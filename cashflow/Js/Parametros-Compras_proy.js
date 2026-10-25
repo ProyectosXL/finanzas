@@ -106,6 +106,12 @@
 
     var valores = {};
 
+    /** La sección del % importado por rubro, como la manda el servidor */
+    var rubros = null;
+
+    /** Hay un recálculo en curso: el botón no se puede volver a disparar */
+    var recalculando = false;
+
     /* ================================================================
        CARGA
        ================================================================ */
@@ -157,10 +163,15 @@
                         'contenedores desde el 01/01/2025, y no se puede cambiar.');
                 }
 
-                avisar(avisos);
+                /* Los del servidor traen los del % importado por rubro: los
+                   mismos que ven el tablero y la pestaña Proyección. */
+                avisar(avisos.concat(modulo.avisos || []));
+
+                rubros = modulo.compras_proy_rubros || null;
 
                 pintar();
                 pintarCadena();
+                pintarRubros();
             })
             .catch(function(e) {
                 avisar([{ nivel: 'danger', texto: 'No se pudieron leer los parámetros: ' + e.message }]);
@@ -382,6 +393,297 @@
     function fecha(d) {
         return String(d.getDate()).padStart(2, '0') + '/' +
             String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+    }
+
+    /* ================================================================
+       EL % IMPORTADO POR RUBRO
+       ================================================================ */
+
+    /**
+     * La card entera: la tabla, el botón de recálculo y las marcas.
+     *
+     * "FOB del presupuesto" es la suma de las temporadas con versión oficial
+     * que leyó el último cálculo; "FOB proyectado" lo multiplica por el % de
+     * HOY, así un cambio recién guardado se ve acá antes de recalcular. El
+     * tooltip del FOB abre el detalle por temporada.
+     */
+    function pintarRubros() {
+        var cont = document.getElementById('pcprRubros');
+
+        if (!cont) { return; }
+
+        if (!rubros || !rubros.disponible) {
+            cont.innerHTML = '<div class="card mb-4"><div class="card-header"><h5 class="mb-0">' +
+                '% importado por rubro</h5></div><div class="card-body text-muted">' +
+                'Falta correr <code>sql/cashflow_compras_proy_rubro_pct.sql</code> contra la base ' +
+                'central. Mientras tanto el job del presupuesto no recalcula y queda el último ' +
+                'cálculo.</div></div>';
+
+            return;
+        }
+
+        var filas = rubros.filas || [];
+        var totalPres = 0;
+        var totalProy = 0;
+
+        var cuerpo = filas.map(function(f) {
+            totalPres += Number(f.fob_presupuesto || 0);
+            totalProy += Number(f.fob_proyectado || 0);
+
+            var clase = !f.en_presupuesto ? 'pcpr-rubro-fuera'
+                : (f.configurado && Number(f.pct_importado) === 0 ? 'pcpr-rubro-cero' : '');
+
+            var marca = !f.en_presupuesto
+                ? ' <span class="badge text-bg-light border pcpr-rubro-marca">no está en el ' +
+                  'presupuesto vigente</span>'
+                : (!f.configurado
+                    ? ' <span class="badge text-bg-warning pcpr-rubro-marca">sin configurar ' +
+                      '(100%)</span>'
+                    : '');
+
+            var quien = f.configurado
+                ? esc(Auditoria.quien(f.usuario) || 'sin usuario registrado') +
+                  '<div class="small text-muted">' + esc(Auditoria.fecha(f.fecha)) + '</div>'
+                : '<span class="text-muted">—</span>';
+
+            return '<tr class="' + clase + '" data-rubro="' + esc(f.rubro) + '">' +
+                '<td class="fw-medium">' + esc(f.rubro) + marca + '</td>' +
+                '<td style="width: 150px;">' +
+                    '<div class="input-group input-group-sm">' +
+                        '<input type="number" class="form-control text-end pcpr-rubro-pct" ' +
+                            'min="0" max="100" step="0.01" ' +
+                            (f.configurado ? '' : 'placeholder="100" ') +
+                            'data-rubro="' + esc(f.rubro) + '" ' +
+                            'data-previo="' + (f.configurado ? esc(f.pct_importado) : '') + '" ' +
+                            'value="' + (f.configurado ? esc(f.pct_importado) : '') + '">' +
+                        '<span class="input-group-text">%</span>' +
+                    '</div>' +
+                '</td>' +
+                '<td class="small">' + quien + '</td>' +
+                '<td class="text-end text-muted" title="' + esc(desglose(f, 'fob_presupuesto')) + '">' +
+                    usd(f.fob_presupuesto) + '</td>' +
+                '<td class="text-end fw-bold" title="' + esc(desglose(f, 'fob_proyectado')) + '">' +
+                    usd(f.fob_proyectado) + '</td>' +
+                '<td class="text-end">' +
+                    '<button class="btn btn-sm btn-outline-secondary pcpr-rubro-hist" data-lectura ' +
+                        'data-rubro="' + esc(f.rubro) + '" title="Ver el historial de cambios">' +
+                        '<i class="fas fa-clock-rotate-left"></i>' +
+                    '</button>' +
+                '</td>' +
+            '</tr>';
+        }).join('');
+
+        if (!filas.length) {
+            cuerpo = '<tr><td colspan="6" class="text-center text-muted py-3">Todavía no hay ' +
+                'rubros: el presupuesto por rubro se llena con la próxima corrida del job.</td></tr>';
+        }
+
+        cont.innerHTML =
+            '<div class="card mb-4">' +
+                '<div class="card-header d-flex justify-content-between align-items-center">' +
+                    '<div>' +
+                        '<h5 class="mb-0">% importado por rubro</h5>' +
+                        '<small class="text-muted">Qué parte de cada rubro del presupuesto se ' +
+                        'compra en el exterior. 100%: entra completo; 0%: no se proyecta. Un ' +
+                        'cambio se ve en la proyección después de recalcularla.' +
+                        (rubros.presupuesto_al ? ' FOB del presupuesto al ' +
+                            esc(rubros.presupuesto_al) + '.' : '') + '</small>' +
+                    '</div>' +
+                    '<button id="pcprBtnRecalcular" class="btn btn-sm btn-outline-primary text-nowrap" ' +
+                        'title="Corre el job del presupuesto con los % de esta tabla. Tarda unos segundos.">' +
+                        '<i class="fas fa-calculator me-1"></i> Recalcular la proyección' +
+                    '</button>' +
+                '</div>' +
+                '<div class="card-body p-0">' +
+                    '<div class="table-responsive">' +
+                        '<table class="table table-hover table-sm align-middle mb-0" id="pcprTablaRubros">' +
+                            '<thead><tr>' +
+                                '<th>Rubro</th>' +
+                                '<th>% importado</th>' +
+                                '<th>Cambiado por</th>' +
+                                '<th class="text-end" title="Lo que dice el presupuesto de la ' +
+                                    'app de compras, sin el %">FOB del presupuesto</th>' +
+                                '<th class="text-end" title="FOB del presupuesto × % importado">' +
+                                    'FOB proyectado</th>' +
+                                '<th></th>' +
+                            '</tr></thead>' +
+                            '<tbody>' + cuerpo + '</tbody>' +
+                            (filas.length
+                                ? '<tfoot><tr class="fw-bold">' +
+                                    '<td colspan="3">Total de las temporadas con versión oficial</td>' +
+                                    '<td class="text-end text-muted">' + usd(totalPres) + '</td>' +
+                                    '<td class="text-end">' + usd(totalProy) + '</td>' +
+                                    '<td></td>' +
+                                  '</tr></tfoot>'
+                                : '') +
+                        '</table>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+
+        // Sin permiso: los % como texto, sin recalcular. El historial queda.
+        Permisos.soloLectura(cont);
+
+        cont.querySelectorAll('input.pcpr-rubro-pct').forEach(function(input) {
+            input.addEventListener('change', function() { guardarRubro(input); });
+        });
+
+        cont.querySelectorAll('.pcpr-rubro-hist').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                abrirHistorial(btn.getAttribute('data-rubro'));
+            });
+        });
+
+        var btn = document.getElementById('pcprBtnRecalcular');
+
+        if (btn) {
+            btn.addEventListener('click', function() { recalcular(btn); });
+            pintarBotonRecalcular(btn);
+        }
+    }
+
+    /** "VER 27-28: U$S 1.234,00 · INV 27: U$S 567,00" */
+    function desglose(f, campo) {
+        return (f.temporadas || []).map(function(t) {
+            return t.temporada + ': ' + usd(t[campo]);
+        }).join(' · ');
+    }
+
+    /**
+     * Guarda el % de un rubro.
+     *
+     * SE VALIDA ANTES DE MANDAR, y el servidor lo valida igual
+     * (ComprasProyectadasRubros::validar()): de 0 a 100, hasta dos decimales.
+     */
+    function guardarRubro(input) {
+        var rubro = input.getAttribute('data-rubro');
+        var previo = input.getAttribute('data-previo');
+        var texto = String(input.value).trim().replace(',', '.');
+        var n = Number(texto);
+
+        if (texto === previo) { return; }
+
+        if (texto === '' || isNaN(n) || n < 0 || n > 100) {
+            Notificacion.campoInvalido(input, 'El % importado de ' + rubro + ' tiene que ser un ' +
+                'número entre 0 y 100.');
+            input.value = previo;
+
+            return;
+        }
+
+        if (!/^\d+(\.\d{1,2})?$/.test(texto)) {
+            Notificacion.campoInvalido(input, 'El % importado admite hasta dos decimales.');
+            input.value = previo;
+
+            return;
+        }
+
+        input.disabled = true;
+
+        pedir(ENDPOINT + '?action=saveRubroPctComprasProy', { rubro: rubro, pct: texto })
+            .then(function(d) {
+                Notificacion.exito(d.message);
+                cargar();
+            })
+            .catch(function(e) {
+                Notificacion.error('No se pudo guardar el % de ' + rubro + ': ' + e.message, {
+                    detalle: 'El campo vuelve al último valor guardado.'
+                });
+                input.disabled = false;
+                input.value = previo;
+            });
+    }
+
+    /**
+     * Corre el job del presupuesto, con los % de la tabla.
+     *
+     * UNA SOLA VEZ: mientras corre, el botón queda deshabilitado y dice que
+     * está calculando. El SP además tiene su propio lock: una segunda corrida
+     * simultánea, desde otra pantalla, sale sin hacer nada y lo deja dicho.
+     */
+    function recalcular(btn) {
+        if (recalculando) { return; }
+
+        recalculando = true;
+        pintarBotonRecalcular(btn);
+
+        pedir(ENDPOINT + '?action=recalcularPresupuestoComprasProy', {})
+            .then(function(d) {
+                Notificacion.exito(d.message);
+            })
+            .catch(function(e) {
+                Notificacion.error('No se pudo recalcular la proyección: ' + e.message, {
+                    detalle: 'Se sigue usando el último cálculo bueno.'
+                });
+            })
+            .then(function() {
+                recalculando = false;
+                cargar();
+            });
+    }
+
+    function pintarBotonRecalcular(btn) {
+        btn.disabled = recalculando;
+        btn.innerHTML = recalculando
+            ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Calculando…'
+            : '<i class="fas fa-calculator me-1"></i> Recalcular la proyección';
+    }
+
+    function abrirHistorial(rubro) {
+        var modalEl = document.getElementById('modalHistorialRubroPct');
+
+        if (!modalEl || !window.bootstrap || !bootstrap.Modal) {
+            Notificacion.error('No se puede abrir el historial: falta Bootstrap en la página.');
+
+            return;
+        }
+
+        var tabla = document.getElementById('pcprHistTabla');
+        var titulo = document.getElementById('pcprHistTitulo');
+
+        if (titulo) { titulo.textContent = rubro; }
+        if (tabla) { tabla.style.display = 'none'; }
+
+        Cargando.mostrar('pcprHistSpinner');
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+        pedir(ENDPOINT + '?action=getHistorialRubroPct&rubro=' + encodeURIComponent(rubro))
+            .then(function(d) {
+                var lista = d.data || [];
+                var body = document.getElementById('pcprHistBody');
+
+                if (body) {
+                    body.innerHTML = lista.length
+                        ? lista.map(function(h) {
+                            return '<tr class="' + (h.vigente ? 'fw-bold' : 'text-muted') + '">' +
+                                '<td class="text-end">' + esc(pctTexto(h.pct)) + '</td>' +
+                                '<td>' + esc(Auditoria.linea('alta', h.usuario, h.fecha_alta)) + '</td>' +
+                                '<td>' + (h.vigente ? 'vigente'
+                                    : esc(Auditoria.linea('baja', h.usuario_baja, h.fecha_baja))) +
+                                '</td>' +
+                            '</tr>';
+                        }).join('')
+                        : '<tr><td colspan="3" class="text-center text-muted py-3">Sin ' +
+                          'configurar: nunca se le asignó un %, así que se proyecta al 100%.</td></tr>';
+                }
+
+                Cargando.ocultar('pcprHistSpinner');
+                if (tabla) { tabla.style.display = ''; }
+            })
+            .catch(function(e) {
+                Cargando.ocultar('pcprHistSpinner');
+                Notificacion.error('No se pudo leer el historial: ' + e.message);
+            });
+    }
+
+    function pctTexto(n) {
+        return Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }) + ' %';
+    }
+
+    function usd(n) {
+        return 'U$S ' + Number(n || 0).toLocaleString('es-AR', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2
+        });
     }
 
     /* ================================================================

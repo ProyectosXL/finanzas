@@ -239,7 +239,12 @@ $edita = AuthCashflow::puedeEditar('compras_proyectadas');
                             <th>Versión</th>
                             <th>Calculada</th>
                             <th class="text-end">Unidades</th>
-                            <th class="text-end">FOB U$S</th>
+                            <!-- EL FOB YA AJUSTADO por el % importado de cada
+                                 rubro, que es el que se proyecta. Al lado, en
+                                 gris, el del presupuesto sin ajustar: es el que
+                                 muestra la app de compras. -->
+                            <th class="text-end" title="FOB del presupuesto × % importado de cada rubro: lo que se proyecta">FOB proyectado U$S</th>
+                            <th class="text-end text-muted" title="Lo que dice la app de compras, sin el % importado">FOB presupuesto U$S</th>
                             <th class="text-end">U$S / unidad</th>
                             <!-- EL CONTRASTE QUE JUSTIFICA EL PARÁMETRO: el
                                  inc_fob del presupuesto toma dos valores (0 y
@@ -290,6 +295,8 @@ $edita = AuthCashflow::puedeEditar('compras_proyectadas');
                                 <th class="text-end">Compra (u)</th>
                                 <th class="text-end">Costo prom. U$S</th>
                                 <th class="text-end">FOB U$S</th>
+                                <th class="text-end" title="Qué parte del rubro se compra en el exterior. Se edita en Parámetros › Compras Exterior">% importado</th>
+                                <th class="text-end" title="FOB U$S × % importado">FOB proyectado U$S</th>
                                 <th class="text-end">inc_fob</th>
                                 <th class="text-end">Déficit cobertura</th>
                             </tr>

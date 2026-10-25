@@ -177,12 +177,17 @@ class ComprasProyectadasProvider extends CashflowProvider {
             $this->avisar($datos->avisoSinAjustes(), Aviso::WARNING);
         }
 
-        // El filtro propio de la vista es un criterio: informativo.
-        $contraste = ComprasProyectadasDatos::avisoContraste($datos->contrasteVista(self::PAIS));
+        /* El control de la vista: si devuelve menos que sus tablas, alguien le
+           puso un filtro que el cashflow no ve. Ver NIVEL_CONTROL_VISTA. */
+        $control = ComprasProyectadasDatos::avisoControlVista($datos->contrasteVista(self::PAIS));
 
-        if ($contraste !== '') {
-            $this->avisar($contraste, Aviso::INFO);
+        if ($control !== null) {
+            $this->avisarTodos([$control]);
         }
+
+        /* El % importado: rubros sin configurar, lo que queda fuera y los
+           cambios que todavia no se recalcularon. */
+        $this->avisarTodos($datos->avisosRubrosConNivel(self::PAIS));
 
         /* --- La cuenta ---------------------------------------------------- */
         $grilla = $this->grilla($h, $datos, $params, $dolar);

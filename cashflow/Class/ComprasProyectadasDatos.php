@@ -3,6 +3,9 @@
 require_once __DIR__ . '/ComprasProyectadas.php';
 require_once __DIR__ . '/Comex.php';
 require_once __DIR__ . '/Aviso.php';
+/* Solo por sus reglas puras -normalizar, aplicar, excluido-: la escritura de
+   esa clase no se llama desde aca. */
+require_once __DIR__ . '/ComprasProyectadasRubros.php';
 
 /**
  * ComprasProyectadasDatos
@@ -76,7 +79,33 @@ class ComprasProyectadasDatos {
     const TABLA_RECEP_HIST = 'RO_T_CASHFLOW_COMEX_RECEP_HIST';
     const TABLA_PRESUP_RESUMEN = 'RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN';
     const TABLA_PRESUP_CONTRASTE = 'RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE';
+    const TABLA_PRESUP_RUBRO = 'RO_T_CASHFLOW_COMEX_PRESUP_RUBRO';
     const TABLA_JOB_LOG = 'RO_T_CASHFLOW_JOB_LOG';
+
+    /**
+     * El % importado por rubro, del lado del cashflow. ESTA CLASE SOLO LA LEE:
+     * el alta vive en ComprasProyectadasRubros, por lo mismo que los ajustes.
+     */
+    const TABLA_RUBRO_PCT = 'RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT';
+
+    /** Sin la tabla del %, el job no recalcula: deja el presupuesto anterior */
+    const AVISO_SIN_RUBRO_PCT = 'Falta la tabla del % importado por rubro: hay que correr '
+        . 'sql/cashflow_compras_proy_rubro_pct.sql contra la base central. Hasta entonces el '
+        . 'job del presupuesto no recalcula y queda el último cálculo.';
+
+    /**
+     * La gravedad del control de la vista: la vista devuelve menos filas que
+     * sus tablas.
+     *
+     * CRITICO: la proyeccion sale de menos sin que nada lo diga. La
+     * definicion de la vista en el repo de compras usa el mismo criterio que
+     * el contraste (es_oficial = 1 AND eliminada = 0, los mismos tres JOIN),
+     * asi que sin filtro las dos dan lo mismo. Verificado contra la base el
+     * 25/10/2026, con la vista ya sin el filtro de cuero: 144 filas y
+     * U$S 6.965.385,74 de FOB de los dos lados. Una diferencia, entonces, es
+     * un filtro nuevo y no un desfasaje de criterios.
+     */
+    const NIVEL_CONTROL_VISTA = Aviso::DANGER;
 
     /** El PROCESO con que cada SP se anota en el log */
     const PROCESO_HISTORIA = 'COMEX_RECEP_HIST';
@@ -136,6 +165,12 @@ class ComprasProyectadasDatos {
 
     /** @var array|null Cache de oficialesEnVivo() */
     private $oficiales = null;
+
+    /** @var array|null Cache de pctVigentes() */
+    private $pcts = null;
+
+    /** @var array Cache de presupuestoPorRubro(), por pais */
+    private $porRubro = [];
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -217,7 +252,11 @@ class ComprasProyectadasDatos {
      * el tramo intermedio de una version contaria esa temporada dos veces. Es
      * la regla de la app de compras y esta escrita en su README.
      *
-     *     FOB U$S = compra (unidades) x costo_prom
+     *     FOB U$S = compra (unidades) x costo_prom x % importado / 100
+     *
+     * EL % IMPORTADO YA VIENE APLICADO: el SP multiplica cada fila por el % de
+     * su rubro antes de sumar (ver ComprasProyectadasRubros). fob_usd es lo
+     * que se proyecta; fob_presupuesto_usd, lo que dice la app de compras.
      *
      * COSTO_PROM ES EL FOB UNITARIO EN DOLARES, verificado contra la base: el
      * presupuesto implica 7,24 U$S por unidad y las ordenes de compra reales
@@ -268,6 +307,8 @@ class ComprasProyectadasDatos {
                     UNIDADES              unidades,
                     UNIDADES_SIN_COSTO    unidades_sin_costo,
                     FOB_USD               fob_usd,
+                    " . ($e['presupuesto']['fob_presupuesto'] ? 'FOB_PRESUPUESTO_USD' : 'NULL') . "
+                                          fob_presupuesto_usd,
                     NAC_SEGUN_INC_FOB     nac_segun_inc_fob,
                     DEFICIT_COBERTURA     deficit_cobertura
                 FROM " . self::TABLA_PRESUP_RESUMEN . "
@@ -301,6 +342,11 @@ class ComprasProyectadasDatos {
                 'unidades' => floatval($row['unidades']),
                 'unidades_sin_costo' => floatval($row['unidades_sin_costo']),
                 'fob_usd' => $fob,
+                /* El FOB del presupuesto SIN el % importado, para comparar con
+                   la app de compras. NULL = lo grabo un SP anterior al %: ahi
+                   no se aplicaba ninguno, asi que es el mismo FOB. */
+                'fob_presupuesto_usd' => ($row['fob_presupuesto_usd'] === null)
+                    ? $fob : floatval($row['fob_presupuesto_usd']),
                 'nac_segun_inc_fob' => floatval($row['nac_segun_inc_fob']),
                 'deficit_cobertura' => floatval($row['deficit_cobertura']),
                 /* El inc_fob ponderado de la version, SOLO para poder mostrar
@@ -317,6 +363,11 @@ class ComprasProyectadasDatos {
 
     /**
      * El detalle por rubro y categoria de una version, para auditar.
+     *
+     * CADA FILA VIAJA CON SU % IMPORTADO Y SU FOB PROYECTADO: fob_usd es lo
+     * que dice el presupuesto, fob_proyectado lo que entra en la proyeccion.
+     * El % es el vigente HOY, el mismo que el job aplica en su proxima
+     * corrida; si cambio despues del ultimo calculo, la pantalla ya lo avisa.
      *
      * @param int $idVersion
      * @return array
@@ -362,24 +413,131 @@ class ComprasProyectadasDatos {
 
         sqlsrv_free_stmt($stmt);
 
-        return $out;
+        return ComprasProyectadasRubros::aplicar($out, $this->pctVigentes());
+    }
+
+    /**
+     * Si existe la tabla del % importado por rubro.
+     *
+     * @return bool
+     */
+    public function tieneRubroPct() {
+        $e = $this->estadoInsumos();
+
+        return !empty($e['rubro_pct']['tabla']);
+    }
+
+    /**
+     * Los % importados vigentes, por rubro normalizado.
+     *
+     * @return array rubro => ['pct','usuario','fecha']
+     */
+    public function pctVigentes() {
+        if ($this->pcts !== null) {
+            return $this->pcts;
+        }
+
+        $this->pcts = [];
+
+        if (!$this->tieneRubroPct()) {
+            return $this->pcts;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return $this->pcts;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT RUBRO, PCT_IMPORTADO, USUARIO_ALTA, FECHA_ALTA
+             FROM " . self::TABLA_RUBRO_PCT . "
+             WHERE VIGENTE = 1");
+
+        if ($stmt === false) {
+            return $this->pcts;
+        }
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $this->pcts[ComprasProyectadasRubros::normalizar($row['RUBRO'])] = [
+                'pct' => floatval($row['PCT_IMPORTADO']),
+                'usuario' => ($row['USUARIO_ALTA'] === null) ? null : (string) $row['USUARIO_ALTA'],
+                'fecha' => self::aFechaHora($row['FECHA_ALTA'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $this->pcts;
+    }
+
+    /**
+     * El presupuesto por temporada y rubro, con el % que le aplico el ultimo
+     * calculo. Lo materializa el SP en RO_T_CASHFLOW_COMEX_PRESUP_RUBRO.
+     *
+     * @param string $pais
+     * @return array Lista de ['temporada','rubro','id_version','filas',
+     *               'fob_presupuesto','pct_aplicado','configurado','fob_proyectado']
+     */
+    public function presupuestoPorRubro($pais = 'argentina') {
+        if (isset($this->porRubro[$pais])) {
+            return $this->porRubro[$pais];
+        }
+
+        $this->porRubro[$pais] = [];
+
+        $e = $this->estadoInsumos();
+
+        if (empty($e['presupuesto']['por_rubro'])) {
+            return [];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return [];
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT TEMPORADA, RUBRO, ID_VERSION, FILAS, FOB_PRESUPUESTO, PCT_APLICADO,
+                    CONFIGURADO, FOB_PROYECTADO
+             FROM " . self::TABLA_PRESUP_RUBRO . "
+             WHERE PAIS = ?
+             ORDER BY TEMPORADA, FOB_PRESUPUESTO DESC", [$pais]);
+
+        if ($stmt === false) {
+            return [];
+        }
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $this->porRubro[$pais][] = [
+                'temporada' => trim((string) $row['TEMPORADA']),
+                'rubro' => (string) $row['RUBRO'],
+                'id_version' => intval($row['ID_VERSION']),
+                'filas' => intval($row['FILAS']),
+                'fob_presupuesto' => floatval($row['FOB_PRESUPUESTO']),
+                'pct_aplicado' => floatval($row['PCT_APLICADO']),
+                'configurado' => (intval($row['CONFIGURADO']) === 1),
+                'fob_proyectado' => floatval($row['FOB_PROYECTADO'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $this->porRubro[$pais];
     }
 
     /**
      * Cuantas filas del tramo objetivo deja afuera la vista respecto de sus
      * tablas de origen.
      *
-     * POR QUE EXISTE ESTE CONTROL. La vista tiene hoy un filtro propio que el
-     * script del repo de compras NO tiene -deja afuera los rubros de cuero, por
-     * decision del area- y desde el cashflow ese filtro es INVISIBLE: la vista
-     * devuelve 55 filas y nada dice que en las tablas hay 72. Son U$S 2,2
-     * millones de FOB entre las dos temporadas.
-     *
-     * El dia que alguien vuelva a correr el script, el filtro se borra -usa
-     * CREATE OR ALTER- y el tablero empieza a proyectar esos millones sin que
-     * nadie lo decida. Al reves tambien: un filtro nuevo bajaria la proyeccion
-     * en silencio. Este control no opina sobre el filtro; solo hace que la
-     * diferencia se vea.
+     * ES UN CONTROL DE SEGURIDAD. La vista tuvo un filtro propio -dejaba
+     * afuera los rubros de cuero- que el cashflow no veia. Se saco: que parte
+     * de cada rubro se proyecta lo decide ahora el % importado del cashflow
+     * (ComprasProyectadasRubros), asi que la vista tiene que devolver lo mismo
+     * que sus tablas. Si vuelve a devolver menos, alguien le puso un filtro en
+     * la base que el cashflow no ve, y la proyeccion baja en silencio. Ver
+     * avisoControlVista().
      *
      * SE LEE DE RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE, que llena el mismo SP y en
      * la misma corrida que el resumen: el contraste describe exactamente el
@@ -427,33 +585,161 @@ class ComprasProyectadasDatos {
     }
 
     /**
-     * El aviso de que la vista filtra parte del presupuesto, o cadena vacia.
+     * El aviso de que la vista devuelve MENOS filas que sus tablas, o null.
      *
-     * NO DICE QUE ESTE MAL. El filtro puede ser deliberado -hoy lo es- y en ese
-     * caso lo que hace falta es que el numero quede a la vista para poder
-     * explicar por que el tablero no coincide con el presupuesto que muestra la
-     * app de compras.
+     * Reemplaza al aviso informativo del filtro de cuero. La vista ya no
+     * deberia filtrar nada: lo que queda fuera de la proyeccion lo dice el
+     * aviso del % importado (avisoExcluidoDe()). Una diferencia aca es un
+     * filtro que alguien puso en la base. Ver NIVEL_CONTROL_VISTA.
      *
      * @param array $contraste Lo que devuelve contrasteVista()
-     * @return string
+     * @return array|null Aviso::nuevo()
      */
-    public static function avisoContraste($contraste) {
+    public static function avisoControlVista($contraste) {
         if (empty($contraste) || $contraste['filas_tablas'] <= 0) {
-            return '';
+            return null;
         }
 
         $filas = $contraste['filas_tablas'] - $contraste['filas_vista'];
-        $fob = $contraste['fob_tablas'] - $contraste['fob_vista'];
 
-        if ($filas <= 0 && abs($fob) < 1) {
-            return '';
+        if ($filas <= 0) {
+            return null;
         }
 
-        return 'La vista del presupuesto deja afuera ' . $filas . ' fila'
-            . ($filas === 1 ? '' : 's') . ' del tramo objetivo, por U$S '
-            . number_format($fob, 2, ',', '.') . ' de FOB. Es un filtro propio de la vista, '
-            . 'no del cashflow: hoy excluye los rubros de cuero. Lo que se proyecta es lo '
-            . 'que la vista devuelve.';
+        $fob = $contraste['fob_tablas'] - $contraste['fob_vista'];
+
+        return Aviso::nuevo(self::NIVEL_CONTROL_VISTA, 'La vista del presupuesto '
+            . '(' . self::VISTA_PRESUPUESTO . ') devuelve ' . $filas . ' fila'
+            . ($filas === 1 ? '' : 's') . ' menos que sus tablas, por U$S '
+            . number_format($fob, 2, ',', '.') . ' de FOB. La vista no debería filtrar nada: '
+            . 'qué parte de cada rubro se proyecta lo decide el % importado de Parámetros › '
+            . 'Compras Exterior. Alguien le puso un filtro en la base que el cashflow no ve, y '
+            . 'la proyección está saliendo de menos. Hay que revisar la vista en POWER_BI_CONTROL.');
+    }
+
+    /**
+     * Los avisos del % importado: lo que queda fuera de la proyeccion, los
+     * rubros sin configurar y los cambios que todavia no se recalcularon.
+     *
+     * Van al tablero, a la pestana Proyeccion y a Parametros.
+     *
+     * @param string $pais
+     * @return array Lista de Aviso::nuevo()
+     */
+    public function avisosRubrosConNivel($pais = 'argentina') {
+        return self::avisosRubrosDe($this->estadoInsumos(), $this->presupuestoPorRubro($pais),
+            $this->pctVigentes());
+    }
+
+    /**
+     * Ver avisosRubrosConNivel(). Estatica para poder probarla sin base.
+     *
+     *   SIN CONFIGURAR  atencion, uno por rubro. Se cruza contra los % de
+     *                   AHORA y no contra el CONFIGURADO del ultimo calculo:
+     *                   apenas alguien le asigna un %, el aviso pasa a ser el
+     *                   de los cambios sin recalcular, que es lo que es.
+     *   EXCLUIDO        informativo: es una decision, no un problema. Sale
+     *                   del % que el job APLICO, para coincidir con el FOB
+     *                   que se esta proyectando.
+     *   SIN RECALCULAR  atencion: un % cambio despues del ultimo calculo
+     *                   bueno, y ningun numero lo refleja todavia.
+     *
+     * @param array $e estadoInsumos()
+     * @param array $presupuesto presupuestoPorRubro()
+     * @param array $vigentes pctVigentes()
+     * @return array
+     */
+    public static function avisosRubrosDe($e, $presupuesto, $vigentes) {
+        $out = [];
+
+        if (!empty($e['error'])) {
+            return $out;
+        }
+
+        if (isset($e['rubro_pct']) && empty($e['rubro_pct']['tabla'])) {
+            $out[] = Aviso::nuevo(Aviso::WARNING, self::AVISO_SIN_RUBRO_PCT);
+
+            return $out;
+        }
+
+        $sinConfigurar = [];
+
+        foreach ($presupuesto as $r) {
+            $k = ComprasProyectadasRubros::normalizar($r['rubro']);
+
+            if (!isset($vigentes[$k])) {
+                $sinConfigurar[$k] = true;
+            }
+        }
+
+        foreach (array_keys($sinConfigurar) as $rubro) {
+            $out[] = Aviso::nuevo(Aviso::WARNING, 'Rubro nuevo sin configurar: ' . $rubro
+                . '. Se está proyectando al 100%. Asignale su % importado en Parámetros › '
+                . 'Compras Exterior.');
+        }
+
+        $excluido = self::avisoExcluidoDe($presupuesto);
+
+        if ($excluido !== null) {
+            $out[] = $excluido;
+        }
+
+        $sinRecalcular = self::avisoSinRecalcularDe($e);
+
+        if ($sinRecalcular !== null) {
+            $out[] = $sinRecalcular;
+        }
+
+        return $out;
+    }
+
+    /**
+     * "Por el % importado quedan fuera de la proyeccion U$S X de FOB (N
+     * rubros en 0% y M con % parcial)", o null si no queda nada fuera.
+     *
+     * @param array $presupuesto presupuestoPorRubro()
+     * @return array|null
+     */
+    public static function avisoExcluidoDe($presupuesto) {
+        $x = ComprasProyectadasRubros::excluido($presupuesto);
+        $n = count($x['en_cero']);
+        $m = count($x['parciales']);
+
+        if ($n + $m === 0) {
+            return null;
+        }
+
+        return Aviso::nuevo(Aviso::INFO, 'Por el % importado quedan fuera de la proyección U$S '
+            . number_format($x['fob'], 2, ',', '.') . ' de FOB (' . $n . ' rubro'
+            . ($n === 1 ? '' : 's') . ' en 0% y ' . $m . ' con % parcial).');
+    }
+
+    /**
+     * El aviso de que hay un % guardado despues del ultimo calculo bueno del
+     * presupuesto, o null.
+     *
+     * @param array $e estadoInsumos()
+     * @return array|null
+     */
+    public static function avisoSinRecalcularDe($e) {
+        if (empty($e['rubro_pct']['ultimo_cambio']) || empty($e['presupuesto']['ok'])) {
+            return null;
+        }
+
+        $cambio = $e['rubro_pct']['ultimo_cambio'];
+
+        /* Contra el INICIO de la corrida: el SP lee la tabla del % al
+           arrancar, asi que un cambio guardado durante la corrida puede no
+           haber entrado. */
+        if ($cambio <= $e['presupuesto']['ok']['inicio']) {
+            return null;
+        }
+
+        return Aviso::nuevo(Aviso::WARNING, 'Hay cambios de % importado del '
+            . self::fechaCorta($cambio) . ', posteriores al último cálculo del presupuesto ('
+            . self::fechaCorta($e['presupuesto']['ok']['fin']) . '): todavía no se ven en la '
+            . 'proyección. Se ven después de «Actualizar ahora», de «Recalcular la proyección» '
+            . 'en Parámetros › Compras Exterior, o de la próxima corrida automática.');
     }
 
     /* ====================================================================
@@ -968,7 +1254,10 @@ class ComprasProyectadasDatos {
             'log' => false,
             'contraste' => false,
             'historia' => $proceso + ['anio_min' => null, 'anio_max' => null],
-            'presupuesto' => $proceso
+            'presupuesto' => $proceso + ['por_rubro' => false, 'fob_presupuesto' => false],
+            /* La tabla del % y su ultimo cambio: un cambio posterior al ultimo
+               calculo bueno todavia no esta en ningun numero. */
+            'rubro_pct' => ['tabla' => false, 'ultimo_cambio' => null]
         ];
 
         $this->estado = $e;
@@ -985,7 +1274,10 @@ class ComprasProyectadasDatos {
             OBJECT_ID('dbo." . self::TABLA_JOB_LOG . "', 'U') L,
             OBJECT_ID('dbo." . self::TABLA_RECEP_HIST . "', 'U') H,
             OBJECT_ID('dbo." . self::TABLA_PRESUP_RESUMEN . "', 'U') R,
-            OBJECT_ID('dbo." . self::TABLA_PRESUP_CONTRASTE . "', 'U') C");
+            OBJECT_ID('dbo." . self::TABLA_PRESUP_CONTRASTE . "', 'U') C,
+            OBJECT_ID('dbo." . self::TABLA_PRESUP_RUBRO . "', 'U') RR,
+            OBJECT_ID('dbo." . self::TABLA_RUBRO_PCT . "', 'U') P,
+            COL_LENGTH('dbo." . self::TABLA_PRESUP_RESUMEN . "', 'FOB_PRESUPUESTO_USD') FP");
 
         if ($stmt === false) {
             $this->estado['error'] = $this->errorSql('no se pudo verificar las tablas materializadas');
@@ -1000,9 +1292,18 @@ class ComprasProyectadasDatos {
         $e['historia']['tabla'] = ($obj['H'] !== null);
         $e['presupuesto']['tabla'] = ($obj['R'] !== null);
         $e['contraste'] = ($obj['C'] !== null);
+        $e['presupuesto']['por_rubro'] = ($obj['RR'] !== null);
+        $e['presupuesto']['fob_presupuesto'] = ($obj['FP'] !== null);
+        $e['rubro_pct']['tabla'] = ($obj['P'] !== null);
 
         /* Solo se nombran las que existen. */
         $partes = [];
+
+        /* Cada cambio de % inserta una fila, asi que la ultima alta es el
+           ultimo cambio. */
+        if ($e['rubro_pct']['tabla']) {
+            $partes[] = "(SELECT MAX(FECHA_ALTA) FROM " . self::TABLA_RUBRO_PCT . ") rp_ultimo";
+        }
 
         if ($e['historia']['tabla']) {
             $partes[] = "(SELECT COUNT(*) FROM " . self::TABLA_RECEP_HIST . ") h_filas,
@@ -1055,6 +1356,10 @@ class ComprasProyectadasDatos {
 
             if ($e['presupuesto']['tabla']) {
                 $e['presupuesto']['filas'] = intval($r['p_filas']);
+            }
+
+            if ($e['rubro_pct']['tabla']) {
+                $e['rubro_pct']['ultimo_cambio'] = self::aFechaHora($r['rp_ultimo']);
             }
 
             if ($e['log']) {

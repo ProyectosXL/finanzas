@@ -199,6 +199,12 @@ class AuthCashflow {
             'activarImpuestoProvLocal' => [['parametros', 'PROV_LOCALES']],
             'addAlicuotaProvLocal' => [['parametros', 'PROV_LOCALES']],
             'bajaAlicuotaProvLocal' => [['parametros', 'PROV_LOCALES']],
+            /* El % importado por rubro de Compras Exterior, y el recalculo del
+               presupuesto que lo aplica. El recalculo pide el permiso de esta
+               sub-pestaña y no el de la pestaña Proyección: es el boton de
+               quien acaba de cambiar un %. */
+            'saveRubroPctComprasProy' => [['parametros', 'COMPRAS_PROY']],
+            'recalcularPresupuestoComprasProy' => [['parametros', 'COMPRAS_PROY']],
             'savePPPManualGrupo' => [['parametros', 'COBRANZAS']],
             'saveMedioPagoCliente' => [['parametros', 'COBRANZAS']],
             'excluirClienteCobranza' => [['parametros', 'COBRANZAS']],
@@ -272,7 +278,8 @@ class AuthCashflow {
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
-            'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento'],
+            'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento',
+            'getHistorialRubroPct'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getFondos', 'getMovimientosFondo'],

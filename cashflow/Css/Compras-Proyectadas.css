@@ -65,3 +65,10 @@
     z-index: 2;
     background: var(--bs-body-bg, #fff);
 }
+
+/* El detalle por rubro de una version: un rubro en 0 % de importado no se
+   proyecta. Se ve atenuado, no se esconde: su FOB sigue siendo parte del
+   presupuesto, y su % se cambia en Parametros > Compras Exterior. */
+#tablaDetalleVersion .cp-rubro-cero {
+    opacity: 0.55;
+}

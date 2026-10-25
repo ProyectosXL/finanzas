@@ -3,15 +3,34 @@
    ----------------------------------------------------------------------------
    Base    : central
    Origen  : [XL-APPS].POWER_BI_CONTROL (linked server desde XL-TANGO)
-   Destino : RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN y
+   Destino : RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN,
+             RO_T_CASHFLOW_COMEX_PRESUP_RUBRO y
              RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE (misma base)
+   Lee     : RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT (misma base), el % importado
    Log     : RO_T_CASHFLOW_JOB_LOG, PROCESO = 'COMEX_PRESUP_RESUMEN'
-   Requiere: sql/cashflow_comex_materializado.sql
+   Requiere: sql/cashflow_comex_materializado.sql y
+             sql/cashflow_compras_proy_rubro_pct.sql, en ese orden. Sin la
+             columna FOB_PRESUPUESTO_USD este script ni siquiera crea el SP.
 
    El presupuesto oficial de la app de compras, ya resumido por pais y
-   temporada, y el contraste de la vista contra sus tablas de origen. Es lo
+   temporada con el % importado de cada rubro aplicado, el mismo presupuesto
+   por rubro, y el contraste de la vista contra sus tablas de origen. Es lo
    que ComprasProyectadasDatos::versionesOficiales() y contrasteVista() leian
    en cada pedido desde POWER_BI_CONTROL.
+
+   EL % IMPORTADO POR RUBRO
+   ------------------------
+   La vista ya no filtra rubros: devuelve todo el presupuesto. Que parte de
+   cada rubro se compra en el exterior lo dice RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT,
+   y se aplica FILA POR FILA, ANTES DE SUMAR:
+
+       FOB del rubro x % importado / 100
+
+   a FOB_USD, UNIDADES, UNIDADES_SIN_COSTO, NAC_SEGUN_INC_FOB y
+   DEFICIT_COBERTURA. Un rubro que no esta en la tabla entra al 100 % y queda
+   CONFIGURADO = 0 en el detalle por rubro; el SP no lo da de alta. El cruce
+   compara el rubro normalizado (mayusculas, sin espacios de mas). Ver la
+   seccion 7 de README-compras-proyectadas.md.
 
    POR QUE DESDE CENTRAL Y NO UN SP EN POWER_BI_CONTROL
    ----------------------------------------------------
@@ -25,7 +44,7 @@
    LA MISMA REGLA QUE LA LECTURA EN VIVO
    -------------------------------------
      solo el tramo objetivo       es_objetivo = 1
-     FOB U$S                      compra x costo_prom
+     FOB U$S                      compra x costo_prom x % importado / 100
      filas sin costo              se cuentan aparte, no se multiplican por cero
      inc_fob                      se lee y se guarda SOLO para el contraste de
                                   la pantalla; el porcentaje que se aplica es
@@ -37,7 +56,7 @@
    Lo remoto se trae PRIMERO a temporales, fuera de cualquier transaccion: asi
    la transaccion del reemplazo es local y no necesita MSDTC, y una caida del
    linked server corta la corrida antes de tocar nada. Despues, en UNA
-   transaccion, DELETE + INSERT de las dos tablas. Quien lee durante la
+   transaccion, DELETE + INSERT de las tres tablas. Quien lee durante la
    corrida ve el presupuesto anterior entero.
 
    SIN VISTA NO SE PISA NADA. Si la vista no existe en POWER_BI_CONTROL, la
@@ -101,7 +120,68 @@ BEGIN
                        WHERE name = 'RO_V_COMPRA_PROYECTADA_VIGENTE')
             THROW 50002, 'No existe RO_V_COMPRA_PROYECTADA_VIGENTE en POWER_BI_CONTROL. La crea el bloque 4 de presupuestos/sql/05_baja_logica_versiones.sql en el repo de compras. Se deja el presupuesto anterior.', 1;
 
-        /* 2. EL RESUMEN POR PAIS Y TEMPORADA, a una temporal. */
+        /* 1b. LA TABLA DEL % IMPORTADO TAMBIEN. Sin ella todos los rubros
+               entrarian al 100 % -cuero, cosmetica, lentes y relojes
+               incluidos-, y eso es una decision que nadie tomo. Se deja el
+               presupuesto anterior. */
+        IF OBJECT_ID('dbo.RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT', 'U') IS NULL
+            THROW 50003, 'No existe RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT: falta correr sql/cashflow_compras_proy_rubro_pct.sql. Sin el % importado por rubro no se recalcula; se deja el presupuesto anterior.', 1;
+
+        /* 2. LAS FILAS DEL TRAMO OBJETIVO, a una temporal. Es la UNICA lectura
+              de la vista: el resumen, el detalle por rubro y el contraste
+              salen de aca, asi que los tres describen el mismo presupuesto.
+
+              SELECT INTO para que los importes conserven el tipo de la vista:
+              el FOB se sigue calculando con la misma precision que antes.
+
+              EL RUBRO SE NORMALIZA: mayusculas, sin espacios en las puntas y
+              con los repetidos colapsados a uno. El truco de CHAR(7): 'A  B'
+              pasa a 'A <7> <7>B', se borra cada '<7> ' y despues cada <7>. Es
+              la misma regla de ComprasProyectadasRubros::normalizar(), que es
+              con la que se guarda el rubro en la tabla del %. */
+        SELECT
+            CAST(v.pais AS VARCHAR(50)) COLLATE DATABASE_DEFAULT                   AS PAIS,
+            CAST(LTRIM(RTRIM(v.temporada_codigo)) AS VARCHAR(30)) COLLATE DATABASE_DEFAULT AS TEMPORADA,
+            v.id_version                                                           AS ID_VERSION,
+            CAST(v.nombre_presupuesto AS VARCHAR(255)) COLLATE DATABASE_DEFAULT    AS NOMBRE,
+            CAST(v.solapa AS VARCHAR(255)) COLLATE DATABASE_DEFAULT                AS SOLAPA,
+            v.fecha_calculo                                                        AS FECHA_CALCULO_VERSION,
+            CAST(v.tramos_estado AS VARCHAR(100)) COLLATE DATABASE_DEFAULT         AS TRAMOS_ESTADO,
+            v.temporada_desde                                                      AS TEMPORADA_DESDE,
+            v.temporada_hasta                                                      AS TEMPORADA_HASTA,
+            CAST(ISNULL(NULLIF(UPPER(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(v.rubro)),
+                ' ', ' ' + CHAR(7)), CHAR(7) + ' ', ''), CHAR(7), '')), ''), '(SIN RUBRO)')
+                AS VARCHAR(100)) COLLATE DATABASE_DEFAULT                          AS RUBRO,
+            v.compra                                                               AS COMPRA,
+            v.costo_prom                                                           AS COSTO_PROM,
+            v.inc_fob                                                              AS INC_FOB,
+            v.compra_deficit_cobertura                                             AS DEFICIT,
+            CAST(NULL AS DECIMAL(5,2))                                             AS PCT
+        INTO #FILAS
+        FROM [XL-APPS].POWER_BI_CONTROL.dbo.RO_V_COMPRA_PROYECTADA_VIGENTE v
+        WHERE v.es_objetivo = 1;
+
+        /* 3. EL % IMPORTADO, cruzado en local. Un rubro sin fila queda con PCT
+              en NULL: entra al 100 % y se graba CONFIGURADO = 0, que es lo que
+              dispara el aviso de rubro sin configurar. El job NO lo da de
+              alta: sigue sin configurar hasta que alguien le asigne un %. */
+        UPDATE f
+        SET PCT = p.PCT_IMPORTADO
+        FROM #FILAS f
+        JOIN dbo.RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT p
+            ON p.RUBRO = f.RUBRO AND p.VIGENTE = 1;
+
+        /* 4. EL RESUMEN POR PAIS Y TEMPORADA. EL % SE APLICA FILA POR FILA,
+              ANTES DE SUMAR: cada importe y cada cantidad se multiplica por
+              ISNULL(PCT, 100) / 100, asi el FOB, las unidades, la
+              nacionalizacion segun inc_fob y el deficit describen la misma
+              mercaderia. La nacionalizacion que se PROYECTA no sale de aca: el
+              cashflow la deriva del FOB, que ya viene reducido.
+
+              FILAS y FILAS_SIN_COSTO cuentan solo las filas que se proyectan
+              (% mayor a 0): una fila sin costo de un rubro en 0 % no le quita
+              nada a la proyeccion. FOB_PRESUPUESTO_USD es el FOB sin el %,
+              para poder comparar con la app de compras. */
         CREATE TABLE #RES (
             PAIS                  VARCHAR(50)   COLLATE DATABASE_DEFAULT NOT NULL,
             TEMPORADA             VARCHAR(30)   COLLATE DATABASE_DEFAULT NOT NULL,
@@ -117,35 +197,71 @@ BEGIN
             UNIDADES              DECIMAL(18,2) NOT NULL,
             UNIDADES_SIN_COSTO    DECIMAL(18,2) NOT NULL,
             FOB_USD               DECIMAL(18,4) NOT NULL,
+            FOB_PRESUPUESTO_USD   DECIMAL(18,4) NOT NULL,
             NAC_SEGUN_INC_FOB     DECIMAL(18,4) NOT NULL,
             DEFICIT_COBERTURA     DECIMAL(18,2) NOT NULL
         );
 
         INSERT INTO #RES
         SELECT
-            v.pais,
-            v.temporada_codigo,
-            MAX(v.id_version),
-            MAX(v.nombre_presupuesto),
-            MAX(v.solapa),
-            MAX(v.fecha_calculo),
-            MAX(v.tramos_estado),
-            MIN(v.temporada_desde),
-            MAX(v.temporada_hasta),
-            COUNT(*),
-            SUM(CASE WHEN v.costo_prom IS NULL THEN 1 ELSE 0 END),
-            SUM(ISNULL(v.compra, 0)),
-            SUM(CASE WHEN v.costo_prom IS NULL THEN ISNULL(v.compra, 0) ELSE 0 END),
-            SUM(ISNULL(v.compra, 0) * ISNULL(v.costo_prom, 0)),
-            SUM(ISNULL(v.compra, 0) * ISNULL(v.costo_prom, 0) * ISNULL(v.inc_fob, 0) / 100.0),
-            SUM(ISNULL(v.compra_deficit_cobertura, 0))
-        FROM [XL-APPS].POWER_BI_CONTROL.dbo.RO_V_COMPRA_PROYECTADA_VIGENTE v
-        WHERE v.es_objetivo = 1
-        GROUP BY v.pais, v.temporada_codigo;
+            f.PAIS,
+            f.TEMPORADA,
+            MAX(f.ID_VERSION),
+            MAX(f.NOMBRE),
+            MAX(f.SOLAPA),
+            MAX(f.FECHA_CALCULO_VERSION),
+            MAX(f.TRAMOS_ESTADO),
+            MIN(f.TEMPORADA_DESDE),
+            MAX(f.TEMPORADA_HASTA),
+            SUM(CASE WHEN ISNULL(f.PCT, 100) > 0 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN ISNULL(f.PCT, 100) > 0 AND f.COSTO_PROM IS NULL THEN 1 ELSE 0 END),
+            SUM(ISNULL(f.COMPRA, 0) * ISNULL(f.PCT, 100) / 100.0),
+            SUM(CASE WHEN f.COSTO_PROM IS NULL
+                     THEN ISNULL(f.COMPRA, 0) * ISNULL(f.PCT, 100) / 100.0 ELSE 0 END),
+            SUM(ISNULL(f.COMPRA, 0) * ISNULL(f.COSTO_PROM, 0) * ISNULL(f.PCT, 100) / 100.0),
+            SUM(ISNULL(f.COMPRA, 0) * ISNULL(f.COSTO_PROM, 0)),
+            SUM(ISNULL(f.COMPRA, 0) * ISNULL(f.COSTO_PROM, 0) * ISNULL(f.INC_FOB, 0) / 100.0
+                * ISNULL(f.PCT, 100) / 100.0),
+            SUM(ISNULL(f.DEFICIT, 0) * ISNULL(f.PCT, 100) / 100.0)
+        FROM #FILAS f
+        GROUP BY f.PAIS, f.TEMPORADA;
 
-        /* 3. EL CONTRASTE: lo que devuelve la vista contra lo que hay en sus
-              tablas. La diferencia es el filtro propio de la vista -hoy los
-              rubros de cuero- y existe para que no sea invisible. */
+        /* 5. EL DETALLE POR RUBRO, con el % que se le aplico. De aca salen el
+              aviso de lo que queda fuera por el %, el de rubros sin
+              configurar y el FOB por rubro de Parametros > Compras Exterior.
+              PCT_APLICADO y CONFIGURADO son por rubro, y el rubro tiene un
+              solo % vigente: el MAX no elige entre valores distintos. */
+        CREATE TABLE #RUB (
+            PAIS            VARCHAR(50)   COLLATE DATABASE_DEFAULT NOT NULL,
+            TEMPORADA       VARCHAR(30)   COLLATE DATABASE_DEFAULT NOT NULL,
+            RUBRO           VARCHAR(100)  COLLATE DATABASE_DEFAULT NOT NULL,
+            ID_VERSION      INT           NOT NULL,
+            FILAS           INT           NOT NULL,
+            FOB_PRESUPUESTO DECIMAL(18,4) NOT NULL,
+            PCT_APLICADO    DECIMAL(5,2)  NOT NULL,
+            CONFIGURADO     BIT           NOT NULL,
+            FOB_PROYECTADO  DECIMAL(18,4) NOT NULL
+        );
+
+        INSERT INTO #RUB
+        SELECT
+            f.PAIS,
+            f.TEMPORADA,
+            f.RUBRO,
+            MAX(f.ID_VERSION),
+            COUNT(*),
+            SUM(ISNULL(f.COMPRA, 0) * ISNULL(f.COSTO_PROM, 0)),
+            MAX(ISNULL(f.PCT, 100)),
+            MAX(CASE WHEN f.PCT IS NULL THEN 0 ELSE 1 END),
+            SUM(ISNULL(f.COMPRA, 0) * ISNULL(f.COSTO_PROM, 0) * ISNULL(f.PCT, 100) / 100.0)
+        FROM #FILAS f
+        GROUP BY f.PAIS, f.TEMPORADA, f.RUBRO;
+
+        /* 6. EL CONTRASTE: lo que devuelve la vista contra lo que hay en sus
+              tablas. La vista ya no filtra -que parte de cada rubro se
+              proyecta lo decide el %-, asi que las dos tienen que dar lo
+              mismo. Es un CONTROL: si la vista vuelve a devolver menos,
+              alguien le puso un filtro en la base que el cashflow no ve. */
         CREATE TABLE #VISTA (
             PAIS        VARCHAR(50)   COLLATE DATABASE_DEFAULT NOT NULL,
             FILAS_VISTA INT           NOT NULL,
@@ -153,10 +269,9 @@ BEGIN
         );
 
         INSERT INTO #VISTA
-        SELECT v.pais, COUNT(*), SUM(ISNULL(v.compra, 0) * ISNULL(v.costo_prom, 0))
-        FROM [XL-APPS].POWER_BI_CONTROL.dbo.RO_V_COMPRA_PROYECTADA_VIGENTE v
-        WHERE v.es_objetivo = 1
-        GROUP BY v.pais;
+        SELECT f.PAIS, COUNT(*), SUM(ISNULL(f.COMPRA, 0) * ISNULL(f.COSTO_PROM, 0))
+        FROM #FILAS f
+        GROUP BY f.PAIS;
 
         CREATE TABLE #TABLAS (
             PAIS         VARCHAR(50)   COLLATE DATABASE_DEFAULT NOT NULL,
@@ -174,7 +289,7 @@ BEGIN
         WHERE c.es_oficial = 1 AND c.eliminada = 0 AND t.es_objetivo = 1
         GROUP BY c.pais;
 
-        /* 4. EL REEMPLAZO, con todo ya traido. */
+        /* 7. EL REEMPLAZO, con todo ya traido. */
         DECLARE @Ahora DATETIME = GETDATE();
 
         BEGIN TRANSACTION;
@@ -184,15 +299,25 @@ BEGIN
             INSERT INTO dbo.RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN
                 (PAIS, TEMPORADA, ID_VERSION, NOMBRE, SOLAPA, FECHA_CALCULO_VERSION,
                  TRAMOS_ESTADO, TEMPORADA_DESDE, TEMPORADA_HASTA, FILAS, FILAS_SIN_COSTO,
-                 UNIDADES, UNIDADES_SIN_COSTO, FOB_USD, NAC_SEGUN_INC_FOB, DEFICIT_COBERTURA,
-                 FECHA_CALCULO, USUARIO_ALTA, FECHA_ALTA)
-            SELECT PAIS, LTRIM(RTRIM(TEMPORADA)), ID_VERSION, NOMBRE, SOLAPA,
+                 UNIDADES, UNIDADES_SIN_COSTO, FOB_USD, FOB_PRESUPUESTO_USD, NAC_SEGUN_INC_FOB,
+                 DEFICIT_COBERTURA, FECHA_CALCULO, USUARIO_ALTA, FECHA_ALTA)
+            SELECT PAIS, TEMPORADA, ID_VERSION, NOMBRE, SOLAPA,
                    FECHA_CALCULO_VERSION, TRAMOS_ESTADO, TEMPORADA_DESDE, TEMPORADA_HASTA,
                    FILAS, FILAS_SIN_COSTO, UNIDADES, UNIDADES_SIN_COSTO, FOB_USD,
-                   NAC_SEGUN_INC_FOB, DEFICIT_COBERTURA, @Ahora, @Usuario, @Ahora
+                   FOB_PRESUPUESTO_USD, NAC_SEGUN_INC_FOB, DEFICIT_COBERTURA, @Ahora, @Usuario, @Ahora
             FROM #RES;
 
             SET @Filas = @@ROWCOUNT;
+
+            DELETE FROM dbo.RO_T_CASHFLOW_COMEX_PRESUP_RUBRO;
+
+            INSERT INTO dbo.RO_T_CASHFLOW_COMEX_PRESUP_RUBRO
+                (PAIS, TEMPORADA, RUBRO, ID_VERSION, FILAS, FOB_PRESUPUESTO, PCT_APLICADO,
+                 CONFIGURADO, FOB_PROYECTADO, FECHA_CALCULO, USUARIO_ALTA, FECHA_ALTA,
+                 USUARIO_MODIF, FECHA_MODIF)
+            SELECT PAIS, TEMPORADA, RUBRO, ID_VERSION, FILAS, FOB_PRESUPUESTO, PCT_APLICADO,
+                   CONFIGURADO, FOB_PROYECTADO, @Ahora, @Usuario, @Ahora, @Usuario, @Ahora
+            FROM #RUB;
 
             DELETE FROM dbo.RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE;
 

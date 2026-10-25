@@ -12,7 +12,14 @@
    1. RO_T_CASHFLOW_JOB_LOG               una fila por corrida de cada SP
    2. RO_T_CASHFLOW_COMEX_RECEP_HIST      la historia de recepciones, por mes
    3. RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN  el presupuesto oficial, por temporada
-   4. RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE cuanto filtra la vista del presupuesto
+   4. RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE la vista contra sus tablas: control
+                                           de que nadie le puso un filtro
+   5. RO_T_CASHFLOW_COMEX_PRESUP_RUBRO    el presupuesto por rubro, con el %
+                                           importado que se le aplico
+   Y agrega a RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN la columna FOB_PRESUPUESTO_USD,
+   el FOB sin el % importado (seccion 3b). Las dos ultimas son de
+   feature/proyeccion-pct-importado-rubro: en una base que ya tenia las
+   demas, volver a correr este script agrega solo eso.
 
    POR QUE EXISTEN
 
@@ -167,12 +174,37 @@ ELSE
 GO
 
 /* ============================================================================
+   3b. EL FOB DEL PRESUPUESTO SIN AJUSTAR
+
+   FOB_USD es el FOB YA MULTIPLICADO por el % importado de cada rubro: es el
+   que se proyecta. FOB_PRESUPUESTO_USD es el que dice la app de compras, sin
+   ajustar, y existe solo para poder comparar las dos pantallas.
+
+   NULL en las filas que grabo un SP anterior a esta columna: el cashflow las
+   lee como "sin ajuste" (igual a FOB_USD) hasta la proxima corrida.
+   ============================================================================ */
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN', 'FOB_PRESUPUESTO_USD') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN
+        ADD FOB_PRESUPUESTO_USD DECIMAL(18,4) NULL;
+
+    PRINT 'RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN: + FOB_PRESUPUESTO_USD.';
+END
+ELSE
+    PRINT 'RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN.FOB_PRESUPUESTO_USD ya existia.';
+GO
+
+/* ============================================================================
    4. EL CONTRASTE DE LA VISTA CONTRA SUS TABLAS, UNA FILA POR PAIS
 
-   Lo que devolvia ComprasProyectadasDatos::contrasteVista(): cuantas filas
+   Lo que devuelve ComprasProyectadasDatos::contrasteVista(): cuantas filas
    del tramo objetivo deja afuera la vista respecto de sus tablas de origen.
-   Hoy son 34 filas y U$S 2,2 millones de FOB -los rubros de cuero-, y el
-   aviso existe para que ese filtro no sea invisible desde el cashflow.
+
+   ES UN CONTROL DE SEGURIDAD. La vista tuvo un filtro propio -los rubros de
+   cuero- que se saco: que parte de cada rubro se proyecta lo decide ahora el
+   % importado del cashflow (RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT). Si la
+   vista vuelve a devolver menos filas que sus tablas, alguien le puso un
+   filtro en la base que el cashflow no ve, y la pantalla lo avisa.
 
    VA EN SU PROPIA TABLA y no repetido en cada fila del resumen: es un dato
    por pais y no por temporada, y un pais sin ninguna version oficial no
@@ -196,14 +228,68 @@ ELSE
     PRINT 'RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE ya existia.';
 GO
 
+/* ============================================================================
+   5. EL PRESUPUESTO POR RUBRO, CON SU % IMPORTADO
+
+   Una fila por pais, temporada y rubro: el FOB que dice el presupuesto, el %
+   importado que el SP le aplico y el FOB que quedo para proyectar.
+
+   SE MATERIALIZA PARA QUE TRES PANTALLAS DIGAN LO MISMO QUE EL JOB HIZO: el
+   aviso de lo que queda fuera por el %, el de los rubros sin configurar, y
+   el FOB por rubro de Parametros > Compras Exterior. Leido en vivo de la
+   vista, cualquiera de los tres podria describir un presupuesto mas nuevo
+   que el que se esta proyectando.
+
+   RUBRO va normalizado, igual que en RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT.
+   CONFIGURADO = 0 es un rubro que no tenia % y entro al 100 %.
+
+   Auditoria: el SP llena alta y modificacion con quien lo pidio. Se
+   reescribe entera en cada corrida, asi que no hay baja que registrar.
+   ============================================================================ */
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_COMEX_PRESUP_RUBRO', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.RO_T_CASHFLOW_COMEX_PRESUP_RUBRO (
+        PAIS            VARCHAR(50)   NOT NULL,
+        TEMPORADA       VARCHAR(30)   NOT NULL,
+        RUBRO           VARCHAR(100)  NOT NULL,
+        ID_VERSION      INT           NOT NULL,
+        FILAS           INT           NOT NULL,
+        FOB_PRESUPUESTO DECIMAL(18,4) NOT NULL,
+        PCT_APLICADO    DECIMAL(5,2)  NOT NULL,
+        CONFIGURADO     BIT           NOT NULL,
+        FOB_PROYECTADO  DECIMAL(18,4) NOT NULL,
+        FECHA_CALCULO   DATETIME      NOT NULL,
+
+        USUARIO_ALTA    VARCHAR(50)   NULL,
+        FECHA_ALTA      DATETIME      NULL
+            CONSTRAINT DF_RO_T_CF_PRESRUB_ALTA DEFAULT (GETDATE()),
+        USUARIO_MODIF   VARCHAR(50)   NULL,
+        FECHA_MODIF     DATETIME      NULL
+            CONSTRAINT DF_RO_T_CF_PRESRUB_MODIF DEFAULT (GETDATE()),
+        USUARIO_BAJA    VARCHAR(50)   NULL,
+        FECHA_BAJA      DATETIME      NULL,
+
+        CONSTRAINT PK_RO_T_CASHFLOW_COMEX_PRESUP_RUBRO PRIMARY KEY CLUSTERED (PAIS, TEMPORADA, RUBRO)
+    );
+
+    PRINT 'RO_T_CASHFLOW_COMEX_PRESUP_RUBRO creada.';
+END
+ELSE
+    PRINT 'RO_T_CASHFLOW_COMEX_PRESUP_RUBRO ya existia.';
+GO
+
 /* ----------------------------------------------------------------------------
    Estado final.
    ---------------------------------------------------------------------------- */
 SELECT t.nombre,
        CASE WHEN OBJECT_ID('dbo.' + t.nombre, 'U') IS NULL THEN 'FALTA' ELSE 'OK' END AS estado
 FROM (VALUES ('RO_T_CASHFLOW_JOB_LOG'), ('RO_T_CASHFLOW_COMEX_RECEP_HIST'),
-             ('RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN'), ('RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE')) t (nombre);
+             ('RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN'), ('RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE'),
+             ('RO_T_CASHFLOW_COMEX_PRESUP_RUBRO')) t (nombre);
+
+SELECT CASE WHEN COL_LENGTH('dbo.RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN', 'FOB_PRESUPUESTO_USD') IS NULL
+            THEN 'FALTA' ELSE 'OK' END AS resumen_fob_presupuesto;
 GO
 
-PRINT 'Listo. Siguiente: sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql y sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql.';
+PRINT 'Listo. Siguiente: sql/cashflow_compras_proy_rubro_pct.sql, y despues sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql y sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql.';
 GO
