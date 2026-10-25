@@ -802,6 +802,20 @@
     }
 }
 
+/* El % importado por rubro. Un rubro en 0 % no se proyecta y uno que ya no
+   viene en el presupuesto no aplica a nada: los dos se ven apagados, pero se
+   ven. El primero porque su % es una decision que hay que poder cambiar; el
+   segundo porque su historial no se borra. */
+#pcprTablaRubros .pcpr-rubro-cero,
+#pcprTablaRubros .pcpr-rubro-fuera {
+    opacity: 0.55;
+}
+
+#pcprTablaRubros .pcpr-rubro-marca {
+    font-weight: 500;
+    font-size: 0.72rem;
+}
+
 /* ----------------------------------------------------------------------------
    PARAMETROS -> TARJETAS
 

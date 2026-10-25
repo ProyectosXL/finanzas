@@ -154,8 +154,12 @@ class Parametros {
                 . 'el FOB y se nacionaliza. Alimentan la pestaña Comercio Exterior › Proyección y las dos '
                 . 'filas proyectadas del tablero, dentro de los grupos Proveedores Exterior y '
                 . 'Nacionalizaciones. Y desde qué fecha de movimiento se consideran los contenedores '
-                . 'de Proveedores Exterior y Crono Nacionalización',
-            'secciones' => ['generales']
+                . 'de Proveedores Exterior y Crono Nacionalización. Abajo, qué parte de cada rubro '
+                . 'del presupuesto se compra en el exterior',
+            /* El % importado por rubro va DESPUES de los generales: decide
+               cuanto del presupuesto se proyecta, pero se mira despues de
+               entender como se proyecta. */
+            'secciones' => ['generales', 'compras_proy_rubros']
         ],
         /* Va PEGADA a Prov. Locales, y no es casual: un fletero es un proveedor
            local al que ademas se le proyecta el pago por horas, asi que las dos
@@ -657,6 +661,22 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudieron leer las retenciones de '
                             . 'Proveedores Locales: ' . $e->getMessage();
                     }
+                } elseif ($seccion === 'compras_proy_rubros') {
+                    /* El % importado por rubro. Mismo criterio que las
+                       retenciones: lo lee la clase del modulo, y un script sin
+                       correr no tumba la pestaña. */
+                    try {
+                        $modulo[$seccion] = $this->comprasProyRubros();
+
+                        foreach ($modulo[$seccion]['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = ['disponible' => false, 'filas' => [],
+                                             'presupuesto_al' => null, 'avisos' => []];
+                        $modulo['avisos'][] = 'No se pudo leer el % importado por rubro: '
+                            . $e->getMessage();
+                    }
                 } elseif ($seccion === 'prov_locales_opciones') {
                     /* Mismo criterio que Saldos, Cob. Electrónicos y
                        Pre-chequeado: la tabla es del módulo Proveedores Locales
@@ -973,6 +993,40 @@ class Parametros {
             'alcance_todos' => ProveedoresRetenciones::ALCANCE_TODOS,
             'hoy' => $hoy,
             'avisos' => Aviso::textos(ProveedoresRetenciones::avisosConfig($config))
+        ];
+    }
+
+    /**
+     * El % importado por rubro de Compras Exterior, para su sección.
+     *
+     * UN RENGLON POR RUBRO, venga del presupuesto, de la tabla del %, o de
+     * los dos: ver ComprasProyectadasRubros::tablaParametros(). Los avisos son
+     * los mismos que ven el tablero y la pestaña Proyección, con su nivel.
+     *
+     * @return array
+     */
+    private function comprasProyRubros() {
+        require_once __DIR__ . '/ComprasProyectadasRubros.php';
+
+        $datos = new ComprasProyectadasDatos();
+        $e = $datos->estadoInsumos();
+        $pais = 'argentina';
+
+        $avisos = $datos->avisosRubrosConNivel($pais);
+        $control = ComprasProyectadasDatos::avisoControlVista($datos->contrasteVista($pais));
+
+        if ($control !== null) {
+            $avisos[] = $control;
+        }
+
+        return [
+            'disponible' => !empty($e['rubro_pct']['tabla']),
+            'filas' => ComprasProyectadasRubros::tablaParametros(
+                $datos->presupuestoPorRubro($pais), $datos->pctVigentes()),
+            /* De cuándo es el presupuesto por rubro: "antes" sale de ahí. */
+            'presupuesto_al' => ($e['presupuesto']['ok'] === null)
+                ? null : ComprasProyectadasDatos::fechaCorta($e['presupuesto']['ok']['fin']),
+            'avisos' => $avisos
         ];
     }
 

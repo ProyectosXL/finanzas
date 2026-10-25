@@ -99,9 +99,10 @@ foreach (glob($RAIZ . 'Tabs/*.php') as $f) {
         preg_match_all('/<div class="cargando-slot" id="\w+" data-cargando="[^"]+"><\/div>/', $s));
 }
 
-// 28 desde que Pagos con Tarjetas y Otros dejo de ser un placeholder y tiene el
-// suyo. Antes eran 27, con el de Logistica Local.
-chequear('los 28 lugares de las pestanas', 28, $slots);
+// 29 desde el historial del % importado por rubro, en Parametros > Compras
+// Exterior. 28 desde que Pagos con Tarjetas y Otros dejo de ser un placeholder
+// y tiene el suyo. Antes eran 27, con el de Logistica Local.
+chequear('los 29 lugares de las pestanas', 29, $slots);
 
 foreach (glob($RAIZ . 'Css/*.css') as $f) {
     if (basename($f) === 'cargando.css') {

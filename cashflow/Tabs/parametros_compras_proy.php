@@ -60,6 +60,41 @@
             </small>
         </div>
     </div>
+
+    <!-- EL % IMPORTADO POR RUBRO. Qué parte de cada rubro del presupuesto se
+         compra en el exterior. Reemplaza al filtro de cuero que tenía la vista
+         del presupuesto. La card entera la dibuja el JS: sin el script dice
+         qué falta en vez de mostrar una tabla que fallaría al guardar. -->
+    <div id="pcprRubros"></div>
+</div>
+
+<!-- Historial de un rubro: todos los % que tuvo, quién y cuándo. -->
+<div class="modal fade" id="modalHistorialRubroPct" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    Historial del % importado
+                    <small class="text-muted ms-2" id="pcprHistTitulo"></small>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="cargando-slot" id="pcprHistSpinner" data-cargando="Leyendo el historial…"></div>
+                <table class="table table-sm mb-0" id="pcprHistTabla" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th class="text-end">% importado</th>
+                            <th>Desde</th>
+                            <th>Hasta</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pcprHistBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script src="Js/Parametros-Compras_proy.js?v=<?php echo time(); ?>"></script>

@@ -1216,6 +1216,65 @@ try {
             break;
 
         /* ================================================================
+           MODULO COMPRAS EXTERIOR: EL % IMPORTADO POR RUBRO
+
+           El % rige desde que se guarda, pero la proyeccion lo toma en la
+           proxima corrida del job del presupuesto. Por eso el mensaje lo dice,
+           y por eso existe recalcularPresupuestoComprasProy: corre SOLO ese
+           SP, con el usuario de la pantalla. No se dispara en cada guardado:
+           pasa por el linked server, y quien edita cinco rubros dispararia
+           cinco corridas.
+           ================================================================ */
+        case 'saveRubroPctComprasProy':
+            $data = bodyJson();
+
+            if (!isset($data['rubro']) || !array_key_exists('pct', $data)) {
+                throw new Exception('Faltan el rubro o el % importado.');
+            }
+
+            require_once __DIR__ . '/../Class/ComprasProyectadasRubros.php';
+
+            $r = (new ComprasProyectadasRubros())->guardar($data['rubro'], $data['pct'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['rubro'] . ': ' . ComprasProyectadasRubros::numero($r['pct'])
+                    . ' % importado'
+                    . ($r['anterior'] === null ? '' : ' (antes '
+                        . ComprasProyectadasRubros::numero($r['anterior']) . ' %, queda en el historial)')
+                    . '. El cambio se ve en la proyección después de «Recalcular la proyección», '
+                    . 'de «Actualizar ahora» en Comercio Exterior › Proyección, o de la próxima '
+                    . 'corrida automática.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'getHistorialRubroPct':
+            $rubro = isset($_GET['rubro']) ? (string) $_GET['rubro'] : '';
+
+            require_once __DIR__ . '/../Class/ComprasProyectadasRubros.php';
+
+            echo json_encode([
+                'success' => true,
+                'data' => (new ComprasProyectadasRubros())->historial($rubro)
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'recalcularPresupuestoComprasProy':
+            require_once __DIR__ . '/../Class/ComprasProyectadasJob.php';
+
+            $r = (new ComprasProyectadasJob())->correr('presupuesto', $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Proyección recalculada en ' . $r['segundos'] . ' s con los % '
+                    . 'importados vigentes. El tablero y Comercio Exterior › Proyección ya la '
+                    . 'muestran.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
            MODULO COBRANZAS (PPP por grupo empresario y escala de descuento)
            ================================================================ */
 
