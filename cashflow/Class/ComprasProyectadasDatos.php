@@ -97,16 +97,15 @@ class ComprasProyectadasDatos {
      * La gravedad del control de la vista: la vista devuelve menos filas que
      * sus tablas.
      *
-     * EN ATENCION Y NO EN CRITICO, HASTA VERIFICARLO CONTRA LA BASE. La
+     * CRITICO: la proyeccion sale de menos sin que nada lo diga. La
      * definicion de la vista en el repo de compras usa el mismo criterio que
      * el contraste (es_oficial = 1 AND eliminada = 0, los mismos tres JOIN),
-     * asi que sin filtro las dos tienen que dar lo mismo. Pero la vista de la
-     * base ya fue distinta del script una vez -el filtro de cuero-, y una
-     * alarma critica que salta el primer dia por otro motivo ensenia a
-     * ignorarla. Cuando RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE muestre filas
-     * iguales despues de una corrida, pasa a Aviso::DANGER.
+     * asi que sin filtro las dos dan lo mismo. Verificado contra la base el
+     * 25/10/2026, con la vista ya sin el filtro de cuero: 144 filas y
+     * U$S 6.965.385,74 de FOB de los dos lados. Una diferencia, entonces, es
+     * un filtro nuevo y no un desfasaje de criterios.
      */
-    const NIVEL_CONTROL_VISTA = Aviso::WARNING;
+    const NIVEL_CONTROL_VISTA = Aviso::DANGER;
 
     /** El PROCESO con que cada SP se anota en el log */
     const PROCESO_HISTORIA = 'COMEX_RECEP_HIST';
