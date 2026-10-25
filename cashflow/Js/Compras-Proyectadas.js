@@ -676,7 +676,7 @@
         var nacPct = (datos.parametros || {}).compras_proy_nac_pct;
 
         if (!versiones.length) {
-            body.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">' +
+            body.innerHTML = '<tr><td colspan="11" class="text-center text-muted py-3">' +
                 'No hay ninguna versión oficial vigente. Todos los meses de la ventana van en ' +
                 'cero: se está proyectando de menos.</td></tr>';
 
@@ -699,6 +699,9 @@
                 '<td>' + fecha(v.fecha_calculo) + '</td>' +
                 '<td class="text-end">' + num(v.unidades) + '</td>' +
                 '<td class="text-end fw-bold">' + usd(v.fob_usd) + '</td>' +
+                /* El del presupuesto sin el % importado, para comparar con
+                   la app de compras. */
+                '<td class="text-end text-muted">' + usd(v.fob_presupuesto_usd) + '</td>' +
                 '<td class="text-end">' + usd(unitario) + '</td>' +
                 '<td class="text-end ' + (lejos ? 'text-danger' : '') + '">' +
                     pct(v.inc_fob_pct) + '</td>' +
@@ -775,7 +778,7 @@
         if (!body) { return; }
 
         if (!filas.length) {
-            body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">' +
+            body.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">' +
                 'La versión no tiene filas con compra.</td></tr>';
             setTexto('cpDetallePie', '');
 
@@ -783,18 +786,35 @@
         }
 
         var totalFob = 0;
+        var totalProy = 0;
         var sinCosto = 0;
+        var sinConfigurar = {};
 
         body.innerHTML = filas.map(function(f) {
             totalFob += Number(f.fob_usd || 0);
+            totalProy += Number(f.fob_proyectado || 0);
 
             /* UNA FILA SIN COSTO NO SE MULTIPLICA POR CERO: se marca. Un NULL
                tratado como cero es una afirmación ("esa mercadería no cuesta
                nada") que nadie hizo. */
             if (f.costo_prom === null) { sinCosto++; }
 
-            return '<tr' + (f.costo_prom === null ? ' class="table-warning"' : '') + '>' +
-                '<td>' + esc(f.rubro) + '</td>' +
+            /* EL % IMPORTADO: un rubro en 0 % no se proyecta y se ve
+               atenuado; uno sin configurar entra al 100 % y se marca. */
+            var cero = f.configurado && Number(f.pct_importado) === 0;
+
+            if (!f.configurado) { sinConfigurar[f.rubro] = true; }
+
+            var clases = [];
+
+            if (f.costo_prom === null) { clases.push('table-warning'); }
+            if (cero) { clases.push('cp-rubro-cero'); }
+
+            return '<tr' + (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>' +
+                '<td>' + esc(f.rubro) + (f.configurado ? ''
+                    : ' <span class="badge text-bg-warning" title="El rubro no tiene % importado: ' +
+                      'se proyecta completo. Asignáselo en Parámetros › Compras Exterior.">sin ' +
+                      'configurar (100%)</span>') + '</td>' +
                 '<td>' + esc(f.categoria || '—') + '</td>' +
                 '<td class="text-end">' + num(f.compra) + '</td>' +
                 '<td class="text-end">' + (f.costo_prom === null
@@ -802,13 +822,20 @@
                       'FOB y se informa aparte">sin costo</span>'
                     : usd(f.costo_prom)) + '</td>' +
                 '<td class="text-end">' + usd(f.fob_usd) + '</td>' +
+                '<td class="text-end">' + pct(f.pct_importado) + '</td>' +
+                '<td class="text-end fw-bold">' + usd(f.fob_proyectado) + '</td>' +
                 '<td class="text-end">' + pct(f.inc_fob) + '</td>' +
                 '<td class="text-end">' + num(f.deficit) + '</td>' +
             '</tr>';
         }).join('');
 
-        setTexto('cpDetallePie', filas.length + ' filas · FOB ' + usd(totalFob) +
-            (sinCosto ? ' · ' + sinCosto + ' sin costo cargado' : ''));
+        var nSinConf = Object.keys(sinConfigurar).length;
+
+        setTexto('cpDetallePie', filas.length + ' filas · FOB del presupuesto ' + usd(totalFob) +
+            ' · FOB proyectado ' + usd(totalProy) +
+            (sinCosto ? ' · ' + sinCosto + ' sin costo cargado' : '') +
+            (nSinConf ? ' · ' + nSinConf + ' rubro' + (nSinConf === 1 ? '' : 's') +
+                ' sin configurar' : ''));
     }
 
     /* ================================================================
