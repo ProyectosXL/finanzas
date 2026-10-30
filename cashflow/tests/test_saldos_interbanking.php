@@ -502,32 +502,56 @@ $ibViejo = ['FECHA_OPERACION' => '2026-10-06'];
 $ibHoy = ['FECHA_OPERACION' => IB_HOY];
 
 chequear('sin Interbanking, el respaldo',
-    'RESPALDO', SaldosInterbanking::resolverSaldo(null, ibResp(1, '2026-10-07', 5.0)));
+    'RESPALDO', SaldosInterbanking::resolverSaldo(null, ibResp(1, '2026-10-07', 5.0), IB_HOY));
 chequear('un respaldo mas nuevo gana a un Interbanking viejo',
-    'RESPALDO', SaldosInterbanking::resolverSaldo($ibViejo, ibResp(1, '2026-10-07', 5.0)));
-chequear('un Interbanking mas nuevo gana al respaldo',
-    'INTERBANKING', SaldosInterbanking::resolverSaldo($ibHoy, ibResp(1, '2026-10-07', 5.0)));
-chequear('a igual fecha gana Interbanking',
-    'INTERBANKING', SaldosInterbanking::resolverSaldo($ibHoy, ibResp(1, IB_HOY, 5.0)));
-chequear('sin ninguno de los dos, nada', null, SaldosInterbanking::resolverSaldo(null, null));
+    'RESPALDO', SaldosInterbanking::resolverSaldo($ibViejo, ibResp(1, '2026-10-07', 5.0), IB_HOY));
+chequear('un Interbanking mas nuevo gana al manual de ayer',
+    'INTERBANKING', SaldosInterbanking::resolverSaldo($ibHoy, ibResp(1, '2026-10-07', 5.0), IB_HOY));
+chequear('el manual de hoy gana a Interbanking de hoy: manda todo el dia',
+    'RESPALDO', SaldosInterbanking::resolverSaldo($ibHoy, ibResp(1, IB_HOY, 5.0), IB_HOY));
+chequear('a igual fecha que no es hoy, gana Interbanking',
+    'INTERBANKING', SaldosInterbanking::resolverSaldo(['FECHA_OPERACION' => '2026-10-07'],
+        ibResp(1, '2026-10-07', 5.0), IB_HOY));
+chequear('sin ninguno de los dos, nada', null, SaldosInterbanking::resolverSaldo(null, null, IB_HOY));
 
-// La fecha de Interbanking que compite es la del ultimo con OPERATIVO: un
-// registro de hoy que solo trae el contable no le gana al respaldo de hoy.
+// Un registro de hoy que solo trae el contable no cuenta: el operativo que
+// compite es el de ayer, y el manual de hoy manda igual.
 $soloContableHoy = SaldosInterbanking::armarCuentasBancarias([
     ibReg(1, '2026-10-07', 500.0, false, '015', '300'),
     ibReg(2, IB_HOY, null, false, '015', '300', 'ARS', 888.0)
 ], ['hoy' => IB_HOY, 'tango' => $tangoIb,
     'respaldos' => ['015|300|ARS' => ibResp(4, IB_HOY, 650.0, '015', '300')]]);
-chequear('un registro de hoy con contable y sin operativo no le gana al respaldo de hoy',
+chequear('un registro de hoy con contable y sin operativo no le gana al manual de hoy',
     650.0, $soloContableHoy['filas'][0]['saldo']);
-chequear('el respaldo es de origen RESPALDO', 'RESPALDO', $soloContableHoy['filas'][0]['origen']);
+chequear('el manual es de origen RESPALDO', 'RESPALDO', $soloContableHoy['filas'][0]['origen']);
 
+/* El pedido de Direccion: Interbanking actualiza cada hora, y un registro de
+   hoy MAS NUEVO que el manual no lo pisa. */
 $operativoHoy = SaldosInterbanking::armarCuentasBancarias([
-    ibReg(1, IB_HOY, 500.0, false, '015', '300', 'ARS', 888.0)
+    ibReg(1, IB_HOY, 500.0, IB_HOY . ' 15:00:00', '015', '300', 'ARS', 888.0)
 ], ['hoy' => IB_HOY, 'tango' => $tangoIb,
     'respaldos' => ['015|300|ARS' => ibResp(4, IB_HOY, 650.0, '015', '300')]]);
-chequear('con operativo de la misma fecha gana Interbanking, con su operativo',
-    500.0, $operativoHoy['filas'][0]['saldo']);
+chequear('con un operativo de hoy mas nuevo que el manual de hoy, manda el manual',
+    650.0, $operativoHoy['filas'][0]['saldo']);
+chequear('la fila dice lo que trae Interbanking, para el tooltip',
+    500.0, $operativoHoy['filas'][0]['automatico']['saldo']);
+chequear('y que el manual es de hoy y manda', true,
+    $operativoHoy['filas'][0]['manual']['de_hoy'] && $operativoHoy['filas'][0]['manual']['manda']);
+chequear('sin avisos: quien lo cargo hoy sabe por que', 0, count($operativoHoy['avisos']));
+
+$operativoManana = SaldosInterbanking::armarCuentasBancarias([
+    ibReg(1, '2026-10-09', 500.0, false, '015', '300')
+], ['hoy' => '2026-10-09', 'tango' => $tangoIb,
+    'respaldos' => ['015|300|ARS' => ibResp(4, IB_HOY, 650.0, '015', '300')]]);
+chequear('al dia siguiente vuelve a mandar Interbanking, sin que nadie haga nada',
+    500.0, $operativoManana['filas'][0]['saldo']);
+chequear('y el manual de ayer queda en la fila pero no manda', false,
+    $operativoManana['filas'][0]['manual']['manda']);
+
+$sinDatoManana = SaldosInterbanking::armarCuentasBancarias([], ['hoy' => '2026-10-09', 'tango' => $tangoIb,
+    'respaldos' => ['015|300|ARS' => ibResp(4, IB_HOY, 650.0, '015', '300')]]);
+chequear('al dia siguiente, si Interbanking no trae el dato, el manual de ayer sigue de respaldo',
+    650.0, $sinDatoManana['filas'][0]['saldo']);
 
 $conResp = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY, 'tango' => $tangoIb,
     'respaldos' => ['014|200|ARS' => ibResp(9, IB_HOY, 35000000.0)]]);
@@ -554,9 +578,9 @@ $conRespAyer = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_
     'respaldos' => ['014|200|ARS' => ibResp(9, '2026-10-07', 35000000.0)]]);
 chequear('con un respaldo de otro dia la falla se acusa en atencion, con su fecha',
     true, ibContiene(ibAvisos($conRespAyer['avisos'], Aviso::WARNING),
-        'Interbanking no trae el saldo operativo de PROVINCIA DE BS.AS. · 200; se usa la carga '
+        'Interbanking no trae el saldo operativo de PROVINCIA DE BS.AS. · 200; se usa el saldo '
         . 'manual del 07/10'));
-chequear('el respaldo vigente viaja en la fila para el dialogo', 9, $prov['respaldo']['id']);
+chequear('el respaldo vigente viaja en la fila para el dialogo', 9, $prov['manual']['id']);
 
 // Interbanking mas nuevo: el respaldo queda en la fila pero no se usa
 $respViejo = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY, 'tango' => $tangoIb,
@@ -569,7 +593,7 @@ foreach ($respViejo['filas'] as $f) {
 
 chequear('con Interbanking de hoy, el respaldo de ayer no se usa',
     1000.0, $porClave['007|100|ARS']['saldo']);
-chequear('pero se sigue mostrando en el dialogo', 3, $porClave['007|100|ARS']['respaldo']['id']);
+chequear('pero se sigue mostrando en el dialogo', 3, $porClave['007|100|ARS']['manual']['id']);
 chequear('y no avisa falla de integracion',
     false, ibContiene(ibAvisos($respViejo['avisos']), 'no trae el saldo operativo de DE GALICIA'));
 
@@ -613,17 +637,19 @@ chequear('una observacion vacia va null', null, $v['observacion']);
 chequear('un saldo negativo (descubierto) se acepta', -10.0,
     SaldosInterbanking::validarRespaldo(array_merge($respOk, ['saldo' => '-10']), IB_HOY)['saldo']);
 
-chequearLanza('no se acepta una fecha futura', function () use ($respOk) {
-    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['fecha_saldo' => '2026-10-09']), IB_HOY);
-});
-chequearLanza('ni un importe vacio', function () use ($respOk) {
+/* La fecha la pone el servidor: hoy. La que mande el navegador, valida o no,
+   no se toma. */
+chequear('la fecha es siempre hoy', IB_HOY, $v['fecha_saldo']);
+chequear('una fecha de ayer del navegador no se toma', IB_HOY,
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['fecha_saldo' => '2026-10-01']), IB_HOY)['fecha_saldo']);
+chequear('una invalida tampoco rompe nada', IB_HOY,
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['fecha_saldo' => '2026-02-30']), IB_HOY)['fecha_saldo']);
+
+chequearLanza('no se acepta un importe vacio', function () use ($respOk) {
     SaldosInterbanking::validarRespaldo(array_merge($respOk, ['saldo' => '']), IB_HOY);
 });
 chequearLanza('ni un importe que no es numero', function () use ($respOk) {
     SaldosInterbanking::validarRespaldo(array_merge($respOk, ['saldo' => 'mucho']), IB_HOY);
-});
-chequearLanza('ni una fecha invalida', function () use ($respOk) {
-    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['fecha_saldo' => '2026-02-30']), IB_HOY);
 });
 chequearLanza('ni una observacion de mas de 500 caracteres', function () use ($respOk) {
     SaldosInterbanking::validarRespaldo(array_merge($respOk, ['observacion' => str_repeat('x', 501)]), IB_HOY);
