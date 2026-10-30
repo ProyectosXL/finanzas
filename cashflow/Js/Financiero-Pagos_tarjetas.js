@@ -1173,7 +1173,7 @@
             var celda = (mes && fila.celdas[mes]) ? fila.celdas[mes] : null;
 
             return '<td class="currency' + (celda && celda.origen === 'RESUMEN'
-                        ? ' tarj-resumen' : '') + '"'
+                        ? ' tarj-resumen' : '') + ' ' + vistas.marca(col).clase + '"'
                 + (celda ? ' title="' + esc(celda.tooltip) + '"' : '') + '>'
                 + (v === 0 || v === null ? '' : (esUsd ? dolaresCorto(v) : plataCorta(v)))
             + '</td>';
@@ -1399,9 +1399,14 @@
 
         fila.innerHTML = cols.map(function(col) {
             var meta = vistas.meta(col);
+            // Sábado, domingo o feriado: lo decide el backend (vistas.marca())
+            var marca = vistas.marca(col, meta && meta.feriado_comercio
+                ? 'Feriado de comercio: sin venta estimada' : '');
 
             return '<th class="text-end' + (vistas.esMes(col) ? ' col-mes' : '')
-                + (meta && meta.feriado_comercio ? ' col-feriado' : '') + '">'
+                + (meta && meta.feriado_comercio ? ' col-feriado' : '')
+                + (marca.clase ? ' ' + marca.clase : '') + '"'
+                + (marca.titulo ? ' title="' + esc(marca.titulo) + '"' : '') + '>'
                 + esc(vistas.rotulo(col)) + '</th>';
         }).join('');
 
@@ -1412,7 +1417,8 @@
         return cols.map(function(col) {
             var v = vistas.valor(eje, col);
 
-            return '<td class="currency' + (negrita ? '' : ' text-muted') + '">'
+            return '<td class="currency' + (negrita ? '' : ' text-muted')
+                + ' ' + vistas.marca(col).clase + '">'
                 + (v === 0 || v === null ? '' : plataCorta(v)) + '</td>';
         }).join('');
     }
@@ -1452,8 +1458,9 @@
         var html = '<td colspan="' + colsDesc + '" class="fw-bold text-end">'
             + esc(rotulo || 'TOTALES') + '</td>';
 
-        valores.forEach(function(v) {
-            html += '<td class="currency fw-bold">' + celdaEje(v) + '</td>';
+        valores.forEach(function(v, i) {
+            html += '<td class="currency fw-bold ' + vistas.marca(cols[i]).clase + '">'
+                + celdaEje(v) + '</td>';
         });
 
         // El total del período, en la última columna: la misma posición que en las

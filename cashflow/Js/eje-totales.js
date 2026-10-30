@@ -85,6 +85,9 @@ var EjeTotales = (function() {
     /** La clase de las celdas. El estilo está en Css/main.css */
     var CLASE = 'eje-total';
 
+    /** La de los días no hábiles (Css/eje-vistas.css). No la decide: la copia */
+    var CLASE_NO_HABIL = 'ev-no-habil';
+
     /* ================================================================
        LA REGLA, SIN DOM
        ================================================================ */
@@ -181,7 +184,11 @@ var EjeTotales = (function() {
         for (var i = 0; i < lista.length; i++) {
             var th = document.createElement('th');
 
-            th.className = CLASE + (lista[i].esTotal ? ' ' + CLASE + '-general' : '');
+            // El día no hábil se marca en toda la columna: la celda de arriba
+            // copia la marca de su fecha, que ya la decidió vistas.marca()
+            th.className = CLASE + (lista[i].esTotal ? ' ' + CLASE + '-general' : '')
+                + (!lista[i].esTotal && abajo.cells[i].classList.contains(CLASE_NO_HABIL)
+                    ? ' ' + CLASE_NO_HABIL : '');
             th.setAttribute('data-eje-total', '');
             th.setAttribute('data-exportar-omitir', '');
             th.title = lista[i].esTotal

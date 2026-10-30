@@ -130,7 +130,12 @@
             '<th rowspan="2" class="text-center" style="width: 120px;">Mes base</th>' +
         '</tr><tr>' +
             columnas.map(function(c) {
-                return '<th class="text-end">' + esc(vistas.rotulo(c)) + '</th>';
+                // Sábado, domingo o feriado: lo decide el backend (vistas.marca())
+                var marca = vistas.marca(c);
+
+                return '<th class="text-end' + (marca.clase ? ' ' + marca.clase : '') + '"'
+                    + (marca.titulo ? ' title="' + esc(marca.titulo) + '"' : '') + '>'
+                    + esc(vistas.rotulo(c)) + '</th>';
             }).join('') +
             '<th class="text-end fw-bold total-column">Total</th>' +
         '</tr>';
@@ -168,7 +173,8 @@
                          'Valor hora base, ya ajustado') +
                 celdaMes(f.cod_provee, f.mes_base) +
                 columnas.map(function(c) {
-                    return '<td class="text-end">' + celdaEje(f, eje, c) + '</td>';
+                    return '<td class="text-end ' + vistas.marca(c).clase + '">'
+                        + celdaEje(f, eje, c) + '</td>';
                 }).join('') +
                 '<td class="text-end fw-bold">' +
                     (eje ? importe(vistas.total(eje)) : '—') +
@@ -280,8 +286,9 @@
 
         pie.innerHTML = '<tr>' +
             '<td colspan="4" class="fw-bold text-end">TOTALES</td>' +
-            valores.map(function(suma) {
-                return '<td class="text-end fw-bold">' + celdaEje(suma) + '</td>';
+            valores.map(function(suma, i) {
+                return '<td class="text-end fw-bold ' + vistas.marca(columnas[i]).clase + '">'
+                    + celdaEje(suma) + '</td>';
             }).join('') +
             '<td class="text-end fw-bold">' + celdaTotal(total) + '</td>' +
         '</tr>';

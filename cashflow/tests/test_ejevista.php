@@ -407,15 +407,41 @@ foreach (glob(__DIR__ . '/../Css/*.css') as $f) {
 
 chequear('la clase no se redefine en otra hoja', [], $otrasCss);
 
+// La clase la escribe eje-vistas.js, y eje-totales.js la copia de la fecha de
+// abajo; nadie mas.
 $jsDecide = [];
 
 foreach (glob(__DIR__ . '/../Js/*.js') as $f) {
     $js = file_get_contents($f);
+    $escribeClase = strpos($js, "'ev-no-habil'") !== false
+        && !in_array(basename($f), ['eje-vistas.js', 'eje-totales.js'], true);
 
-    if (preg_match('/getDay\(\)\s*(===?|>=?|<)\s*[06]/', $js) || strpos($js, "'ev-no-habil'") !== false
-            && basename($f) !== 'eje-vistas.js') {
+    if (preg_match('/getDay\(\)\s*(===?|>=?|<)\s*[06]/', $js) || $escribeClase) {
         $jsDecide[] = basename($f);
     }
 }
 
 chequear('ningun JS calcula el fin de semana ni escribe la clase a mano', [], $jsDecide);
+
+// Toda pantalla con eje marca la columna entera: encabezado, celdas y pie.
+// Con menos de tres llamadas a marca() le falta alguna de las tres.
+$sinMarca = [];
+
+foreach (['Cashflow.js' => 1, 'Ingresos-Ventas.js' => 1, 'Ingresos-Cobranzas_fr.js' => 3,
+          'Ingresos-Cobranzas_may.js' => 3, 'Ingresos-Echeqs.js' => 6,
+          'Proveedores-Proveedores_locales.js' => 3, 'Logistica-Local.js' => 3,
+          'Comex-Proveedores_exterior.js' => 3, 'Comex-Crono_nacionalizacion.js' => 3,
+          'Ingresos-Exportaciones_tasky.js' => 3, 'Financiero-Pagos_tarjetas.js' => 4] as $archivo => $minimo) {
+    $js = (string) @file_get_contents(__DIR__ . '/../Js/' . $archivo);
+
+    if (preg_match_all('/\b(vistas|vistasPre)\.marca\(/', $js) < $minimo) {
+        $sinMarca[] = $archivo;
+    }
+}
+
+chequear('cada pantalla con eje usa vistas.marca()', [], $sinMarca);
+
+$totalesJs = (string) @file_get_contents(__DIR__ . '/../Js/eje-totales.js');
+
+chequear('la fila de totales de arriba copia la marca de su fecha', 1,
+    substr_count($totalesJs, 'abajo.cells[i].classList.contains(CLASE_NO_HABIL)'));

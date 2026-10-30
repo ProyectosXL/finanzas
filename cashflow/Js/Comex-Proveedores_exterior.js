@@ -311,6 +311,14 @@ function generarEncabezados() {
             titulo = 'Este mes está recortado: sus primeros días están en el tramo diario';
         }
 
+        // Sábado, domingo o feriado: lo decide el backend (vistas.marca())
+        var marca = vistas.marca(col);
+
+        if (marca.clase) {
+            clases.push(marca.clase);
+            titulo = marca.titulo;
+        }
+
         headerHTML += '<th class="' + clases.join(' ') + '"'
             + (titulo ? ' title="' + titulo + '"' : '') + '>'
             + vistas.rotulo(col) + '</th>';
@@ -430,7 +438,8 @@ function generarFilasDatos() {
         cols.forEach(function(col) {
             var valor = Number(vistas.valor(item, col)) || 0;
 
-            html += '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '') + '">'
+            html += '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '')
+                + ' ' + vistas.marca(col).clase + '">'
                 + (valor > 0 ? formatCurrency(valor) : '') + '</td>';
         });
 
@@ -900,8 +909,9 @@ function generarFilaTotales() {
     var cols = vistas.columnas();
     var tot = totalesEjeProv(totales, cols);
 
-    tot.columnas.forEach(function(valor) {
-        html += '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '') + '">'
+    tot.columnas.forEach(function(valor, i) {
+        html += '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '')
+            + ' ' + vistas.marca(cols[i]).clase + '">'
             + celdaEjeProv(valor) + '</td>';
     });
 

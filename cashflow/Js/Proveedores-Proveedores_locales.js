@@ -585,12 +585,14 @@
         document.getElementById('headerSubProv').innerHTML = cols.map(function(c) {
             var meta = vistas.meta(c) || {};
             var parcial = vistas.esMes(c) && meta.parcial;
+            // Sábado, domingo o feriado: lo decide el backend (vistas.marca())
+            var marca = vistas.marca(c);
+            var titulo = parcial
+                ? 'Este mes está recortado: sus primeros días están en el tramo diario'
+                : marca.titulo;
 
-            return '<th class="text-end"'
-                + (parcial
-                    ? ' title="' + escapar('Este mes está recortado: sus primeros días '
-                        + 'están en el tramo diario') + '"'
-                    : '')
+            return '<th class="text-end' + (marca.clase ? ' ' + marca.clase : '') + '"'
+                + (titulo ? ' title="' + escapar(titulo) + '"' : '')
                 + '>' + escapar(vistas.rotulo(c)) + '</th>';
         }).join('');
 
@@ -652,7 +654,8 @@
             cols.forEach(function(c) {
                 var v = Number(vistas.valor(f, c)) || 0;
 
-                html += '<td class="currency' + (v !== 0 ? ' cell-with-value' : '') + '">'
+                html += '<td class="currency' + (v !== 0 ? ' cell-with-value' : '')
+                    + ' ' + vistas.marca(c).clase + '">'
                     + (v !== 0 ? plataCorta(v) : '') + '</td>';
             });
 
@@ -866,8 +869,9 @@
            Sin total general, porque la grilla no tiene columna Total. */
         var valores = cols.map(function(c) { return porCol[c] || 0; });
 
-        valores.forEach(function(v) {
-            html += '<td class="currency fw-bold">' + celdaEje(v) + '</td>';
+        valores.forEach(function(v, i) {
+            html += '<td class="currency fw-bold ' + vistas.marca(cols[i]).clase + '">'
+                + celdaEje(v) + '</td>';
         });
 
         document.getElementById('totalesProv').innerHTML = html;
