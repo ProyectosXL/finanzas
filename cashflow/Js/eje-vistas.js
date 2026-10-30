@@ -28,6 +28,7 @@
  *   vistas.rotulo(col)                // '6/9' o 'Oct-26'
  *   vistas.valor(fila, col)           // el importe de esa fila en esa columna
  *   vistas.total(fila)                // el total que corresponde a la vista activa
+ *   vistas.marca(col)                 // {clase, titulo} del día no hábil, para <th> y <td>
  *
  * EL TOTAL DEPENDE DE LA VISTA, y no es un detalle: la vista Meses cubre sólo
  * los días que quedaron fuera del tramo diario, así que su total NO es el del
@@ -62,6 +63,9 @@ function crearEjeVistas(opciones) {
                + 'del tramo diario, así que su total no es el del horizonte completo',
         'completo': 'Las dos ramas juntas, en orden cronológico'
     };
+
+    /** La clase de los días no hábiles. El color está en Css/eje-vistas.css */
+    var CLASE_NO_HABIL = 'ev-no-habil';
 
     var datos = null;
     var activa = opciones.inicial || 'dias';
@@ -191,6 +195,31 @@ function crearEjeVistas(opciones) {
             }
 
             return Number(fila.total_tramo) || 0;
+        },
+
+        /**
+         * La marca de día no hábil de una columna: la clase, que va en el
+         * encabezado Y en las celdas, y el texto del tooltip del encabezado.
+         *
+         * Qué día es fin de semana o feriado lo decide el backend
+         * (Horizonte::noHabil()) y viaja en el eje; acá sólo se lee. Las
+         * columnas mensuales no se marcan.
+         *
+         * @param {string} col
+         * @param {string} [nota] Otro texto del mismo encabezado -el feriado de
+         *        comercio-, que se suma al tooltip en lugar de taparlo
+         * @returns {{clase: string, titulo: string}}
+         */
+        marca: function(col, nota) {
+            // Sin métodos de ES5: tests/js/eje_vistas.wsf la corre con cscript
+            var meta = api.esMes(col) ? null : api.meta(col);
+            var texto = (meta && meta.no_habil) ? (meta.no_habil_texto || '') : '';
+            var titulo = (texto && nota) ? texto + ' \u00b7 ' + nota : (texto || nota || '');
+
+            return {
+                clase: texto ? CLASE_NO_HABIL : '',
+                titulo: titulo
+            };
         },
 
         /** Cambia de vista por código, como si se hubiera apretado el botón */

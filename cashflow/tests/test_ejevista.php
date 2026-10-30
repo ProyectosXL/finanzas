@@ -356,3 +356,66 @@ $agrupadoNh = EjeVista::armarAgrupado($hNh, [['COD' => 'A', 'Cobro' => '2026-10-
 
 chequear('armar() trae la misma marca', 'FERIADO', $armadoNh['dias'][4]['no_habil']);
 chequear('armarAgrupado() trae la misma marca', 'FERIADO', $agrupadoNh['dias'][4]['no_habil']);
+
+seccion('dias no habiles: el front solo dibuja la marca');
+
+// vistas.marca() esta escrita en ES3 para correrla con cscript, como
+// EjeTotales.celdas(). Donde no hay cscript -fuera de Windows- se saltea.
+$wsfEv = realpath(__DIR__ . '/js/eje_vistas.wsf');
+$cscriptEv = (PHP_OS_FAMILY === 'Windows' && function_exists('shell_exec'))
+    ? trim((string) @shell_exec('where cscript 2>NUL')) : '';
+
+if ($wsfEv === false) {
+    chequear('existe tests/js/eje_vistas.wsf', true, false);
+} elseif ($cscriptEv === '') {
+    Pruebas::saltear('no hay cscript en esta maquina');
+} else {
+    $salidaEv = trim((string) shell_exec('cscript //nologo ' . escapeshellarg($wsfEv) . ' 2>&1'));
+    $lineasEv = preg_split('/\r?\n/', $salidaEv);
+    $ultimaEv = trim(end($lineasEv));
+
+    if (!preg_match('/^OK: (\d+)\s+FALLAS: (\d+)$/', $ultimaEv, $mEv)) {
+        chequear('eje_vistas.wsf corre', 'OK: n   FALLAS: 0', $ultimaEv);
+    } else {
+        chequear('eje_vistas.wsf: hay casos', true, intval($mEv[1]) > 0);
+        chequear('eje_vistas.wsf: sin fallas', 0, intval($mEv[2]));
+    }
+}
+
+$cssEv = (string) @file_get_contents(__DIR__ . '/../Css/eje-vistas.css');
+$indexEv = (string) @file_get_contents(__DIR__ . '/../index.php');
+
+chequear('el color se define una sola vez', 1, substr_count($cssEv, '--ev-no-habil-fondo:'));
+chequear('la hoja se carga en el index, para todas las pestanas', 1,
+    substr_count($indexEv, 'href="Css/eje-vistas.css'));
+
+// Ninguna otra hoja define la clase, salvo para dejar ganar al feriado de
+// comercio, y ningun JS decide por su cuenta que dia es no habil.
+$otrasCss = [];
+
+foreach (glob(__DIR__ . '/../Css/*.css') as $f) {
+    if (basename($f) === 'eje-vistas.css') { continue; }
+
+    if (preg_match_all('/[^\n]*\.ev-no-habil[^\n]*/', file_get_contents($f), $mm)) {
+        foreach ($mm[0] as $linea) {
+            if (strpos($linea, 'feriado') === false) {
+                $otrasCss[] = basename($f) . ': ' . trim($linea);
+            }
+        }
+    }
+}
+
+chequear('la clase no se redefine en otra hoja', [], $otrasCss);
+
+$jsDecide = [];
+
+foreach (glob(__DIR__ . '/../Js/*.js') as $f) {
+    $js = file_get_contents($f);
+
+    if (preg_match('/getDay\(\)\s*(===?|>=?|<)\s*[06]/', $js) || strpos($js, "'ev-no-habil'") !== false
+            && basename($f) !== 'eje-vistas.js') {
+        $jsDecide[] = basename($f);
+    }
+}
+
+chequear('ningun JS calcula el fin de semana ni escribe la clase a mano', [], $jsDecide);
