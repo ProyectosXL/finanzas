@@ -117,6 +117,13 @@
     color: #6f42c1;
 }
 
+/* Feriado de comercio que además es no hábil: gana el fondo del feriado de
+   comercio, y la línea de abajo del encabezado sigue diciendo "no hábil"
+   (Css/eje-vistas.css) */
+.tab-ventas thead th.col-feriado.ev-no-habil {
+    background-color: #ede7ff !important;
+}
+
 /* Subtotales por canal */
 .tab-ventas .fila-subtotal td {
     background-color: #f8f9fc;
