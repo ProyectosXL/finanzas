@@ -308,3 +308,51 @@ $sinClave = EjeVista::armarAgrupado($h, [
 
 chequear('un item sin la clave igual genera su fila', 1, count($sinClave['filas']));
 chequear('y su importe no se pierde', 10.0, $sinClave['totales']['total_horizonte']);
+
+/* ================================================================
+   Los dias no habiles viajan en el payload
+   ================================================================ */
+seccion('dias no habiles en el payload del eje');
+
+// 7 dias desde el jueves 08/10/2026 + 3 meses, con el lunes 12 no laborable
+$hNh = (new Horizonte(7, 3, [], new DateTime('2026-10-08')))->marcarCalendario([
+    '2026-10-12' => false, '2026-10-13' => true
+]);
+
+$ejeNh = EjeVista::eje($hNh);
+$porFecha = array_column($ejeNh['dias'], null, 'fecha');
+
+chequear('cada dia del eje trae la marca', true,
+    count(array_filter($ejeNh['dias'], function ($d) {
+        return array_key_exists('no_habil', $d) && array_key_exists('no_habil_texto', $d);
+    })) === 7);
+
+foreach (['dias', 'completo'] as $vista) {
+    $marcadas = [];
+
+    foreach ($ejeNh['vistas'][$vista]['columnas'] as $col) {
+        list($rama, $clave) = EjeVista::partir($col);
+
+        if ($rama === 'dias' && $porFecha[$clave]['no_habil'] !== null) {
+            $marcadas[$clave] = $porFecha[$clave]['no_habil_texto'];
+        }
+    }
+
+    chequear("vista $vista: las columnas marcadas y su texto", [
+        '2026-10-10' => 'Fin de semana', '2026-10-11' => 'Fin de semana', '2026-10-12' => 'Feriado'
+    ], $marcadas);
+}
+
+chequear('vista meses: no tiene columnas diarias, asi que no hay marca', [],
+    array_values(array_filter($ejeNh['vistas']['meses']['columnas'], function ($c) {
+        return strpos($c, 'DIA|') === 0;
+    })));
+chequear('los meses del eje no llevan marca', false,
+    array_key_exists('no_habil', $ejeNh['meses'][0]));
+
+$armadoNh = EjeVista::armar($hNh, [['Cobro' => '2026-10-13', 'importe' => 5.0]], 'Cobro', 'importe');
+$agrupadoNh = EjeVista::armarAgrupado($hNh, [['COD' => 'A', 'Cobro' => '2026-10-13', 'importe' => 5.0]],
+    'COD', 'Cobro', 'importe');
+
+chequear('armar() trae la misma marca', 'FERIADO', $armadoNh['dias'][4]['no_habil']);
+chequear('armarAgrupado() trae la misma marca', 'FERIADO', $agrupadoNh['dias'][4]['no_habil']);

@@ -145,3 +145,81 @@ $h6 = new Horizonte(90, 1, [], $hoy);
 
 chequear('fin() lo manda el tramo diario', '2026-12-04', $h6->fin());
 chequear('los 90 dias entran en la secuencia', 90, count($h6->secuencia()));
+
+/* ================================================================
+   Los dias no habiles del tramo diario
+   ================================================================ */
+seccion('dias no habiles: la marca de cada columna diaria');
+
+// Del jueves 08/10/2026 al miercoles 14/10/2026. El calendario de la prueba
+// tiene el lunes 12 como no laborable y no tiene el 14.
+$cal = [
+    '2026-10-08' => true,  '2026-10-09' => true,
+    '2026-10-10' => false, '2026-10-11' => false,
+    '2026-10-12' => false, '2026-10-13' => true
+];
+
+$hNh = new Horizonte(7, 1, [], new DateTime('2026-10-08'));
+
+$marcas = function ($h) {
+    return array_combine(array_column($h->dias(), 'fecha'), array_column($h->dias(), 'no_habil'));
+};
+
+chequear('sin calendario, el respaldo: solo los fines de semana', [
+    '2026-10-08' => null, '2026-10-09' => null,
+    '2026-10-10' => 'FIN_DE_SEMANA', '2026-10-11' => 'FIN_DE_SEMANA',
+    '2026-10-12' => null, '2026-10-13' => null, '2026-10-14' => null
+], $marcas($hNh));
+
+$hNh->marcarCalendario($cal);
+
+chequear('con calendario: el lunes no laborable es feriado', [
+    '2026-10-08' => null, '2026-10-09' => null,
+    '2026-10-10' => 'FIN_DE_SEMANA', '2026-10-11' => 'FIN_DE_SEMANA',
+    '2026-10-12' => 'FERIADO', '2026-10-13' => null, '2026-10-14' => null
+], $marcas($hNh));
+
+chequear('los textos del tooltip', [null, null, 'Fin de semana', 'Fin de semana', 'Feriado', null, null],
+    array_column($hNh->dias(), 'no_habil_texto'));
+
+chequear('dia de semana habil', null, Horizonte::noHabil('2026-10-13', $cal));
+chequear('sabado', 'FIN_DE_SEMANA', Horizonte::noHabil('2026-10-10', $cal));
+chequear('domingo', 'FIN_DE_SEMANA', Horizonte::noHabil('2026-10-11', $cal));
+chequear('feriado en dia de semana', 'FERIADO', Horizonte::noHabil('2026-10-12', $cal));
+// Mismo criterio que Echeqs::correrAHabil(): el feriado en fin de semana se
+// dice fin de semana.
+chequear('feriado en fin de semana: se rotula fin de semana', 'FIN_DE_SEMANA',
+    Horizonte::noHabil('2026-11-21', ['2026-11-21' => false]));
+chequear('un sabado que el calendario da como laboral sigue siendo fin de semana', 'FIN_DE_SEMANA',
+    Horizonte::noHabil('2026-10-10', ['2026-10-10' => true]));
+chequear('fecha de semana fuera del calendario: habil, sin marca', null,
+    Horizonte::noHabil('2026-10-14', $cal));
+chequear('fecha de fin de semana fuera del calendario: se marca igual', 'FIN_DE_SEMANA',
+    Horizonte::noHabil('2026-11-21', $cal));
+chequear('calendario vacio (no se pudo leer): solo fines de semana', null,
+    Horizonte::noHabil('2026-10-12', []));
+
+chequear('el feriado de comercio no cambia con la marca',
+    [false, false, false, false, false, false, false],
+    array_column($hNh->dias(), 'feriado_comercio'));
+chequear('marcar no toca las columnas mensuales', ['clave', 'anio', 'mes', 'label'],
+    array_keys($hNh->meses()[0]));
+
+seccion('dias no habiles: el calendario sale de la unica lectura');
+
+$srcHorizonte = file_get_contents(__DIR__ . '/../Class/Horizonte.php');
+$srcParametrosH = file_get_contents(__DIR__ . '/../Class/Parametros.php');
+$srcVentasH = file_get_contents(__DIR__ . '/../Class/Ventas.php');
+
+chequear('Horizonte pide el calendario por Ventas::getDiasHabiles()', 1,
+    substr_count($srcHorizonte, '(new Ventas())->getDiasHabiles($desde, $hasta)'));
+chequear('RO_T_CALENDARIO se consulta en un solo lugar del modulo', 1,
+    array_sum(array_map(function ($f) {
+        return substr_count(file_get_contents($f), 'FROM RO_T_CALENDARIO');
+    }, array_merge(glob(__DIR__ . '/../Class/*.php'), glob(__DIR__ . '/../Controller/*.php')))));
+chequear('la consulta no lee ES_FERIADO: Feriado es DIA_LABORAL = 0', false,
+    strpos($srcVentasH, 'ES_FERIADO') !== false);
+chequear('la validacion de Parametros no espera al calendario', 1,
+    substr_count($srcParametrosH, 'Horizonte::desdeParametros($this, $map, false)'));
+chequear('el eje propio de Ventas tambien se marca', 1,
+    substr_count($srcVentasH, '->conCalendario();'));

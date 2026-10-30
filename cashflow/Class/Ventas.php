@@ -1011,7 +1011,9 @@ class Ventas {
                 throw new Exception('El horizonte de proyeccion debe ser mayor a cero');
             }
 
-            $horizonte = new Horizonte($horizonteDias, $horizonteMeses, $feriadosMMDD);
+            // Con los dias no habiles marcados, como el eje de desdeParametros()
+            $horizonte = (new Horizonte($horizonteDias, $horizonteMeses, $feriadosMMDD))
+                ->conCalendario();
         }
 
         $hoy     = new DateTime($horizonte->hoy());
