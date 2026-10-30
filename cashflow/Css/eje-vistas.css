@@ -1,0 +1,40 @@
+/* ============================================================================
+   DÍAS NO HÁBILES EN EL EJE (Js/eje-vistas.js → vistas.marca())
+   ============================================================================
+   Sábados, domingos y feriados bancarios: la columna diaria entera, encabezado
+   y celdas, con un fondo gris suave. Explica por qué un importe corrido al día
+   hábil siguiente queda a la derecha de una columna vacía. Qué día se marca lo
+   decide el backend (Horizonte::noHabil()); acá sólo está el color, una vez
+   para todo el módulo.
+
+   Las columnas mensuales no se marcan nunca.
+
+   EL ENCABEZADO VA CON !important porque cada pestaña pinta el suyo opaco con
+   un selector por id (los encabezados son fijos y no pueden transparentar).
+   La línea de abajo es un gradiente y no un box-shadow: los encabezados fijos
+   ya dibujan su borde con box-shadow, y el tablero marca así la columna con
+   saldo negativo. Con la línea aparte, cuando el feriado de comercio pone su
+   propio fondo, el encabezado sigue diciendo "no hábil".
+
+   LAS CELDAS VAN SIN !important, a la altura de Bootstrap: el color de una
+   celda con importe, de un aviso o de la selección se sigue viendo encima.
+
+   EL FERIADO DE COMERCIO GANA EL FONDO. Es otro concepto -sin venta estimada-
+   y se ve como antes; lo resuelven Cashflow.css e Ingresos-Ventas.css con su
+   propia regla para .ev-no-habil. */
+
+:root {
+    --ev-no-habil-fondo: #eceff3;
+    --ev-no-habil-linea: #9aa4b2;
+}
+
+tbody .ev-no-habil,
+tfoot .ev-no-habil {
+    --bs-table-bg: var(--ev-no-habil-fondo);
+    background-color: var(--ev-no-habil-fondo);
+}
+
+thead th.ev-no-habil {
+    background-color: var(--ev-no-habil-fondo) !important;
+    background-image: linear-gradient(to top, var(--ev-no-habil-linea) 3px, transparent 3px);
+}

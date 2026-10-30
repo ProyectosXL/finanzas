@@ -396,6 +396,14 @@
                 titulo = 'Este mes está recortado: sus primeros días están en el tramo diario';
             }
 
+            // Sábado, domingo o feriado: lo decide el backend (vistas.marca())
+            var marca = vistas.marca(col);
+
+            if (marca.clase) {
+                clases.push(marca.clase);
+                titulo = marca.titulo;
+            }
+
             html += '<th class="' + clases.join(' ') + '"'
                 + (titulo ? ' title="' + escapar(titulo) + '"' : '') + '>'
                 + escapar(vistas.rotulo(col)) + '</th>';
@@ -457,7 +465,8 @@
             cols.forEach(function(col) {
                 var valor = Number(vistas.valor(f, col)) || 0;
 
-                html += '<td class="currency ' + (valor !== 0 ? 'cell-with-value' : '') + '">'
+                html += '<td class="currency ' + (valor !== 0 ? 'cell-with-value' : '')
+                    + ' ' + vistas.marca(col).clase + '">'
                     + (valor !== 0 ? pesos(valor) : '') + '</td>';
             });
 
@@ -694,8 +703,9 @@
             + '<td class="currency ' + clase + '">' + (conDeposito ? pesos(neto) : '') + '</td>'
             + '<td></td>';
 
-        tot.columnas.forEach(function(total) {
-            html += '<td class="currency ' + clase + ' ' + (total !== 0 ? 'cell-with-value' : '') + '">'
+        tot.columnas.forEach(function(total, i) {
+            html += '<td class="currency ' + clase + ' ' + (total !== 0 ? 'cell-with-value' : '')
+                + ' ' + vistas.marca(cols[i]).clase + '">'
                 + celdaEje(total) + '</td>';
         });
 
@@ -1795,6 +1805,14 @@
                 titulo = 'Este mes está recortado: sus primeros días están en el tramo diario';
             }
 
+            // Sábado, domingo o feriado: lo decide el backend (vistas.marca())
+            var marca = vistasPre.marca(col);
+
+            if (marca.clase) {
+                clases.push(marca.clase);
+                titulo = marca.titulo;
+            }
+
             html += '<th class="' + clases.join(' ') + '"'
                 + (titulo ? ' title="' + escapar(titulo) + '"' : '') + '>'
                 + escapar(vistasPre.rotulo(col)) + '</th>';
@@ -1891,7 +1909,8 @@
             cols.forEach(function(col) {
                 var v = Number(vistasPre.valor(f, col)) || 0;
 
-                html += '<td class="currency ' + (v !== 0 ? 'cell-with-value' : '') + '">'
+                html += '<td class="currency ' + (v !== 0 ? 'cell-with-value' : '')
+                    + ' ' + vistasPre.marca(col).clase + '">'
                     + (v !== 0 ? pesos(v) : '') + '</td>';
             });
 
@@ -1973,13 +1992,16 @@
         var tot = totalesEje(filas.filter(function(f) { return f.MARCADO; }),
             cols, vistasPre);
 
-        var celdasEje = tot.columnas.map(function(t) {
-            return '<td class="currency ' + (t !== 0 ? 'cell-with-value' : '') + '">'
+        var celdasEje = tot.columnas.map(function(t, i) {
+            return '<td class="currency ' + (t !== 0 ? 'cell-with-value' : '')
+                + ' ' + vistasPre.marca(cols[i]).clase + '">'
                 + celdaEje(t) + '</td>';
         }).join('')
             + '<td class="currency total-column">' + celdaEje(tot.total) + '</td>';
 
-        var vacias = cols.map(function() { return '<td></td>'; }).join('') + '<td></td>';
+        var vacias = cols.map(function(c) {
+            return '<td class="' + vistasPre.marca(c).clase + '"></td>';
+        }).join('') + '<td></td>';
         var anchoTotal = COLS_DESC_PRE + cols.length + 1;
 
         document.getElementById('footPre').innerHTML =

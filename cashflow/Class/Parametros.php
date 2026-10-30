@@ -519,7 +519,9 @@ class Parametros {
                            ciclo de carga. Mismo motivo que saldos(). */
                         require_once __DIR__ . '/Horizonte.php';
 
-                        $h = Horizonte::desdeParametros($this, $map);
+                        // Sin calendario: el cronograma lee el suyo, y la
+                        // marca de los dias no habiles aca no se dibuja.
+                        $h = Horizonte::desdeParametros($this, $map, false);
                         $datos = $this->cronograma();
                         $conceptos = [];
                         $vistos = [];

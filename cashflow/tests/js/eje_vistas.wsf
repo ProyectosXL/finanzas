@@ -1,0 +1,76 @@
+<?xml version="1.0"?>
+<!--
+    vistas.marca() de Js/eje-vistas.js, verificada sin navegador.
+
+    marca() esta escrita en ES3 para poder correrla con cscript, el JScript que
+    trae Windows. El resto de crearEjeVistas() toca el DOM: aca document
+    devuelve null en todo, y las funciones que dibujan salen sin hacer nada.
+
+        cscript //nologo cashflow\tests\js\eje_vistas.wsf
+
+    La corre test_ejevista.php cuando cscript esta disponible, y espera
+    "FALLAS: 0" en la ultima linea.
+-->
+<job>
+<script language="JScript">
+<![CDATA[
+var document = { getElementById: function() { return null; } };
+]]>
+</script>
+<script language="JScript" src="../../Js/eje-vistas.js"/>
+<script language="JScript">
+<![CDATA[
+var ok = 0, mal = 0;
+
+function igual(nombre, esperado, obtenido) {
+    if (esperado === obtenido) {
+        ok++;
+        WScript.Echo('OK    ' + nombre);
+    } else {
+        mal++;
+        WScript.Echo('FALLA ' + nombre + ' | esperado: ' + esperado + ' | obtenido: ' + obtenido);
+    }
+}
+
+var COMERCIO = 'Feriado de comercio: sin venta estimada';
+
+// El eje como lo manda EjeVista::eje(): sabado, lunes feriado y martes habil
+var payload = {
+    dias: [
+        { fecha: '2026-10-10', label: '10/10', no_habil: 'FIN_DE_SEMANA', no_habil_texto: 'Fin de semana' },
+        { fecha: '2026-10-12', label: '12/10', no_habil: 'FERIADO', no_habil_texto: 'Feriado' },
+        { fecha: '2026-10-13', label: '13/10', no_habil: null, no_habil_texto: null }
+    ],
+    meses: [ { clave: '2026-11', label: 'Nov-26', parcial: false } ],
+    vistas: {
+        dias: { label: 'Días', columnas: ['DIA|2026-10-10', 'DIA|2026-10-12', 'DIA|2026-10-13'], periodo: '' },
+        meses: { label: 'Meses', columnas: ['MES|2026-11'], periodo: '' },
+        completo: { label: 'Período completo', columnas: ['DIA|2026-10-10', 'MES|2026-11'], periodo: '' }
+    }
+};
+
+var v = crearEjeVistas({ botones: 'nada' });
+
+igual('sin payload no hay marca', '', v.marca('DIA|2026-10-10').clase);
+
+v.usar(payload);
+
+igual('sabado: la clase', 'ev-no-habil', v.marca('DIA|2026-10-10').clase);
+igual('sabado: el tooltip', 'Fin de semana', v.marca('DIA|2026-10-10').titulo);
+igual('feriado: la clase', 'ev-no-habil', v.marca('DIA|2026-10-12').clase);
+igual('feriado: el tooltip', 'Feriado', v.marca('DIA|2026-10-12').titulo);
+igual('dia habil: sin clase', '', v.marca('DIA|2026-10-13').clase);
+igual('dia habil: sin tooltip', '', v.marca('DIA|2026-10-13').titulo);
+igual('una columna mensual no se marca', '', v.marca('MES|2026-11').clase);
+igual('un dia que no esta en el eje no se marca', '', v.marca('DIA|2026-12-25').clase);
+
+igual('feriado de comercio en dia habil: su nota sola, sin clase',
+    '|' + COMERCIO, v.marca('DIA|2026-10-13', COMERCIO).clase + '|' + v.marca('DIA|2026-10-13', COMERCIO).titulo);
+igual('feriado de comercio y no habil: el tooltip dice las dos cosas',
+    'Feriado · ' + COMERCIO, v.marca('DIA|2026-10-12', COMERCIO).titulo);
+igual('y la clase sigue', 'ev-no-habil', v.marca('DIA|2026-10-12', COMERCIO).clase);
+
+WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
+]]>
+</script>
+</job>

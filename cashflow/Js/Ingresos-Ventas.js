@@ -1000,11 +1000,19 @@
 
         if (vista === 'dias' || vista === 'completo') {
             datosProyeccion.dias.forEach(function(d) {
+                // El día no hábil y el feriado de comercio son dos marcas: el
+                // tooltip dice las dos y el fondo es el del feriado de
+                // comercio (Css/eje-vistas.css)
+                var marca = vistas.marca('DIA|' + d.fecha,
+                    d.feriado_comercio ? 'Feriado de comercio: sin venta estimada' : '');
+
                 cols.push({
                     rama: 'dias',
                     clave: d.fecha,
                     label: d.label,
                     feriado: d.feriado_comercio,
+                    noHabil: marca.clase,
+                    nota: marca.titulo,
                     css: 'day-column'
                 });
             });
@@ -1017,6 +1025,8 @@
                     clave: m.clave,
                     label: m.label,
                     feriado: false,
+                    noHabil: '',
+                    nota: '',
                     css: 'month-column'
                 });
             });
@@ -1081,8 +1091,9 @@
                 : '';
 
             headerHTML += '<th class="' + col.css + (col.feriado ? ' col-feriado' : '') +
+                          (col.noHabil ? ' ' + col.noHabil : '') +
                           (tip ? ' th-participacion' : '') + '"' +
-                          (col.feriado ? ' title="Feriado de comercio: sin venta estimada"' : '') +
+                          (col.nota ? ' title="' + escapar(col.nota) + '"' : '') +
                           '>' + col.label + tip + '</th>';
         });
 
@@ -1236,7 +1247,7 @@
             html += '<td class="col-canal fw-semibold">' + titulo(canal) + '</td>';
 
             cols.forEach(function(col) {
-                html += celdaValor(valorEn(venta, canal, col), col.feriado);
+                html += celdaValor(valorEn(venta, canal, col), col);
             });
 
             html += '</tr>';
@@ -1247,7 +1258,7 @@
         var totalsHtml = '<td class="col-canal total-label">TOTAL VENTA</td>';
 
         cols.forEach(function(col) {
-            totalsHtml += celdaValor(totalEn(venta, col), col.feriado);
+            totalsHtml += celdaValor(totalEn(venta, col), col);
         });
 
         document.getElementById('ventaTotals').innerHTML = totalsHtml;
@@ -1333,7 +1344,7 @@
             html += '<td></td>';
 
             cols.forEach(function(col) {
-                html += celdaImporte(conSigno(medidaCobranza, subtotalEn(grilla, canal, col)));
+                html += celdaImporte(conSigno(medidaCobranza, subtotalEn(grilla, canal, col)), col);
             });
 
             html += '</tr>';
@@ -1358,7 +1369,7 @@
                 html += '<td class="text-center text-muted">' + (n.hoja && n.dias !== null ? n.dias : '') + '</td>';
 
                 cols.forEach(function(col) {
-                    html += celdaImporte(conSigno(medidaCobranza, valorEn(grilla, n.clave, col)));
+                    html += celdaImporte(conSigno(medidaCobranza, valorEn(grilla, n.clave, col)), col);
                 });
 
                 html += '</tr>';
@@ -1383,7 +1394,7 @@
             foot += '<td class="col-concepto total-label" colspan="4">' + f[0] + '</td>';
 
             cols.forEach(function(col) {
-                foot += celdaImporte(f[2] * totalEn(f[1], col));
+                foot += celdaImporte(f[2] * totalEn(f[1], col), col);
             });
 
             foot += '</tr>';
@@ -1506,14 +1517,17 @@
 
     /**
      * Celda de importe que admite negativos: el costo de cobro va con signo.
-     * Cero queda vacía, como en el resto de la pestaña.
+     * Cero queda vacía, como en el resto de la pestaña. col.noHabil es la
+     * clase del día no hábil, o vacío.
      */
-    function celdaImporte(valor) {
+    function celdaImporte(valor, col) {
+        var noHabil = (col && col.noHabil) ? ' ' + col.noHabil : '';
+
         if (!valor) {
-            return '<td class="currency"></td>';
+            return '<td class="currency' + noHabil + '"></td>';
         }
 
-        return '<td class="currency ' + (valor < 0 ? 'cell-negativo' : 'cell-with-value') + '">' +
+        return '<td class="currency ' + (valor < 0 ? 'cell-negativo' : 'cell-with-value') + noHabil + '">' +
                formatCurrency(valor) + '</td>';
     }
 
@@ -1528,12 +1542,14 @@
             .replace(/"/g, '&quot;');
     }
 
-    function celdaValor(valor, esFeriado) {
-        if (esFeriado) {
-            return '<td class="currency col-feriado" title="Feriado de comercio">&mdash;</td>';
+    function celdaValor(valor, col) {
+        var noHabil = col.noHabil ? ' ' + col.noHabil : '';
+
+        if (col.feriado) {
+            return '<td class="currency col-feriado' + noHabil + '" title="Feriado de comercio">&mdash;</td>';
         }
 
-        return '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '') + '">' +
+        return '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '') + noHabil + '">' +
                (valor > 0 ? formatCurrency(valor) : '') + '</td>';
     }
 

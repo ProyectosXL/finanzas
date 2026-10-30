@@ -195,6 +195,10 @@ valuación los informa en dólares), 26 tienen la fecha vencida (no suman) y **2
 entran al eje**, por U$S 131.705. Es la decisión: ver la sección 10 de
 `README-comex.md`.
 
+### Sin scripts: `feature/eje-feriados-fines-semana`
+
+No agrega ni modifica ningún script. Marca los sábados, domingos y feriados en las columnas diarias de todas las pantallas con eje (ver *Los días no hábiles se marcan en el eje*). No mueve ningún importe. Se publica sólo con el código.
+
 ### Sin scripts: `feature/cashflow-avisos-agrupados`
 
 No agrega ni modifica ningún script: cambia cómo se muestran los avisos del
@@ -482,6 +486,25 @@ La columna de un mes acumula **únicamente** los días de ese mes que quedaron f
 total_horizonte = total_tramo + total_meses     (sin repetir nada)
 ```
 
+### Los días no hábiles se marcan en el eje
+
+En todas las pantallas con eje, la columna diaria de un **sábado, domingo o feriado** va con un fondo gris suave, en el encabezado, las celdas, el pie y el total de arriba. Al pasar el mouse por el encabezado dice **"Fin de semana"** o **"Feriado"**. Explica por qué un importe corrido al día hábil siguiente queda a la derecha de una columna vacía. **Las columnas mensuales no se marcan.**
+
+| Caso | Marca |
+| --- | --- |
+| Sábado o domingo | Fin de semana, aunque `RO_T_CALENDARIO` lo tenga como feriado (mismo criterio que Echeqs) |
+| Lunes a viernes con `DIA_LABORAL = 0` | Feriado |
+| Fecha que `RO_T_CALENDARIO` no tiene | El respaldo de siempre (lunes a viernes hábiles): el fin de semana se marca, un feriado no |
+| No se pudo leer el calendario | Igual que el caso anterior, sin aviso nuevo: las pestañas que corren fechas ya avisan que no lo pudieron leer |
+
+**"Feriado" incluye cualquier día de semana no laborable bancario**, tenga o no `ES_FERIADO = 1`. Es el mismo criterio con el que se corren los importes al día hábil (`DiasHabiles`, `Echeqs::correrAHabil()`), así que la marca coincide siempre con el corrimiento. Verificado contra la base: desde 2026 no hay ningún día de semana con `DIA_LABORAL = 0` y `ES_FERIADO = 0`, así que hoy los dos criterios marcan los mismos días. `RO_T_CALENDARIO` no tiene el nombre del feriado, por eso el tooltip dice sólo "Feriado".
+
+**El criterio vive en PHP.** Cada día de `dias` en el payload del eje trae `no_habil` (`FIN_DE_SEMANA`, `FERIADO` o `null`) y `no_habil_texto`. Lo decide `Horizonte::noHabil()` y lo aplica `Horizonte::conCalendario()`, que llaman `Horizonte::desdeParametros()` y `Ventas::calcular()`. El calendario sale de `Ventas::getDiasHabiles()`, la única lectura de `RO_T_CALENDARIO`, sólo para el tramo diario y **una vez por pedido**: si el servidor de `power` no responde, la espera se paga una sola vez. La validación de Parámetros arma el eje sin calendario (`desdeParametros(..., false)`).
+
+**El front sólo dibuja.** `vistas.marca(col, nota)` devuelve la clase `ev-no-habil` y el texto del tooltip; cada pantalla la pone en el `<th>` y en los `<td>` de esa columna. `Js/eje-totales.js` copia la clase de la fecha a su total de arriba. El color está una sola vez, en `Css/eje-vistas.css`.
+
+**El feriado de comercio es otro concepto** (sin venta estimada) y se sigue viendo como antes en el tablero y en Ventas. Si el día también es no hábil, **gana el fondo del feriado de comercio**, la línea gris de abajo del encabezado sigue marcando el día no hábil y el tooltip dice las dos cosas: *Feriado · Feriado de comercio: sin venta estimada*.
+
 ### Qué había antes, y por qué esto no es cosmético
 
 El criterio estaba escrito **cuatro veces y de tres formas**. El tablero lo tenía bien, en métodos privados del motor. Las otras tres pestañas tenían cada una su `procesar*PorPeriodo()` copiado y pegado, con tres defectos que no se veían:
@@ -519,6 +542,7 @@ vistas.columnas()               // las columnas visibles
 vistas.rotulo(col)              // '6/9' o 'Oct-26'
 vistas.valor(fila, col)         // el importe de esa fila en esa columna
 vistas.total(fila)              // el total que corresponde a la vista activa
+vistas.marca(col)               // {clase, titulo}: el día no hábil, para <th> y <td>
 ```
 
 No hay que calcular fechas en el navegador ni decidir qué columnas van en cada vista: eso ya está resuelto y probado.
@@ -2277,7 +2301,7 @@ php cashflow/tests/run.php              # todo
 php cashflow/tests/run.php horizonte    # filtra por nombre de archivo
 ```
 
-Cubren el eje temporal y su secuencia cronológica, las tres vistas y su criterio de columnas y totales, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, el módulo Saldos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
+Cubren el eje temporal y su secuencia cronológica, la marca de los días no hábiles (`test_horizonte.php`, `test_ejevista.php` y `tests/js/eje_vistas.wsf`), las tres vistas y su criterio de columnas y totales, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, el módulo Saldos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
 
 De la **sección Cobertura**, `tests/test_cobertura.php` fija lo que la hace funcionar sin reglas nuevas en el motor: que el stock no vaya en ninguna columna de fecha y su total sea el mismo en las tres vistas; que **la posición de la fila de uso sea lo único** que separa los dos flujos netos —si alguien la mueve, esas pruebas se caen, que es exactamente lo que tienen que hacer—; que el arrastre la recoja y **el invariante `cierre[n] == apertura[n+1]` siga cerrando**; que no infle los indicadores de Ingresos ni de Egresos; y que **los subtotales anidados no dupliquen importes**, sobre un escenario con dos niveles de anidación.
 
@@ -2350,6 +2374,7 @@ Class/DiasHabiles.php                       El paso al proximo dia habil: Ventas
 Class/Retenciones.php                       La tasa de retencion: Cob. Electronicos y cheques depositados
 Class/EjeVista.php                          Las tres vistas: columnas, totales y periodo
 Js/eje-vistas.js                            Su contraparte en el front (cargado en index.php)
+Css/eje-vistas.css                          El fondo de los dias no habiles del eje (idem)
 Js/columnas-fijas.js                        Que columnas quedan fijas al scrollear (idem)
 Js/tabla-orden.js                           Ordenar por encabezado, en las 36 tablas (idem)
 Js/tabla-export.js                          Exportar a Excel lo que se ve (idem)

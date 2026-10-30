@@ -390,13 +390,20 @@
 
     function colsDias() {
         return datos.dias.map(function(d) {
+            // El día no hábil y el feriado de comercio son dos marcas: el
+            // tooltip dice las dos, y el fondo es el del feriado de comercio
+            // (Css/eje-vistas.css)
+            var marca = vistas.marca('DIA|' + d.fecha,
+                d.feriado_comercio ? 'Feriado de comercio: sin venta estimada' : '');
+
             return {
                 rama: 'dias',
                 clave: d.fecha,
                 label: d.label,
                 enSecuencia: d.en_secuencia,
-                nota: d.feriado_comercio ? 'Feriado de comercio: sin venta estimada' : '',
-                feriado: d.feriado_comercio
+                nota: marca.titulo,
+                feriado: d.feriado_comercio,
+                noHabil: marca.clase
             };
         });
     }
@@ -490,6 +497,7 @@
         var clases = [];
 
         if (!c.enSecuencia) { clases.push('cf-col-fuera'); }
+        if (c.noHabil) { clases.push(c.noHabil); }
         if (c.feriado) { clases.push('cf-col-feriado'); }
         if (negativas[c.rama + '|' + c.clave]) { clases.push('cf-col-negativa'); }
 

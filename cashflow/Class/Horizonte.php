@@ -39,9 +39,49 @@ require_once __DIR__ . '/Parametros.php';
  * orden cronologico real y deja afuera las que no representan ningun dia
  * futuro.
  *
- * NO tiene estado de negocio ni toca la base de datos: es solo el eje.
+ * LOS DIAS NO HABILES SE MARCAN EN EL EJE
+ * ---------------------------------------
+ * Cada columna diaria trae 'no_habil': FIN_DE_SEMANA, FERIADO o null, y su
+ * texto para el tooltip. Es la explicacion de por que un importe corrido al
+ * dia habil siguiente queda a la derecha de una columna vacia, asi que el
+ * criterio es EXACTAMENTE el del corrimiento:
+ *
+ *   - sabado o domingo -> fin de semana, este o no en el calendario. Un
+ *     feriado que cae en fin de semana se rotula fin de semana, igual que en
+ *     Echeqs::correrAHabil().
+ *   - de lunes a viernes con DIA_LABORAL = 0 en RO_T_CALENDARIO -> feriado.
+ *     Incluye cualquier dia de semana no laborable bancario, sea o no
+ *     ES_FERIADO: la marca tiene que coincidir con lo que corre las fechas.
+ *   - una fecha que el calendario no tiene -> el respaldo de siempre, lunes a
+ *     viernes habiles (DiasHabiles): el fin de semana se marca y un feriado no.
+ *
+ * Las columnas mensuales no se marcan. El feriado de comercio
+ * ('feriado_comercio') es otro concepto -sin venta estimada- y no cambia.
+ *
+ * NO tiene estado de negocio ni toca la base de datos: es solo el eje. El
+ * calendario lo pide conCalendario() -lo llaman desdeParametros() y
+ * Ventas::calcular()- por Ventas::getDiasHabiles(), la unica lectura de
+ * RO_T_CALENDARIO; marcarCalendario() es la parte pura.
  */
 class Horizonte {
+
+    /** Por que una columna diaria no es habil. Mismos valores que Echeqs::CORRIDA_* */
+    const NO_HABIL_FIN_DE_SEMANA = 'FIN_DE_SEMANA';
+    const NO_HABIL_FERIADO = 'FERIADO';
+
+    /** El texto del tooltip de cada marca */
+    const TEXTOS_NO_HABIL = [
+        self::NO_HABIL_FIN_DE_SEMANA => 'Fin de semana',
+        self::NO_HABIL_FERIADO => 'Feriado'
+    ];
+
+    /**
+     * @var array Calendario ya leido por pedido, 'desde|hasta' => mapa. Un
+     * calendario que no se pudo leer queda como mapa vacio: si el servidor no
+     * responde, la espera se paga una sola vez y no una por pestana o
+     * proveedor.
+     */
+    private static $calendarios = [];
 
     /** Abreviaturas de mes para los rotulos de columna */
     private static $mesesAbrev = [
@@ -103,20 +143,128 @@ class Horizonte {
      * Arma el eje leyendo el horizonte de los parametros.
      *
      * @param Parametros $parametros Puerta de acceso a la configuracion
+     * Por defecto marca los dias no habiles con el calendario bancario: es el
+     * eje que dibujan el tablero y las pestanas. Quien solo necesita las fechas
+     * -la validacion de Parametros- pasa $conCalendario = false y no espera al
+     * otro servidor.
+     *
      * @param array|null $map Mapa CLAVE => VALOR ya leido, para no repetir la
      *                        consulta. Si es null lo pide.
+     * @param bool $conCalendario Si marca los feriados con RO_T_CALENDARIO
      * @return Horizonte
      */
-    public static function desdeParametros($parametros, $map = null) {
+    public static function desdeParametros($parametros, $map = null, $conCalendario = true) {
         if ($map === null) {
             $map = $parametros->getParametrosMap();
         }
 
-        return new self(
+        $h = new self(
             Parametros::ent($map, 'horizonte_dias'),
             Parametros::ent($map, 'horizonte_meses'),
             $parametros->getFeriadosComercio($map)
         );
+
+        return $conCalendario ? $h->conCalendario() : $h;
+    }
+
+    /**
+     * Marca los feriados del tramo diario leyendo el calendario bancario.
+     * Sin tramo diario no hay nada que marcar ni que leer.
+     *
+     * @return Horizonte $this
+     */
+    public function conCalendario() {
+        if (empty($this->dias)) {
+            return $this;
+        }
+
+        return $this->marcarCalendario(self::calendario(
+            $this->dias[0]['fecha'],
+            $this->dias[count($this->dias) - 1]['fecha']
+        ));
+    }
+
+    /**
+     * El calendario bancario del tramo diario, por la unica lectura de
+     * RO_T_CALENDARIO del modulo: Ventas::getDiasHabiles().
+     *
+     * SI NO SE PUEDE LEER DEVUELVE UN MAPA VACIO Y NO AVISA: el eje cae al
+     * respaldo -solo fines de semana- y las pestanas que corren fechas ya
+     * avisan, con nivel critico, que no pudieron leer el calendario. Una marca
+     * de menos en un encabezado no es motivo para que la pestana no cargue.
+     *
+     * El require va aca y no en la cabecera: Ventas requiere EjeVista, que
+     * requiere esta clase.
+     *
+     * @param string $desde 'Y-m-d'
+     * @param string $hasta 'Y-m-d'
+     * @return array Mapa 'Y-m-d' => bool
+     */
+    private static function calendario($desde, $hasta) {
+        $clave = $desde . '|' . $hasta;
+
+        if (!array_key_exists($clave, self::$calendarios)) {
+            try {
+                require_once __DIR__ . '/Ventas.php';
+
+                self::$calendarios[$clave] = (new Ventas())->getDiasHabiles($desde, $hasta);
+            } catch (Throwable $e) {
+                self::$calendarios[$clave] = [];
+            }
+        }
+
+        return self::$calendarios[$clave];
+    }
+
+    /**
+     * Por que un dia no es habil, o null si lo es. Pura.
+     *
+     * Ver la nota del encabezado: sabado o domingo es fin de semana aunque el
+     * calendario diga feriado; de lunes a viernes, feriado si el calendario lo
+     * da como no laborable; una fecha que el calendario no tiene es habil.
+     *
+     * @param string $fecha 'Y-m-d'
+     * @param array $habiles Mapa 'Y-m-d' => bool de RO_T_CALENDARIO
+     * @return string|null NO_HABIL_FIN_DE_SEMANA, NO_HABIL_FERIADO o null
+     */
+    public static function noHabil($fecha, $habiles) {
+        if (intval(date('N', strtotime($fecha))) >= 6) {
+            return self::NO_HABIL_FIN_DE_SEMANA;
+        }
+
+        if (is_array($habiles) && isset($habiles[$fecha]) && !$habiles[$fecha]) {
+            return self::NO_HABIL_FERIADO;
+        }
+
+        return null;
+    }
+
+    /**
+     * Marca los dias no habiles del tramo diario con un calendario ya leido.
+     *
+     * Sin llamarlo, el eje ya trae el respaldo: los fines de semana marcados y
+     * ningun feriado. Lo llama conCalendario(); va aparte para que las pruebas
+     * marquen con un calendario armado a mano.
+     *
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @return Horizonte $this
+     */
+    public function marcarCalendario($habiles) {
+        foreach ($this->dias as $i => $d) {
+            $this->dias[$i] = array_merge($d, self::marca($d['fecha'], $habiles));
+        }
+
+        return $this;
+    }
+
+    /** Los dos campos de la marca de un dia */
+    private static function marca($fecha, $habiles) {
+        $motivo = self::noHabil($fecha, $habiles);
+
+        return [
+            'no_habil' => $motivo,
+            'no_habil_texto' => ($motivo === null) ? null : self::TEXTOS_NO_HABIL[$motivo]
+        ];
     }
 
     /**
@@ -145,12 +293,13 @@ class Horizonte {
         for ($i = 0; $i < $this->horizonteDias; $i++) {
             $fecha = $cursor->format('Y-m-d');
 
-            $this->dias[] = [
+            // Sin calendario, el respaldo: solo los fines de semana
+            $this->dias[] = array_merge([
                 'fecha' => $fecha,
                 'label' => intval($cursor->format('j')) . '/' . intval($cursor->format('n')),
                 'mes_clave' => $cursor->format('Y-m'),
                 'feriado_comercio' => in_array($cursor->format('m-d'), $this->feriadosMMDD)
-            ];
+            ], self::marca($fecha, []));
 
             $this->diasSet[$fecha] = true;
             $cursor->modify('+1 day');
@@ -179,7 +328,10 @@ class Horizonte {
         }
     }
 
-    /** @return array Columnas diarias: fecha, label, mes_clave, feriado_comercio */
+    /**
+     * @return array Columnas diarias: fecha, label, mes_clave, feriado_comercio,
+     *               no_habil y no_habil_texto
+     */
     public function dias() {
         return $this->dias;
     }

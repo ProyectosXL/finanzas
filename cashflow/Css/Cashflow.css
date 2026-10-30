@@ -131,6 +131,13 @@
     background-color: #fdf7ec;
 }
 
+/* Feriado de comercio que además es no hábil: gana el fondo del feriado de
+   comercio, y la línea de abajo del encabezado sigue diciendo "no hábil"
+   (Css/eje-vistas.css) */
+.tab-cashflow thead th.cf-col-feriado.ev-no-habil {
+    background-color: #fdf7ec !important;
+}
+
 /* ---- Enlace al módulo de origen ---- */
 
 .tab-cashflow .cf-link {

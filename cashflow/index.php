@@ -81,6 +81,10 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          Lo usan Parámetros y Ventas, que llegan por AJAX: un solo archivo con
          los colores, cargado antes que las dos, así significan lo mismo. -->
     <link href="Css/mix-niveles.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- El fondo de los días no hábiles del eje (vistas.marca() de
+         Js/eje-vistas.js). Un solo color para el tablero y todas las
+         pestañas con eje, que llegan por AJAX. -->
+    <link href="Css/eje-vistas.css?v=<?php echo time(); ?>" rel="stylesheet">
     <!-- Si se pueden dibujar los controles de edición (Js/permisos.js). Va en
          el <head> y no al pie con los demás: la pestaña inicial se incluye en
          línea más abajo y su JS ya pregunta al dibujar. No depende de nada. -->

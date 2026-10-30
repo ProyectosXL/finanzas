@@ -308,3 +308,140 @@ $sinClave = EjeVista::armarAgrupado($h, [
 
 chequear('un item sin la clave igual genera su fila', 1, count($sinClave['filas']));
 chequear('y su importe no se pierde', 10.0, $sinClave['totales']['total_horizonte']);
+
+/* ================================================================
+   Los dias no habiles viajan en el payload
+   ================================================================ */
+seccion('dias no habiles en el payload del eje');
+
+// 7 dias desde el jueves 08/10/2026 + 3 meses, con el lunes 12 no laborable
+$hNh = (new Horizonte(7, 3, [], new DateTime('2026-10-08')))->marcarCalendario([
+    '2026-10-12' => false, '2026-10-13' => true
+]);
+
+$ejeNh = EjeVista::eje($hNh);
+$porFecha = array_column($ejeNh['dias'], null, 'fecha');
+
+chequear('cada dia del eje trae la marca', true,
+    count(array_filter($ejeNh['dias'], function ($d) {
+        return array_key_exists('no_habil', $d) && array_key_exists('no_habil_texto', $d);
+    })) === 7);
+
+foreach (['dias', 'completo'] as $vista) {
+    $marcadas = [];
+
+    foreach ($ejeNh['vistas'][$vista]['columnas'] as $col) {
+        list($rama, $clave) = EjeVista::partir($col);
+
+        if ($rama === 'dias' && $porFecha[$clave]['no_habil'] !== null) {
+            $marcadas[$clave] = $porFecha[$clave]['no_habil_texto'];
+        }
+    }
+
+    chequear("vista $vista: las columnas marcadas y su texto", [
+        '2026-10-10' => 'Fin de semana', '2026-10-11' => 'Fin de semana', '2026-10-12' => 'Feriado'
+    ], $marcadas);
+}
+
+chequear('vista meses: no tiene columnas diarias, asi que no hay marca', [],
+    array_values(array_filter($ejeNh['vistas']['meses']['columnas'], function ($c) {
+        return strpos($c, 'DIA|') === 0;
+    })));
+chequear('los meses del eje no llevan marca', false,
+    array_key_exists('no_habil', $ejeNh['meses'][0]));
+
+$armadoNh = EjeVista::armar($hNh, [['Cobro' => '2026-10-13', 'importe' => 5.0]], 'Cobro', 'importe');
+$agrupadoNh = EjeVista::armarAgrupado($hNh, [['COD' => 'A', 'Cobro' => '2026-10-13', 'importe' => 5.0]],
+    'COD', 'Cobro', 'importe');
+
+chequear('armar() trae la misma marca', 'FERIADO', $armadoNh['dias'][4]['no_habil']);
+chequear('armarAgrupado() trae la misma marca', 'FERIADO', $agrupadoNh['dias'][4]['no_habil']);
+
+seccion('dias no habiles: el front solo dibuja la marca');
+
+// vistas.marca() esta escrita en ES3 para correrla con cscript, como
+// EjeTotales.celdas(). Donde no hay cscript -fuera de Windows- se saltea.
+$wsfEv = realpath(__DIR__ . '/js/eje_vistas.wsf');
+$cscriptEv = (PHP_OS_FAMILY === 'Windows' && function_exists('shell_exec'))
+    ? trim((string) @shell_exec('where cscript 2>NUL')) : '';
+
+if ($wsfEv === false) {
+    chequear('existe tests/js/eje_vistas.wsf', true, false);
+} elseif ($cscriptEv === '') {
+    Pruebas::saltear('no hay cscript en esta maquina');
+} else {
+    $salidaEv = trim((string) shell_exec('cscript //nologo ' . escapeshellarg($wsfEv) . ' 2>&1'));
+    $lineasEv = preg_split('/\r?\n/', $salidaEv);
+    $ultimaEv = trim(end($lineasEv));
+
+    if (!preg_match('/^OK: (\d+)\s+FALLAS: (\d+)$/', $ultimaEv, $mEv)) {
+        chequear('eje_vistas.wsf corre', 'OK: n   FALLAS: 0', $ultimaEv);
+    } else {
+        chequear('eje_vistas.wsf: hay casos', true, intval($mEv[1]) > 0);
+        chequear('eje_vistas.wsf: sin fallas', 0, intval($mEv[2]));
+    }
+}
+
+$cssEv = (string) @file_get_contents(__DIR__ . '/../Css/eje-vistas.css');
+$indexEv = (string) @file_get_contents(__DIR__ . '/../index.php');
+
+chequear('el color se define una sola vez', 1, substr_count($cssEv, '--ev-no-habil-fondo:'));
+chequear('la hoja se carga en el index, para todas las pestanas', 1,
+    substr_count($indexEv, 'href="Css/eje-vistas.css'));
+
+// Ninguna otra hoja define la clase, salvo para dejar ganar al feriado de
+// comercio, y ningun JS decide por su cuenta que dia es no habil.
+$otrasCss = [];
+
+foreach (glob(__DIR__ . '/../Css/*.css') as $f) {
+    if (basename($f) === 'eje-vistas.css') { continue; }
+
+    if (preg_match_all('/[^\n]*\.ev-no-habil[^\n]*/', file_get_contents($f), $mm)) {
+        foreach ($mm[0] as $linea) {
+            if (strpos($linea, 'feriado') === false) {
+                $otrasCss[] = basename($f) . ': ' . trim($linea);
+            }
+        }
+    }
+}
+
+chequear('la clase no se redefine en otra hoja', [], $otrasCss);
+
+// La clase la escribe eje-vistas.js, y eje-totales.js la copia de la fecha de
+// abajo; nadie mas.
+$jsDecide = [];
+
+foreach (glob(__DIR__ . '/../Js/*.js') as $f) {
+    $js = file_get_contents($f);
+    $escribeClase = strpos($js, "'ev-no-habil'") !== false
+        && !in_array(basename($f), ['eje-vistas.js', 'eje-totales.js'], true);
+
+    if (preg_match('/getDay\(\)\s*(===?|>=?|<)\s*[06]/', $js) || $escribeClase) {
+        $jsDecide[] = basename($f);
+    }
+}
+
+chequear('ningun JS calcula el fin de semana ni escribe la clase a mano', [], $jsDecide);
+
+// Toda pantalla con eje marca la columna entera: encabezado, celdas y pie.
+// Con menos de tres llamadas a marca() le falta alguna de las tres.
+$sinMarca = [];
+
+foreach (['Cashflow.js' => 1, 'Ingresos-Ventas.js' => 1, 'Ingresos-Cobranzas_fr.js' => 3,
+          'Ingresos-Cobranzas_may.js' => 3, 'Ingresos-Echeqs.js' => 6,
+          'Proveedores-Proveedores_locales.js' => 3, 'Logistica-Local.js' => 3,
+          'Comex-Proveedores_exterior.js' => 3, 'Comex-Crono_nacionalizacion.js' => 3,
+          'Ingresos-Exportaciones_tasky.js' => 3, 'Financiero-Pagos_tarjetas.js' => 4] as $archivo => $minimo) {
+    $js = (string) @file_get_contents(__DIR__ . '/../Js/' . $archivo);
+
+    if (preg_match_all('/\b(vistas|vistasPre)\.marca\(/', $js) < $minimo) {
+        $sinMarca[] = $archivo;
+    }
+}
+
+chequear('cada pantalla con eje usa vistas.marca()', [], $sinMarca);
+
+$totalesJs = (string) @file_get_contents(__DIR__ . '/../Js/eje-totales.js');
+
+chequear('la fila de totales de arriba copia la marca de su fecha', 1,
+    substr_count($totalesJs, 'abajo.cells[i].classList.contains(CLASE_NO_HABIL)'));
