@@ -342,6 +342,18 @@ Antes, el Saldo Inicial tomaba el efectivo de tesorería de la última *Nueva ca
 
 El pago parcial tampoco mueve nada el día que se publica, medido aparte: sin el 42 y con el 42 sin pagos cargados, las tres series de nacionalización quedan iguales al centavo, y los 190 contenedores con costos reales que vuelven a Crono aportan $ 0. Ver `README-comex.md`, sección 13.
 
+### Saldos: el saldo se edita desde la fila (`feature/saldos-edicion-fila-ultimo-raf`)
+
+Se va *Nueva carga*. El saldo de cada cuenta, menos el efectivo de tesorería, se edita desde su fila, y **el manual de hoy manda todo el día**, aunque Interbanking o Mercado Pago traigan otro. Saldos Locales muestra el último envío (RAF) o depósito (BDE) de cada local, de `RO_V_GASTOS_CAJA_SUCURSALES` (servidor `locales`), sólo informativo. Ver *Editar el saldo desde la fila* y *El último envío o depósito de cada local* en `README-saldos.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 44 | `sql/cashflow_saldos_edicion_fila.sql` | Agrega `ID_REEMPLAZA` (con su FK) a `RO_T_CASHFLOW_SALDOS_CARGA`, para encadenar dos ediciones del mismo día de una cuenta del catálogo | Interbanking se edita igual. Mercado Pago, los bancos sin Interbanking y Otros no muestran el lápiz, y la pestaña dice qué script falta |
+
+**El 44 va después del 3 y de `sql/cashflow_auditoria_usuario.sql`.** Si falta alguno, lo dice y no hace nada.
+
+**El día que se publica, el tablero no cambia** mientras nadie edite un saldo: la lectura es la misma. El único cambio de regla es para hoy: un manual de hoy de Interbanking manda aunque Interbanking traiga un saldo de hoy (antes mandaba Interbanking).
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -390,6 +402,7 @@ En este orden, contra `central`:
 -- 41. sql/cashflow_comex_fecha_mov_desde.sql        (Comex: contenedores desde una fecha de movimiento)
 -- 42. sql/cashflow_comex_nac_pago.sql               (Comex: pago parcial de la nacionalizacion y fecha del saldo)
 -- 43. sql/cashflow_saldos_mp_consulta.sql           (Saldos: Mercado Pago en vivo de MP_T_SALDO_DEMANDA)
+-- 44. sql/cashflow_saldos_edicion_fila.sql          (Saldos: el saldo se edita desde la fila)
 ```
 
 **El 39 va después del 38**: sin las alícuotas y el plazo, los depositados no tienen neto. **El 40 no depende de ninguno de los dos.** Los depósitos se leen de Tango; ninguno de los tres crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO`, que está en desuso. Ver `README-echeqs.md`.
