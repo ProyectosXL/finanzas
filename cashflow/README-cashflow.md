@@ -364,6 +364,18 @@ Proveedores Exterior, Crono Nacionalización y Compras Proyectadas pasan a pesos
 
 **No depende de ninguno.** El día que se publica el tablero se mueve sin correr nada —la regla rige con los valores iniciales—: al 31/10/2026, −$ 127.217 en Nacionalizaciones y nada en las otras filas.
 
+### Gastos Locales y fleteros no habituales (`feature/gastos-locales-fleteros-no-habituales`)
+
+Pestaña nueva *Proveedores › Gastos Locales* (el promedio de 90 días de la caja de los locales propios, cuentas 5) con su fila en *Costos Indirectos*; en Logística Local, fleteros no habituales con pagos puntuales y el importe editable del próximo pago. Ver `README-gastos-locales.md` y `README-logistica-local.md` (secciones 14 y 15).
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 46 | `sql/cashflow_gastos_locales.sql` | Día (lunes) y frecuencia (semanal) del cronograma `GASTOS_LOCALES` y la lista de cuentas excluidas (522400), en Generales | La pestaña usa esos mismos valores por defecto y avisa; no se pueden cambiar |
+| 47 | `sql/cashflow_logistica_no_habituales.sql` | `HABITUAL` en el maestro de fleteros (todos quedan habituales) y las tablas de pagos puntuales y de importes editados | Logística proyecta igual que hoy y avisa; no hay no habituales ni edición del próximo pago |
+| 48 | `sql/cashflow_estructura_gastos_locales.sql` | La fila `GASTOS_LOCALES` en *Costos Indirectos*, orden 47 | La pestaña funciona, pero su total no llega al tablero |
+
+Los tres contra `central`, en ese orden. **El 48 mueve el tablero**: al 31/10/2026 aparece un egreso nuevo de **$ 9.177.962,15** en el horizonte. El 47 no mueve nada: todos los fleteros quedan habituales. Después, dar `cashflow.tab.gastos_locales` en Gestión de Usuarios (la pestaña es de sólo lectura: no tiene clave de edición).
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -1127,7 +1139,7 @@ El ícono de la fila mide **sólo las columnas de la vista activa**, igual que l
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales diecinueve: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Logística**, **Pagos con Tarjetas y Otros** (código interno `TARJETAS`), **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
+Hoy tienen datos reales veinte: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Logística**, **Gastos Locales**, **Pagos con Tarjetas y Otros** (código interno `TARJETAS`), **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
 
 > **Logística** y **Pagos con Tarjetas y Otros** son los dos últimos en sumarse, y los dos únicos del grupo de egresos pendientes que ya tienen proveedor.
 >
