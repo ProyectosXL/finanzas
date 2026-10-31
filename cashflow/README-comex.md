@@ -768,6 +768,14 @@ Otros 26 tienen la fecha de pago vencida —no suman, como cualquier vencida— 
 la tienen por delante. **Se sabe y se acepta, sin fecha de corte**: los pagos se
 van a cargar desde Comercio Exterior y cada contenedor cancelado sale solo.
 
+**El aviso de valuación no cuenta lo ya pagado** (rama
+`fix/comex-aviso-valuacion-sin-pagados`). Una fila tildada como pagada, o con
+el saldo CANCELADO en Comercio Exterior, no se proyecta y no tiene fecha ni
+cotización que pedir: `Comex::valuacionImporta()` la saca del aviso en las dos
+pestañas. Al 31/10/2026 el aviso reclamaba fecha para 105 contenedores por
+U$S 6.794.918,65 que estaban **todos** tildados como pagados. No mueve ningún
+número del tablero: solo deja de avisar de más.
+
 Verificado contra la base el 01/10/2026: el padrón pasó de 70 a **348** filas, es
 exactamente el que dice la regla pura sobre las 408 del maestro, `cargado()` trae
 los mismos 348 contenedores, y el invariante de cuatro series cierra en las 40

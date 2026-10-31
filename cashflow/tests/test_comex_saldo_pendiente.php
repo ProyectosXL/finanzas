@@ -474,10 +474,11 @@ $ctrlSrc = codigoSinComentariosSP(__DIR__ . '/../Controller/ComexController.php'
 
 /* EL AVISO DE VALUACION TAMBIEN HABLA DEL PENDIENTE. Con VALOR_FOB_DOLAR
    diria de mas justamente en los contenedores que ya tienen pagos hechos, que
-   son los unicos donde los dos numeros difieren. */
+   son los unicos donde los dos numeros difieren. Las filas le llegan
+   filtradas por valuacionImporta(): ver test_comex_aviso_valuacion_pagados. */
 chequear('el aviso de valuacion mide el pendiente', 1,
-    preg_match('/self::avisosValuacionConNivel\(\$filas,\s*\$this->dolarFuturo\(\)->ultimoMes\(\),'
-        . '\s*\'PENDIENTE_USD\'\)/', codigoSinComentariosSP(__DIR__ . '/../Class/Comex.php')));
+    preg_match('/self::avisosValuacionConNivel\(.*?\$this->dolarFuturo\(\)->ultimoMes\(\),'
+        . '\s*\'PENDIENTE_USD\'\)/s', codigoSinComentariosSP(__DIR__ . '/../Class/Comex.php')));
 
 /* Y EL DEL TABLERO TAMBIEN, con el MISMO campo. Los dos consumidores describen
    las mismas filas y el texto es uno solo; si uno midiera el FOB y el otro el

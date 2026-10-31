@@ -273,13 +273,22 @@ if (!Pruebas::hayBase()) {
     /* Las filas con costos cargados y sin fecha estimada de pago no se pueden
        valuar -sin mes no hay cotizacion- y ComexProvider lo dice en dolares.
        Con la regla nueva son muchas (250 al 01/10/2026): el aviso tiene que
-       estar. */
+       estar. Salvo las ya pagadas, que no se proyectan y no piden fecha: al
+       31/10/2026 las 105 que quedaban estaban todas tildadas. Ver
+       Comex::valuacionImporta(). */
     $sinFecha = 0;
     foreach ($ext as $f) {
-        if ($f['FECHA_PAGO_EFECTIVA'] === null && $f['PENDIENTE_USD'] > 0) {
+        if ($f['FECHA_PAGO_EFECTIVA'] === null && $f['PENDIENTE_USD'] > 0
+                && Comex::valuacionImporta($f)) {
             $sinFecha++;
         }
     }
+    $avisoValuacion = array_filter($prov->warnings(), function ($w) {
+        return strpos($w, 'no se pueden valuar') !== false
+            && strpos($w, 'fecha estimada de pago') !== false;
+    });
+    chequear('el aviso de sin fecha aparece si y solo si hay sin fecha por pagar', $sinFecha > 0,
+        count($avisoValuacion) > 0);
     /* El aviso ya no empieza con "Proveedores Exterior: ": desde el panel
        agrupado, la pestana la dice el grupo y no cada texto. Se lo reconoce
        por lo que dice -que no se pueden valuar por falta de la fecha

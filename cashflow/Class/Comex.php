@@ -629,8 +629,11 @@ class Comex {
             /* La curva que no esta al dia y el dolar BCRA viejo: los mismos
                textos en las tres pantallas. Ver DolarFuturo. */
             $this->dolarFuturo()->avisosDolarConNivel(),
-            self::avisosValuacionConNivel($filas, $this->dolarFuturo()->ultimoMes(),
-                'PENDIENTE_USD'),
+            /* Solo lo que se proyecta: ver valuacionImporta(). */
+            self::avisosValuacionConNivel(
+                array_values(array_filter(is_array($filas) ? $filas : [],
+                    [self::class, 'valuacionImporta'])),
+                $this->dolarFuturo()->ultimoMes(), 'PENDIENTE_USD'),
             /* Sin el eje: ninguna vencida entra en ninguna columna. Se informa
                IMPORTE_ARS -lo que valen-; IMPORTE_EJE daria "$ 0,00". */
             self::avisosVencidosConNivel($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
@@ -668,9 +671,11 @@ class Comex {
            parcial vuelven a la lista- no se valuan con la curva: su base ya esta
            en pesos. Contarlas cambiaria estos avisos sin que nada haya cambiado.
            Lo marcado, lo mismo: un contenedor con costos reales y sin pagos
-           parciales no suma con o sin tilde. */
+           parciales no suma con o sin tilde. Y uno tildado como pagado no se
+           proyecta: ver valuacionImporta(). */
         $estimadas = array_values(array_filter($filas, function ($f) {
-            return empty($f['TIENE_COSTOS']) && empty($f['DUPLICA_GRUPO']);
+            return empty($f['TIENE_COSTOS']) && empty($f['DUPLICA_GRUPO'])
+                && self::valuacionImporta($f);
         }));
         $proyectables = array_values(array_filter($filas, function ($f) {
             return empty($f['NAC_SIN_PROYECCION']) && empty($f['DUPLICA_GRUPO']);
@@ -1801,6 +1806,32 @@ class Comex {
         }
 
         return ($f < substr((string) $hoy, 0, 10));
+    }
+
+    /**
+     * Si una fila cuenta para el aviso de valuacion: no, si ya se pago.
+     *
+     * El aviso de "no se pudo valuar" pide cargar una fecha para que el
+     * importe aparezca en el tablero. Una fila que ya se pago no va a aparecer
+     * nunca -no se proyecta- asi que no hay fecha ni cotizacion que pedirle.
+     * Son las mismas dos senales de vencidaPendiente(): el TILDE de pagado y el
+     * saldo CANCELADO por los pagos de Comercio Exterior.
+     *
+     * Antes el aviso contaba todas las filas, y al 31/10/2026 reclamaba fecha
+     * para 105 contenedores por U$S 6.794.918,65 que estaban TODOS tildados
+     * como pagados -escondidos en la grilla y fuera del tablero-.
+     *
+     * Estatica y pura. Un campo ausente es falso.
+     *
+     * @param array $fila
+     * @return bool
+     */
+    public static function valuacionImporta($fila) {
+        if (!empty($fila['PAGADO'])) {
+            return false;
+        }
+
+        return !(isset($fila['ESTADO_PAGO']) && $fila['ESTADO_PAGO'] === self::ESTADO_CANCELADO);
     }
 
     /**
