@@ -160,30 +160,53 @@
 
         cuerpo.innerHTML = filas.map(function(f) {
             var eje = filaDelEje(f.cod_provee);
+            var habitual = f.habitual !== false;
 
             return '<tr data-cod="' + esc(f.cod_provee) + '">' +
                 '<td>' +
                     '<a href="#" class="fw-semibold text-decoration-none" data-detalle="' +
                         esc(f.cod_provee) + '">' + esc(f.nombre || f.cod_provee) + '</a>' +
                     '<div><small class="text-muted">' + esc(f.cod_provee) + '</small>' +
-                        Auditoria.icono({ usuario: f.usuario, fecha: f.fecha_modif }) + '</div>' +
+                        Auditoria.icono({ usuario: f.usuario, fecha: f.fecha_modif }) +
+                        marcaHabitual(f) + '</div>' +
                 '</td>' +
-                celdaNum(f.cod_provee, 'horas', f.horas_mes, '0.5', 'Horas por mes') +
-                celdaNum(f.cod_provee, 'valor_hora', f.valor_hora_base, '0.01',
-                         'Valor hora base, ya ajustado') +
-                celdaMes(f.cod_provee, f.mes_base) +
+                (habitual
+                    ? celdaNum(f.cod_provee, 'horas', f.horas_mes, '0.5', 'Horas por mes') +
+                      celdaNum(f.cod_provee, 'valor_hora', f.valor_hora_base, '0.01',
+                               'Valor hora base, ya ajustado') +
+                      celdaMes(f.cod_provee, f.mes_base)
+                    : celdaConservada(f.horas_mes, false) +
+                      celdaConservada(f.valor_hora_base, true) +
+                      celdaConservada(f.mes_base, false)) +
                 columnas.map(function(c) {
-                    return '<td class="text-end ' + vistas.marca(c).clase + '">'
-                        + celdaEje(f, eje, c) + '</td>';
+                    var prox = proximoEn(f, c);
+
+                    return '<td class="text-end ' + vistas.marca(c).clase +
+                        (prox && prox.editado ? ' log-editado' : '') + '"' +
+                        (prox ? ' title="' + esc(tooltipProximo(f, prox)) + '"' : '') + '>'
+                        + (prox ? celdaProximo(f, eje, c) : celdaEje(f, eje, c)) + '</td>';
                 }).join('') +
                 '<td class="text-end fw-bold">' +
                     (eje ? importe(vistas.total(eje)) : '—') +
                 '</td>' +
-            '</tr>';
+            '</tr>' +
+            (habitual ? '' : filaPuntuales(f, columnas.length + 5));
         }).join('');
 
         cuerpo.querySelectorAll('.log-edit').forEach(function(input) {
             input.addEventListener('change', function() { guardarCampo(input); });
+        });
+
+        cuerpo.querySelectorAll('.log-habitual').forEach(function(input) {
+            input.addEventListener('change', function() { cambiarHabitual(input); });
+        });
+
+        cuerpo.querySelectorAll('[data-proximo]').forEach(function(el) {
+            el.addEventListener('click', function() { editarProximo(el.getAttribute('data-proximo')); });
+        });
+
+        cuerpo.querySelectorAll('[data-puntual-accion]').forEach(function(btn) {
+            btn.addEventListener('click', function() { accionPuntual(btn); });
         });
 
         cuerpo.querySelectorAll('[data-detalle]').forEach(function(a) {
@@ -217,6 +240,343 @@
 
         return (v === 0 || v === null || v === undefined)
             ? '<span class="text-muted">—</span>' : importe(v);
+    }
+
+    /* ================================================================
+       HABITUAL O NO HABITUAL
+       ================================================================ */
+
+    /**
+     * El interruptor "Habitual" con permiso y con el script corrido; sin eso,
+     * sólo la marca de un no habitual.
+     */
+    function marcaHabitual(f) {
+        var habitual = f.habitual !== false;
+
+        if (datos.no_habituales && puedeEditar()) {
+            return '<div class="form-check form-switch mb-0 mt-1" ' +
+                'title="Habitual: se proyecta con horas × valor hora. No habitual: sólo sus pagos puntuales.">' +
+                '<input class="form-check-input log-habitual" type="checkbox" role="switch" ' +
+                    'id="logHab' + esc(f.cod_provee) + '" data-cod="' + esc(f.cod_provee) + '"' +
+                    (habitual ? ' checked' : '') + '>' +
+                '<label class="form-check-label small" for="logHab' + esc(f.cod_provee) + '">' +
+                    'Habitual</label></div>';
+        }
+
+        return habitual ? '' : ' <span class="badge bg-secondary">no habitual</span>';
+    }
+
+    /**
+     * Las horas, el valor hora y el mes base de un no habitual: se conservan
+     * y se ven, pero no se piden ni se editan.
+     */
+    function celdaConservada(valor, plata) {
+        var texto = (valor === null || valor === undefined || valor === '')
+            ? '—'
+            : (plata ? importeTexto(valor) : esc(valor));
+
+        return '<td class="text-end text-muted" title="No habitual: no se calcula. Se conserva ' +
+            'para cuando vuelva a ser habitual.">' + texto + '</td>';
+    }
+
+    function fleteroPorCodigo(cod) {
+        var f = null;
+
+        datos.planilla.fleteros.forEach(function(x) {
+            if (x.cod_provee === cod) { f = x; }
+        });
+
+        return f;
+    }
+
+    /**
+     * Pasar un fletero a habitual o a no habitual. LA CONFIRMACIÓN DICE QUÉ
+     * CAMBIA EN LA PROYECCIÓN: al volver a habitual, cuántos pagos puntuales
+     * futuros dejan de proyectarse y por cuánto.
+     */
+    function cambiarHabitual(input) {
+        var f = fleteroPorCodigo(input.getAttribute('data-cod'));
+
+        if (!f) { return; }
+
+        var aHabitual = input.checked;
+        var nombre = f.nombre || f.cod_provee;
+        var detalle;
+
+        if (aHabitual) {
+            var futuros = (f.puntuales || []).filter(function(p) { return p.fecha > datos.hoy; });
+            var total = 0;
+
+            futuros.forEach(function(p) { total += Number(p.importe) || 0; });
+
+            detalle = 'Se vuelve a proyectar con sus horas y su valor hora. ' + (futuros.length
+                ? futuros.length + ' pago(s) puntual(es) futuro(s) por ' + importeTexto(total) +
+                  ' dejan de proyectarse: quedan guardados y se ven en su fila.'
+                : 'No tiene pagos puntuales futuros, así que no se pierde ninguno.');
+        } else {
+            detalle = 'Deja de proyectarse por cálculo. Sus horas, su valor hora y su mes base se ' +
+                'conservan para cuando vuelva a ser habitual. Desde ahora se le cargan pagos ' +
+                'puntuales, con importe y fecha.';
+        }
+
+        Notificacion.confirmar({
+            titulo: aHabitual ? 'Volver a habitual' : 'Pasar a no habitual',
+            mensaje: '¿' + (aHabitual ? 'Volver a habitual' : 'Pasar a no habitual') + ' a ' +
+                nombre + '?',
+            detalle: detalle,
+            confirmar: aHabitual ? 'Volver a habitual' : 'Pasar a no habitual',
+            peligro: true
+        }).then(function(si) {
+            if (!si) {
+                input.checked = !aHabitual;
+
+                return null;
+            }
+
+            /* SE MANDAN LOS TRES CAMPOS, como en guardarCampo(): el guardado
+               escribe la fila entera. */
+            return pedir(ENDPOINT + '?action=saveFletero', {
+                cod_provee: f.cod_provee,
+                horas: f.horas_mes,
+                valor_hora: f.valor_hora_base,
+                mes_base: f.mes_base,
+                habitual: aHabitual
+            }).then(function(d) {
+                Notificacion.exito(d.message || 'Guardado.');
+                cargar();
+            });
+        }).catch(function(e) {
+            input.checked = !aHabitual;
+            Notificacion.error('No se pudo cambiar: ' + e.message);
+        });
+    }
+
+    /* ================================================================
+       LOS PAGOS PUNTUALES DE UN NO HABITUAL
+       ================================================================ */
+
+    /** 'aaaa-mm-dd' del día siguiente a hoy: lo mínimo que acepta un pago puntual */
+    function manana() {
+        var p = String(datos.hoy).split('-');
+        var d = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + 1));
+
+        return d.toISOString().substring(0, 10);
+    }
+
+    /**
+     * La fila de pagos puntuales, debajo del fletero. Los futuros se corrigen
+     * y se dan de baja; los que ya pasaron quedan como historial, sin botones.
+     */
+    function filaPuntuales(f, colspan) {
+        var edita = puedeEditar() && datos.no_habituales;
+        var lista = f.puntuales || [];
+        var html = '<strong>Pagos puntuales:</strong> ';
+
+        html += lista.length ? lista.map(function(p) {
+            var pasado = p.fecha <= datos.hoy;
+            var quien = Auditoria.icono({ usuario: p.usuario, fecha: p.fecha_modif,
+                                          alta: { usuario: p.usuario_alta, fecha: p.fecha_alta } });
+
+            if (pasado || !edita) {
+                return '<span class="log-puntual' + (pasado ? ' text-muted' : '') + '"' +
+                    (pasado ? ' title="' + esc(p.motivo_excluido) + '"' : '') + '>' +
+                    esc(fecha(p.fecha)) + ' · ' + importeTexto(p.importe) +
+                    (pasado ? ' <span class="badge bg-light text-muted">historial</span>' : '') +
+                    quien + '</span>';
+            }
+
+            return '<span class="log-puntual" data-id="' + p.id + '">' +
+                '<input type="date" class="form-control form-control-sm" min="' + manana() + '" ' +
+                    'value="' + esc(p.fecha) + '">' +
+                '<input type="number" step="0.01" min="0.01" class="form-control form-control-sm text-end" ' +
+                    'value="' + esc(p.importe) + '">' +
+                '<button class="btn btn-sm btn-outline-primary" data-puntual-accion="guardar" ' +
+                    'data-cod="' + esc(f.cod_provee) + '" title="Guardar la corrección">' +
+                    '<i class="fas fa-check"></i></button>' +
+                '<button class="btn btn-sm btn-outline-danger" data-puntual-accion="baja" ' +
+                    'data-cod="' + esc(f.cod_provee) + '" title="Dar de baja">' +
+                    '<i class="fas fa-trash"></i></button>' + quien +
+            '</span>';
+        }).join('') : '<span class="text-muted me-3">Sin pagos puntuales cargados: no proyecta nada.</span>';
+
+        if (edita) {
+            html += '<span class="log-puntual" data-id="">' +
+                '<input type="date" class="form-control form-control-sm" min="' + manana() + '" ' +
+                    'title="De mañana en adelante: lo de hoy ya está en el saldo bancario">' +
+                '<input type="number" step="0.01" min="0.01" class="form-control form-control-sm text-end" ' +
+                    'placeholder="Importe">' +
+                '<button class="btn btn-sm btn-primary" data-puntual-accion="guardar" ' +
+                    'data-cod="' + esc(f.cod_provee) + '"><i class="fas fa-plus me-1"></i>Agregar</button>' +
+            '</span>';
+        }
+
+        return '<tr class="log-puntuales"><td colspan="' + colspan + '">' + html + '</td></tr>';
+    }
+
+    function accionPuntual(btn) {
+        var caja = btn.closest('.log-puntual');
+        var cod = btn.getAttribute('data-cod');
+        var id = caja.getAttribute('data-id');
+        var inputs = caja.querySelectorAll('input');
+
+        if (btn.getAttribute('data-puntual-accion') === 'baja') {
+            Notificacion.confirmar({
+                titulo: 'Dar de baja el pago puntual',
+                mensaje: '¿Dar de baja el pago del ' + fecha(inputs[0].value) + ' por ' +
+                    importeTexto(inputs[1].value) + '?',
+                detalle: 'Deja de proyectarse. No se borra: queda en el historial.',
+                confirmar: 'Dar de baja',
+                peligro: true
+            }).then(function(si) {
+                if (!si) { return null; }
+
+                return pedir(ENDPOINT + '?action=bajaPagoPuntual', { id: Number(id), cod_provee: cod })
+                    .then(function(d) { Notificacion.exito(d.message); cargar(); });
+            }).catch(function(e) {
+                Notificacion.error('No se pudo dar de baja: ' + e.message);
+            });
+
+            return;
+        }
+
+        /* La fecha mínima se avisa acá para no ir y volver, pero la que vale
+           es la del servidor. */
+        if (!inputs[0].value || inputs[0].value <= datos.hoy) {
+            Notificacion.campoInvalido(inputs[0], 'La fecha tiene que ser de mañana en adelante: ' +
+                'lo que se paga hoy ya está reflejado en el saldo bancario.');
+
+            return;
+        }
+
+        if (!(Number(inputs[1].value) > 0)) {
+            Notificacion.campoInvalido(inputs[1], 'El importe tiene que ser mayor a 0.');
+
+            return;
+        }
+
+        pedir(ENDPOINT + '?action=savePagoPuntual', {
+            id: id ? Number(id) : null,
+            cod_provee: cod,
+            fecha: inputs[0].value,
+            importe: inputs[1].value
+        }).then(function(d) {
+            Notificacion.exito(d.message);
+            cargar();
+        }).catch(function(e) {
+            Notificacion.error('No se pudo guardar el pago: ' + e.message);
+        });
+    }
+
+    /* ================================================================
+       EL IMPORTE DEL PRÓXIMO PAGO DE UN HABITUAL
+       ================================================================ */
+
+    /** El próximo pago del fletero, si cae en esa columna */
+    function proximoEn(f, columna) {
+        if (f.habitual === false || !f.proximo) { return null; }
+
+        var pago = null;
+
+        (f.pagos || []).forEach(function(p) { if (p.proximo) { pago = p; } });
+
+        if (!pago) { return null; }
+
+        var col = pago.en_tramo ? 'DIA|' + pago.fecha : 'MES|' + String(pago.fecha).substring(0, 7);
+
+        return col === columna ? pago : null;
+    }
+
+    /** La celda del próximo pago: el importe y, con permiso, el lápiz */
+    function celdaProximo(f, eje, columna) {
+        var v = eje ? vistas.valor(eje, columna) : null;
+        var texto = (v === null || v === undefined || v === 0)
+            ? '<span class="text-muted">—</span>' : importe(v);
+
+        if (!puedeEditar() || !datos.no_habituales) { return texto; }
+
+        return '<span class="log-proximo" data-proximo="' + esc(f.cod_provee) + '">' + texto +
+            ' <i class="fas fa-pen"></i></span>';
+    }
+
+    /**
+     * El tooltip del próximo pago: de dónde sale la cuenta y, si se editó, el
+     * calculado, el editado, quién y cuándo.
+     */
+    function tooltipProximo(f, p) {
+        var celda = f.meses[p.mes] || {};
+        var partes = (celda.pagos || []).length || 1;
+        var calc = (p.importe_calculado === null || p.importe_calculado === undefined)
+            ? 'sin cálculo (' + (celda.tooltip || 'faltan datos') + ')'
+            : importeTexto(p.importe_calculado) + ' = ' +
+              Number(f.horas_mes).toLocaleString('es-AR') + ' h × ' +
+              importeTexto(celda.valor_hora) + (partes > 1 ? ' / ' + partes + ' pagos' : '');
+
+        if (!p.editado) {
+            return 'Próximo pago, ' + fecha(p.fecha) + '. Calculado: ' + calc + '.' +
+                (puedeEditar() ? ' Hacé clic para cargar el importe real.' : '');
+        }
+
+        var e = p.edicion || {};
+
+        return 'Próximo pago, ' + fecha(p.fecha) + '. Calculado: ' + calc + '. Editado: ' +
+            importeTexto(p.importe) + ', por ' + (e.usuario || 'sin usuario registrado') +
+            (e.fecha ? ' el ' + fecha(e.fecha) + ' ' + String(e.fecha).substring(11, 16) : '') +
+            '. Vale sólo para este pago.' +
+            (puedeEditar() ? ' Hacé clic para cambiarlo o volver al cálculo.' : '');
+    }
+
+    /** '61.234,56' o '61234.56' -> '61234.56'. La validación que vale es la del servidor */
+    function normalizarImporte(t) {
+        var s = String(t || '').replace(/\s|\$/g, '');
+
+        if (s.indexOf(',') !== -1) {
+            s = s.replace(/\./g, '').replace(',', '.');
+        }
+
+        return s;
+    }
+
+    function editarProximo(cod) {
+        var f = fleteroPorCodigo(cod);
+        var p = null;
+
+        if (!f) { return; }
+
+        (f.pagos || []).forEach(function(x) { if (x.proximo) { p = x; } });
+
+        if (!p) { return; }
+
+        Notificacion.pedirTexto({
+            titulo: 'Importe del próximo pago',
+            mensaje: (f.nombre || cod) + ', pago del ' + fecha(p.fecha) + '.',
+            detalle: 'Cargá el importe real de este pago. Vale sólo para este pago: los ' +
+                'siguientes se siguen calculando. ' + (p.editado
+                    ? 'Dejalo vacío para volver al importe calculado.'
+                    : 'El cálculo da ' + (p.importe_calculado === null ? '—'
+                        : importeTexto(p.importe_calculado)) + '.'),
+            etiqueta: 'Importe',
+            placeholder: 'Por ejemplo: 61234,56',
+            valor: p.editado ? String(p.importe).replace('.', ',') : '',
+            opcional: !!p.editado,
+            confirmar: 'Guardar'
+        }).then(function(t) {
+            if (t === null) { return null; }
+
+            if (String(t).trim() === '') {
+                return pedir(ENDPOINT + '?action=deshacerImporteProximo',
+                    { cod_provee: cod, mes: p.mes, nro: p.nro });
+            }
+
+            return pedir(ENDPOINT + '?action=saveImporteProximo',
+                { cod_provee: cod, mes: p.mes, nro: p.nro, importe: normalizarImporte(t) });
+        }).then(function(d) {
+            if (!d) { return; }
+
+            Notificacion.exito(d.message);
+            cargar();
+        }).catch(function(e) {
+            Notificacion.error('No se pudo guardar el importe: ' + e.message);
+        });
     }
 
     /* Sin permiso de edicion, las horas, el valor hora y el mes base son
@@ -394,6 +754,16 @@
                         ? '<span class="badge bg-primary">columna del día</span>'
                         : '<span class="badge bg-info text-dark">columna del mes</span>');
 
+                if (p.puntual) {
+                    estado += ' <span class="badge bg-info text-dark">pago puntual</span>';
+                }
+
+                if (p.editado) {
+                    estado += ' <span class="badge bg-warning text-dark" title="Calculado: ' +
+                        esc(p.importe_calculado === null ? '—' : importeTexto(p.importe_calculado)) +
+                        '">importe a mano</span>';
+                }
+
                 if (p.override) {
                     estado += ' <span class="badge bg-warning text-dark">fecha a mano</span>';
                 } else if (p.corrida) {
@@ -488,7 +858,10 @@
         /* CUENTA LOS QUE NO PROYECTAN NINGUN MES, que es el numero que importa:
            un fletero al que le falta la inflacion de marzo proyecta igual hasta
            febrero, y contarlo acá exageraría el problema. */
-        var sinProyectar = fleteros.filter(function(f) { return f.total === null; }).length;
+        var sinProyectar = fleteros.filter(function(f) {
+            // Un no habitual sin pagos puntuales no proyecta, pero no le falta nada.
+            return f.total === null && f.habitual !== false;
+        }).length;
 
         texto('logSinProyectar', String(sinProyectar));
 

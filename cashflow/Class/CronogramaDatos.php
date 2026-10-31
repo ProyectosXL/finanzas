@@ -150,7 +150,9 @@ class CronogramaDatos {
             $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $config['aviso']);
         }
 
-        $rango = CronogramaPagos::rangoCalendario($h, $mesesExtra);
+        $rango = CronogramaPagos::rangoCalendario($h, $mesesExtra,
+            ($config['corrimiento'] === CronogramaPagos::SIGUIENTE)
+                ? CronogramaPagos::DIAS_CALENDARIO_SIGUIENTE : 0);
         $habiles = $this->habilesEntre($rango['desde'], $rango['hasta']);
 
         $overrides = [];
@@ -170,7 +172,8 @@ class CronogramaDatos {
             $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $a);
         }
 
-        if (!$this->tablaCreada()) {
+        // Un concepto sin overrides no pierde nada sin la tabla: no se avisa.
+        if (!$this->tablaCreada() && CronogramaPagos::admiteOverrides($concepto)) {
             $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $this->avisoSinTabla());
         }
 
@@ -252,6 +255,11 @@ class CronogramaDatos {
                 'usa' => $meta['usa'],
                 'dia' => $cfg['dia'],
                 'frecuencia' => $cfg['frecuencia'],
+
+                // Lo que el concepto admite: la pantalla no ofrece lo que el guardado rechaza
+                'frecuencias' => CronogramaPagos::frecuenciasDe($concepto),
+                'corrimiento' => CronogramaPagos::corrimiento($concepto),
+                'overrides' => CronogramaPagos::admiteOverrides($concepto),
                 'descripcion' => $cfg['descripcion'],
                 'defecto' => $cfg['defecto'],
                 'editable' => $this->editable($concepto),
@@ -386,7 +394,7 @@ class CronogramaDatos {
     public function guardarConfig($concepto, $dia, $frecuencia, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $concepto = CronogramaPagos::validarConcepto($concepto);
-        $nueva = CronogramaPagos::config($dia, $frecuencia);
+        $nueva = CronogramaPagos::configDe($concepto, $dia, $frecuencia);
 
         if (!$this->parametrosCreados($concepto)) {
             throw new Exception('Todavía no existen los parámetros del cronograma de '
@@ -443,6 +451,14 @@ class CronogramaDatos {
                 sqlsrv_free_stmt($stmt);
             }
 
+            /* LOS IMPORTES EDITADOS DEL PROXIMO PAGO DE LOGISTICA, por el mismo
+               motivo que los overrides: se guardan contra (mes, numero de pago),
+               y con otro dia ese numero es otro pago. La pantalla los nombra en
+               la confirmacion, antes de guardar. */
+            $bajasImportes = ($concepto === 'LOGISTICA')
+                ? $this->bajaImportesLogistica($cid, CronogramaPagos::desdeMesBaja(date('Y-m-d')), $usuario)
+                : 0;
+
             sqlsrv_commit($cid);
         } catch (Throwable $e) {
             sqlsrv_rollback($cid);
@@ -452,7 +468,43 @@ class CronogramaDatos {
 
         $this->parametros = null;
 
-        return ['concepto' => $concepto, 'config' => $nueva, 'cambio' => true, 'bajas' => $bajas];
+        return ['concepto' => $concepto, 'config' => $nueva, 'cambio' => true, 'bajas' => $bajas,
+                'bajas_importes' => $bajasImportes];
+    }
+
+    /**
+     * Da de baja los importes editados vigentes de Logistica desde un mes, en la
+     * transaccion de quien llama. Sin la tabla no hay nada que bajar.
+     *
+     * @return int Cuantos
+     */
+    private function bajaImportesLogistica($cid, $desdeMes, $usuario) {
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo.RO_T_CASHFLOW_LOGISTICA_IMPORTE_EDIT', 'U') AS T");
+        $row = ($stmt === false) ? null : sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+
+        if ($stmt !== false) {
+            sqlsrv_free_stmt($stmt);
+        }
+
+        if (!$row || $row['T'] === null) {
+            return 0;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo.RO_T_CASHFLOW_LOGISTICA_IMPORTE_EDIT
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+             WHERE VIGENTE = 1 AND MES >= ?",
+            [$usuario, $usuario, $desdeMes]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al dar de baja los importes editados de Logística'));
+        }
+
+        $n = intval(sqlsrv_rows_affected($stmt));
+        sqlsrv_free_stmt($stmt);
+
+        return $n;
     }
 
     /* ====================================================================
@@ -581,7 +633,8 @@ class CronogramaDatos {
      * @return bool
      */
     public function editable($concepto) {
-        return $this->tablaCreada()
+        return CronogramaPagos::admiteOverrides($concepto)
+            && $this->tablaCreada()
             && ($this->tieneTipo() || $concepto === self::TIPO_HISTORICO);
     }
 

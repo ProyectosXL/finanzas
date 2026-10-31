@@ -36,6 +36,7 @@
     var fleteros = [];
     var tablaCreada = false;
     var tangoDisponible = false;
+    var noHabituales = false;
     var elegido = null;
     var debounce = null;
 
@@ -69,11 +70,13 @@
                 fleteros = d.data.filas || [];
                 tablaCreada = !!d.data.tabla_creada;
                 tangoDisponible = !!d.data.tango_disponible;
+                noHabituales = !!d.data.no_habituales;
                 MIN_BUSQUEDA = d.data.min_busqueda || MIN_BUSQUEDA;
 
                 var avisos = [];
 
                 if (d.data.aviso) { avisos.push(d.data.aviso); }
+                if (d.data.aviso_no_habituales) { avisos.push(d.data.aviso_no_habituales); }
 
                 if (!tangoDisponible) {
                     avisos.push('No se puede leer CPA01, así que no se pueden dar de alta ' +
@@ -121,7 +124,7 @@
         if (!cuerpo) { return; }
 
         if (!fleteros.length) {
-            cuerpo.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">' +
+            cuerpo.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">' +
                 (tablaCreada
                     ? 'Todavía no hay ningún fletero cargado. Agregalos con el botón de arriba.'
                     : 'Falta correr sql/cashflow_logistica_fleteros.sql contra la base central.') +
@@ -144,14 +147,22 @@
                anticipe. */
             var falta = [];
 
-            if (f.HORAS_MES === null) { falta.push('horas'); }
-            if (f.VALOR_HORA_BASE === null) { falta.push('valor hora'); }
-            if (f.MES_BASE === null) { falta.push('mes base'); }
+            // A un no habitual no se le piden: proyecta sus pagos puntuales.
+            if (f.HABITUAL !== false) {
+                if (f.HORAS_MES === null) { falta.push('horas'); }
+                if (f.VALOR_HORA_BASE === null) { falta.push('valor hora'); }
+                if (f.MES_BASE === null) { falta.push('mes base'); }
+            }
 
             var marcaFalta = (falta.length && f.ACTIVO)
                 ? '<div><small class="text-warning-emphasis">' +
                   '<i class="fas fa-triangle-exclamation me-1"></i>No se proyecta: falta ' +
                   esc(falta.join(', ')) + '</small></div>' : '';
+
+            if (f.HABITUAL === false) {
+                marcaFalta += '<div><small class="text-muted">No habitual: proyecta sólo sus ' +
+                    'pagos puntuales, que se cargan en Proveedores › Logística Local.</small></div>';
+            }
 
             return '<tr class="' + (f.ACTIVO ? '' : 'text-muted') + '">' +
                 '<td>' +
@@ -167,6 +178,17 @@
                         'data-cod="' + esc(f.COD_PROVEE) + '" data-campo="mes_base" ' +
                         'value="' + (f.MES_BASE === null ? '' : esc(f.MES_BASE)) + '"' +
                         (tablaCreada ? '' : ' disabled') + '>' +
+                '</td>' +
+                '<td class="text-center">' +
+                    '<div class="form-check form-switch d-inline-block">' +
+                        '<input class="form-check-input plog-habitual" type="checkbox" ' +
+                            'data-cod="' + esc(f.COD_PROVEE) + '"' +
+                            (f.HABITUAL !== false ? ' checked' : '') +
+                            (noHabituales && f.ACTIVO ? '' : ' disabled title="' +
+                                (noHabituales ? 'Está dado de baja'
+                                    : 'Falta correr sql/cashflow_logistica_no_habituales.sql') + '"') +
+                            '>' +
+                    '</div>' +
                 '</td>' +
                 '<td class="text-center">' +
                     '<div class="form-check form-switch d-inline-block">' +
@@ -196,6 +218,63 @@
             chk.addEventListener('change', function() {
                 activar(chk.getAttribute('data-cod'), chk.checked);
             });
+        });
+
+        cuerpo.querySelectorAll('.plog-habitual').forEach(function(chk) {
+            chk.addEventListener('change', function() { cambiarHabitual(chk); });
+        });
+    }
+
+    /**
+     * Habitual o no habitual. LA MISMA CONFIRMACIÓN QUE EN LA PLANILLA: al
+     * volver a habitual dice cuántos pagos puntuales futuros dejan de
+     * proyectarse y por cuánto (PUNTUALES_FUTUROS viene del backend).
+     */
+    function cambiarHabitual(chk) {
+        var f = porCodigo(chk.getAttribute('data-cod'));
+
+        if (!f) { return; }
+
+        var aHabitual = chk.checked;
+        var fut = f.PUNTUALES_FUTUROS || { cantidad: 0, total: 0 };
+        var detalle = aHabitual
+            ? 'Se vuelve a proyectar con sus horas y su valor hora. ' + (fut.cantidad
+                ? fut.cantidad + ' pago(s) puntual(es) futuro(s) por $ ' +
+                  Number(fut.total).toLocaleString('es-AR', { minimumFractionDigits: 2,
+                      maximumFractionDigits: 2 }) +
+                  ' dejan de proyectarse: quedan guardados y se ven en Logística Local.'
+                : 'No tiene pagos puntuales futuros, así que no se pierde ninguno.')
+            : 'Deja de proyectarse por cálculo. Sus horas, su valor hora y su mes base se ' +
+              'conservan para cuando vuelva a ser habitual. Los pagos puntuales se cargan en ' +
+              'Proveedores › Logística Local.';
+
+        Notificacion.confirmar({
+            titulo: aHabitual ? 'Volver a habitual' : 'Pasar a no habitual',
+            mensaje: '¿' + (aHabitual ? 'Volver a habitual' : 'Pasar a no habitual') + ' a ' +
+                (f.NOMBRE || f.COD_PROVEE) + '?',
+            detalle: detalle,
+            confirmar: aHabitual ? 'Volver a habitual' : 'Pasar a no habitual',
+            peligro: true
+        }).then(function(si) {
+            if (!si) {
+                chk.checked = !aHabitual;
+
+                return null;
+            }
+
+            return pedir(ENDPOINT + '?action=saveFletero', {
+                cod_provee: f.COD_PROVEE,
+                horas: f.HORAS_MES,
+                valor_hora: f.VALOR_HORA_BASE,
+                mes_base: f.MES_BASE,
+                habitual: aHabitual
+            }).then(function(d) {
+                Notificacion.exito(d.message || 'Guardado.');
+                cargar();
+            });
+        }).catch(function(e) {
+            chk.checked = !aHabitual;
+            Notificacion.error('No se pudo cambiar: ' + e.message);
         });
     }
 

@@ -146,6 +146,10 @@
                 puede mostrar medio importe y no es un error.
                 <strong>Un pago con fecha anterior o igual a hoy no se proyecta</strong>: esa
                 plata ya salió y ya está en el saldo que abre el tablero.
+                <strong>El próximo pago de cada fletero habitual</strong> se puede cargar con su
+                importe real (lápiz en la celda): vale sólo para ese pago, y la celda se marca.
+                <strong>Un fletero no habitual</strong> no se calcula: proyecta sólo los pagos
+                puntuales que se le cargan debajo de su fila, de mañana en adelante.
             </small>
         </div>
     </div>

@@ -289,5 +289,5 @@ chequear('esta en la categoria Proveedores', 'Proveedores',
 chequear('con estado datos', Menu::DATOS, $porTabLog['logistica_local']['estado']);
 chequear('y sin marca: el caso normal no se marca', '',
     $porTabLog['logistica_local']['icono_estado']);
-chequear('la categoria pasa a tener sus 2 pestanas con datos',
-    2, $catDe['logistica_local']['con_datos']);
+chequear('la categoria pasa a tener sus 3 pestanas con datos',
+    3, $catDe['logistica_local']['con_datos']);

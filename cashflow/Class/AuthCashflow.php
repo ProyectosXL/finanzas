@@ -154,7 +154,12 @@ class AuthCashflow {
         ],
         'Logistica' => [
             'saveFletero' => [['logistica_local', null], ['parametros', 'LOGISTICA']],
-            'activarFletero' => [['parametros', 'LOGISTICA']]
+            'activarFletero' => [['parametros', 'LOGISTICA']],
+            // Los pagos puntuales y el importe del proximo pago se cargan en la planilla.
+            'savePagoPuntual' => [['logistica_local', null]],
+            'bajaPagoPuntual' => [['logistica_local', null]],
+            'saveImporteProximo' => [['logistica_local', null]],
+            'deshacerImporteProximo' => [['logistica_local', null]]
         ],
         'Parametros' => [
             'saveParametro' => [['parametros', self::SUB_DEL_PARAMETRO]],
@@ -166,6 +171,8 @@ class AuthCashflow {
                cambiar el dia de un concepto: como los preview, pide edicion. */
             'contarOverridesCronograma' => [['parametros', 'GENERALES']],
             'saveConfigCronograma' => [['parametros', 'GENERALES']],
+            // Gastos Locales es solo lectura: su lista de cuentas se edita en Generales.
+            'saveCuentasGastosLocales' => [['parametros', 'GENERALES']],
             /* El mix de cobro es un arbol (Class/MixCobro.php). La previsualizacion
                tambien pide edicion: la usa solo quien esta editando el arbol, como
                los preview del cronograma. */
@@ -279,6 +286,7 @@ class AuthCashflow {
             'getHistorialPagado', 'getHistorialFecha', 'getCronoNacionalizacion', 'getPagosNac'],
         'ComprasProyectadas' => ['getGrilla', 'getDetalleVersion', 'getHistorialAjustes'],
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
+        'GastosLocales' => ['getPlanilla', 'getComprobantes'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',

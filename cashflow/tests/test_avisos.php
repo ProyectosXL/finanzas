@@ -572,6 +572,7 @@ $contenedores = [
     'avisosCobMay' => 'Ingresos-Cobranzas_may.js', 'avisosComprasProy' => 'Compras-Proyectadas.js',
     'avisosCronoNac' => 'Comex-Crono_nacionalizacion.js', 'avisosEcheqs' => 'Ingresos-Echeqs.js',
     'avisosExpTasky' => 'Ingresos-Exportaciones_tasky.js', 'avisosLogistica' => 'Logistica-Local.js',
+    'avisosGastosLocales' => 'Gastos-Locales.js',
     'avisosTarj' => 'Financiero-Pagos_tarjetas.js', 'avisosProvExt' => 'Comex-Proveedores_exterior.js',
     'avisosSaldos' => 'Saldos.js', 'avisosParametros' => 'parametros-carga.js',
     // Un panel por sub-pestana, desde feature/cashflow-avisos-kpis-comex-nac-parcial

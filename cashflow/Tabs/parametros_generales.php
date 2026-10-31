@@ -162,7 +162,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
                     <strong>Un cronograma por concepto</strong>, cada uno con su día de la
                     semana y su frecuencia: <em>quincenal</em> es el 2do y el 4to de ese día
                     del mes; <em>semanal</em>, todos los de ese día. Si el día no es hábil, el
-                    pago se corre al día hábil <strong>anterior</strong>.
+                    pago se corre al día hábil <strong>anterior</strong>, salvo
+                    <strong>Gastos Locales</strong>, que se corre al <strong>siguiente</strong>,
+                    es siempre semanal y no se mueve a mano.
                 </small>
             </div>
             <button class="btn btn-sm btn-outline-success" data-exportar="pgenTablaCronograma"
@@ -252,6 +254,47 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
                     <tbody id="pgenCronoRestoBody"></tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- ========================================================
+         GASTOS LOCALES: LAS CUENTAS QUE NO ENTRAN EN EL PROMEDIO
+         El día de pago está arriba, en el cronograma. Acá va lo otro
+         que decide el número de la pestaña Proveedores › Gastos
+         Locales: qué cuentas de caja se dejan afuera.
+         ======================================================== -->
+    <div class="card mb-4" id="pgenGastosLocales">
+        <div class="card-header">
+            <h5 class="mb-0">Gastos Locales</h5>
+            <small class="text-muted">
+                El promedio de los últimos 90 días toma los egresos de caja de los locales
+                propios en las cuentas que empiezan con <strong>5</strong>. Las cuentas de esta
+                lista <strong>no entran</strong>. El día de pago se elige arriba, en el
+                cronograma.
+            </small>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-6">
+                    <label for="pgenCuentasExcluidas" class="form-label mb-1">
+                        Cuentas excluidas
+                        <span id="pgenCuentasAuditoria"></span>
+                    </label>
+                    <input type="text" class="form-control form-control-sm" id="pgenCuentasExcluidas"
+                           placeholder="Por ejemplo: 522400, 531250"
+                           title="Códigos de cuenta separados por coma. Vacío: no se excluye ninguna.">
+                </div>
+                <?php if ($edita): ?>
+                <div class="col-md-3">
+                    <button class="btn btn-sm btn-primary" id="pgenGuardarCuentas">
+                        <i class="fas fa-check me-1"></i> Guardar
+                    </button>
+                </div>
+                <?php endif; ?>
+            </div>
+            <small class="text-muted d-block mt-2" id="pgenCuentasNota">
+                Códigos separados por coma. Si dejás la lista vacía, entran todas las cuentas 5.
+            </small>
         </div>
     </div>
 

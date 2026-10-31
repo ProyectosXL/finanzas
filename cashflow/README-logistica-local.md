@@ -56,6 +56,7 @@ Todos contra `central`, en este orden:
 | 1 | `sql/migracion_parametros_modulo.sql` | *(ya existía)* Agrega `MODULO` a `RO_T_CASHFLOW_PARAMETROS` | El script 2 **no migra nada** y lo dice. La sub-pestaña Generales rescata igual los parámetros y avisa |
 | 2 | `sql/cashflow_parametros_generales.sql` | Mueve a `MODULO = 'GENERALES'` los parámetros que hoy figuran como de Ventas, y crea `RO_T_CASHFLOW_INFLACION_MES` y `RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT` | **Ningún cálculo cambia** y nada se rompe. Los cuatro parámetros se siguen viendo y editando en Generales, con un aviso que nombra el script. No se puede cargar inflación —los valores hora se proyectan sin ajuste trimestral— ni mover una fecha del cronograma, y las dos tarjetas lo dicen |
 | 3 | `sql/cashflow_logistica_fleteros.sql` | Crea `RO_T_CASHFLOW_LOGISTICA_FLETEROS`. **No siembra ningún fletero** | La pestaña Logística Local **no falla**: muestra la planilla vacía y avisa. La fila *Logística* del tablero va en **cero**, que es lo que va hoy, y el proveedor lo dice con su propio aviso |
+| 4 | `sql/cashflow_logistica_no_habituales.sql` *(feature/gastos-locales-fleteros-no-habituales)* | Agrega `HABITUAL` al maestro (**todos los existentes quedan habituales**) y crea `RO_T_CASHFLOW_LOGISTICA_PAGO_PUNTUAL` y `RO_T_CASHFLOW_LOGISTICA_IMPORTE_EDIT` | Logística proyecta como siempre y avisa. No se puede marcar a nadie como no habitual, cargar pagos puntuales ni editar el importe del próximo pago. Ver secciones 14 y 15 |
 
 **Ninguno crea filas del tablero.** La fila `LOGISTICA` ya existe en `RO_T_CASHFLOW_CONF_FILA` —sección *Costos Directos*, apuntada a `LOGISTICA` / `PAGOS`— desde `sql/cashflow_estructura.sql`. Lo único que cambia es que ahora el proveedor existe, así que esa fila deja de rendir cero.
 
@@ -139,12 +140,13 @@ Desde `feature/cronogramas-tarjetas-corporativas` hay **un cronograma por concep
 | `PROV_LOCALES` | miércoles, quincenal | Cuentas a Pagar Locales (ver `README-proveedores-locales.md`) |
 | `LOGISTICA` | **viernes, quincenal** | Esta pestaña |
 | `SUPERVISORAS` | lunes, semanal | El efectivo de Gastos Supervisoras (ver `README-pagos-tarjetas.md`) |
+| `GASTOS_LOCALES` | lunes, **semanal fijo** | Gastos Locales (ver `README-gastos-locales.md`). **El único que se corre al hábil SIGUIENTE**, y sus pagos no se mueven a mano |
 
 *Quincenal* es el 2do y el 4to de ese día del mes; *semanal*, todos los de ese día (cuatro o cinco). El día y la frecuencia son parámetros de `RO_T_CASHFLOW_PARAMETROS` (`cronograma_logistica_dia` y `cronograma_logistica_frecuencia`, módulo `GENERALES`, grupo `CRONOGRAMA`) que siembra `sql/cashflow_cronograma_conceptos.sql`; sin el script se usa el defecto con un aviso. **`CronogramaPagos` ya no tiene el viernes escrito**: recibe la configuración.
 
 **Con el valor por defecto, Logística no cambia un peso ni una fecha.** Lo fija una prueba de no regresión contra una foto que sacó el código anterior (ver *Pruebas*).
 
-**Cambiar el día o la frecuencia da de baja los overrides vigentes de Logística desde el mes actual**, después de una confirmación que dice cuántos son: con otro día el número de pago apunta a otra fecha, y el override quedaría colgado de un pago que ya no es el mismo. Los overrides llevan el concepto (`RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT.TIPO`); los que existían antes de la columna son todos de Logística, y el script les pone `LOGISTICA`.
+**Cambiar el día o la frecuencia da de baja los overrides vigentes de Logística desde el mes actual** —y también los **importes editados del próximo pago** (sección 15), que la confirmación nombra uno por uno con su fletero, su fecha y su importe—, después de una confirmación que dice cuántos son: con otro día el número de pago apunta a otra fecha, y el override quedaría colgado de un pago que ya no es el mismo. Los overrides llevan el concepto (`RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT.TIPO`); los que existían antes de la columna son todos de Logística, y el script les pone `LOGISTICA`.
 
 ### El corrimiento va para el otro lado que en Ventas, y no es un detalle
 
@@ -416,12 +418,58 @@ La pestaña pasa por `AuthCashflow::puede('logistica_local')`, que busca la clav
 
 ---
 
+## 14. Fleteros habituales y no habituales
+
+*(feature/gastos-locales-fleteros-no-habituales)*
+
+`HABITUAL` en el maestro, `BIT NOT NULL DEFAULT 1`. **Todos los existentes quedaron habituales**: con todos habituales, Logística proyecta exactamente lo mismo que antes, y lo fija una prueba contra la planilla sin la marca.
+
+| | Qué proyecta |
+| --- | --- |
+| **Habitual** | Horas × valor hora, según su cronograma, como siempre |
+| **No habitual** | **No proyecta por cálculo.** Sólo sus **pagos puntuales**: importe y fecha, uno o varios |
+
+- Se marca desde **las dos pantallas** donde se edita el maestro: el interruptor *Habitual* en la fila de la planilla y la columna *Habitual* de *Parámetros › Logística*. Pasa por el mismo `saveFletero`, que ahora acepta `habitual`; si no viene, queda como estaba.
+- **Pasar a no habitual no borra nada.** Sus horas, su valor hora y su mes base se conservan y se ven atenuados; no se piden ni se avisa que faltan. Si vuelve a habitual, vuelve a proyectar con esos datos.
+- **Volver a habitual** deja sus pagos puntuales guardados pero sin proyectar —se ven en su fila, marcados—, y **la confirmación dice cuántos pagos puntuales futuros dejan de proyectarse y por cuánto** (`PUNTUALES_FUTUROS`, que calcula el backend con `LogisticaPlanilla::puntualesFuturos()`).
+- Un no habitual sin pagos puntuales no cuenta en la tarjeta *Sin proyectar*: no le falta nada.
+
+### Los pagos puntuales
+
+`RO_T_CASHFLOW_LOGISTICA_PAGO_PUNTUAL`: fletero, fecha, importe, `VIGENTE` y las seis columnas de auditoría.
+
+- Se cargan, corrigen y dan de baja **debajo de la fila del fletero**, en Logística Local, con el permiso `cashflow.editar.logistica_local`.
+- **La fecha va de mañana en adelante**, validado en el servidor (`Logistica::validarPagoPuntual()`), y el mensaje dice por qué: lo que se paga hoy ya está reflejado en el saldo bancario, y la planilla no lo proyectaría nunca.
+- **No se corre al día hábil**: la cargó alguien que sabe cuándo se paga.
+- Sólo para un fletero **activo y no habitual**: a un habitual se le calcula, y un puntual al lado se sumaría a la cuenta.
+- **Un pago cuya fecha ya pasó** deja de proyectarse y queda como historial: se ve, sin botones, y no se corrige ni se da de baja.
+- Uno posterior al horizonte va a `fuera_horizonte` con el aviso de siempre.
+
+---
+
+## 15. El importe del próximo pago
+
+`RO_T_CASHFLOW_LOGISTICA_IMPORTE_EDIT`. En la **fecha de pago más próxima** de cada fletero habitual —el primer pago, por fecha, posterior a hoy— la celda muestra el cálculo y se puede **cargar el importe real**.
+
+- **Vale sólo para ese pago.** Los siguientes, y el otro pago del mismo mes, se siguen calculando.
+- **No pide motivo**: es el importe real.
+- La identidad es **(fletero, mes, nº de pago)**, la misma de los overrides de fecha: si un feriado nuevo corre la fecha, la edición sigue pegada al mismo pago. Se guarda también la fecha y el **importe calculado del momento**.
+- **Que sea el próximo lo verifica el servidor** (`Logistica::exigirProximo()`) contra la planilla recalculada, no lo que dice la pantalla.
+- La celda editada se ve **como una fecha cargada a mano** (fondo ámbar, borde naranja) y el tooltip dice el calculado, el editado, quién y cuándo. **Dejar el importe vacío deshace** la edición: `VIGENTE = 0`, no `DELETE`.
+- **Cuando la fecha pasa**, el pago no se proyecta —como cualquier pago— y la edición queda sólo en el historial; el próximo pasa a ser el siguiente.
+- Se puede editar aunque el cálculo esté en `null` (un fletero sin horas): es el importe real, y la falta de datos no lo hace menos real.
+- **Cambiar el cronograma de Logística da de baja estas ediciones desde el mes actual**, en la misma transacción que los overrides, y la confirmación las nombra antes de guardar (ver sección 3).
+
+**Sigue sin haber override del valor hora** (sección 4): lo que se edita es el importe de un pago, no la fórmula.
+
+---
+
 ## Lo que este módulo no hace
 
 - **No excluye a nadie de Proveedores Locales.** Sólo avisa. Ver la sección 8.
 - **No calcula IVA ni ningún otro concepto.** Los importes son finales.
 - **No tiene parte real.** No lee ni concilia comprobantes.
-- **No permite editar el valor hora ajustado.** Siempre sale de la fórmula.
+- **No permite editar el valor hora ajustado.** Siempre sale de la fórmula. Lo que sí se edita es el importe del próximo pago (sección 15), que es un pago y no la fórmula.
 - **No crea ni mueve filas del tablero.** La fila `LOGISTICA` ya existía.
 - **No precarga fleteros.**
 
@@ -440,7 +488,8 @@ php cashflow/tests/run.php cronograma    el cronograma de pagos por concepto
 | `tests/test_logistica_valor_hora.php` | Que un ajuste suma **su mes y los dos anteriores** (probado con inflación **variable**, porque con constante las tres cuentas posibles dan lo mismo), la aritmética de meses cruzando año, la inflación constante y variable, que **la base se corre**, el **histórico real de los tres fleteros al centavo**, los tres motivos de `null` y la ventana de meses editables |
 | `tests/test_logistica_planilla.php` | **La no regresión**: con el cronograma `LOGISTICA` por defecto, cada pago de una planilla de dos fleteros, doce meses, siete feriados y un override da la misma fecha, el mismo importe y el mismo estado que la foto que sacó el código anterior. El reparto **mitad y mitad** (también con centavos impares), la **exclusión de los pagos ≤ hoy** (incluido el de hoy), que **la columna de hoy queda vacía**, el **mes partido por el final del tramo** —media columna mensual—, que las tres vistas siguen siendo **sumables**, los cinco casos de `null` y los totales |
 | `tests/test_logistica_provider.php` | El registro, que **no declara componentes**, la serie contra el eje **después de `normalizar()`**, los tres casos de fila en cero con su aviso, que un módulo que lanza **no tumba el tablero**, y el menú |
-| `tests/test_menu.php` | Que `logistica_local` dejó de ser un placeholder y que la categoría Proveedores pasa a 2 de 2. Y, nuevo, que **sin sesión el menú filtrado viene vacío**: falla cerrada |
+| `tests/test_logistica_no_habituales.php` | Que **con todos habituales Logística proyecta igual que antes**; un no habitual con varios pagos puntuales (en su día y en su mes), el de ayer y el de hoy en el historial, sus horas conservadas y sin avisos; los puntuales de un habitual que se ven y no proyectan; cuántos dejan de proyectar al volver a habitual; la **fecha de hoy o anterior rechazada en el servidor**, con su mensaje; la edición del próximo pago que **aplica sólo a ese pago**, el deshacer, que **los siguientes no cambian**, que pasada la fecha queda en el historial, y que el servidor rechaza editar otro que no sea el próximo; el cableado de las escrituras y el script |
+| `tests/test_menu.php` | Que `logistica_local` dejó de ser un placeholder y que la categoría Proveedores pasa a 2 de 2 (3 de 3 desde Gastos Locales). Y, nuevo, que **sin sesión el menú filtrado viene vacío**: falla cerrada |
 | `tests/test_providers.php` | 18 módulos disponibles (era 17) |
 
 ### Dos cosas que las pruebas destaparon
@@ -486,6 +535,7 @@ Css/
 sql/
   cashflow_parametros_generales.sql
   cashflow_logistica_fleteros.sql
+  cashflow_logistica_no_habituales.sql   HABITUAL, pagos puntuales e importe editado
 
 tests/
   test_cronograma_pagos.php

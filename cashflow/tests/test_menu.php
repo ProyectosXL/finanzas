@@ -46,7 +46,7 @@ foreach ($menu['categorias'] as $cat) {
 
 // 2 arriba + 19 en las cinco categorias + 1 al pie. Eran 26 hasta que se
 // sacaron Cronograma, Seguros, Bopreal y Pagos Div. Marzo.
-chequear('el menu tiene los 22 items', 22, count($todos));
+chequear('el menu tiene los 23 items', 23, count($todos));
 
 $incompletos = [];
 
@@ -215,11 +215,11 @@ $orden = array_column($menu['categorias'], 'codigo');
 chequear('Comex tiene sus 3 pestanas con datos', 3, $porCategoria['Comex']['con_datos']);
 chequear('y son 3 en total, ya sin Despachante', 3, $porCategoria['Comex']['total']);
 // Proveedores Locales ya tiene datos: sale de Tango (CPA04 + CPA54 + CPA01).
-// Las DOS tienen datos: Logistica Local dejo de ser un placeholder y proyecta
-// los pagos a los fleteros. Cronograma se saco del menu.
-chequear('Proveedores tiene sus 2 pestanas con datos',
-    2, $porCategoria['Proveedores']['con_datos']);
-chequear('y 2 en total, ya sin Cronograma', 2, $porCategoria['Proveedores']['total']);
+// Las TRES tienen datos: Logistica Local dejo de ser un placeholder, Gastos
+// Locales nacio con datos. Cronograma se saco del menu.
+chequear('Proveedores tiene sus 3 pestanas con datos',
+    3, $porCategoria['Proveedores']['con_datos']);
+chequear('y 3 en total, ya sin Cronograma y con Gastos Locales', 3, $porCategoria['Proveedores']['total']);
 chequear('Logistica Local ya no es un placeholder',
     false, Menu::esPlaceholder('logistica_local'));
 chequear('y el menu la declara con datos',
@@ -331,7 +331,7 @@ if (AuthCashflow::estaAutenticado()) {
 /* LA ESTRUCTURA COMPLETA NO SE FILTRA NUNCA. Si alguien le pusiera el filtro,
    todo lo de arriba pasaria a medir permisos sin que el nombre lo diga. */
 chequear('estructuraCompleta no depende de la sesion',
-    22, count(Menu::estructuraCompleta()['principales'])
+    23, count(Menu::estructuraCompleta()['principales'])
         + count(Menu::estructuraCompleta()['pie'])
         + array_sum(array_map(function ($c) { return count($c['items']); },
                               Menu::estructuraCompleta()['categorias'])));
@@ -374,7 +374,7 @@ foreach ($items as $item) {
 }
 
 chequear('cada enlace del menu lleva su tooltip', [], $malos);
-chequear('y son todos los del menu', 22, count($items));
+chequear('y son todos los del menu', 23, count($items));
 
 $sidebarSrc = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Components/sidebar.php'));
 

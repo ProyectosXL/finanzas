@@ -126,6 +126,7 @@
                 pintarGrid();
                 pintarInflacion();
                 pintarCronograma();
+                pintarGastosLocales(modulo.gastos_locales || null);
                 pintarCotizaciones(modulo.cotizaciones);
             })
             .catch(function(e) {
@@ -455,7 +456,8 @@
                     '</option>';
             }).join('');
 
-            var optFrec = frecuencias.map(function(f) {
+            // Sólo las que el concepto admite: Gastos Locales es semanal fijo.
+            var optFrec = (c.frecuencias || frecuencias).map(function(f) {
                 return '<option value="' + esc(f) + '"' + (f === c.frecuencia ? ' selected' : '') +
                     '>' + esc(f === 'SEMANAL' ? 'Semanal' : 'Quincenal') + '</option>';
             }).join('');
@@ -511,19 +513,32 @@
               encodeURIComponent(concepto))
             .then(function(d) {
                 var bajas = (d.data && d.data.bajas) || 0;
+                var importes = (d.data && d.data.importes) || [];
+
+                /* LOS IMPORTES EDITADOS DEL PRÓXIMO PAGO DE LOS FLETEROS, uno por
+                   uno: quién y por cuánto, antes de guardar. Con otro día, el
+                   número de pago apunta a otro pago y la edición se pierde. */
+                var detalleImportes = importes.length
+                    ? ' También se pierden ' + importes.length + ' importe(s) editado(s) del ' +
+                      'próximo pago, que vuelven al calculado: ' +
+                      importes.map(function(i) {
+                          return (i.nombre || i.cod_provee) + ' (' + fecha(i.fecha) + ', ' +
+                              plata(i.importe) + ')';
+                      }).join('; ') + '.'
+                    : '';
 
                 return Notificacion.confirmar({
                     titulo: 'Cambiar el cronograma de ' + nombre,
                     mensaje: '¿Pagar ' + nombre + ' ' + describir(dia, frecuencia) +
                         ' de cada mes?',
-                    detalle: bajas > 0
+                    detalle: (bajas > 0
                         ? 'Se dan de baja ' + bajas + ' pago(s) movido(s) a mano de ' + nombre +
                           ' desde este mes: con otro día apuntan a otra fecha. Quedan en el ' +
                           'historial.'
                         : 'No hay pagos movidos a mano de ' + nombre + ' desde este mes, así ' +
-                          'que no se da de baja ninguno.',
+                          'que no se da de baja ninguno.') + detalleImportes,
                     confirmar: 'Cambiar',
-                    peligro: bajas > 0
+                    peligro: bajas > 0 || importes.length > 0
                 });
             })
             .then(function(si) {
@@ -583,6 +598,11 @@
 
         conceptos().forEach(function(c) {
             var datos = (cronograma.conceptos || {})[c.concepto] || {};
+
+            /* Un concepto cuyos pagos no se mueven a mano no va en esta tabla:
+               sus fechas se ven abajo, con las demás. Con una fila apagada se
+               leería como que falta correr un script. */
+            if (c.overrides === false) { return; }
 
             proximosDe(c.concepto).forEach(function(p) {
                 html += filaCrono(c, p, !!datos.editable);
@@ -678,7 +698,8 @@
             var datos = (cronograma.conceptos || {})[c.concepto] || {};
 
             (datos.pagos || []).forEach(function(p) {
-                if (p.en_horizonte === false || proximos.indexOf(p) !== -1) { return; }
+                if (p.en_horizonte === false ||
+                    (c.overrides !== false && proximos.indexOf(p) !== -1)) { return; }
 
                 porMes[p.mes] = porMes[p.mes] || {};
                 (porMes[p.mes][c.concepto] = porMes[p.mes][c.concepto] || []).push(p);
@@ -688,20 +709,23 @@
         cuerpo.innerHTML = Object.keys(porMes).sort().map(function(mes) {
             return '<tr><td class="fw-semibold">' + esc(rotuloMes(mes)) + '</td>' +
                 conceptos().map(function(c) {
-                    return '<td>' + celdaResto(porMes[mes][c.concepto]) + '</td>';
+                    return '<td>' + celdaResto(porMes[mes][c.concepto], c) + '</td>';
                 }).join('') +
             '</tr>';
         }).join('');
     }
 
-    function celdaResto(pagos) {
+    function celdaResto(pagos, c) {
         if (!pagos || !pagos.length) { return '—'; }
+
+        var haciaDonde = (c && c.corrimiento === 'SIGUIENTE') ? 'siguiente' : 'anterior';
 
         return pagos.map(function(p) {
             return '<span class="text-nowrap" title="' + esc(p.nombre) + '">' +
                 esc(fecha(p.fecha)) +
                 (p.override ? ' <span class="badge bg-info text-dark">a mano</span>' : '') +
-                (p.corrida ? ' <span class="badge bg-warning text-dark">corrida</span>' : '') +
+                (p.corrida ? ' <span class="badge bg-warning text-dark" title="El día de pago ' +
+                    'no es hábil: se corrió al día hábil ' + haciaDonde + '">corrida</span>' : '') +
                 '</span>';
         }).join('<br>');
     }
@@ -905,6 +929,13 @@
         return abrev[Number(p[1]) - 1] + '-' + p[0].substring(2);
     }
 
+    /** 1234.5 -> '$ 1.234,50' */
+    function plata(v) {
+        return '$ ' + Number(v).toLocaleString('es-AR', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2
+        });
+    }
+
     /** '2026-12-24' -> '24/12/2026' */
     function fecha(f) {
         if (!f) { return '—'; }
@@ -949,6 +980,45 @@
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    /* ================================================================
+       GASTOS LOCALES: LAS CUENTAS EXCLUIDAS
+       ================================================================ */
+
+    function pintarGastosLocales(gl) {
+        var input = document.getElementById('pgenCuentasExcluidas');
+        var audit = document.getElementById('pgenCuentasAuditoria');
+
+        if (!input) { return; }
+
+        input.value = gl ? (gl.texto || '') : '';
+
+        /* Sin el parámetro no hay dónde guardar: el campo muestra el defecto
+           que se está usando y no se edita. Sin permiso, tampoco. */
+        input.disabled = !gl || !gl.creado || !Permisos.puedeEditar(input);
+
+        if (audit) {
+            audit.innerHTML = gl && gl.creado
+                ? Auditoria.icono({ usuario: gl.usuario, fecha: gl.fecha_modif })
+                : (gl ? ' <span class="badge bg-warning text-dark" title="Falta correr ' +
+                    'sql/cashflow_gastos_locales.sql">por defecto</span>' : '');
+        }
+    }
+
+    function guardarCuentas() {
+        var input = document.getElementById('pgenCuentasExcluidas');
+
+        if (!input) { return; }
+
+        pedir(ENDPOINT + '?action=saveCuentasGastosLocales', { cuentas: input.value })
+            .then(function(d) {
+                Notificacion.exito(d.message || 'Guardado.');
+                cargar();
+            })
+            .catch(function(e) {
+                Notificacion.campoInvalido(input, e.message);
+            });
+    }
+
     function pedir(url, cuerpo) {
         var opciones = cuerpo
             ? {
@@ -977,6 +1047,7 @@
         enganchar('pgenBtnRefresh', 'click', cargar);
         enganchar('pgenModalidad', 'change', guardarModalidad);
         enganchar('pgenAplicarConstante', 'click', aplicarConstante);
+        enganchar('pgenGuardarCuentas', 'click', guardarCuentas);
 
         /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
            si es la primera que se ve. Ver Js/parametros-carga.js. */
