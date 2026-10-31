@@ -301,3 +301,42 @@ chequear('los avisos del dolar salen en las dos pestanas de Comex', 2,
     substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel()'));
 chequear('y en Compras Proyectadas', 1,
     substr_count($srcCompras, '$dolar->avisosDolarConNivel($h->hoy())'));
+
+/* ================================================================
+   EN PANTALLA
+   ================================================================ */
+seccion('el cartel dice la regla en una linea');
+
+chequear('con N = 7 y BCRA',
+    'Los pagos de los próximos 7 días —hasta el 07/11/2026— y los vencidos van a dólar BCRA '
+    . 'vendedor del 28/10/2026 ($ 1.480,00); los posteriores, a dólar futuro ROFEX del mes de '
+    . 'pago.', DolarFuturo::explicarRegla($regla));
+chequear('con N = 0, todo a la curva', true,
+    strpos(DolarFuturo::explicarRegla($cero), 'Todos los pagos se valúan con dólar futuro') === 0);
+chequear('sin BCRA, lo dice', true,
+    strpos(DolarFuturo::explicarRegla($sin), 'que hoy no se puede leer') !== false);
+
+seccion('la grilla distingue BCRA, curva, aproximada y override');
+
+$srcFechasJs = file_get_contents(__DIR__ . '/../Js/Comex-fechas.js');
+$srcComprasJs = file_get_contents(__DIR__ . '/../Js/Compras-Proyectadas.js');
+
+chequear('la celda de Comex marca BCRA con su clase', true,
+    strpos($srcFechasJs, "clases.push('cotiz-bcra')") !== false);
+chequear('y con el dia de la cotizacion debajo del valor', true,
+    strpos($srcFechasJs, "'BCRA ' + fecha(item.COTIZ_BCRA_FECHA)") !== false);
+chequear('las dos pestanas de Comex tienen el estilo', 2,
+    substr_count(file_get_contents(__DIR__ . '/../Css/Comex-Proveedores_exterior.css')
+        . file_get_contents(__DIR__ . '/../Css/Comex-Crono_nacionalizacion.css'), '.cotiz-bcra {'));
+chequear('Compras Proyectadas marca BCRA con el mismo icono', true,
+    strpos($srcComprasJs, "origen === 'BCRA' ? ' <i class=\"fas fa-building-columns") !== false);
+chequear('el cartel de Comex suma la regla', true,
+    strpos($srcFechasJs, "(c.regla ? ' ' + c.regla : '')") !== false);
+chequear('y el de Compras Proyectadas tambien', true,
+    strpos($srcComprasJs, "(datos.dolar ? ' ' + esc(datos.dolar) : '')") !== false);
+
+$fila = Comex::valuar(['PENDIENTE_USD' => 1000, 'FECHA_PAGO_EFECTIVA' => $hoy], $curva,
+    'PENDIENTE_USD', 'FECHA_PAGO_EFECTIVA', $regla);
+chequear('la fila valuada con BCRA lleva su fecha para la marca', '2026-10-28',
+    $fila['COTIZ_BCRA_FECHA']);
+chequear('y su importe en pesos', 1480000.0, $fila['IMPORTE_ARS']);

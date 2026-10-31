@@ -964,6 +964,33 @@ class DolarFuturo {
     }
 
     /**
+     * La regla en una linea, para el cartel de las tres pantallas.
+     *
+     * Vive aca por el mismo motivo que explicar(): el texto lo muestran tres
+     * pantallas, y tres copias se desincronizan.
+     *
+     * Estatica y pura.
+     *
+     * @param array|null $regla Lo que devolvio bcra()
+     * @return string
+     */
+    public static function explicarRegla($regla) {
+        if (!is_array($regla) || empty($regla['hasta'])) {
+            return 'Todos los pagos se valúan con dólar futuro ROFEX del mes de pago: los días '
+                . 'con dólar BCRA están en 0.';
+        }
+
+        $bcra = empty($regla['cotizacion'])
+            ? 'dólar BCRA vendedor —que hoy no se puede leer, así que quedan sin valuar—'
+            : 'dólar BCRA vendedor del ' . self::fechaCorta($regla['cotizacion']['fecha']) . ' ($ '
+              . number_format($regla['cotizacion']['valor'], 2, ',', '.') . ')';
+
+        return 'Los pagos de los próximos ' . $regla['dias'] . ' días —hasta el '
+            . self::fechaCorta($regla['hasta']) . '— y los vencidos van a ' . $bcra
+            . '; los posteriores, a dólar futuro ROFEX del mes de pago.';
+    }
+
+    /**
      * El aviso de que la cotizacion BCRA tiene mas de M dias, o null.
      *
      * Atencion y no critico: la cotizacion se USA igual -es la ultima que

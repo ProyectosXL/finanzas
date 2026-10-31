@@ -363,6 +363,13 @@
     border-left: 3px dashed #7e57c2;
 }
 
+/* CASO 3: se paga en los proximos dias -o ya vencio- y va a dolar BCRA
+   vendedor, no a la curva. Es una regla, no una correccion ni una
+   aproximacion: borde lleno, en otro color. Ver DolarFuturo. */
+.tab-proveedores_exterior .cotiz-bcra {
+    border-left: 3px solid #26a69a;
+}
+
 .tab-proveedores_exterior .cotiz-marca {
     font-size: 9px;
     opacity: 0.7;
