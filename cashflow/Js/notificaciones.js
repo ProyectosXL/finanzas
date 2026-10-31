@@ -286,9 +286,10 @@ var Notificacion = (function() {
          *        'casillas', `opciones` es [{valor, rotulo, nota, marcada}] y
          *        `titular: true` agrega a cada una un botón para marcar cuál es
          *        la principal: vuelve {elegidas: [...], titular: valor}.
-         * @param {Object} [opciones.renglones] {cantidad, campos, obligatorios}:
-         *        una grilla de `cantidad` renglones con esos campos. Con
-         *        `obligatorios`, tienen que venir todos.
+         * @param {Object} [opciones.renglones] {cantidad, campos, obligatorios,
+         *        valores}: una grilla de `cantidad` renglones con esos campos. Con
+         *        `obligatorios`, tienen que venir todos. `valores` es una lista de
+         *        {campo: valor} con lo que trae cada renglón al abrir.
          * @param {Function} [opciones.validar] (valores) => null | 'mensaje':
          *        lo que no se puede ver campo por campo (al menos un importe).
          * @returns {Promise<Object|null>}
@@ -779,7 +780,15 @@ var Notificacion = (function() {
                 cuerpo += '<tr data-renglon="' + i + '"><td class="small text-muted align-middle">'
                     + (i + 1) + '</td>'
                     + grilla.campos.map(function(c) {
-                        return '<td>' + campoHtml(c, base, i) + '</td>';
+                        var inicial = (grilla.valores && grilla.valores[i]
+                                       && grilla.valores[i][c.nombre] !== undefined)
+                            ? grilla.valores[i][c.nombre] : c.valor;
+                        var conValor = {};
+
+                        for (var k in c) { conValor[k] = c[k]; }
+                        conValor.valor = inicial;
+
+                        return '<td>' + campoHtml(conValor, base, i) + '</td>';
                     }).join('')
                     + '</tr>';
             }

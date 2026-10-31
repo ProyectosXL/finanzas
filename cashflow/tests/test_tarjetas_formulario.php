@@ -146,3 +146,22 @@ lanzaConTF('el periodo es obligatorio', function () {
 lanzaConTF('el vencimiento es obligatorio', function () {
     TarjetasResumen::validarFecha('');
 }, 'no es una fecha válida');
+
+/* ================================================================
+   LA PANTALLA USA EL FORMULARIO
+   ================================================================ */
+seccion('la pantalla carga resumenes con el formulario, no con separadores');
+
+$ptJs = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../Js/Financiero-Pagos_tarjetas.js'));
+$cuerpoNuevo = substr($ptJs, strpos($ptJs, 'function nuevoResumen('));
+$cuerpoNuevo = substr($cuerpoNuevo, 0, strpos($cuerpoNuevo, 'function baseHistorica('));
+$cuerpoBase = substr($ptJs, strpos($ptJs, 'function baseHistorica('));
+$cuerpoBase = substr($cuerpoBase, 0, strpos($cuerpoBase, 'function historicoManual('));
+
+chequear('el resumen se carga con Notificacion.formulario', true,
+    strpos($cuerpoNuevo, 'Notificacion.formulario(') !== false);
+chequear('ya no parte una linea por "|"', false, strpos($cuerpoNuevo, "split('|')") !== false);
+chequear('la base historica es una grilla de 3 renglones obligatorios', true,
+    strpos($cuerpoBase, 'cantidad: 3,') !== false && strpos($cuerpoBase, 'obligatorios: true') !== false);
+chequear('el resumen manda las tarjetas y la titular', true,
+    strpos($cuerpoNuevo, 'titular: compartible ? v.tarjetas.titular') !== false);

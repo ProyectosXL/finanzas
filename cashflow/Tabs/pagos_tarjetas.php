@@ -161,7 +161,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         </div>
                         <div class="kpi-card-value" id="supSinProyectar">0</div>
                         <div class="kpi-card-footer">
-                            <span class="text-muted">inactivas o fuera del maestro</span>
+                            <span class="text-muted">inactivas, fuera del maestro o sin histórico</span>
                         </div>
                     </div>
                 </div>
