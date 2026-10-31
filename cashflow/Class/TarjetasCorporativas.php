@@ -108,6 +108,9 @@ class TarjetasCorporativas {
     /** De donde sale la fecha con la que entra al eje */
     const FECHA_VTO = 'VENCIMIENTO';
     const FECHA_REUBICADA = 'REUBICADA';
+    /* El debito de su tarjeta a partir de su vencimiento. Desde
+       feature/tarjetas-resumenes-seguros es la fecha de toda vinculada. */
+    const FECHA_TARJETA = 'DEBITO_TARJETA';
 
     /* ====================================================================
        EL UNIVERSO
@@ -403,14 +406,46 @@ class TarjetasCorporativas {
 
             $fila['VENCIDA'] = ($fechaVto !== null && $fechaVto < $hoyStr);
 
-            /* LA FECHA: el vencimiento vigente, salvo que este vencido y la
-               factura vinculada, que se reubica en el proximo pago de su tarjeta. */
+            /* LA FECHA DE UNA NO VINCULADA es su vencimiento: no suma, y sin
+               tarjeta no hay debito en el que ponerla. */
             $fila['FECHA'] = $fechaVto;
             $fila['FECHA_ORIGEN'] = self::FECHA_VTO;
             $fila['MES_PAGO'] = ($fechaVto === null) ? null : substr($fechaVto, 0, 7);
             $fila['REUBICADA'] = false;
+            $debitoPasado = false;
 
-            if ($fila['VENCIDA'] && $tarjeta !== null) {
+            /* LA DE UNA VINCULADA ES EL DEBITO DE SU TARJETA: el primero igual o
+               posterior a su vencimiento vigente. Cada cuota va al debito que le
+               toca. Si ese debito ya paso, rige la regla de las vencidas: el
+               proximo pago de la tarjeta posterior a hoy. Ver
+               TarjetasVencimiento::pagoDesde(). */
+            if ($tarjeta !== null && $fechaVto !== null) {
+                $pago = TarjetasVencimiento::pagoDesde($tarjeta['DIA_VENCIMIENTO'], $fechaVto,
+                    isset($resumenes[$idTarjeta]) ? $resumenes[$idTarjeta] : [], $meses, $habiles);
+
+                if ($pago !== null && $pago['fecha'] > $hoyStr) {
+                    $fila['FECHA'] = $pago['fecha'];
+                    $fila['FECHA_ORIGEN'] = self::FECHA_TARJETA;
+                    $fila['MES_PAGO'] = $pago['mes'];
+
+                    if ($pago['vencimiento'] !== null) {
+                        foreach ($pago['vencimiento']['faltan'] as $m) {
+                            if (!in_array($m, $faltan, true)) {
+                                $faltan[] = $m;
+                            }
+                        }
+                    }
+                } elseif ($pago === null && $fechaVto > $hoyStr) {
+                    /* VENCE DESPUES DEL ULTIMO DEBITO DEL HORIZONTE: cae fuera, y
+                       eso es lo que se informa, sin inventarle una fecha. */
+                    $fila['FECHA'] = null;
+                    $fila['MES_PAGO'] = null;
+                } else {
+                    $debitoPasado = true;
+                }
+            }
+
+            if ($debitoPasado) {
                 $prox = $proximos[$idTarjeta];
 
                 if ($prox !== null) {
@@ -524,7 +559,10 @@ class TarjetasCorporativas {
                     . (!empty($fila['VENCIDA']) ? ', en el próximo vencimiento de esa tarjeta.' : '.');
 
             case self::SIN_FECHA:
-                return 'No tiene fecha de vencimiento en Tango y no se pudo ubicar en el eje.';
+                return empty(self::vtoVigente($fila))
+                    ? 'No tiene fecha de vencimiento en Tango y no se pudo ubicar en el eje.'
+                    : 'Vence el ' . self::corto(self::vtoVigente($fila)) . ' y ningún débito de su '
+                      . 'tarjeta dentro del horizonte llega a esa fecha: cae fuera del horizonte.';
         }
 
         $corregido = empty($fila['VTO_EDITADO']) ? ''
@@ -535,6 +573,12 @@ class TarjetasCorporativas {
             return 'Venció el ' . self::corto(self::vtoVigente($fila)) . $corregido
                 . ' y sale en el próximo pago de su tarjeta, el ' . self::corto($fila['FECHA'])
                 . ': una tarjeta se paga una vez por mes.';
+        }
+
+        if (isset($fila['FECHA_ORIGEN']) && $fila['FECHA_ORIGEN'] === self::FECHA_TARJETA) {
+            return 'Vence el ' . self::corto(self::vtoVigente($fila)) . $corregido . ' y se paga '
+                . 'en el débito de su tarjeta del ' . self::corto($fila['FECHA']) . ': el primero '
+                . 'a partir de su vencimiento.';
         }
 
         return empty($fila['VTO_EDITADO'])

@@ -137,19 +137,23 @@ chequear('dos cuotas del mismo comprobante dan la misma clave',
 /* ================================================================
    LA FECHA: EL VENCIMIENTO DE TANGO
    ================================================================ */
-seccion('una factura VINCULADA no vencida entra por su vencimiento de Tango');
+seccion('una factura VINCULADA sale en el debito de su tarjeta a partir de su vencimiento');
+
+/* Vence el 05/10 y la tarjeta vence el 10: sale en el debito del 12/10 -el 10 cae
+   sabado-. Desde feature/tarjetas-resumenes-seguros la fecha de una vinculada es
+   el debito de su tarjeta y no el vencimiento de Tango. */
 
 $facturas = [facturaTC('OGAAA', 'A001', '2026-10-05', 100000)];
 $vincA = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7];
 $r = TarjetasCorporativas::resolver($facturas, $vincA, [], $TARJETAS, [], $HABILES, $MESES, $HOY);
 $fila = $r['filas'][0];
 
-chequear('la fecha es el vencimiento', '2026-10-05', $fila['FECHA']);
-chequear('el origen lo dice', TarjetasCorporativas::FECHA_VTO, $fila['FECHA_ORIGEN']);
+chequear('la fecha es el debito de su tarjeta', '2026-10-12', $fila['FECHA']);
+chequear('el origen lo dice', TarjetasCorporativas::FECHA_TARJETA, $fila['FECHA_ORIGEN']);
 chequear('no esta vencida', false, $fila['VENCIDA']);
 chequear('no se reubico', false, $fila['REUBICADA']);
 chequear('entra al flujo', true, $fila['PROYECTA']);
-chequear('el mes de pago es el del vencimiento', '2026-10', $fila['MES_PAGO']);
+chequear('el mes de pago es el del debito', '2026-10', $fila['MES_PAGO']);
 
 seccion('una factura SIN vincular no entra al flujo, aunque no este vencida');
 
@@ -260,7 +264,7 @@ seccion('la cobertura es un renglon aparte, no un multiplicador');
 
 $facturas = [
     facturaTC('OGAAA', 'A001', '2026-10-05', 100000),
-    facturaTC('OGBBB', 'A002', '2026-10-20', 300000)
+    facturaTC('OGBBB', 'A002', '2026-10-08', 300000)
 ];
 
 $vinculos = [
@@ -287,7 +291,7 @@ chequear('cuenta las facturas', 2, $cob[0]['facturas']);
 chequear('la fecha es el vencimiento de la tarjeta, no de las facturas',
     '2026-10-12', $cob[0]['fecha']);
 chequear('y no la de ninguna de las dos', true,
-    $cob[0]['fecha'] !== '2026-10-05' && $cob[0]['fecha'] !== '2026-10-20');
+    $cob[0]['fecha'] !== '2026-10-05' && $cob[0]['fecha'] !== '2026-10-08');
 
 seccion('las no vinculadas no generan cobertura');
 
@@ -563,7 +567,7 @@ seccion('una vencida reubicada suma a la cobertura de su mes nuevo');
 
 $vencidaVinculada = [
     facturaTC('OGAAA', 'A001', '2026-08-15', 500000),   // vencida, se reubica a octubre
-    facturaTC('OGBBB', 'A002', '2026-10-20', 100000)    // vence en octubre
+    facturaTC('OGBBB', 'A002', '2026-10-08', 100000)    // vence antes del debito de octubre
 ];
 
 $dos = [
@@ -619,7 +623,7 @@ foreach ($r['filas'] as $f) {
 chequear('ninguna fila queda sin explicacion', 0, $sinExplicacion);
 
 chequear('la que entra dice por que fecha', true,
-    strpos($r['filas'][1]['EXPLICACION'], 'fecha de vencimiento de Tango') !== false);
+    strpos($r['filas'][1]['EXPLICACION'], 'débito de su tarjeta del 12/10/2026') !== false);
 chequear('la excluida trae su motivo', true,
     strpos($r['filas'][2]['EXPLICACION'], 'Ya está en Supervisoras') !== false);
 chequear('y la vencida sin tarjeta dice que hacer', true,
@@ -690,16 +694,16 @@ chequear('sin corregir: vencida y reubicada al proximo pago', [true, true, '2026
     [$sinEd['VENCIDA'], $sinEd['REUBICADA'], $sinEd['FECHA']]);
 
 $ed = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
-    $HOY, $vtoA('2026-11-20'))['filas'][0];
+    $HOY, $vtoA('2026-11-05'))['filas'][0];
 chequear('corregida a una fecha futura deja de estar vencida', false, $ed['VENCIDA']);
-chequear('no se reubica: entra en la fecha corregida', [false, '2026-11-20', '2026-11'],
+chequear('no se reubica: entra en el debito de su vencimiento corregido', [false, '2026-11-10', '2026-11'],
     [$ed['REUBICADA'], $ed['FECHA'], $ed['MES_PAGO']]);
-chequear('la fila dice que esta corregida, y conserva el de Tango', [true, '2026-08-15', '2026-11-20'],
+chequear('la fila dice que esta corregida, y conserva el de Tango', [true, '2026-08-15', '2026-11-05'],
     [$ed['VTO_EDITADO'], $ed['FECHA_VTO'], $ed['FECHA_VTO_VIGENTE']]);
 chequear('y quien la corrigio, con el motivo', ['sistemas', 'Otro resumen'],
     [$ed['VTO_EDIT_USUARIO'], $ed['VTO_EDIT_MOTIVO']]);
 chequear('el texto nombra el vencimiento de Tango', true,
-    strpos($ed['EXPLICACION'], 'En Tango vence el 15/08/2026') !== false);
+    stripos($ed['EXPLICACION'], 'en Tango vence el 15/08/2026') !== false);
 
 /* LA COBERTURA SE MUEVE CON LA FECHA: el mes de pago es el corregido. */
 $cobEd = TarjetasCorporativas::cobertura([$ed], $TARJETAS, [], $HABILES, $MESES, $HOY);
@@ -712,7 +716,7 @@ $resNov = [7 => ['2026-11' => ['ID' => 81, 'MES' => '2026-11', 'IMPORTE_ARS' => 
                                'PAGADO' => false]]];
 chequear('corregida a noviembre: cubierta por el resumen de noviembre', TarjetasCorporativas::CUBIERTA,
     TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, $resNov, $HABILES, $MESES, $HOY,
-        $vtoA('2026-11-20'))['filas'][0]['MOTIVO']);
+        $vtoA('2026-11-05'))['filas'][0]['MOTIVO']);
 chequear('sin corregir no la cubre: sale en octubre', TarjetasCorporativas::OK,
     TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, $resNov, $HABILES, $MESES,
         $HOY)['filas'][0]['MOTIVO']);
@@ -721,7 +725,10 @@ chequear('sin corregir no la cubre: sale en octubre', TarjetasCorporativas::OK,
    vencida, y al proximo pago de la tarjeta. */
 $pasada = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
     $HOY, $vtoA('2026-09-20'))['filas'][0];
-chequear('corregida a una fecha que ya paso: vencida y reubicada', [true, true, '2026-10-12'],
+/* Desde feature/tarjetas-resumenes-seguros no es una "reubicada": vencio el 20/09,
+   el primer debito a partir de ahi es el 12/10 y todavia no paso. Es la misma
+   fecha que daria la regla de las vencidas, y tiene que serlo. */
+chequear('corregida a una fecha que ya paso: vencida, en el debito siguiente', [true, false, '2026-10-12'],
     [$pasada['VENCIDA'], $pasada['REUBICADA'], $pasada['FECHA']]);
 
 seccion('deshacer vuelve al de Tango, y la correccion es por cuota');
