@@ -38,6 +38,12 @@
     var modalManual = null;
     var manualFila = null;
 
+    // El último envío (RAF) o depósito (BDE) de cada local. Se pide aparte de
+    // la tabla de locales: la vista tarda, y es sólo informativo. null mientras
+    // no llegó.
+    var datosMovLocales = null;
+    var modalMovLocal = null;
+
     // Qué movimiento se está corrigiendo desde el formulario (null = alta).
     // Corregir no pisa: el servidor da de baja el anterior e inserta uno nuevo.
     var movReemplaza = null;
@@ -95,6 +101,25 @@
 
                 if (btn) {
                     abrirManual(parseInt(btn.dataset.fila, 10));
+                }
+            });
+        }
+
+        var modalMov = document.getElementById('modalMovLocal');
+
+        if (modalMov && window.bootstrap && bootstrap.Modal) {
+            modalMovLocal = new bootstrap.Modal(modalMov);
+        }
+
+        // Lo mismo para el ícono del último envío o depósito de cada local
+        var cuerpoLocales = document.getElementById('bodyLocales');
+
+        if (cuerpoLocales) {
+            cuerpoLocales.addEventListener('click', function(ev) {
+                var btn = ev.target.closest('.sal-btn-movlocal');
+
+                if (btn && !btn.classList.contains('sal-apagado')) {
+                    abrirMovLocal(parseInt(btn.dataset.suc, 10));
                 }
             });
         }
@@ -687,11 +712,127 @@
 
                 Cargando.ocultar('loadingLocales');
                 mostrar('wrapperLocales', true);
+
+                pedirMovLocales();
             })
             .catch(function(error) {
                 Cargando.ocultar('loadingLocales');
                 avisar('No se pudo consultar la caja de los locales: ' + error.message);
             });
+    }
+
+    /**
+     * El último envío o depósito de cada local, en un pedido aparte: la tabla
+     * ya está dibujada y los íconos esperan apagados. Si no llega, quedan
+     * apagados y el aviso lo dice; los saldos no cambian.
+     */
+    function pedirMovLocales() {
+        datosMovLocales = null;
+
+        pedirJson(URL_SALDOS + '?action=getUltimosMovLocales')
+            .then(function(data) {
+                datosMovLocales = data;
+            })
+            .catch(function(error) {
+                datosMovLocales = { locales: {}, leido: false, avisos: [
+                    'No se pudieron leer los últimos envíos y depósitos de los locales (' +
+                    error.message + '): los íconos se ven apagados.'] };
+            })
+            .then(function() {
+                pintarAvisos();
+
+                if (datosLocales) {
+                    recalcularLocales();
+                }
+            });
+    }
+
+    /**
+     * El último movimiento de un local según la gestión: el último RAF si
+     * envía, el último BDE si deposita (Saldos::COMPROBANTE_GESTION). null si
+     * no tiene, o si todavía no llegó.
+     */
+    function movLocal(nro, deposita) {
+        var porLocal = datosMovLocales && datosMovLocales.locales && datosMovLocales.locales[nro];
+
+        return porLocal ? (porLocal[deposita ? 'BDE' : 'RAF'] || null) : null;
+    }
+
+    /** Los totales de un bloque, por moneda y sin mezclar: "$ 680.000,00 + US$ 100,00" */
+    function totalesMov(m) {
+        var partes = [];
+
+        Object.keys(m.totales).forEach(function(moneda) {
+            partes.push(importe(m.totales[moneda], moneda));
+        });
+
+        return partes.join(' + ');
+    }
+
+    /** Pone el ícono de un local en su estado: apagado, o con fecha e importe en el tooltip */
+    function pintarIconoMov(f, deposita) {
+        var btn = document.querySelector('.sal-btn-movlocal[data-suc="' + f.nro_sucursal + '"]');
+
+        if (!btn) {
+            return;
+        }
+
+        var m = movLocal(f.nro_sucursal, deposita);
+        var que = deposita ? 'depósito' : 'envío';
+        var titulo;
+
+        if (datosMovLocales === null) {
+            titulo = 'Buscando el último ' + que + '…';
+        } else if (!datosMovLocales.leido) {
+            titulo = 'No se pudieron leer los envíos y depósitos de los locales';
+        } else if (!m) {
+            titulo = deposita ? 'Sin depósitos registrados' : 'Sin envíos registrados';
+        } else {
+            titulo = 'Último ' + que + ': ' + fecha(m.fecha) + ' · ' + totalesMov(m) +
+                (m.comprobantes.length > 1 ? ' (' + m.comprobantes.length + ' comprobantes)' : '');
+        }
+
+        btn.classList.toggle('sal-apagado', !m);
+        btn.title = titulo;
+    }
+
+    /** El detalle del último envío o depósito de un local, con la gestión que hay en pantalla */
+    function abrirMovLocal(nro) {
+        var f = ((datosLocales && datosLocales.filas) || []).filter(function(x) {
+            return x.nro_sucursal === nro;
+        })[0];
+
+        if (!f || !modalMovLocal) {
+            return;
+        }
+
+        var sel = document.querySelector('.sal-gestion[data-suc="' + nro + '"]');
+        var deposita = (sel ? sel.value : f.gestion) !== 'ENVIA';
+        var m = movLocal(nro, deposita);
+
+        if (!m) {
+            return;
+        }
+
+        texto('movLocalTitulo', (deposita ? 'Último depósito de ' : 'Último envío de ') + f.local);
+
+        document.getElementById('bodyMovLocal').innerHTML = m.comprobantes.map(function(c) {
+            return '<tr>' +
+                '<td class="text-center">' + fecha(m.fecha) + '</td>' +
+                '<td>' + escapar(c.comprobante) + '</td>' +
+                '<td class="text-end sal-saldo">' + importe(c.monto, c.moneda) + '</td>' +
+                '<td class="text-center">' + escapar(c.moneda) + '</td>' +
+                '</tr>';
+        }).join('');
+
+        document.getElementById('footMovLocal').innerHTML = Object.keys(m.totales).map(function(moneda) {
+            return '<tr class="sal-fila-total">' +
+                '<td colspan="2" class="fw-bold text-end">Total en ' + escapar(moneda) + '</td>' +
+                '<td class="text-end fw-bold sal-saldo">' + importe(m.totales[moneda], moneda) + '</td>' +
+                '<td></td></tr>';
+        }).join('');
+
+        modalMovLocal.show();
     }
 
     function pintarTablaLocales() {
@@ -719,7 +860,12 @@
             html += '<tr data-suc="' + f.nro_sucursal + '"' +
                     (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>';
 
+            // El último envío o depósito: el estado y el tooltip los pone
+            // recalcularLocales(), porque dependen de la gestión en pantalla.
             html += '<td class="fw-semibold">' + escapar(f.local) +
+                    ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 sal-btn-movlocal sal-apagado" ' +
+                        'data-suc="' + f.nro_sucursal + '" title="Buscando el último envío o depósito…">' +
+                        '<i class="fas fa-money-bill-transfer"></i></button>' +
                     (f.sin_parametro
                         ? '<div class="sal-subtitulo sal-error">sin configurar en Parámetros: ' +
                           'se toma Deposita con reserva cero</div>'
@@ -919,6 +1065,9 @@
             if (celdaAcred && f.acreditacion && datosLocales.acreditacion_creada) {
                 celdaAcred.title = f.acreditacion.explicacion[deposita ? 'DEPOSITA' : 'ENVIA'] || '';
             }
+
+            // El último envío o depósito también sigue a la gestión de la pantalla
+            pintarIconoMov(f, deposita);
 
             totales.saldo += saldo;
             totales.reserva += reserva;
@@ -1459,7 +1608,10 @@
             (datosSaldos && datosSaldos.avisos) || [];
 
         AvisosPanel.pintarPestana('avisosSaldos', conNivel, { tab: 'saldos', sub: 'saldos' });
-        AvisosPanel.pintarPestana('avisosSaldosLocales', (datosLocales && datosLocales.avisos) || [],
+        // Los de la caja y, aparte porque llegan después, los del último envío
+        AvisosPanel.pintarPestana('avisosSaldosLocales',
+            ((datosLocales && datosLocales.avisos) || []).concat(
+                (datosMovLocales && datosMovLocales.avisos) || []),
             { tab: 'saldos', sub: 'locales' });
         AvisosPanel.pintarPestana('avisosSaldosFondos', (datosFondos && datosFondos.avisos) || [],
             { tab: 'saldos', sub: 'fondos' });

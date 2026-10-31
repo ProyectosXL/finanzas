@@ -281,7 +281,7 @@ class AuthCashflow {
             'getHistorialRubroPct'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
-        'Saldos' => ['getSaldos', 'getLocales', 'getFondos', 'getMovimientosFondo'],
+        'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],
         'Tarjetas' => ['getDatos', 'getHistorialFactura', 'getTarjetas', 'getResumenes'],
         'Ventas' => ['getProyeccionVentas', 'getProyeccionCobranzas', 'getAnalisisVentas',
             'getVentaAcumulada', 'getVentaBalance', 'getParametros']

@@ -65,6 +65,15 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* El ultimo envio o deposito de cada local. Aparte de getLocales: la
+           vista tarda, es solo informativo, y la tabla no lo espera. */
+        case 'getUltimosMovLocales':
+            echo json_encode([
+                'success' => true,
+                'data' => $saldos->getUltimosMovimientosLocales()
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'guardarCargaLocales':
             $data = bodyJson();
 

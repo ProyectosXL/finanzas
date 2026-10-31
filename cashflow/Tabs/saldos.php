@@ -386,6 +386,49 @@ $edita = AuthCashflow::puedeEditar('saldos');
                 </div>
             </div>
         </div>
+
+        <!-- El último envío (RAF) o depósito (BDE) de un local: todos los
+             comprobantes de su última fecha, con el total por moneda. Sale de
+             RO_V_GASTOS_CAJA_SUCURSALES y es sólo informativo: no cambia lo que
+             el local aporta al cashflow. Lo ve cualquiera que vea la pestaña. -->
+        <div class="modal fade" id="modalMovLocal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h6 class="modal-title">
+                            <i class="fas fa-money-bill-transfer me-1"></i>
+                            <span id="movLocalTitulo"></span>
+                        </h6>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0" id="tablaMovLocal">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="text-center">Fecha</th>
+                                        <th>Comprobante</th>
+                                        <th class="text-end">Importe</th>
+                                        <th class="text-center">Moneda</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="bodyMovLocal"></tbody>
+                                <tfoot class="table-light" id="footMovLocal"></tfoot>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer justify-content-between">
+                        <small class="text-muted">
+                            Es informativo: no cambia lo que el local aporta al cashflow.
+                        </small>
+                        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ============================================================

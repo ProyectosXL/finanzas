@@ -174,6 +174,16 @@ class Saldos {
     /** El script que agrega ID_REEMPLAZA a la cabecera de carga */
     const SCRIPT_EDICION = 'sql/cashflow_saldos_edicion_fila.sql';
 
+    /**
+     * El comprobante de Tango con el que un local entrega su efectivo, segun
+     * su gestion: el que ENVIA lo manda con un RAF; el que DEPOSITA, con una
+     * boleta de deposito (BDE). Ver armarUltimosMovimientos().
+     */
+    const COMPROBANTE_GESTION = [self::DEPOSITA => 'BDE', self::ENVIA => 'RAF'];
+
+    /** La vista de Tango, en el servidor 'locales', con los comprobantes de caja de cada local */
+    const VISTA_GASTOS_CAJA = 'RO_V_GASTOS_CAJA_SUCURSALES';
+
     /** El saldo de Mercado Pago: el ultimo registro por CREATED_AT */
     const TABLA_MP = 'MP_T_SALDO_DEMANDA';
 
@@ -2536,6 +2546,145 @@ class Saldos {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /**
+     * El ultimo envio (RAF) y el ultimo deposito (BDE) de cada local propio
+     * habilitado, desde RO_V_GASTOS_CAJA_SUCURSALES en el servidor 'locales'.
+     *
+     * UNA SOLA CONSULTA PARA TODOS LOS LOCALES, no una por fila, y trae los
+     * dos comprobantes: la gestion se puede cambiar en la pantalla antes de
+     * guardar, y el icono tiene que seguirla sin volver a preguntar. De cada
+     * local y comprobante, TODOS los de su ultima fecha: si ese dia hubo mas
+     * de uno, se suman. Solo las columnas que se muestran.
+     *
+     * ES SOLO INFORMATIVO: no toca ningun importe de la serie Caja Locales.
+     * Por eso va en un pedido aparte de getPestanaLocales() -la vista tarda un
+     * par de segundos y la tabla no tiene por que esperarla- y nunca lanza:
+     * una falla es un aviso de atencion y los iconos apagados.
+     *
+     * @return array ['locales' => mapa de armarUltimosMovimientos(), 'leido' => bool,
+     *               'avisos' => [string]]
+     */
+    public function getUltimosMovimientosLocales() {
+        try {
+            $cid = $this->conectar('locales');
+            $p = $this->prefijoLocales();
+            $vista = $p . self::VISTA_GASTOS_CAJA;
+            $comps = "'" . implode("', '", array_values(self::COMPROBANTE_GESTION)) . "'";
+
+            $sql = "WITH U AS (
+                        SELECT G.NRO_SUCURS, G.COD_COMP, MAX(G.FECHA) AS FECHA
+                        FROM {$vista} G
+                        INNER JOIN {$p}SUCURSALES_LAKERS B ON G.NRO_SUCURS = B.NRO_SUCURSAL
+                        WHERE G.COD_COMP IN ({$comps}) AND B.CANAL = 'PROPIOS' AND B.HABILITADO = 1
+                        GROUP BY G.NRO_SUCURS, G.COD_COMP
+                    )
+                    SELECT G.FECHA, G.NRO_SUCURS, G.COD_COMP, G.N_COMP, G.MONTO, G.MONEDA
+                    FROM {$vista} G
+                    INNER JOIN U ON U.NRO_SUCURS = G.NRO_SUCURS AND U.COD_COMP = G.COD_COMP
+                                AND U.FECHA = G.FECHA
+                    ORDER BY G.NRO_SUCURS, G.COD_COMP, G.N_COMP";
+
+            $stmt = sqlsrv_query($cid, $sql);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer ' . self::VISTA_GASTOS_CAJA));
+            }
+
+            $v = [];
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $v[] = $row;
+            }
+
+            sqlsrv_free_stmt($stmt);
+        } catch (Throwable $e) {
+            return ['locales' => [], 'leido' => false, 'avisos' => [
+                'No se pudieron leer los últimos envíos y depósitos de los locales ('
+                . $e->getMessage() . '): los íconos se ven apagados. Los saldos y lo que aporta '
+                . 'cada local no cambian.']];
+        }
+
+        return ['locales' => self::armarUltimosMovimientos($v), 'leido' => true, 'avisos' => []];
+    }
+
+    /**
+     * Agrupa por local y comprobante lo que devolvio la vista. PURA.
+     *
+     * Cada bloque es la ultima fecha de ese comprobante en ese local: la
+     * lista de comprobantes (COD_COMP + N_COMP, sin los espacios de Tango) y
+     * EL TOTAL POR MONEDA. Un local manda pesos y a veces dolares por RAF, y
+     * sumarlos daria un numero que no es ni una cosa ni la otra: es la regla
+     * de todo el modulo.
+     *
+     * Si la consulta trajo, para un mismo local y comprobante, mas de una
+     * fecha -no deberia-, se queda con la mas nueva: el helper no confia en
+     * que la consulta haya filtrado.
+     *
+     * @param array $filas Filas crudas: FECHA, NRO_SUCURS, COD_COMP, N_COMP, MONTO, MONEDA
+     * @return array Mapa NRO_SUCURSAL => ['RAF' => bloque|null, 'BDE' => bloque|null], con
+     *         bloque = ['fecha' => 'Y-m-d', 'comprobantes' => [['cod_comp', 'n_comp',
+     *         'comprobante', 'monto', 'moneda']], 'totales' => ['ARS' => float, ...]]
+     */
+    public static function armarUltimosMovimientos($filas) {
+        $v = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $r) {
+            $nro = intval($r['NRO_SUCURS']);
+            $comp = strtoupper(trim((string) $r['COD_COMP']));
+            $fecha = Horizonte::normalizarFecha($r['FECHA']);
+
+            if (!in_array($comp, self::COMPROBANTE_GESTION, true) || $fecha === null) {
+                continue;
+            }
+
+            if (!isset($v[$nro])) {
+                $v[$nro] = array_fill_keys(array_values(self::COMPROBANTE_GESTION), null);
+            }
+
+            $b = $v[$nro][$comp];
+
+            if ($b === null || $fecha > $b['fecha']) {
+                $b = ['fecha' => $fecha, 'comprobantes' => [], 'totales' => []];
+            } elseif ($fecha < $b['fecha']) {
+                continue;
+            }
+
+            $nComp = trim((string) $r['N_COMP']);
+            $moneda = strtoupper(trim((string) $r['MONEDA']));
+            $moneda = ($moneda === '') ? 'ARS' : $moneda;
+            $monto = round(floatval($r['MONTO']), 2);
+
+            $b['comprobantes'][] = ['cod_comp' => $comp, 'n_comp' => $nComp,
+                                    'comprobante' => $comp . ' ' . $nComp,
+                                    'monto' => $monto, 'moneda' => $moneda];
+            $b['totales'][$moneda] = (isset($b['totales'][$moneda]) ? $b['totales'][$moneda] : 0) + $monto;
+
+            $v[$nro][$comp] = $b;
+        }
+
+        ksort($v);
+
+        return $v;
+    }
+
+    /**
+     * El bloque que corresponde a la gestion del local: el ultimo RAF si
+     * envia, el ultimo BDE si deposita, o null si no tiene. PURA. La pantalla
+     * hace lo mismo con la gestion que haya en pantalla.
+     *
+     * @param array $mapa armarUltimosMovimientos()
+     * @param int $nro
+     * @param string $gestion DEPOSITA o ENVIA
+     * @return array|null
+     */
+    public static function ultimoMovimiento($mapa, $nro, $gestion) {
+        $gestion = strtoupper(trim((string) $gestion));
+        $comps = self::COMPROBANTE_GESTION;
+        $comp = array_key_exists($gestion, $comps) ? $comps[$gestion] : $comps[self::DEPOSITA];
+
+        return isset($mapa[intval($nro)][$comp]) ? $mapa[intval($nro)][$comp] : null;
     }
 
     /**
