@@ -585,7 +585,7 @@ $glFuera = CronogramaPagos::delMes('2026-11', $glSin, []);
 chequear('sin calendario el lunes es habil y el mes queda en faltan', ['2026-11-02', ['2026-11']],
     [$glFuera[0]['fecha'], $glFuera[0]['faltan']]);
 
-$hGL = new Horizonte(28, 12, [], '2026-10-31');
+$hGL = new Horizonte(28, 12, [], new DateTime('2026-10-31'));
 chequear('el calendario de un concepto que va hacia adelante se lee una semana mas',
     date('Y-m-d', strtotime($hGL->fin() . ' +7 day')),
     CronogramaPagos::rangoCalendario($hGL, 0, CronogramaPagos::DIAS_CALENDARIO_SIGUIENTE)['hasta']);
