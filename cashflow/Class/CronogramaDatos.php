@@ -451,6 +451,14 @@ class CronogramaDatos {
                 sqlsrv_free_stmt($stmt);
             }
 
+            /* LOS IMPORTES EDITADOS DEL PROXIMO PAGO DE LOGISTICA, por el mismo
+               motivo que los overrides: se guardan contra (mes, numero de pago),
+               y con otro dia ese numero es otro pago. La pantalla los nombra en
+               la confirmacion, antes de guardar. */
+            $bajasImportes = ($concepto === 'LOGISTICA')
+                ? $this->bajaImportesLogistica($cid, CronogramaPagos::desdeMesBaja(date('Y-m-d')), $usuario)
+                : 0;
+
             sqlsrv_commit($cid);
         } catch (Throwable $e) {
             sqlsrv_rollback($cid);
@@ -460,7 +468,43 @@ class CronogramaDatos {
 
         $this->parametros = null;
 
-        return ['concepto' => $concepto, 'config' => $nueva, 'cambio' => true, 'bajas' => $bajas];
+        return ['concepto' => $concepto, 'config' => $nueva, 'cambio' => true, 'bajas' => $bajas,
+                'bajas_importes' => $bajasImportes];
+    }
+
+    /**
+     * Da de baja los importes editados vigentes de Logistica desde un mes, en la
+     * transaccion de quien llama. Sin la tabla no hay nada que bajar.
+     *
+     * @return int Cuantos
+     */
+    private function bajaImportesLogistica($cid, $desdeMes, $usuario) {
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo.RO_T_CASHFLOW_LOGISTICA_IMPORTE_EDIT', 'U') AS T");
+        $row = ($stmt === false) ? null : sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+
+        if ($stmt !== false) {
+            sqlsrv_free_stmt($stmt);
+        }
+
+        if (!$row || $row['T'] === null) {
+            return 0;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo.RO_T_CASHFLOW_LOGISTICA_IMPORTE_EDIT
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+             WHERE VIGENTE = 1 AND MES >= ?",
+            [$usuario, $usuario, $desdeMes]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al dar de baja los importes editados de Logística'));
+        }
+
+        $n = intval(sqlsrv_rows_affected($stmt));
+        sqlsrv_free_stmt($stmt);
+
+        return $n;
     }
 
     /* ====================================================================

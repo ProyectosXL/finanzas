@@ -154,7 +154,12 @@ class AuthCashflow {
         ],
         'Logistica' => [
             'saveFletero' => [['logistica_local', null], ['parametros', 'LOGISTICA']],
-            'activarFletero' => [['parametros', 'LOGISTICA']]
+            'activarFletero' => [['parametros', 'LOGISTICA']],
+            // Los pagos puntuales y el importe del proximo pago se cargan en la planilla.
+            'savePagoPuntual' => [['logistica_local', null]],
+            'bajaPagoPuntual' => [['logistica_local', null]],
+            'saveImporteProximo' => [['logistica_local', null]],
+            'deshacerImporteProximo' => [['logistica_local', null]]
         ],
         'Parametros' => [
             'saveParametro' => [['parametros', self::SUB_DEL_PARAMETRO]],

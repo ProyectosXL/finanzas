@@ -513,19 +513,32 @@
               encodeURIComponent(concepto))
             .then(function(d) {
                 var bajas = (d.data && d.data.bajas) || 0;
+                var importes = (d.data && d.data.importes) || [];
+
+                /* LOS IMPORTES EDITADOS DEL PRÓXIMO PAGO DE LOS FLETEROS, uno por
+                   uno: quién y por cuánto, antes de guardar. Con otro día, el
+                   número de pago apunta a otro pago y la edición se pierde. */
+                var detalleImportes = importes.length
+                    ? ' También se pierden ' + importes.length + ' importe(s) editado(s) del ' +
+                      'próximo pago, que vuelven al calculado: ' +
+                      importes.map(function(i) {
+                          return (i.nombre || i.cod_provee) + ' (' + fecha(i.fecha) + ', ' +
+                              plata(i.importe) + ')';
+                      }).join('; ') + '.'
+                    : '';
 
                 return Notificacion.confirmar({
                     titulo: 'Cambiar el cronograma de ' + nombre,
                     mensaje: '¿Pagar ' + nombre + ' ' + describir(dia, frecuencia) +
                         ' de cada mes?',
-                    detalle: bajas > 0
+                    detalle: (bajas > 0
                         ? 'Se dan de baja ' + bajas + ' pago(s) movido(s) a mano de ' + nombre +
                           ' desde este mes: con otro día apuntan a otra fecha. Quedan en el ' +
                           'historial.'
                         : 'No hay pagos movidos a mano de ' + nombre + ' desde este mes, así ' +
-                          'que no se da de baja ninguno.',
+                          'que no se da de baja ninguno.') + detalleImportes,
                     confirmar: 'Cambiar',
-                    peligro: bajas > 0
+                    peligro: bajas > 0 || importes.length > 0
                 });
             })
             .then(function(si) {
@@ -914,6 +927,13 @@
         if (p.length < 2) { return String(mes || ''); }
 
         return abrev[Number(p[1]) - 1] + '-' + p[0].substring(2);
+    }
+
+    /** 1234.5 -> '$ 1.234,50' */
+    function plata(v) {
+        return '$ ' + Number(v).toLocaleString('es-AR', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2
+        });
     }
 
     /** '2026-12-24' -> '24/12/2026' */

@@ -333,11 +333,28 @@ try {
            frecuencia de un concepto. La pantalla lo pregunta ANTES de guardar,
            para que la confirmacion diga el numero. */
         case 'contarOverridesCronograma':
+            $conceptoC = isset($_GET['concepto']) ? $_GET['concepto'] : '';
+
+            /* En Logistica, ademas, los importes editados del proximo pago que
+               se pierden: la confirmacion dice de que fletero y por cuanto. */
+            $importes = [];
+
+            if (strtoupper(trim((string) $conceptoC)) === 'LOGISTICA') {
+                require_once __DIR__ . '/../Class/Logistica.php';
+
+                foreach ((new Logistica())->getEdiciones(
+                             CronogramaPagos::desdeMesBaja(date('Y-m-d'))) as $e) {
+                    $importes[] = ['cod_provee' => $e['COD_PROVEE'], 'nombre' => $e['NOMBRE'],
+                                   'fecha' => $e['FECHA_PAGO'], 'importe' => $e['IMPORTE'],
+                                   'importe_calculado' => $e['IMPORTE_CALCULADO']];
+                }
+            }
+
             echo json_encode([
                 'success' => true,
                 'data' => [
-                    'bajas' => $parametros->cronograma()->contarOverridesABajar(
-                        isset($_GET['concepto']) ? $_GET['concepto'] : '')
+                    'bajas' => $parametros->cronograma()->contarOverridesABajar($conceptoC),
+                    'importes' => $importes
                 ]
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -387,6 +404,11 @@ try {
                       . ($r['bajas'] > 0
                         ? ' Se dieron de baja ' . $r['bajas'] . ' pago(s) movido(s) a mano '
                           . 'desde este mes: con otro día apuntaban a otra fecha. Quedan en el '
+                          . 'historial.'
+                        : '')
+                      . (!empty($r['bajas_importes'])
+                        ? ' Se dieron de baja ' . $r['bajas_importes'] . ' importe(s) editado(s) '
+                          . 'del próximo pago de los fleteros: vuelven al calculado y quedan en el '
                           . 'historial.'
                         : ''),
                 'data' => $r

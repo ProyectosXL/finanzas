@@ -105,7 +105,8 @@ try {
                     'cronograma_config' => $datos['cronograma_config'],
                     'hoy' => $h->hoy(),
                     'avisos' => $datos['avisos'],
-                    'tabla_creada' => $datos['tabla_creada']
+                    'tabla_creada' => $datos['tabla_creada'],
+                    'no_habituales' => $datos['no_habituales']
                 ]
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -119,6 +120,9 @@ try {
                 'data' => [
                     'filas' => $log->getFleteros(false),
                     'tabla_creada' => $log->tablaCreada(),
+                    'no_habituales' => $log->noHabitualesCreado(),
+                    'aviso_no_habituales' => ($log->tablaCreada() && !$log->noHabitualesCreado())
+                        ? $log->avisoSinNoHabituales() : '',
                     'tango_disponible' => $log->tango()->disponible(),
                     'min_busqueda' => ProveedoresTango::MIN_BUSQUEDA,
                     'aviso' => $log->avisoSinTabla()
@@ -160,7 +164,9 @@ try {
             $r = $log->guardarFletero($data['cod_provee'], [
                 'horas' => isset($data['horas']) ? $data['horas'] : null,
                 'valor_hora' => isset($data['valor_hora']) ? $data['valor_hora'] : null,
-                'mes_base' => isset($data['mes_base']) ? $data['mes_base'] : null
+                'mes_base' => isset($data['mes_base']) ? $data['mes_base'] : null,
+                // Si no viene, queda como estaba: la planilla vieja no la manda.
+                'habitual' => array_key_exists('habitual', $data) ? $data['habitual'] : null
             ], $usuario);
 
             $mensaje = $r['nuevo']
@@ -169,14 +175,24 @@ try {
                     ? ('Fletero reactivado: ' . $r['nombre'] . '.')
                     : ('Datos guardados: ' . $r['nombre'] . '.'));
 
+            if ($r['cambio_habitual']) {
+                $mensaje .= $r['habitual']
+                    ? ' Vuelve a ser habitual: se proyecta con sus horas y su valor hora, y sus '
+                      . 'pagos puntuales dejan de proyectarse (quedan guardados).'
+                    : ' Pasa a no habitual: deja de proyectarse por cálculo. Sus horas y su valor '
+                      . 'hora se conservan; se le cargan pagos puntuales.';
+            }
+
             /* SE DICE SI TODAVÍA NO PROYECTA, y en el mismo mensaje: un alta que
                contesta "guardado" y deja la fila del tablero igual que antes se
-               lee como que ya está configurado. */
+               lee como que ya está configurado. A un no habitual no se le piden. */
             $faltan = [];
 
-            if (empty($data['horas'])) { $faltan[] = 'las horas por mes'; }
-            if (empty($data['valor_hora'])) { $faltan[] = 'el valor hora base'; }
-            if (empty($data['mes_base'])) { $faltan[] = 'el mes base'; }
+            if ($r['habitual']) {
+                if (empty($data['horas'])) { $faltan[] = 'las horas por mes'; }
+                if (empty($data['valor_hora'])) { $faltan[] = 'el valor hora base'; }
+                if (empty($data['mes_base'])) { $faltan[] = 'el mes base'; }
+            }
 
             if (!empty($faltan)) {
                 $mensaje .= ' Todavía no se proyecta: le falta ' . implode(', ', $faltan)
@@ -206,6 +222,97 @@ try {
                     ? ('Fletero reactivado: ' . $r['nombre'] . '.')
                     : ('Fletero dado de baja: ' . $r['nombre'] . '. No se borra: conserva las '
                         . 'horas y el valor hora con los que se proyectó, y se puede reactivar.'),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LOS PAGOS PUNTUALES DE UN NO HABITUAL
+
+           La fecha va de mañana en adelante y se valida en la clase, no acá
+           ni sólo en la pantalla.
+           ================================================================ */
+        case 'savePagoPuntual':
+            $data = bodyJson();
+
+            if (!isset($data['cod_provee'])) {
+                throw new Exception('Falta el fletero');
+            }
+
+            $r = $log->guardarPagoPuntual(isset($data['id']) ? $data['id'] : null,
+                $data['cod_provee'], isset($data['fecha']) ? $data['fecha'] : '',
+                isset($data['importe']) ? $data['importe'] : null, $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['nuevo'] ? 'Pago puntual cargado' : 'Pago puntual corregido')
+                    . ': $ ' . number_format($r['importe'], 2, ',', '.') . ' el '
+                    . date('d/m/Y', strtotime($r['fecha'])) . '.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaPagoPuntual':
+            $data = bodyJson();
+
+            if (!isset($data['id']) || !isset($data['cod_provee'])) {
+                throw new Exception('Faltan parámetros obligatorios');
+            }
+
+            $r = $log->bajaPagoPuntual($data['id'], $data['cod_provee'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Pago puntual dado de baja ($ ' . number_format($r['importe'], 2, ',', '.')
+                    . ' del ' . date('d/m/Y', strtotime($r['fecha'])) . '). No se borra: queda '
+                    . 'en el historial.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL IMPORTE DEL PRÓXIMO PAGO DE UN HABITUAL
+
+           Que sea el próximo lo verifica la clase contra la planilla
+           recalculada acá, no contra lo que dice la pantalla.
+           ================================================================ */
+        case 'saveImporteProximo':
+            $data = bodyJson();
+
+            foreach (['cod_provee', 'mes', 'nro', 'importe'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan parámetros obligatorios');
+                }
+            }
+
+            $r = $log->guardarImporteProximo(Horizonte::desdeParametros(new Parametros()),
+                $data['cod_provee'], $data['mes'], $data['nro'], $data['importe'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Importe del pago del ' . date('d/m/Y', strtotime($r['fecha']))
+                    . ': $ ' . number_format($r['importe'], 2, ',', '.')
+                    . ($r['importe_calculado'] === null ? '.'
+                        : ' (el cálculo daba $ ' . number_format($r['importe_calculado'], 2, ',', '.')
+                          . '). Los pagos siguientes se siguen calculando.'),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deshacerImporteProximo':
+            $data = bodyJson();
+
+            if (!isset($data['cod_provee']) || !isset($data['mes']) || !isset($data['nro'])) {
+                throw new Exception('Faltan parámetros obligatorios');
+            }
+
+            $r = $log->deshacerImporte($data['cod_provee'], $data['mes'], $data['nro'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['habia']
+                    ? 'El pago vuelve al importe calculado. El editado queda en el historial.'
+                    : 'Ese pago ya estaba con el importe calculado.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
