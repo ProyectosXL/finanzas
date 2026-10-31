@@ -256,6 +256,7 @@ try {
                         'sin_tarjeta' => $sup['sin_tarjeta'],
                         'disponible' => $sup['disponible'],
                         'cronograma' => isset($sup['cronograma']) ? $sup['cronograma'] : null,
+                        'historico_tabla' => !empty($sup['historico_tabla']),
 
                         /* Una fila por supervisora -el renglon que se ve- y una por
                            supervisora y parte, que son las dos subfilas
@@ -778,6 +779,52 @@ try {
                 'message' => 'Resumen de ' . $r['mes'] . ' dado de baja, de todas las tarjetas '
                     . 'que incluía. No se borra: queda en el historial, y ese mes vuelve a '
                     . 'proyectarse con la estimación.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL HISTORICO MANUAL DE GASTOS SUPERVISORAS
+           Para quien tiene tarjeta Supervisora y no carga gastos en la app de
+           supervision. Tres meses, en una transaccion.
+           ================================================================ */
+        case 'cargarHistoricoManual':
+            require_once __DIR__ . '/../Class/TarjetasHistManual.php';
+
+            $data = bodyJson();
+
+            if (!isset($data['id_usuario']) || !isset($data['meses'])) {
+                throw new Exception('Faltan la persona y los meses del histórico');
+            }
+
+            $r = (new TarjetasHistManual())->cargar($data['id_usuario'], $data['meses'], $usuario,
+                date('Y-m-d'));
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Histórico cargado para ' . $r['nombre'] . ' ('
+                    . implode(', ', array_keys($r['meses'])) . '). Proyecta el promedio de los '
+                    . '3 meses, ajustado por inflación, en el vencimiento de su tarjeta. Si '
+                    . 'empieza a cargar gastos, mandan los gastos.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaHistoricoManual':
+            require_once __DIR__ . '/../Class/TarjetasHistManual.php';
+
+            $data = bodyJson();
+
+            if (!isset($data['id_usuario'])) {
+                throw new Exception('Falta la persona');
+            }
+
+            $r = (new TarjetasHistManual())->darDeBaja($data['id_usuario'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Histórico manual dado de baja. No se borra: queda en el historial, '
+                    . 'y la persona deja de proyectar.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

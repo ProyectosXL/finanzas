@@ -12,6 +12,7 @@ require_once __DIR__ . '/TarjetasSupervisoras.php';
 require_once __DIR__ . '/TarjetasCorporativas.php';
 require_once __DIR__ . '/TarjetasSocios.php';
 require_once __DIR__ . '/GastosSupervision.php';
+require_once __DIR__ . '/TarjetasHistManual.php';
 require_once __DIR__ . '/CronogramaDatos.php';
 require_once __DIR__ . '/Inflacion.php';
 require_once __DIR__ . '/DolarFuturo.php';
@@ -75,6 +76,9 @@ class PagosTarjetas {
     /** @var GastosSupervision */
     private $gastos;
 
+    /** @var TarjetasHistManual El historico de quien no carga gastos */
+    private $histManual;
+
     /** @var CronogramaDatos */
     private $cronograma;
 
@@ -92,6 +96,7 @@ class PagosTarjetas {
         $this->vtoEdit = new TarjetasFacturaVto();
         $this->mensual = new TarjetasMensual();
         $this->gastos = new GastosSupervision();
+        $this->histManual = new TarjetasHistManual();
         $this->cronograma = new CronogramaDatos();
         $this->inflacion = new Inflacion();
     }
@@ -131,6 +136,7 @@ class PagosTarjetas {
                 'factura_vto' => $this->vtoEdit->tablaCreada(),
                 'mensual' => $this->mensual->tablaCreada(),
                 'gastos' => $this->gastos->tablaCreada(),
+                'historico_manual' => $this->histManual->tablaCreada(),
                 'vista_usuarios' => $this->tarjetas->vistaUsuariosCreada()
             ],
             'tarjetas' => $tarjetas,
@@ -228,14 +234,29 @@ class PagosTarjetas {
         $salida['disponible'] = true;
 
         $promedios = TarjetasSupervisoras::promedios($base['gastos'], $ventana);
-        $estimado = TarjetasSupervisoras::estimar($promedios, $meses, $inflacion, $ventana,
-            $base['estados']);
 
         /* LAS TARJETAS DE TIPO SUPERVISORA SE ASOCIAN POR EL NOMBRE DEL USUARIO.
            Ver TarjetasSupervisoras y el README: es el unico tipo que cruza contra
            algo, y lo hace por nombre porque RO_T_GASTOS_SUPERVISION guarda el
            nombre y no un ID. */
         $porSupervisora = $this->tarjetasPorSupervisora($tarjetas);
+
+        /* QUIEN TIENE TARJETA Y NO CARGA GASTOS: su fila, con el historico
+           manual si lo tiene. Mandan los gastos: un historico de alguien que
+           ya tiene gastos en la ventana deja de usarse y se avisa. */
+        $historicos = $this->leer(function () { return $this->histManual->vigentes(); },
+            'el histórico manual de Gastos Supervisoras', $salida['avisos'], []);
+        $manual = TarjetasSupervisoras::universoManual($porSupervisora, $promedios, $historicos);
+        $promedios = $promedios + $manual['promedios'];
+        ksort($promedios);
+
+        $salida['historico_tabla'] = $this->histManual->tablaCreada();
+        $salida['en_desuso'] = $manual['en_desuso'];
+
+        $estados = TarjetasSupervisoras::estadosConTarjeta($base['estados'],
+            array_keys($promedios), $porSupervisora);
+        $estimado = TarjetasSupervisoras::estimar($promedios, $meses, $inflacion, $ventana,
+            $estados);
 
         /* EL CRONOGRAMA SUPERVISORAS de Parametros -> Generales, con sus
            overrides: por defecto todos los lunes del mes. Hasta
@@ -405,10 +426,31 @@ class PagosTarjetas {
         ];
 
         foreach ($porMotivo as $motivo => $nombres) {
+            /* SIN HISTORICO VA APARTE: no tiene gastos que se vean en la grilla,
+               y lo que hay que hacer es cargar algo, no revisar el maestro. */
+            if ($motivo === TarjetasSupervisoras::SIN_HISTORICO) {
+                $avisos[] = count($nombres) . ' persona(s) tienen tarjeta Supervisora y no cargan '
+                    . 'gastos en la app de supervisión, así que no proyectan nada: '
+                    . implode('; ', array_map(function ($n) {
+                        return preg_replace('/ \(—\/mes\)$/', '', $n);
+                    }, $nombres))
+                    . '. Cargales el histórico manual de los últimos 3 meses desde su fila.';
+                continue;
+            }
+
             $avisos[] = count($nombres) . ' supervisora(s) '
                 . (isset($textos[$motivo]) ? $textos[$motivo] : 'no se proyectan')
                 . ', así que no se proyectan: ' . implode('; ', $nombres) . '. Sus gastos se ven '
                 . 'en la grilla; lo que no entra al tablero es su proyección.';
+        }
+
+        /* EL HISTORICO MANUAL QUE DEJO DE USARSE: la persona empezo a cargar
+           gastos, y mandan los gastos. Informativo: es el criterio funcionando,
+           y el historico queda como historia. */
+        if (!empty($salida['en_desuso'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, implode(', ', $salida['en_desuso'])
+                . ' ya tiene(n) gastos autorizados en la ventana, así que su histórico manual '
+                . 'dejó de usarse: mandan los gastos. El histórico queda cargado como historia.');
         }
 
         /* 2. LA PARTE TARJETA SIN TARJETA. No es plata que falte del universo: es
@@ -452,6 +494,18 @@ class PagosTarjetas {
         try {
             $sinGastos = $this->gastos->activasSinGastos($base['gastos'],
                 $this->gastos->maestro());
+
+            /* QUIEN YA TIENE FILA -por su tarjeta- no es "alguien que no aparece
+               en la grilla": su fila dice que hacer. */
+            $conFila = [];
+
+            foreach ($salida['filas'] as $f) {
+                $conFila[GastosSupervision::clave($f['nombre'])] = true;
+            }
+
+            $sinGastos = array_values(array_filter($sinGastos, function ($n) use ($conFila) {
+                return !isset($conFila[GastosSupervision::clave($n)]);
+            }));
 
             if (!empty($sinGastos)) {
                 // Informativo: explica el criterio de no inventar un promedio, y

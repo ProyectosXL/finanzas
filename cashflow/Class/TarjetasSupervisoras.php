@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Inflacion.php';
 require_once __DIR__ . '/TarjetasVencimiento.php';
 require_once __DIR__ . '/CronogramaPagos.php';
+require_once __DIR__ . '/GastosSupervision.php';
 
 /**
  * TarjetasSupervisoras
@@ -82,9 +83,162 @@ class TarjetasSupervisoras {
     const SIN_IMPORTE = 'SIN_IMPORTE';
     const SIN_INFLACION = 'SIN_INFLACION';
 
+    /** Tiene tarjeta Supervisora, no tiene gastos y no tiene historico manual */
+    const SIN_HISTORICO = 'SIN_HISTORICO';
+
     /** La parte tarjeta no tiene donde caer */
     const SIN_TARJETA = 'SIN_TARJETA';
     const VARIAS_TARJETAS = 'VARIAS_TARJETAS';
+
+    /** De donde sale el promedio de una fila */
+    const ORIGEN_GASTOS = 'GASTOS';
+    const ORIGEN_MANUAL = 'MANUAL';
+
+    /* ====================================================================
+       QUIEN NO CARGA GASTOS: EL HISTORICO MANUAL
+
+       Una persona con tarjeta de tipo Supervisora que no carga gastos en la app
+       de supervision -alguien del equipo de ventas- no tendria fila: el
+       universo eran las que tienen gastos. Ahora tiene fila, y con un historico
+       manual de 3 meses se proyecta IGUAL que una supervisora: promedio sobre 3,
+       inflacion compuesta desde el ultimo mes cargado, todo con tarjeta,
+       cobertura y debito en su tarjeta.
+
+       MANDAN LOS GASTOS: si la persona tiene gastos en la ventana, el historico
+       deja de usarse y se avisa. No se suman: serian el mismo gasto dos veces.
+       ==================================================================== */
+
+    /**
+     * El promedio de un historico manual, con la misma forma que promedios().
+     *
+     * SE DIVIDE POR TRES, como las supervisoras: un mes en cero es un dato.
+     * TODO ES TARJETA: el historico manual no tiene parte en efectivo.
+     * EL MES BASE ES EL ULTIMO CARGADO: el promedio esta en moneda de ese mes, y
+     * la inflacion se compone desde el siguiente.
+     *
+     * Estatica y pura.
+     *
+     * @param string $nombre
+     * @param array $meses Mapa 'Y-m' => importe
+     * @return array La fila de promedios(), mas 'origen', 'base' y 'rotulo'
+     */
+    public static function promedioManual($nombre, $meses) {
+        ksort($meses);
+
+        $total = array_sum(array_map('floatval', $meses));
+        $claves = array_keys($meses);
+        $conDatos = count(array_filter($meses, function ($v) { return floatval($v) != 0; }));
+
+        return [
+            'nombre' => $nombre,
+            'efectivo' => 0.0,
+            'tarjeta' => round($total, 2),
+            'total' => round($total, 2),
+            'promedio' => ($total > 0) ? ($total / self::MESES_VENTANA) : null,
+            'meses_con_datos' => $conDatos,
+            'pct_efectivo' => ($total > 0) ? 0.0 : null,
+            'pct_tarjeta' => ($total > 0) ? 1.0 : null,
+            'por_mes' => $meses,
+            'origen' => self::ORIGEN_MANUAL,
+            'base' => empty($claves) ? null : $claves[count($claves) - 1],
+            'rotulo' => empty($claves) ? '' : 'histórico manual '
+                . self::rotuloMes($claves[0]) . ' a ' . self::rotuloMes($claves[count($claves) - 1])
+        ];
+    }
+
+    /**
+     * Las filas de quienes tienen tarjeta Supervisora activa y no tienen gastos
+     * en la ventana: con su historico manual si lo tienen, o sin proyeccion
+     * (SIN_HISTORICO) para que se les pueda cargar.
+     *
+     * Y quienes tienen gastos Y un historico vigente: el historico deja de
+     * usarse, y esa lista es la que avisa.
+     *
+     * Estatica y pura.
+     *
+     * @param array $porSupervisora Mapa clave => [tarjetas Supervisora activas]
+     * @param array $promedios Lo que devolvio promedios(), de los gastos
+     * @param array $historicos Mapa ID_USUARIO => ['meses' => ['Y-m' => float], ...]
+     * @return array ['promedios' => [nombre => fila], 'en_desuso' => [nombres]]
+     */
+    public static function universoManual($porSupervisora, $promedios, $historicos) {
+        $conGastos = [];
+
+        foreach (array_keys($promedios) as $nombre) {
+            $conGastos[GastosSupervision::clave($nombre)] = true;
+        }
+
+        $salida = [];
+        $enDesuso = [];
+
+        foreach ($porSupervisora as $clave => $tarjetas) {
+            if (empty($tarjetas)) {
+                continue;
+            }
+
+            $t = $tarjetas[0];
+            $id = intval($t['ID_USUARIO']);
+            $nombre = trim((string) $t['NOMBRE_USUARIO']);
+            $h = isset($historicos[$id]) ? $historicos[$id] : null;
+
+            if (isset($conGastos[$clave])) {
+                if ($h !== null && !empty($h['meses'])) {
+                    $enDesuso[] = $nombre;
+                }
+
+                continue;
+            }
+
+            if ($h !== null && !empty($h['meses'])) {
+                $p = self::promedioManual($nombre, $h['meses']);
+            } else {
+                $p = [
+                    'nombre' => $nombre, 'efectivo' => 0.0, 'tarjeta' => 0.0, 'total' => 0.0,
+                    'promedio' => null, 'meses_con_datos' => 0, 'pct_efectivo' => null,
+                    'pct_tarjeta' => null, 'por_mes' => [],
+                    'origen' => self::SIN_HISTORICO, 'motivo_fijo' => self::SIN_HISTORICO
+                ];
+            }
+
+            $p['id_usuario'] = $id;
+            $salida[$nombre] = $p;
+        }
+
+        ksort($salida);
+
+        return ['promedios' => $salida, 'en_desuso' => $enDesuso];
+    }
+
+    /**
+     * Los estados, con la regla de la tarjeta: QUIEN NO ESTA EN EL MAESTRO DE
+     * SUPERVISORAS PERO TIENE UNA TARJETA SUPERVISORA ACTIVA CUENTA COMO ACTIVA.
+     *
+     * La tarjeta la da de alta una persona, contra la vista de usuarios activos,
+     * y eso es saber que trabaja. Sin esto, alguien del equipo de ventas que
+     * empieza a cargar gastos quedaria SIN_SUPERVISORA y dejaria de proyectar
+     * justo cuando "mandan los gastos". Quien SI esta en el maestro sigue su
+     * estado de alla: una inactiva en el maestro dejo de trabajar.
+     *
+     * Estatica y pura.
+     *
+     * @param array $estados Mapa nombre => ['en_maestro', 'activa', 'id']
+     * @param array $nombres Los nombres de todas las filas
+     * @param array $porSupervisora Mapa clave => [tarjetas Supervisora activas]
+     * @return array El mapa, completado
+     */
+    public static function estadosConTarjeta($estados, $nombres, $porSupervisora) {
+        foreach ($nombres as $nombre) {
+            $e = isset($estados[$nombre]) ? $estados[$nombre] : null;
+
+            if (($e === null || empty($e['en_maestro']))
+                && !empty($porSupervisora[GastosSupervision::clave($nombre)])) {
+                $estados[$nombre] = ['en_maestro' => false, 'activa' => true, 'id' => null,
+                                     'por_tarjeta' => true];
+            }
+        }
+
+        return $estados;
+    }
 
     /* ====================================================================
        LA VENTANA
@@ -297,15 +451,31 @@ class TarjetasSupervisoras {
      *               'meses' => ['Y-m' => celda], 'faltan_inflacion' => ['Y-m']]
      */
     public static function estimar($promedios, $meses, $inflacion, $ventana, $estados = []) {
-        $factores = Inflacion::compuestaParaMeses($inflacion, $ventana['base'], $meses);
+        /* UN FACTOR POR MES BASE: los gastos estan en moneda del ultimo mes de la
+           ventana, y un historico manual en la del ultimo mes que se cargo. */
+        $porBase = [];
         $salida = [];
 
         foreach ($promedios as $nombre => $p) {
+            $base = !empty($p['base']) ? $p['base'] : $ventana['base'];
+
+            if (!isset($porBase[$base])) {
+                $porBase[$base] = Inflacion::compuestaParaMeses($inflacion, $base, $meses);
+            }
+
+            $factores = $porBase[$base];
+            $ventanaP = ['base' => $base,
+                         'rotulo' => !empty($p['rotulo']) ? $p['rotulo'] : $ventana['rotulo']];
+
             $motivo = self::motivoDe($nombre, $p, $estados);
             $proyecta = ($motivo === self::OK);
 
             $fila = [
                 'nombre' => $nombre,
+                'origen' => isset($p['origen']) ? $p['origen'] : self::ORIGEN_GASTOS,
+                'id_usuario' => isset($p['id_usuario']) ? $p['id_usuario'] : null,
+                'historico' => (isset($p['origen']) && $p['origen'] === self::ORIGEN_MANUAL)
+                    ? $p['por_mes'] : null,
                 'promedio' => $p['promedio'],
                 'pct_efectivo' => $p['pct_efectivo'],
                 'pct_tarjeta' => $p['pct_tarjeta'],
@@ -355,7 +525,7 @@ class TarjetasSupervisoras {
                     'tarjeta' => $estimado * $p['pct_tarjeta'],
                     'factor' => $f['factor'],
                     'motivo' => self::OK,
-                    'tooltip' => self::explicarCelda($p, $ventana, $f, $estimado)
+                    'tooltip' => self::explicarCelda($p, $ventanaP, $f, $estimado)
                 ];
             }
 
@@ -380,7 +550,17 @@ class TarjetasSupervisoras {
      * @return string
      */
     public static function motivoDe($nombre, $p, $estados) {
+        if (!empty($p['motivo_fijo'])) {
+            return $p['motivo_fijo'];
+        }
+
         $estado = isset($estados[$nombre]) ? $estados[$nombre] : null;
+
+        /* ACTIVA POR SU TARJETA: no esta en el maestro, pero tiene una tarjeta
+           Supervisora activa. Ver estadosConTarjeta(). */
+        if ($estado !== null && !empty($estado['por_tarjeta'])) {
+            return ($p['promedio'] === null || $p['total'] <= 0) ? self::SIN_IMPORTE : self::OK;
+        }
 
         if ($estado === null || empty($estado['en_maestro'])) {
             return self::SIN_SUPERVISORA;
@@ -469,6 +649,11 @@ class TarjetasSupervisoras {
             case self::SIN_IMPORTE:
                 return 'Tiene gastos autorizados en la ventana pero suman cero, así que no hay '
                     . 'promedio ni proporción que calcular.';
+
+            case self::SIN_HISTORICO:
+                return 'Tiene tarjeta Supervisora pero no carga gastos en la app de supervisión, '
+                    . 'así que no hay con qué estimar. Cargale el histórico manual de los últimos '
+                    . '3 meses desde su fila para que proyecte. Queda en blanco y NO en cero.';
 
             case self::SIN_INFLACION:
                 return 'Falta la inflación esperada de '
