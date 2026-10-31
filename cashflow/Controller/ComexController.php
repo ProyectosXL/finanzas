@@ -104,6 +104,11 @@ try {
                 'actualizada' => $comex->dolarFuturo()->actualizada(),
                 'curva' => array_values($comex->dolarFuturo()->curva()),
 
+                /* Los pagos de los proximos dias van a dolar BCRA: la regla en
+                   una linea, armada en DolarFuturo, la misma de las otras dos
+                   pantallas. */
+                'regla' => DolarFuturo::explicarRegla($comex->dolarFuturo()->bcra()),
+
                 /* Si se puede corregir a mano. La pantalla lo pregunta en vez de
                    suponerlo: sin el script la grilla se lee igual y lo que no se
                    puede es escribir el override. Una celda que se dibuja
@@ -380,7 +385,8 @@ try {
                 'origen' => DolarFuturo::ORIGEN,
                 'disponible' => $comex->dolarFuturo()->disponible(),
                 'ultimo_mes' => $comex->dolarFuturo()->ultimoMes(),
-                'actualizada' => $comex->dolarFuturo()->actualizada()
+                'actualizada' => $comex->dolarFuturo()->actualizada(),
+                'regla' => DolarFuturo::explicarRegla($comex->dolarFuturo()->bcra())
             ];
 
             $payload['fechas_editables'] = $comex->tieneHistorial();

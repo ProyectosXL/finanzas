@@ -144,7 +144,10 @@ try {
                    arriba. */
                 'insumos' => ComprasProyectadasDatos::insumosParaPantalla($datos->estadoInsumos()),
                 'hoy' => $h->hoy(),
-                'fin_horizonte' => $h->fin()
+                'fin_horizonte' => $h->fin(),
+                /* Con que dolar se valua: la regla en una linea, la misma de
+                   las dos pestanas de Comex. */
+                'dolar' => DolarFuturo::explicarRegla((new DolarFuturo())->bcra($h->hoy()))
             ]);
             break;
 

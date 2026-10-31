@@ -136,10 +136,10 @@ seccion('El proveedor valua cada serie por SU fecha');
 $src = codigoSinComentariosCPP($provider);
 
 chequear('el FOB se valua por la fecha de pago',
-    true, strpos($src, "valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO')") !== false);
+    true, strpos($src, "valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO', \$bcra)") !== false);
 
 chequear('la nacionalizacion por la suya',
-    true, strpos($src, "valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC')") !== false);
+    true, strpos($src, "valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC', \$bcra)") !== false);
 
 chequear('y cada serie se ubica en el eje por su propia fecha',
     true, strpos($src, "agrupar(\$filas, 'FECHA_PAGO', 'IMPORTE_FOB_ARS')") !== false
@@ -420,9 +420,10 @@ foreach (array_keys(ComprasProyectadasProvider::DEFAULTS) as $clave) {
 
 /* Cada campo VALIDA ANTES DE MANDAR, con su rango: un dia 45 o un porcentaje
    negativo son numeros validos para la base y producen una proyeccion que no
-   significa nada. */
+   significa nada. Son los siete de la proyeccion y los dos del dolar BCRA de
+   Comercio Exterior (sql/cashflow_comex_dolar_bcra.sql). */
 chequear('cada parametro declara su rango',
-    7, preg_match_all('/min:\s*-?\d+,\s*max:\s*\d+/', $srcParamJs)
+    9, preg_match_all('/min:\s*-?\d+,\s*max:\s*\d+/', $srcParamJs)
      + preg_match_all("/tipo:\s*'opciones'/", $srcParamJs));
 
 chequear('y se valida contra ese rango antes de guardar',

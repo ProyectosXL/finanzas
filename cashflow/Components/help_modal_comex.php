@@ -440,9 +440,16 @@
                                 <strong>Dólar aplicado</strong> dice cuál le tocó a cada uno, con
                                 el símbolo del contrato (<code>DLR/NOV26</code>) y su valor.
                             </p>
+                            <p class="mb-2">
+                                <strong>Los pagos de los próximos días van a dólar BCRA</strong>:
+                                si un contenedor se paga dentro de los próximos días —7 por
+                                defecto— o ya venció, se valúa con el dólar oficial BCRA vendedor, la última
+                                cotización publicada, porque se paga al tipo de cambio de hoy. Los
+                                días se cambian en <em>Parámetros › Compras Exterior</em>.
+                            </p>
                             <div class="alert alert-secondary mb-0 py-2">
                                 <small>
-                                    <strong>Es el único criterio.</strong> Antes se usaba un
+                                    <strong>No hay un número global.</strong> Antes se usaba un
                                     parámetro global, <code>comex_tipo_cambio_usd</code>: un solo
                                     número con el que se convertían por igual el pago del mes que
                                     viene y el de dentro de once meses. Ese parámetro se retiró de
@@ -476,6 +483,17 @@
                                             ROFEX, así que se usó la cotización del mes más cercano
                                             que hay. El importe es una aproximación y por eso se
                                             marca.
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-2 border rounded" style="border-left: 3px solid #26a69a !important;">
+                                        <strong><i class="fas fa-building-columns me-1"></i> Dólar BCRA</strong>
+                                        <br><small class="text-muted">
+                                            Se paga en los próximos días, o ya venció, así que va al
+                                            dólar oficial BCRA vendedor de la fecha que dice debajo
+                                            del valor, no a la curva. Una cotización corregida a
+                                            mano manda igual.
                                         </small>
                                     </div>
                                 </div>

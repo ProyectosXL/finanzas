@@ -2,7 +2,7 @@
 
 Pestañas **Comercio Exterior → Proveedores Exterior** y **Crono Nacionalización**, y las filas *Proveedores del Exterior* y *Nacionalizaciones* del tablero de Cashflow.
 
-Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd` · `feature/comex-saldo-pendiente` · `feature/comex-visibilidad-saldo` · `feature/cashflow-avisos-kpis-comex-nac-parcial`
+Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd` · `feature/comex-saldo-pendiente` · `feature/comex-visibilidad-saldo` · `feature/cashflow-avisos-kpis-comex-nac-parcial` · `feature/comex-dolar-bcra-proximos-pagos`
 
 ---
 
@@ -21,7 +21,8 @@ RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
         │       │  VALOR_FOB_DOLAR de la OC principal
         │       │    − RO_T_IMPORTACIONES_ENCABEZADO_PAGOS  (lo ya pagado, en U$S)
         │       │    = lo que FALTA pagar, que es lo único que se proyecta
-        │       │  × curva de dólar futuro ROFEX del mes de esa fecha
+        │       │  × curva de dólar futuro ROFEX del mes de esa fecha, o dólar BCRA
+        │       │    vendedor si se paga en los próximos N días (sección 14)
         │       ▼
         │   Proveedores Exterior  →  ComexProvider
         │                            (PAGOS / PAGOS_PAGADOS / PAGOS_COMEX / PAGOS_TODO)
@@ -29,7 +30,8 @@ RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
         └─ FECHA_DESP_ADU ──── cuándo se nacionaliza
                 │  + RO_T_IMPORTACIONES_ESTIMACION_DETALLE (conceptos 3 a 10,
                 │    que TAMBIÉN están en dólares: ver la sección 6)
-                │  × curva de dólar futuro ROFEX del mes de esa fecha
+                │  × curva de dólar futuro ROFEX del mes de esa fecha, o dólar BCRA
+                │    vendedor si es en los próximos N días (sección 14)
                 ▼
             Crono Nacionalización  →  ComexProvider (NACIONALIZACION / _PAGADAS / _TODO)
 
@@ -56,8 +58,9 @@ Contra `central`, en este orden:
 | 3 | `sql/cashflow_comex_pagado.sql` | Crea `RO_T_CASHFLOW_COMEX_PAGADO`: qué pagos ya se hicieron, con su historial | Las dos pestañas se leen igual y **el tablero no cambia** —sin la tabla no hay nada marcado, así que proyecta todo lo pendiente—. La casilla se dibuja deshabilitada y las dos avisan qué script falta |
 | 4 | `sql/cashflow_comex_fecha_mov_desde.sql` | Siembra el parámetro `comex_fecha_mov_desde` (*Contenedores desde*) en 01/01/2025, en Parámetros › Compras Exterior. No pisa un valor ya cargado | **El corte se aplica igual**, con 01/01/2025, que el código tiene escrito. Lo único que no se puede es cambiarlo, y **sólo Parámetros** dice qué script falta: las pestañas no avisan nada |
 | 5 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` (los pagos parciales de la nacionalización) y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA` (la fecha del saldo, con historial) | **Crono funciona exactamente como hoy**: el tilde no ofrece el pago parcial, los contenedores con costos reales no se muestran, y la pestaña avisa qué script falta. El tablero no cambia |
+| 6 | `sql/cashflow_comex_dolar_bcra.sql` | Siembra *Días con dólar BCRA* (`comex_dias_bcra`, 7) y *Antigüedad máxima del dólar BCRA* (`comex_bcra_antiguedad_max`, 3) en Parámetros › Compras Exterior. No pisa un valor ya cargado | **La regla se aplica igual**, con 7 y 3, que el código tiene escritos. Lo único que no se puede es cambiarlos, y **sólo Parámetros** dice qué script falta. Ver la sección 14 |
 
-Los cinco son reejecutables y ninguno borra nada. El 3, el 4 y el 5 no dependen de ningún otro. En la instalación completa de `README-cashflow.md` el 4 es el 41 y el 5 el 42.
+Los seis son reejecutables y ninguno borra nada. El 3, el 4, el 5 y el 6 no dependen de ningún otro. En la instalación completa de `README-cashflow.md` el 4 es el 41, el 5 el 42 y el 6 el 45.
 
 > **El 2 es el único del módulo que escribe sobre una tabla que no es del cashflow.** Por eso su encabezado documenta el criterio de conflicto y el script lista al final lo que decidió no migrar.
 
@@ -957,9 +960,71 @@ La pestaña suma el de *falta `sql/cashflow_comex_nac_pago.sql`* (warning), como
 
 ---
 
+## 14. Los pagos de los próximos días van a dólar BCRA
+
+> De `feature/comex-dolar-bcra-proximos-pagos`.
+
+**Un importe en dólares que se paga dentro de los próximos N días se pasa a pesos con el dólar oficial BCRA, punta vendedora**, y no con la curva ROFEX: es un pago inminente, se liquida al tipo de cambio de hoy, y la curva del mes en curso ya trae una devaluación esperada que en una semana no ocurre. Los posteriores siguen con la curva del mes de pago, como antes. Vale para **Proveedores Exterior, Crono Nacionalización y Compras Proyectadas**, y para lo que cada una aporta al tablero.
+
+### La regla
+
+| Pago | Cotización |
+| --- | --- |
+| Fecha entre hoy y hoy + N días | BCRA vendedor, última cotización publicada hasta hoy |
+| Fecha **vencida** | BCRA vendedor: si todavía no se pagó, se paga ya |
+| Fecha posterior a hoy + N | Curva ROFEX del mes de pago (sin cambios) |
+| Con cotización corregida a mano (`COTIZ_USD_EDIT`) | **El override gana siempre** |
+| Sin fecha | Sin valuar, como antes —el override tampoco la valúa: sin fecha no entra en ninguna columna— |
+
+- **N** es *Días con dólar BCRA* (`comex_dias_bcra`, 7 por defecto). **Con 0, nadie usa BCRA**, tampoco lo vencido: todo va con la curva, como antes de esta rama.
+- **Última cotización publicada** es `Cotizacion::ultimaHasta(hoy, VENDEDOR)`: la más reciente con fecha anterior o igual a hoy. Un lunes usa la del viernes.
+- **Si tiene más de M días corridos** —*Antigüedad máxima del dólar BCRA*, `comex_bcra_antiguedad_max`, 3 por defecto— se usa igual y va un aviso de **atención**: *"La última cotización del dólar BCRA es del dd/mm/aaaa; se usa ésa para los pagos de los próximos N días."*
+- **Sin ninguna cotización BCRA** esos importes quedan en `null` con un aviso **crítico** que dice cuántos son y cuánto suman en dólares. **Nunca se valúan con la curva en silencio**: sería aplicarles justo el criterio que esta regla dice que no corresponde.
+- **La fecha que decide es la misma que elige el mes de la curva**: la de pago en Proveedores Exterior y en el FOB de Compras Proyectadas, la de nacionalización en Crono Nacionalización y en la nacionalización proyectada. En Crono, la fecha del saldo de un pago parcial **sigue sin cambiar la cotización** (sección 13): sólo decide la columna.
+- **Lo vencido de Comex sigue sin entrar al tablero** (sección 2): ahí la regla sólo cambia el importe que muestra la grilla. En Compras Proyectadas, un pago de este mes con fecha ya pasada sí entra —en la columna del mes en curso— y va a BCRA.
+
+> **La punta es la vendedora, y es deliberado**: es la que se paga para girarle a un proveedor del exterior. El resto del cashflow valúa con la compradora (ver el encabezado de `Class/Cotizacion.php`), incluido **Tarjetas Socios**, que es el antecedente de esta regla —su próximo vencimiento va a BCRA comprador—. No se tocó: quedó fuera de alcance a propósito.
+
+### Dónde está escrita
+
+**Una vez, pura, en `DolarFuturo`**: `reglaBcra()` arma la regla, `usaBcra()` decide si un pago entra y `resolver()` aplica la precedencia, con el origen nuevo `BCRA` y el motivo `SIN_BCRA`. La lectura —los dos parámetros y la cotización, una vez por pedido— es `DolarFuturo::bcra()`, y nunca lanza. Las tres pantallas valúan **todas** por `Comex::valuar()`, que recibe la regla: no hay una copia por clase, y una prueba lo exige leyendo el código.
+
+### Qué se ve
+
+- **La marca de la fila**, en la columna *Dólar aplicado*: BCRA lleva **borde verde lleno**, el ícono de banco y, debajo del valor, `BCRA dd/mm`. Las otras tres no cambiaron: la curva sin marca, la aproximada con borde punteado violeta y el override naranja con lápiz. En Compras Proyectadas, el mismo ícono de banco al lado de la cotización.
+- **El tooltip dice qué dólar se usó**: *"Dólar BCRA vendedor del 28/10/2026: $ 1.480,00. …"* o *"Dólar futuro ROFEX de Nov-26 (DLR/NOV26)."* Lo arma `DolarFuturo::explicar()`.
+- **El cartel de origen** de las tres pantallas suma la regla en una línea (`DolarFuturo::explicarRegla()`), con la fecha y el valor de la cotización BCRA. La ayuda de Comex, pestaña *El dólar*, la explica y suma la marca.
+
+### La curva ROFEX desactualizada
+
+**Si la `fecha_actualizacion` más reciente de la curva es de un día anterior al último día hábil**, va un aviso de **atención** en las tres pestañas y en sus grupos del panel del tablero: *"La curva de dólar futuro ROFEX se actualizó por última vez el dd/mm/aaaa hh:mm. Los pagos posteriores a los próximos N días se valúan con esa curva."*
+
+- **El último día hábil** es el anterior o igual a hoy según `RO_T_CALENDARIO` (leído por `Ventas::getDiasHabiles()`), con el respaldo de lunes a viernes y la mecánica hacia atrás de `CronogramaPagos::habilAnterior()`. Un sábado, un domingo o un feriado **no avisan** si la curva es del último hábil.
+- **Un día hábil, antes de que corra el proceso que baja la curva**, avisa: la curva es la de ayer. Al 31/10/2026 el proceso escribe cerca de las 08:00.
+- **No reemplaza** al aviso de *"no se pudo leer la curva"*, que sigue siendo crítico (`Comex::avisoSinCurva()`).
+
+Los dos avisos que no dependen de las filas —curva vieja y BCRA vieja— salen de `DolarFuturo::avisosDolarConNivel()`, **un solo texto** para las tres pantallas.
+
+### Cuánto se movió el tablero
+
+Medido contra la base el **31/10/2026** (sábado), sólo lectura, con la misma cuenta de los proveedores y N = 0 (como antes) contra N = 7. La BCRA vendedora más reciente es la del **26/10, $ 1.550** —cinco días, así que hoy sale el aviso de antigüedad—; la curva dice $ 1.537,30 para octubre y $ 1.570 para noviembre.
+
+| Fila | N = 0 | N = 7 | Diferencia | Con N = 15 |
+| --- | ---: | ---: | ---: | ---: |
+| Proveedores Exterior (`PAGOS`) | $ 6.024.638.058,95 | igual | $ 0 | −$ 1.732.362,20 |
+| Nacionalizaciones (`NACIONALIZACION`) | $ 5.407.716.123,85 | $ 5.407.588.906,85 | **−$ 127.217,00** | −$ 5.205.201,00 |
+| Compras Proyectadas, FOB | $ 6.842.373.722,52 | igual | $ 0 | $ 0 |
+| Compras Proyectadas, nacionalización | $ 1.672.187.032,61 | igual | $ 0 | $ 0 |
+
+- **Proveedores Exterior: 38 filas pasan a BCRA y las 38 están vencidas**, así que cambia la grilla y no el tablero. Ningún pago no vencido cae entre el 31/10 y el 07/11.
+- **Nacionalizaciones: un contenedor**, el 03/11, pasa de $ 1.570 (curva de noviembre) a $ 1.550. Las otras 209 filas a BCRA están vencidas.
+- **Compras Proyectadas**: ningún mes de la ventana paga ni nacionaliza antes del 07/11.
+
+---
+
 ## Lo que no cambió
 
-- **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
+- **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva —salvo los pagos de los próximos días, que desde la sección 14 van a dólar BCRA—. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
 
   Lo que **sí** cambió es **quiénes la usan**: hasta `feature/comex-nac-usd` era sólo Proveedores Exterior, porque se creía que los gastos de nacionalización estaban en pesos. Ahora valúan las dos pestañas, cada una por su propia fecha efectiva. Ver la sección 6.
 - **El override de cotización por contenedor** (`COTIZ_USD_EDIT`), y que **se descarta si el pago cambia de mes**. Lo único que cambió es de dónde sale la fecha anterior para compararla: antes de la tabla del cashflow, ahora del maestro. `Comex::descartaCotizacion()` no se tocó, y **sigue siendo de Proveedores Exterior solamente** —el motivo, que ya no es el que decía su docblock, está en la sección 6—.
@@ -981,6 +1046,7 @@ php cashflow/tests/run.php comex
 - `tests/test_comex_saldo_pendiente.php` — lo de la sección 8.
 - `tests/test_comex_visibilidad.php` — lo de las secciones 10 y 11, y contra la base que el padrón sea el de la regla pura **con el corte por fecha de movimiento**.
 - `tests/test_comex_nac_parcial.php` — lo de la sección 13: el saldo con base real y estimada, varios pagos, el anulado, el sobrepago y el pagado de más al pasar de estimado a real, el pago en dólares, la fecha de pago futura, la fecha del saldo obligatoria, el tilde con parciales, los pagos que cubren la base, los que tienen costos reales, el invariante columna por columna con saldos en otra fecha, la clave del contenedor —con el grupo de principal + hija y la OC que cambia de grupo después de cargar el pago—, que sin el script nada cambie, los permisos y la pantalla.
+- `tests/test_comex_dolar_bcra.php` — lo de la sección 14, sin base: pago hoy, en el día N, en el N + 1, vencido, sin fecha, con override y con N = 0; la BCRA de más de M días y la que falta (`null` y aviso crítico, nunca la curva); la punta vendedora; la curva al día y desactualizada contando hábiles —actualizada el viernes y hoy sábado, domingo o lunes feriado no avisa; el jueves y hoy viernes, sí—; los parámetros al leerlos y al guardarlos; y, leyendo el código, que las tres pantallas valúen por `Comex::valuar()` con la misma regla y que nadie más la reimplemente.
 - `tests/test_comex_fecha_mov.php` — lo de la sección 12: el corte con un contenedor justo en la fecha, uno anterior, uno posterior y una hija cuya principal es anterior; el valor inicial sin el parámetro; la validación al guardarlo; que los dos padrones y Crono usen el mismo ayudante; y que lo que queda afuera no se avise.
 
 De las secciones 10 y 11, lo que se fija:
@@ -1040,8 +1106,10 @@ sql/cashflow_comex_cotiz_edit.sql      El override de cotizacion por contenedor
 sql/cashflow_comex_pagado.sql          Que pagos ya se hicieron, con su historial
 sql/cashflow_comex_fecha_mov_desde.sql El parametro "Contenedores desde (fecha de movimiento)"
 sql/cashflow_comex_nac_pago.sql        Los pagos parciales de la nacionalizacion y la fecha del saldo
+sql/cashflow_comex_dolar_bcra.sql      Los dos parametros del dolar BCRA para los pagos cercanos
 cashflow/Class/Comex.php               Las dos consultas, el guardado y las reglas puras
-cashflow/Class/DolarFuturo.php         La curva ROFEX y que cotizacion le toca a cada fila
+cashflow/Class/DolarFuturo.php         La curva ROFEX y que cotizacion le toca a cada fila,
+                                       con la regla del dolar BCRA y sus avisos
 cashflow/Class/Providers/ComexProvider.php   Las dos filas del tablero y sus siete series
 cashflow/Class/CashflowRegistry.php          La moneda y las series de las dos filas
 cashflow/Controller/ComexController.php      Listados, edicion de fechas y de cotizacion
@@ -1057,6 +1125,7 @@ cashflow/Tabs/crono_nacionalizacion.php
 tests/test_comex_fecha_maestra.php
 tests/test_comex_fecha_pago_manual.php  El BIT de fecha de pago fijada, y su degradacion
 tests/test_comex_saldo_pendiente.php    La regla del saldo, el invariante de cuatro series
+tests/test_comex_dolar_bcra.php         El dolar BCRA para los pagos cercanos y la curva vieja
                                         y la deduplicacion de OC hijas
 tests/test_comex_visibilidad.php        Cuando un contenedor deja de verse, los dos padrones
                                         iguales y el disparador del recalculo en Comex

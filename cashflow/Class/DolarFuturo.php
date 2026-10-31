@@ -75,6 +75,30 @@
  * la cotizacion del mes mas cercano que exista y la fila queda MARCADA, con el
  * mes que se le aplico a la vista. Aproximar en silencio seria mostrar un
  * numero que nadie puede explicar; no valuar seria esconder un pago que existe.
+ *
+ * LOS PAGOS DE LOS PROXIMOS DIAS VAN A DOLAR BCRA, NO A LA CURVA
+ * --------------------------------------------------------------
+ * Desde feature/comex-dolar-bcra-proximos-pagos. Un pago que sale dentro de los
+ * proximos N dias -comex_dias_bcra, Parametros > Compras Exterior, 7 por
+ * defecto- se liquida al tipo de cambio de hoy: la curva del mes en curso ya
+ * incorpora una devaluacion esperada que para dentro de una semana no ocurre.
+ * Es la misma regla que TarjetasSocios aplica a su proximo vencimiento, con
+ * una diferencia deliberada: aca la punta es VENDEDORA, que es la que se paga
+ * para girarle a un proveedor del exterior. Tarjetas Socios sigue con la
+ * compradora.
+ *
+ * Lo VENCIDO TAMBIEN VA A BCRA: si todavia no se pago, se paga ya. En
+ * Proveedores Exterior y Crono Nacionalizacion eso solo cambia lo que muestra
+ * la grilla -lo vencido no entra al tablero, ver Comex::importeProyectable()-;
+ * en Compras Proyectadas, un pago de este mes con fecha ya pasada si entra, en
+ * la columna del mes en curso.
+ *
+ * El override manual sigue mandando sobre las dos. Y SIN COTIZACION BCRA ESOS
+ * IMPORTES QUEDAN EN null, con aviso: valuarlos con la curva en silencio seria
+ * aplicar justo el criterio que esta regla dice que no corresponde.
+ *
+ * La regla se arma con reglaBcra() -pura- y la lectura de los parametros y de
+ * la cotizacion vive en bcra(), igual que curva() y resolver().
  */
 class DolarFuturo {
 
@@ -92,10 +116,31 @@ class DolarFuturo {
     const ORIGEN_CURVA = 'CURVA';          /* el mes de pago esta en la curva */
     const ORIGEN_APROXIMADA = 'APROXIMADA'; /* se uso el mes mas cercano */
     const ORIGEN_OVERRIDE = 'OVERRIDE';     /* la cargo una persona */
+    const ORIGEN_BCRA = 'BCRA';             /* se paga en los proximos dias */
 
     /* Por que NO se pudo valuar una fila. Tambien viaja al front. */
     const SIN_FECHA = 'SIN_FECHA';
     const SIN_CURVA = 'SIN_CURVA';
+    const SIN_BCRA = 'SIN_BCRA';
+
+    /**
+     * Los dos parametros de la regla del dolar BCRA, en
+     * RO_T_CASHFLOW_PARAMETROS (sql/cashflow_comex_dolar_bcra.sql).
+     *
+     * LOS VALORES INICIALES ESTAN ESCRITOS DOS VECES -aca y en el script-, como
+     * Comex::FECHA_MOV_DESDE_INICIAL: el script los siembra, y el codigo no
+     * depende de que se haya corrido.
+     */
+    const PARAM_DIAS_BCRA = 'comex_dias_bcra';
+    const PARAM_ANTIGUEDAD_BCRA = 'comex_bcra_antiguedad_max';
+    const DIAS_BCRA_INICIAL = 7;
+    const ANTIGUEDAD_BCRA_INICIAL = 3;
+
+    /* Topes de los dos parametros. N mas alla de dos meses ya no es "un pago
+       de los proximos dias", y un aviso de antiguedad a partir de un mes no
+       avisa nada. */
+    const DIAS_BCRA_MAX = 60;
+    const ANTIGUEDAD_BCRA_MAX = 30;
 
     /** @var Conexion */
     private $conn;
@@ -105,6 +150,12 @@ class DolarFuturo {
 
     /** @var string|null Por que no se pudo leer la curva, si no se pudo */
     private $error = null;
+
+    /** @var array Cache de bcra(), indexado por hoy */
+    private $reglas = [];
+
+    /** @var array Cache de ultimoHabil(), indexado por hoy */
+    private $habiles = [];
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -268,6 +319,166 @@ class DolarFuturo {
         return $ultima;
     }
 
+    /**
+     * La regla del dolar BCRA de hoy: los dos parametros y la ultima
+     * cotizacion BCRA VENDEDORA publicada hasta hoy. Es lo que reciben
+     * resolver() y Comex::valuar().
+     *
+     * UNA LECTURA POR PEDIDO, cacheada por dia: la usan las filas de las dos
+     * pestanas de Comex y los meses de Compras Proyectadas, y la cotizacion es
+     * la misma para todos.
+     *
+     * NO LANZA, como curva(). Sin parametros usa los iniciales; sin la vista
+     * del BCRA deja la cotizacion en null y el motivo en 'error', y los pagos
+     * de los proximos dias quedan sin valuar con su aviso. Con N = 0 ni
+     * siquiera se pide la cotizacion: nadie la usa.
+     *
+     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy.
+     * @return array Lo que devuelve reglaBcra()
+     */
+    public function bcra($hoy = null) {
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        if (isset($this->reglas[$hoy])) {
+            return $this->reglas[$hoy];
+        }
+
+        $params = $this->parametrosBcra();
+        $dias = self::diasBcra($params[self::PARAM_DIAS_BCRA]);
+        $cotizacion = null;
+        $error = null;
+
+        if ($dias > 0) {
+            try {
+                require_once __DIR__ . '/Cotizacion.php';
+
+                $cotizacion = (new Cotizacion())->ultimaHasta($hoy, Cotizacion::VENDEDOR);
+            } catch (Throwable $e) {
+                $error = $e->getMessage();
+            }
+        }
+
+        $this->reglas[$hoy] = self::reglaBcra($hoy, $dias,
+            $params[self::PARAM_ANTIGUEDAD_BCRA], $cotizacion, $error);
+
+        return $this->reglas[$hoy];
+    }
+
+    /**
+     * El ultimo dia habil anterior o igual a hoy, segun RO_T_CALENDARIO con
+     * el respaldo de lunes a viernes. Es contra lo que se mide si la curva
+     * esta al dia.
+     *
+     * La direccion -hacia atras- es la de CronogramaPagos::habilAnterior(), y
+     * se usa esa: el calendario se lee con la misma puerta que el resto del
+     * modulo (Ventas::getDiasHabiles()). Si no se puede leer, el mapa vacio
+     * deja solo el respaldo de lunes a viernes; si ni asi aparece un habil,
+     * null, y no se avisa nada.
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return string|null 'Y-m-d'
+     */
+    public function ultimoHabil($hoy = null) {
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        if (array_key_exists($hoy, $this->habiles)) {
+            return $this->habiles[$hoy];
+        }
+
+        require_once __DIR__ . '/CronogramaPagos.php';
+
+        $mapa = [];
+
+        try {
+            require_once __DIR__ . '/Ventas.php';
+
+            $mapa = (new Ventas())->getDiasHabiles(
+                date('Y-m-d', strtotime($hoy . ' -' . CronogramaPagos::MAX_CORRIMIENTO . ' days')),
+                $hoy);
+        } catch (Throwable $e) {
+            $mapa = [];
+        }
+
+        try {
+            $this->habiles[$hoy] = CronogramaPagos::habilAnterior($hoy, $mapa)['fecha'];
+        } catch (Throwable $e) {
+            $this->habiles[$hoy] = null;
+        }
+
+        return $this->habiles[$hoy];
+    }
+
+    /**
+     * Los avisos del dolar que no dependen de las filas: la curva que no esta
+     * al dia, la cotizacion BCRA vieja y la que no se pudo leer.
+     *
+     * UN SOLO TEXTO PARA LAS TRES PANTALLAS Y EL TABLERO: lo emiten
+     * Comex::avisosExteriorConNivel(), avisosNacionalizacionConNivel() y
+     * ComprasProyectadasProvider, y la pestana saca los repetidos comparando
+     * el texto.
+     *
+     * La curva que no se pudo leer NO esta aca: es critica y la dice
+     * Comex::avisoSinCurva(). Cuantos pagos quedaron sin BCRA tampoco: eso es
+     * de las filas, y lo cuenta Comex::avisosValuacionConNivel().
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosDolarConNivel($hoy = null) {
+        require_once __DIR__ . '/Aviso.php';
+
+        $regla = $this->bcra($hoy);
+        $avisos = [];
+
+        if ($this->disponible()) {
+            $avisos[] = self::avisoCurvaDesactualizada($this->actualizada(),
+                $this->ultimoHabil($hoy), $regla);
+        }
+
+        $avisos[] = self::avisoBcraVieja($regla);
+
+        /* El motivo tecnico va aparte y en atencion: lo que no se pudo valuar
+           por esto ya lo cuenta, critico, el aviso de las filas. */
+        if ($regla['error'] !== null) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer el dólar BCRA para los pagos '
+                . 'de los próximos ' . $regla['dias'] . ' días: ' . $regla['error']);
+        }
+
+        return array_values(array_filter($avisos));
+    }
+
+    /**
+     * Los dos parametros de la regla, tal como estan en la base. Sin la fila
+     * -no se corrio el script- o sin poder leerla, null: reglaBcra() pone el
+     * inicial. El aviso de que falta el script va solo en Parametros.
+     *
+     * @return array [PARAM_DIAS_BCRA => mixed, PARAM_ANTIGUEDAD_BCRA => mixed]
+     */
+    private function parametrosBcra() {
+        $out = [self::PARAM_DIAS_BCRA => null, self::PARAM_ANTIGUEDAD_BCRA => null];
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return $out;
+        }
+
+        $stmt = @sqlsrv_query($cid,
+            "SELECT CLAVE, VALOR FROM RO_T_CASHFLOW_PARAMETROS WHERE CLAVE IN (?, ?)",
+            [self::PARAM_DIAS_BCRA, self::PARAM_ANTIGUEDAD_BCRA]);
+
+        if ($stmt === false) {
+            return $out;
+        }
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $out[$row['CLAVE']] = $row['VALOR'];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $out;
+    }
+
     /* ====================================================================
        RESOLUCION
        Puras: deciden que cotizacion le toca a una fila, sin tocar la base.
@@ -285,8 +496,14 @@ class DolarFuturo {
      * EL ORDEN DE PRECEDENCIA
      *   1. El override manual de la fila, si tiene uno valido. Manda sobre todo:
      *      lo cargo una persona que sabe algo que la curva no sabe.
-     *   2. La cotizacion del mes de la fecha efectiva de pago.
-     *   3. La del mes mas cercano de la curva, marcada como aproximada.
+     *   2. Si se paga dentro de los proximos N dias -o ya vencio-, el dolar
+     *      oficial BCRA vendedor de la regla. Sin esa cotizacion, null con
+     *      SIN_BCRA: NO se cae a la curva. Ver el encabezado de la clase.
+     *   3. La cotizacion del mes de la fecha efectiva de pago.
+     *   4. La del mes mas cercano de la curva, marcada como aproximada.
+     *
+     * SIN REGLA -$bcra null- NO HAY PASO 2, y todo va con la curva como antes
+     * de feature/comex-dolar-bcra-proximos-pagos. Es lo que pasa con N = 0.
      *
      * DEVUELVE SIEMPRE LA MISMA ESTRUCTURA, con 'cotizacion' en null cuando no
      * se puede valuar y 'motivo' diciendo por que. Asi quien consume no tiene
@@ -302,16 +519,21 @@ class DolarFuturo {
      * @param array $curva Mapa 'YYYY-MM' => ['simbolo', 'cotizacion', ...]
      * @param mixed $fechaPago Fecha efectiva de pago ('Y-m-d', DateTime o null)
      * @param mixed $override Cotizacion cargada a mano para esta fila, o null
-     * @return array ['cotizacion', 'simbolo', 'origen', 'mes_pago', 'mes_curva', 'motivo']
+     * @param array|null $bcra Lo que devolvio reglaBcra(), o null sin regla
+     * @return array ['cotizacion', 'simbolo', 'origen', 'mes_pago', 'mes_curva', 'motivo',
+     *                'bcra_fecha', 'bcra_punta', 'bcra_dias']
      */
-    public static function resolver($curva, $fechaPago, $override = null) {
+    public static function resolver($curva, $fechaPago, $override = null, $bcra = null) {
         $r = [
             'cotizacion' => null,
             'simbolo' => null,
             'origen' => null,
             'mes_pago' => null,
             'mes_curva' => null,
-            'motivo' => null
+            'motivo' => null,
+            'bcra_fecha' => null,
+            'bcra_punta' => null,
+            'bcra_dias' => null
         ];
 
         $curva = is_array($curva) ? $curva : [];
@@ -344,6 +566,23 @@ class DolarFuturo {
             return $r;
         }
 
+        if (self::usaBcra($bcra, $fechaPago)) {
+            $r['bcra_dias'] = $bcra['dias'];
+
+            if (empty($bcra['cotizacion'])) {
+                $r['motivo'] = self::SIN_BCRA;
+
+                return $r;
+            }
+
+            $r['cotizacion'] = floatval($bcra['cotizacion']['valor']);
+            $r['origen'] = self::ORIGEN_BCRA;
+            $r['bcra_fecha'] = $bcra['cotizacion']['fecha'];
+            $r['bcra_punta'] = $bcra['cotizacion']['punta'];
+
+            return $r;
+        }
+
         if ($delMes === null) {
             $r['motivo'] = self::SIN_CURVA;
 
@@ -356,6 +595,185 @@ class DolarFuturo {
             : self::ORIGEN_APROXIMADA;
 
         return $r;
+    }
+
+    /**
+     * La regla del dolar BCRA, armada: hasta que dia va a BCRA y con que
+     * cotizacion.
+     *
+     * Es lo que recibe resolver(). Va en un array aparte, y no como cuatro
+     * argumentos mas, porque se arma UNA vez por pedido -bcra() lee los
+     * parametros y la cotizacion- y se aplica a cada fila.
+     *
+     * LOS PARAMETROS SE NORMALIZAN ACA: un valor que no es un entero valido
+     * vale el inicial. Al guardarlos los valida validarDiasBcra(); esto solo
+     * pasa sin el script o con un valor cargado a mano en la base.
+     *
+     * Estatica y pura.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @param mixed $dias N, el parametro comex_dias_bcra
+     * @param mixed $antiguedad M, el parametro comex_bcra_antiguedad_max
+     * @param array|null $cotizacion Lo que devolvio Cotizacion::ultimaHasta()
+     * @param string|null $error Por que no se pudo leer la cotizacion, si no se pudo
+     * @return array ['hoy', 'dias', 'hasta', 'antiguedad_max', 'cotizacion', 'error']
+     */
+    public static function reglaBcra($hoy, $dias, $antiguedad, $cotizacion, $error = null) {
+        require_once __DIR__ . '/Horizonte.php';
+
+        $hoy = Horizonte::normalizarFecha($hoy);
+        $dias = self::diasBcra($dias);
+
+        return [
+            'hoy' => $hoy,
+            'dias' => $dias,
+            /* Con N = 0 no hay ventana: nadie va a BCRA. hasta en null lo dice
+               sin que usaBcra() tenga que preguntar por el cero. */
+            'hasta' => ($hoy === null || $dias === 0)
+                ? null : date('Y-m-d', strtotime($hoy . ' +' . $dias . ' days')),
+            'antiguedad_max' => self::antiguedadBcra($antiguedad),
+            'cotizacion' => (is_array($cotizacion) && !empty($cotizacion['valor']))
+                ? $cotizacion : null,
+            'error' => $error
+        ];
+    }
+
+    /**
+     * Si un pago va a dolar BCRA: hay regla, N es mayor que cero y la fecha es
+     * anterior o igual a hoy + N. Lo vencido entra: ver el encabezado.
+     *
+     * Estatica y pura.
+     *
+     * @param array|null $regla Lo que devolvio reglaBcra()
+     * @param mixed $fechaPago
+     * @return bool
+     */
+    public static function usaBcra($regla, $fechaPago) {
+        if (!is_array($regla) || empty($regla['hasta'])) {
+            return false;
+        }
+
+        require_once __DIR__ . '/Horizonte.php';
+
+        $f = Horizonte::normalizarFecha($fechaPago);
+
+        return $f !== null && $f <= $regla['hasta'];
+    }
+
+    /**
+     * Si la cotizacion BCRA de la regla tiene mas de M dias corridos.
+     *
+     * Solo importa con N mayor que cero: si nadie va a BCRA, que tan vieja
+     * sea no cambia ningun numero.
+     *
+     * Estatica y pura.
+     *
+     * @param array|null $regla
+     * @return bool
+     */
+    public static function bcraVieja($regla) {
+        if (!is_array($regla) || empty($regla['hasta']) || empty($regla['cotizacion'])) {
+            return false;
+        }
+
+        $dias = (strtotime($regla['hoy']) - strtotime($regla['cotizacion']['fecha'])) / 86400;
+
+        return round($dias) > $regla['antiguedad_max'];
+    }
+
+    /**
+     * Si la curva no esta al dia: su ultima actualizacion es de un dia
+     * ANTERIOR al ultimo dia habil. Un sabado, un domingo o un feriado no
+     * avisan si la curva es del ultimo habil.
+     *
+     * SIN FECHA DE ACTUALIZACION NO SE AFIRMA NADA: false. No es lo mismo que
+     * una curva vieja, y la curva que no se pudo leer ya tiene su aviso.
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $actualizada 'Y-m-d H:i:s', lo que devolvio actualizada()
+     * @param string|null $ultimoHabil 'Y-m-d', el ultimo habil anterior o igual a hoy
+     * @return bool
+     */
+    public static function curvaDesactualizada($actualizada, $ultimoHabil) {
+        if ($actualizada === null || $ultimoHabil === null) {
+            return false;
+        }
+
+        return substr((string) $actualizada, 0, 10) < substr((string) $ultimoHabil, 0, 10);
+    }
+
+    /**
+     * N, el parametro de dias con dolar BCRA, normalizado: un entero de 0 a
+     * DIAS_BCRA_MAX, o el inicial.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $valor
+     * @return int
+     */
+    public static function diasBcra($valor) {
+        $n = self::enteroEntre($valor, self::DIAS_BCRA_MAX);
+
+        return ($n === null) ? self::DIAS_BCRA_INICIAL : $n;
+    }
+
+    /**
+     * M, la antiguedad maxima del dolar BCRA, normalizada: un entero de 0 a
+     * ANTIGUEDAD_BCRA_MAX, o el inicial.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $valor
+     * @return int
+     */
+    public static function antiguedadBcra($valor) {
+        $n = self::enteroEntre($valor, self::ANTIGUEDAD_BCRA_MAX);
+
+        return ($n === null) ? self::ANTIGUEDAD_BCRA_INICIAL : $n;
+    }
+
+    /**
+     * La validacion de los dos parametros al guardarlos, en el servidor.
+     *
+     * LANZA, al reves que diasBcra(): aca el valor lo esta tipeando alguien,
+     * y caer en silencio al inicial guardaria un numero que nadie pidio.
+     *
+     * @param string $clave PARAM_DIAS_BCRA o PARAM_ANTIGUEDAD_BCRA
+     * @param mixed $valor
+     * @return string El entero, como texto
+     * @throws Exception Si no es un entero en el rango
+     */
+    public static function validarParametro($clave, $valor) {
+        $esDias = ($clave === self::PARAM_DIAS_BCRA);
+        $max = $esDias ? self::DIAS_BCRA_MAX : self::ANTIGUEDAD_BCRA_MAX;
+        $n = self::enteroEntre($valor, $max);
+
+        if ($n === null) {
+            throw new Exception('"' . ($esDias ? 'Días con dólar BCRA' : 'Antigüedad máxima del '
+                . 'dólar BCRA') . '" tiene que ser un número entero de días entre 0 y ' . $max . '.');
+        }
+
+        return (string) $n;
+    }
+
+    /**
+     * Un entero de 0 a $max, o null. Acepta '7' y 7; rechaza '7,5', '-1' y ''.
+     *
+     * @param mixed $valor
+     * @param int $max
+     * @return int|null
+     */
+    private static function enteroEntre($valor, $max) {
+        $v = is_int($valor) ? (string) $valor : trim((string) $valor);
+
+        if (!preg_match('/^\d{1,4}$/', $v)) {
+            return null;
+        }
+
+        $n = intval($v);
+
+        return ($n <= $max) ? $n : null;
     }
 
     /**
@@ -502,6 +920,12 @@ class DolarFuturo {
      */
     public static function explicar($resuelto) {
         if (empty($resuelto['origen'])) {
+            if ($resuelto['motivo'] === self::SIN_BCRA) {
+                return 'Se paga en los próximos ' . $resuelto['bcra_dias'] . ' días, así que va '
+                    . 'a dólar BCRA vendedor, pero no hay ninguna cotización publicada: este pago '
+                    . 'no se puede valuar. No se usa la curva en su lugar.';
+            }
+
             return ($resuelto['motivo'] === self::SIN_CURVA)
                 ? 'No hay curva de dólar futuro cargada, así que este pago no se puede valuar.'
                 : 'Sin fecha estimada de pago no hay mes al que pedirle cotización, '
@@ -514,16 +938,137 @@ class DolarFuturo {
             return 'Cotización cargada a mano para este contenedor. Manda sobre la curva'
                 . ($resuelto['mes_curva'] === null
                     ? '.'
-                    : ', que para ' . $resuelto['mes_curva'] . $simbolo . ' dice otra cosa.');
+                    : ', que para ' . self::mesCorto($resuelto['mes_curva']) . $simbolo
+                      . ' dice otra cosa.');
+        }
+
+        /* EL TEXTO EMPIEZA POR EL DOLAR Y SU FECHA, que es lo que se compara
+           contra lo publicado por el BCRA; el porque va despues. */
+        if ($resuelto['origen'] === self::ORIGEN_BCRA) {
+            require_once __DIR__ . '/Cotizacion.php';
+
+            return 'Dólar BCRA ' . Cotizacion::nombrePunta($resuelto['bcra_punta']) . ' del '
+                . self::fechaCorta($resuelto['bcra_fecha']) . ': $ '
+                . number_format($resuelto['cotizacion'], 2, ',', '.') . '. Se paga en los '
+                . 'próximos ' . $resuelto['bcra_dias'] . ' días —o ya venció—, así que va a dólar '
+                . 'de hoy y no a la curva de futuros.';
         }
 
         if ($resuelto['origen'] === self::ORIGEN_APROXIMADA) {
-            return 'El mes de pago (' . $resuelto['mes_pago'] . ') no está en la curva, '
-                . 'así que se usó el mes más cercano que hay: ' . $resuelto['mes_curva']
-                . $simbolo . '.';
+            return 'El mes de pago (' . self::mesCorto($resuelto['mes_pago']) . ') no está en la '
+                . 'curva, así que se usó el mes más cercano que hay: '
+                . self::mesCorto($resuelto['mes_curva']) . $simbolo . '.';
         }
 
-        return 'Dólar futuro ROFEX de ' . $resuelto['mes_curva'] . $simbolo . '.';
+        return 'Dólar futuro ROFEX de ' . self::mesCorto($resuelto['mes_curva']) . $simbolo . '.';
+    }
+
+    /**
+     * La regla en una linea, para el cartel de las tres pantallas.
+     *
+     * Vive aca por el mismo motivo que explicar(): el texto lo muestran tres
+     * pantallas, y tres copias se desincronizan.
+     *
+     * Estatica y pura.
+     *
+     * @param array|null $regla Lo que devolvio bcra()
+     * @return string
+     */
+    public static function explicarRegla($regla) {
+        if (!is_array($regla) || empty($regla['hasta'])) {
+            return 'Todos los pagos se valúan con dólar futuro ROFEX del mes de pago: los días '
+                . 'con dólar BCRA están en 0.';
+        }
+
+        $bcra = empty($regla['cotizacion'])
+            ? 'dólar BCRA vendedor —que hoy no se puede leer, así que quedan sin valuar—'
+            : 'dólar BCRA vendedor del ' . self::fechaCorta($regla['cotizacion']['fecha']) . ' ($ '
+              . number_format($regla['cotizacion']['valor'], 2, ',', '.') . ')';
+
+        return 'Los pagos de los próximos ' . $regla['dias'] . ' días —hasta el '
+            . self::fechaCorta($regla['hasta']) . '— y los vencidos van a ' . $bcra
+            . '; los posteriores, a dólar futuro ROFEX del mes de pago.';
+    }
+
+    /**
+     * El aviso de que la cotizacion BCRA tiene mas de M dias, o null.
+     *
+     * Atencion y no critico: la cotizacion se USA igual -es la ultima que
+     * hay-, y lo que se pide es mirar si el origen se sigue cargando.
+     *
+     * Estatica y pura.
+     *
+     * @param array|null $regla
+     * @return array|null ['nivel', 'texto', 'seccion']
+     */
+    public static function avisoBcraVieja($regla) {
+        require_once __DIR__ . '/Aviso.php';
+
+        if (!self::bcraVieja($regla)) {
+            return null;
+        }
+
+        return Aviso::nuevo(Aviso::WARNING, 'La última cotización del dólar BCRA es del '
+            . self::fechaCorta($regla['cotizacion']['fecha']) . '; se usa ésa para los pagos de '
+            . 'los próximos ' . $regla['dias'] . ' días.');
+    }
+
+    /**
+     * El aviso de que la curva no esta al dia, o null.
+     *
+     * Atencion: los numeros salen igual, con la ultima curva que hay. No
+     * reemplaza al de "no se pudo leer la curva", que es critico y lo emite
+     * Comex::avisoSinCurva().
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $actualizada 'Y-m-d H:i:s'
+     * @param string|null $ultimoHabil 'Y-m-d'
+     * @param array|null $regla La del BCRA, para decir desde cuando rige la curva
+     * @return array|null ['nivel', 'texto', 'seccion']
+     */
+    public static function avisoCurvaDesactualizada($actualizada, $ultimoHabil, $regla = null) {
+        require_once __DIR__ . '/Aviso.php';
+
+        if (!self::curvaDesactualizada($actualizada, $ultimoHabil)) {
+            return null;
+        }
+
+        $dias = is_array($regla) ? intval($regla['dias']) : 0;
+
+        return Aviso::nuevo(Aviso::WARNING, 'La curva de dólar futuro ROFEX se actualizó por '
+            . 'última vez el ' . self::fechaCorta($actualizada) . ' '
+            . substr((string) $actualizada, 11, 5) . '. '
+            . ($dias > 0
+                ? 'Los pagos posteriores a los próximos ' . $dias . ' días se valúan con esa curva.'
+                : 'Los pagos se valúan con esa curva.'));
+    }
+
+    /**
+     * Como se nombra un mes en pantalla: '2026-11' -> 'Nov-26'.
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $mes 'YYYY-MM'
+     * @return string
+     */
+    public static function mesCorto($mes) {
+        $nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+                    'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        $m = intval(substr((string) $mes, 5, 2));
+
+        if ($m < 1 || $m > 12) {
+            return (string) $mes;
+        }
+
+        return $nombres[$m - 1] . '-' . substr((string) $mes, 2, 2);
+    }
+
+    /** 'Y-m-d' (o 'Y-m-d H:i:s') -> 'dd/mm/aaaa' */
+    private static function fechaCorta($fecha) {
+        $f = substr((string) $fecha, 0, 10);
+
+        return substr($f, 8, 2) . '/' . substr($f, 5, 2) . '/' . substr($f, 0, 4);
     }
 
     /* ====================================================================

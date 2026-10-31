@@ -912,14 +912,15 @@ chequear('Crono Nacionalizacion sigue igual', true,
 seccion('el gasto de nacionalizacion se valua, y el eje va en pesos');
 
 chequear('la fila se valua con la fecha de nacionalizacion', true,
-    strpos($codigoComex, "self::valuar(\$row, \$curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA')")
-        !== false);
+    strpos($codigoComex,
+        "self::valuar(\$row, \$curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA', \$bcra)") !== false);
 
 /* La curva se lee UNA vez por listado y no una por fila: son 76 filas y
-   DolarFuturo::curva() es una consulta contra un servidor vinculado. */
+   DolarFuturo::curva() es una consulta contra un servidor vinculado. La regla
+   del dolar BCRA, igual: va justo despues. */
 chequear('la curva se lee antes del while', true,
-    (bool) preg_match('/\$curva = \$this->dolarFuturo\(\)->curva\(\);\s*\n\s*while/',
-        $codigoComex));
+    (bool) preg_match('/\$curva = \$this->dolarFuturo\(\)->curva\(\);\s*\n\s*'
+        . '\$bcra = \$this->dolarFuturo\(\)->bcra\(\$hoy\);\s*\n\s*while/', $codigoComex));
 chequear('y una sola vez en cada getter', 2,
     substr_count($codigoComex, '$curva = $this->dolarFuturo()->curva();'));
 

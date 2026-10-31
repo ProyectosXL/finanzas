@@ -317,7 +317,10 @@
                 'nacionalización ' + esc(par.compras_proy_dias_nac) + ' días antes. ' +
                 'Cuota sobre ' + esc(par.compras_proy_anios_cuota) + ' años por ' +
                 (par.compras_proy_base_cuota === 'UNIDADES' ? 'unidades' : 'importe') + '. ' +
-                'Nacionalización ' + pct(par.compras_proy_nac_pct) + ' del FOB.';
+                'Nacionalización ' + pct(par.compras_proy_nac_pct) + ' del FOB.' +
+                /* Con qué dólar: la misma línea que las dos pestañas de Comex
+                   (DolarFuturo::explicarRegla()). */
+                (datos.dolar ? ' ' + esc(datos.dolar) : '');
         }
     }
 
@@ -657,8 +660,11 @@
     function celdaDolar(cotiz, origen, detalle) {
         if (cotiz === null || cotiz === undefined) { return '—'; }
 
+        /* BCRA: el pago cae en los próximos días, o ya pasó, y va a dólar de
+           hoy. Mismo ícono que las dos pestañas de Comex. */
         var marca = (origen === 'APROXIMADA')
-            ? ' <i class="fas fa-triangle-exclamation text-warning"></i>' : '';
+            ? ' <i class="fas fa-triangle-exclamation text-warning"></i>'
+            : (origen === 'BCRA' ? ' <i class="fas fa-building-columns text-success"></i>' : '');
 
         return '<span title="' + esc(detalle || '') + '">' + num(cotiz, 2) + marca + '</span>';
     }

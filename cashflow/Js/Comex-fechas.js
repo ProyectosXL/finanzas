@@ -652,6 +652,8 @@
             clases.push('cotiz-override');
         } else if (item.COTIZ_ORIGEN === 'APROXIMADA') {
             clases.push('cotiz-aproximada');
+        } else if (item.COTIZ_ORIGEN === 'BCRA') {
+            clases.push('cotiz-bcra');
         }
 
         if (editable) {
@@ -663,17 +665,24 @@
         if (item.COTIZ_USD === null || item.COTIZ_USD === undefined) {
             cuerpo = '<span class="cotiz-sin">—</span>';
         } else {
+            /* Debajo del valor, DE DÓNDE SALE: el contrato de la curva, "a
+               mano" o el BCRA con su día —la fecha es lo que se compara contra
+               lo publicado—. */
+            var origen = item.COTIZ_ORIGEN === 'OVERRIDE'
+                ? 'a mano'
+                : (item.COTIZ_ORIGEN === 'BCRA'
+                    ? 'BCRA ' + fecha(item.COTIZ_BCRA_FECHA).substring(0, 5)
+                    : (item.COTIZ_SIMBOLO || item.COTIZ_MES || ''));
+
             cuerpo = '<span class="cotiz-valor">' + cotiz(item.COTIZ_USD) + '</span>'
-                + '<span class="cotiz-simbolo">'
-                + escapar(item.COTIZ_ORIGEN === 'OVERRIDE'
-                    ? 'a mano'
-                    : (item.COTIZ_SIMBOLO || item.COTIZ_MES || ''))
-                + '</span>';
+                + '<span class="cotiz-simbolo">' + escapar(origen) + '</span>';
 
             if (item.COTIZ_ORIGEN === 'APROXIMADA') {
                 cuerpo += '<i class="fas fa-code-branch cotiz-marca" aria-hidden="true"></i>';
             } else if (item.COTIZ_ORIGEN === 'OVERRIDE') {
                 cuerpo += '<i class="fas fa-pen cotiz-marca" aria-hidden="true"></i>';
+            } else if (item.COTIZ_ORIGEN === 'BCRA') {
+                cuerpo += '<i class="fas fa-building-columns cotiz-marca" aria-hidden="true"></i>';
             }
         }
 
@@ -755,7 +764,10 @@
                 : '')
             + (c.editable === false
                 ? '. La corrección manual está apagada: falta el script.'
-                : '.');
+                : '.')
+            /* La regla del dólar BCRA en una línea, armada por el servidor
+               (DolarFuturo::explicarRegla()): la misma en las tres pantallas. */
+            + (c.regla ? ' ' + c.regla : '');
     }
 
     /* ================================================================

@@ -96,6 +96,12 @@
     border-left: 3px dashed #7e57c2;
 }
 
+/* Se nacionaliza en los proximos dias -o ya vencio- y va a dolar BCRA
+   vendedor, no a la curva. Mismo borde que en Proveedores Exterior. */
+.tab-crono_nacionalizacion .cotiz-bcra {
+    border-left: 3px solid #26a69a;
+}
+
 .tab-crono_nacionalizacion .cotiz-marca {
     font-size: 9px;
     opacity: 0.7;

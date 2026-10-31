@@ -1338,6 +1338,14 @@ class Parametros {
             $valor = Comex::validarFechaMovDesde($valor, date('Y-m-d'));
         }
 
+        /* LOS DOS DEL DOLAR BCRA, IGUAL: enteros de dias en su rango. Un "7,5"
+           o un negativo no fallan en la base, pero la lectura los ignoraria y
+           volveria al inicial sin que nadie se entere. La regla vive en
+           DolarFuturo::validarParametro(). */
+        if ($clave === DolarFuturo::PARAM_DIAS_BCRA || $clave === DolarFuturo::PARAM_ANTIGUEDAD_BCRA) {
+            $valor = DolarFuturo::validarParametro($clave, $valor);
+        }
+
         $sql = "UPDATE RO_T_CASHFLOW_PARAMETROS
                 SET VALOR = ?, " . Auditoria::SET_MODIF . "
                 WHERE CLAVE = ?";

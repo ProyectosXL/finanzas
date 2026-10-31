@@ -1,7 +1,8 @@
 /**
  * Parametros -> Compras Exterior (codigo interno COMPRAS_PROY)
  *
- * Los siete parametros del modulo, y el dibujo de la cadena de fechas que los
+ * Los siete parametros del modulo -mas el corte de contenedores y los dos del
+ * dolar BCRA de Comercio Exterior-, y el dibujo de la cadena de fechas que los
  * tres de dias producen.
  *
  * POR QUE LA CADENA SE DIBUJA
@@ -43,6 +44,15 @@
      */
     var CLAVE_FECHA_MOV = 'comex_fecha_mov_desde';
 
+    /**
+     * Los dos de la valuación de Comercio Exterior: hasta cuántos días se paga
+     * con dólar BCRA y desde cuántos días se avisa que esa cotización es vieja.
+     * Valen para las tres pantallas —Proveedores Exterior, Crono
+     * Nacionalización y Proyección—, así que se miran acá. Van aparte porque
+     * los siembra otro script (sql/cashflow_comex_dolar_bcra.sql).
+     */
+    var CLAVES_BCRA = ['comex_dias_bcra', 'comex_bcra_antiguedad_max'];
+
     /** Como se dibuja y se valida cada uno */
     var FORMATO = {
         compras_proy_meses: { tipo: 'entero', sufijo: 'meses', min: 1, max: 60 },
@@ -52,7 +62,10 @@
         compras_proy_dia_llegada: { tipo: 'entero', sufijo: 'del mes', min: 1, max: 31 },
         compras_proy_dias_pago: { tipo: 'entero', sufijo: 'días antes', min: 0, max: 365 },
         compras_proy_dias_nac: { tipo: 'entero', sufijo: 'días antes', min: 0, max: 365 },
-        comex_fecha_mov_desde: { tipo: 'fecha' }
+        comex_fecha_mov_desde: { tipo: 'fecha' },
+        // Los topes son los de DolarFuturo::DIAS_BCRA_MAX y ANTIGUEDAD_BCRA_MAX.
+        comex_dias_bcra: { tipo: 'entero', sufijo: 'días', min: 0, max: 60 },
+        comex_bcra_antiguedad_max: { tipo: 'entero', sufijo: 'días', min: 0, max: 30 }
     };
 
     var ETIQUETAS = {
@@ -63,7 +76,9 @@
         compras_proy_dia_llegada: 'Día de llegada dentro del mes',
         compras_proy_dias_pago: 'Días entre el pago del FOB y la recepción',
         compras_proy_dias_nac: 'Días entre la nacionalización y la recepción',
-        comex_fecha_mov_desde: 'Contenedores desde (fecha de movimiento)'
+        comex_fecha_mov_desde: 'Contenedores desde (fecha de movimiento)',
+        comex_dias_bcra: 'Días con dólar BCRA',
+        comex_bcra_antiguedad_max: 'Antigüedad máxima del dólar BCRA'
     };
 
     /**
@@ -98,6 +113,15 @@
             'principal tiene fecha de movimiento desde este día, y lo mismo vale para lo ya ' +
             'cargado que descuenta la proyección. Lo anterior no se muestra ni se avisa. No puede ' +
             'ser una fecha futura.',
+        comex_dias_bcra:
+            'Un pago en dólares que sale dentro de estos días —o que ya venció— se pasa a pesos ' +
+            'con el dólar oficial BCRA vendedor, la última cotización publicada: es un pago ' +
+            'inminente. Los posteriores, con la curva ROFEX del mes de pago. Con 0, todo va con ' +
+            'la curva. Vale para Proveedores Exterior, Crono Nacionalización y Proyección, y ' +
+            'mueve el tablero.',
+        comex_bcra_antiguedad_max:
+            'Si la última cotización del BCRA tiene más de estos días corridos, se usa igual y ' +
+            'las tres pantallas avisan. No cambia ningún número.',
         compras_proy_dias_nac:
             'Es el más chico de los dos, así que los últimos meses de la ventana aportan su FOB ' +
             'y no su nacionalización: ésa cae fuera del horizonte. El tablero lo avisa con su ' +
@@ -163,6 +187,15 @@
                         'contenedores desde el 01/01/2025, y no se puede cambiar.');
                 }
 
+                /* LO MISMO CON LOS DOS DEL DÓLAR BCRA: la regla se aplica igual,
+                   con 7 y 3 (DolarFuturo::DIAS_BCRA_INICIAL). */
+                if (CLAVES_BCRA.some(function(c) { return !valores[c]; })) {
+                    avisos.push('Faltan "Días con dólar BCRA" y "Antigüedad máxima del dólar ' +
+                        'BCRA". Corré sql/cashflow_comex_dolar_bcra.sql contra la base central. ' +
+                        'Mientras tanto los pagos de los próximos 7 días van a dólar BCRA y se ' +
+                        'avisa si la cotización tiene más de 3 días, y no se puede cambiar.');
+                }
+
                 /* Los del servidor traen los del % importado por rubro: los
                    mismos que ven el tablero y la pestaña Proyección. */
                 avisar(avisos.concat(modulo.avisos || []));
@@ -212,7 +245,7 @@
 
         if (!grid) { return; }
 
-        grid.innerHTML = ORDEN.concat([CLAVE_FECHA_MOV]).map(function(clave) {
+        grid.innerHTML = ORDEN.concat([CLAVE_FECHA_MOV], CLAVES_BCRA).map(function(clave) {
             var p = valores[clave];
 
             if (!p) { return ''; }
