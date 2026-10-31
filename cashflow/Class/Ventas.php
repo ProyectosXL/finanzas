@@ -1206,21 +1206,30 @@ class Ventas {
         // recorre hojas igual, y da la cobranza de siempre.
         $mixCobro = new MixCobro();
         $mix = $mixCobro->getArbol();
-        $arbol = MixCobro::resolver($mix['nodos']);
+
+        // EL MIX POR MES: un arbol por cada mes del anio que tiene venta en la
+        // ventana, resuelto con el MES DE LA VENTA. Con todos los canales en
+        // constante, resolverPorMes() devuelve el mismo arbol para todos los
+        // meses y la proyeccion es, al centavo, la de antes.
+        $arboles = MixCobro::resolverPorMes($mix['nodos'], $mix['config'], self::mesesDeVenta($ventaDiaria));
+        $mesHoy = intval($hoy->format('n'));
+        $arbol = isset($arboles[$mesHoy]) ? $arboles[$mesHoy] : MixCobro::resolver($mix['nodos']);
 
         // UN ARBOL INVALIDO NO CORTA LA PROYECCION: se calcula con lo que hay
         // y se avisa como CRITICO, diciendo que rama y cuanta venta queda
         // afuera. Antes un canal sin medios tiraba una excepcion y se llevaba
         // puesta la pestana entera, incluida la venta, que no dependia del mix.
-        foreach (self::avisosDelMix($arbol, self::ventaPorCanal($ventaDiaria), $mix['origen']) as $a) {
+        foreach (self::avisosDelMixPorMes($arboles, $ventaDiaria, $mix['origen']) as $a) {
             $this->warnUnaVez($a);
         }
 
         $maxDias = 0;
 
-        foreach ($arbol['nodos'] as $n) {
-            if ($n['hoja'] && $n['dias'] !== null && $n['dias'] > $maxDias) {
-                $maxDias = $n['dias'];
+        foreach ($arboles ?: [$arbol] as $a) {
+            foreach ($a['nodos'] as $n) {
+                if ($n['hoja'] && $n['dias'] !== null && $n['dias'] > $maxDias) {
+                    $maxDias = $n['dias'];
+                }
             }
         }
 
@@ -1240,7 +1249,8 @@ class Ventas {
             $ventaDiaria, $arbol, $dias, $meses, $diasSet,
             function ($fecha) use ($habiles) {
                 return $this->proximoHabil($fecha, $habiles);
-            }
+            },
+            $arboles
         );
 
         $cobranza['neteo_prechequeado'] = $this->getNeteoPrechequeado(
@@ -1257,7 +1267,13 @@ class Ventas {
             // Cobranza Proyectada los muestra en el orden de la jerarquia, y
             // cada nodo ya trae su codigo en 'nivel'. La misma lista que
             // recibe el editor de Parametros.
-            'niveles' => MixCobro::nivelesLista()
+            'niveles' => MixCobro::nivelesLista(),
+            // El modo de cada canal y que meses usaron mix propio, para que
+            // Cobranza Proyectada diga que arbol se aplico a cada mes.
+            'modos' => $mix['config']['modos'],
+            'meses_propios' => self::mesesPropios($arboles),
+            'mes_hoy' => $mesHoy,
+            'nombres_mes' => array_values(MixCobro::NOMBRES_MES)
         ];
         $resultado['kpi']['cobranza_neta_tramo'] = $cobranza['neto']['total_tramo'];
         $resultado['kpi']['cobranza_neta_horizonte'] = $cobranza['neto']['total_horizonte'];
@@ -1552,40 +1568,65 @@ class Ventas {
      * que corre una fecha teorica al proximo habil. El motor le pasa
      * proximoHabil().
      *
+     * EL MIX POR MES. Con $arbolesPorMes, cada dia de venta se reparte con el
+     * arbol del MES DE LA VENTA, no el de la acreditacion: una venta del 30/11
+     * que se acredita en diciembre usa el mix de noviembre. La cuenta es la
+     * misma -los mismos montos, en el mismo orden-, solo cambia de que arbol
+     * salen las hojas. Con todos los meses iguales a $arbol, el resultado es
+     * identico al de siempre.
+     *
+     * Las filas del arbol son los nodos en juego en ALGUN mes, en el orden de
+     * dibujo, con los valores de $arbol (el mes en curso). Si algun mes tiene
+     * otro arbol, 'por_mes' trae lo que la regla resolvio para cada nodo en
+     * cada mes: es lo que Cobranza Proyectada muestra al elegir un mes.
+     *
      * @param array $ventaDiaria Mapa 'Y-m-d' => [CANAL => monto]
-     * @param array $arbol Resultado de MixCobro::resolver()
+     * @param array $arbol Resultado de MixCobro::resolver(): el del mes en curso
      * @param array $dias Eje de dias del tramo
      * @param array $meses Eje de meses del horizonte
      * @param array $diasSet Set de fechas del tramo
      * @param callable $corrimiento fn('Y-m-d') => 'Y-m-d' habil
+     * @param array|null $arbolesPorMes [mes 1..12 => resolver()]; null o un mes
+     *                   ausente usan $arbol
      * @return array Grilla bruta + ['costo' => grilla, 'neto' => grilla,
-     *               'arbol' => [...], 'filas' => [hojas]]
+     *               'arbol' => [...], 'filas' => [hojas], 'por_mes' => [...]?]
      */
-    public static function cobranzaPorHojas($ventaDiaria, $arbol, $dias, $meses, $diasSet, $corrimiento) {
+    public static function cobranzaPorHojas($ventaDiaria, $arbol, $dias, $meses, $diasSet, $corrimiento,
+                                            $arbolesPorMes = null) {
         $mesesClaves = array_column($meses, 'clave');
         $mesesSet = array_flip($mesesClaves);
 
-        // Los nodos en juego, en orden de dibujo, y las hojas que se proyectan
-        // con la lista de claves a las que suman: ellas y sus ancestros.
+        // Los arboles que no son $arbol: si no hay ninguno, todo es como antes
+        $otros = [];
+
+        foreach ((is_array($arbolesPorMes) ? $arbolesPorMes : []) as $mes => $a) {
+            if ($a !== $arbol) {
+                $otros[intval($mes)] = $a;
+            }
+        }
+
+        // Los nodos en juego -en algun mes-, en orden de dibujo, y las hojas
+        // que se proyectan con la lista de claves a las que suman: ellas y
+        // sus ancestros.
         $filasArbol = [];
-        $hojasPorCanal = [];
 
         foreach ($arbol['nodos'] as $clave => $n) {
-            if (!$n['en_juego']) {
-                continue;
+            $enJuego = $n['en_juego'];
+
+            foreach ($otros as $a) {
+                $enJuego = $enJuego || (isset($a['nodos'][$clave]) && $a['nodos'][$clave]['en_juego']);
             }
 
-            $filasArbol[] = self::filaArbol($n);
-
-            if ($n['hoja'] && $n['dias'] !== null) {
-                $hojasPorCanal[$n['canal']][] = [
-                    'clave' => $clave,
-                    'porcentaje' => $n['porcentaje_efectivo'],
-                    'carga' => $n['carga'],
-                    'dias' => $n['dias'],
-                    'suma_a' => array_column($n['camino'], 'clave')
-                ];
+            if ($enJuego) {
+                $filasArbol[] = self::filaArbol($n);
             }
+        }
+
+        $hojasPorCanal = self::hojasProyectables($arbol);
+        $hojasPorMes = [];
+
+        foreach ($otros as $mes => $a) {
+            $hojasPorMes[$mes] = self::hojasProyectables($a);
         }
 
         $claves = array_column($filasArbol, 'clave');
@@ -1597,12 +1638,16 @@ class Ventas {
         $cacheHabil = [];
 
         foreach ($ventaDiaria as $fecha => $porCanal) {
+            // El mix del MES DE LA VENTA
+            $mesVenta = intval(substr($fecha, 5, 2));
+            $hojasDelDia = isset($hojasPorMes[$mesVenta]) ? $hojasPorMes[$mesVenta] : $hojasPorCanal;
+
             foreach ($porCanal as $canal => $ventaDia) {
-                if ($ventaDia == 0 || !isset($hojasPorCanal[$canal])) {
+                if ($ventaDia == 0 || !isset($hojasDelDia[$canal])) {
                     continue;
                 }
 
-                foreach ($hojasPorCanal[$canal] as $h) {
+                foreach ($hojasDelDia[$canal] as $h) {
                     $monto = $ventaDia * $h['porcentaje'];
 
                     if ($monto == 0) {
@@ -1659,13 +1704,121 @@ class Ventas {
             ];
         }
 
-        return array_merge($bruto, [
+        $salida = array_merge($bruto, [
             'arbol' => $filasArbol,
             'filas' => $hojas,
             'resumen_canal' => $resumen,
             'costo' => $costo,
             'neto' => self::restarGrilla($bruto, $costo)
         ]);
+
+        if (count($otros)) {
+            $salida['por_mes'] = self::porMesDe($arbolesPorMes, array_column($filasArbol, 'clave'));
+        }
+
+        return $salida;
+    }
+
+    /**
+     * Las hojas que se proyectan de un arbol, por canal: en juego y con dias.
+     * Una hoja sin dias no se proyecta (avisosDelMix() dice cuanto queda
+     * afuera).
+     */
+    private static function hojasProyectables($arbol) {
+        $hojas = [];
+
+        foreach ($arbol['nodos'] as $clave => $n) {
+            if ($n['en_juego'] && $n['hoja'] && $n['dias'] !== null) {
+                $hojas[$n['canal']][] = [
+                    'clave' => $clave,
+                    'porcentaje' => $n['porcentaje_efectivo'],
+                    'carga' => $n['carga'],
+                    'dias' => $n['dias'],
+                    'suma_a' => array_column($n['camino'], 'clave')
+                ];
+            }
+        }
+
+        return $hojas;
+    }
+
+    /**
+     * Lo que la regla resolvio para cada nodo de la pantalla en cada mes de
+     * venta, y si cada canal uso su mix propio. Es lo que el selector de mes
+     * de Cobranza Proyectada pone en las columnas % efectivo, Costo + tasa y
+     * Dias, sin pedir nada al servidor.
+     *
+     * @return array [mes => ['nodos' => [clave => [...]], 'canales' => [CANAL =>
+     *               ['mes_propio', 'porcentaje_efectivo', 'carga_ponderada']]]]
+     */
+    private static function porMesDe($arbolesPorMes, $claves) {
+        $v = [];
+
+        foreach ($arbolesPorMes as $mes => $a) {
+            $nodos = [];
+
+            foreach ($claves as $clave) {
+                $n = $a['nodos'][$clave];
+                $nodos[$clave] = [
+                    'en_juego' => $n['en_juego'], 'hoja' => $n['hoja'],
+                    'porcentaje_efectivo' => $n['porcentaje_efectivo'], 'carga' => $n['carga'],
+                    'carga_ponderada' => $n['carga_ponderada'], 'dias' => $n['dias'], 'dias_de' => $n['dias_de']
+                ];
+            }
+
+            $canales = [];
+
+            foreach (Parametros::CANALES as $canal) {
+                $peso = 0.0;
+                $carga = 0.0;
+
+                foreach ($a['canales'][$canal]['hojas'] as $clave) {
+                    $peso += $a['nodos'][$clave]['porcentaje_efectivo'];
+                    $carga += $a['nodos'][$clave]['porcentaje_efectivo'] * $a['nodos'][$clave]['carga'];
+                }
+
+                $canales[$canal] = [
+                    'mes_propio' => !empty($a['canales'][$canal]['mes_propio']),
+                    'porcentaje_efectivo' => $peso,
+                    'carga_ponderada' => $peso > 0 ? $carga / $peso : null
+                ];
+            }
+
+            $v[intval($mes)] = ['nodos' => $nodos, 'canales' => $canales];
+        }
+
+        ksort($v);
+
+        return $v;
+    }
+
+    /** Los meses del anio (1 a 12) que tienen venta en la ventana, en orden */
+    public static function mesesDeVenta($ventaDiaria) {
+        $v = [];
+
+        foreach (array_keys($ventaDiaria) as $fecha) {
+            $v[intval(substr($fecha, 5, 2))] = true;
+        }
+
+        $meses = array_keys($v);
+        sort($meses);
+
+        return $meses;
+    }
+
+    /** Por canal, los meses en que uso su mix propio */
+    public static function mesesPropios($arbolesPorMes) {
+        $v = array_fill_keys(Parametros::CANALES, []);
+
+        foreach ($arbolesPorMes as $mes => $a) {
+            foreach (Parametros::CANALES as $canal) {
+                if (!empty($a['canales'][$canal]['mes_propio'])) {
+                    $v[$canal][] = intval($mes);
+                }
+            }
+        }
+
+        return $v;
     }
 
     /** Lo que viaja de un nodo a la pantalla: lo que resolvio la regla */
@@ -1814,40 +1967,125 @@ class Ventas {
      */
     public static function avisosDelMix($arbol, $ventaPorCanal, $origen) {
         $avisos = [];
-        $seccion = 'Mix de cobro';
-        $donde = ' Corregilo en Parámetros › Ventas › Mix de Cobro y Plazos.';
 
         foreach ($arbol['errores'] as $e) {
             $venta = isset($ventaPorCanal[$e['canal']]) ? $ventaPorCanal[$e['canal']] : 0;
-            $importe = abs($e['afuera']) * $venta;
-            $plata = '$ ' . number_format($importe, 2, ',', '.');
-            $parte = MixCobro::porcentajeTexto(abs($e['afuera']));
-
-            switch ($e['tipo']) {
-                case 'SIN_DIAS':
-                    $texto = $e['texto'] . ' Esa parte no se proyecta: queda fuera de la cobranza el '
-                        . $parte . ' de la venta del canal, ' . $plata . '.';
-                    break;
-
-                case 'SUMA':
-                    $texto = $e['texto'] . ($e['afuera'] >= 0
-                        ? ' Queda fuera de la cobranza el ' . $parte . ' de la venta del canal, '
-                            . $plata . '.'
-                        : ' Se proyecta cobranza de más: el ' . $parte . ' de la venta del canal, '
-                            . $plata . '.');
-                    break;
-
-                case 'SIN_HOJAS':
-                    $texto = $e['texto'] . ' Queda afuera toda su venta: ' . $plata . '.';
-                    break;
-
-                default:
-                    // CARGA: la hoja se proyecta, pero su neto sale negativo
-                    $texto = $e['texto'] . ' Se proyecta igual, y su cobranza neta sale negativa.';
-            }
-
-            $avisos[] = Aviso::nuevo(Aviso::DANGER, $texto . $donde, $seccion);
+            $avisos[] = self::avisoDelMix($e, $venta, null);
         }
+
+        return array_merge($avisos, self::avisoMixPlano($origen));
+    }
+
+    /**
+     * avisosDelMix() con un arbol por mes de venta (MixCobro::resolverPorMes()).
+     *
+     * Si todos los meses usan el mismo arbol -todo en constante- es
+     * exactamente avisosDelMix(), con la venta de toda la ventana.
+     *
+     * Si no, un error de un canal que en ese mes usa SU MIX PROPIO es de ese
+     * mes: lo dice ("Diciembre: ...") y la plata es la de la venta de ese mes.
+     * Un error del constante se repite igual en todos los meses que lo usan,
+     * asi que va UNA vez, con la venta de todos esos meses juntos.
+     *
+     * @param array $arbolesPorMes [mes => resolver()]
+     * @param array $ventaDiaria Mapa 'Y-m-d' => [CANAL => monto]
+     * @param string $origen 'NODO' | 'PLANO'
+     * @return array Avisos con nivel
+     */
+    public static function avisosDelMixPorMes($arbolesPorMes, $ventaDiaria, $origen) {
+        $lista = array_values($arbolesPorMes);
+
+        if (!count($lista) || count(array_filter($lista, function ($a) use ($lista) {
+                return $a !== $lista[0];
+            })) === 0) {
+            return self::avisosDelMix(count($lista) ? $lista[0] : ['errores' => []],
+                self::ventaPorCanal($ventaDiaria), $origen);
+        }
+
+        // La venta de cada canal en cada mes del anio
+        $ventaMes = [];
+
+        foreach ($ventaDiaria as $fecha => $porCanal) {
+            $mes = intval(substr($fecha, 5, 2));
+
+            foreach ($porCanal as $canal => $monto) {
+                $ventaMes[$mes][$canal] = (isset($ventaMes[$mes][$canal]) ? $ventaMes[$mes][$canal] : 0) + $monto;
+            }
+        }
+
+        $grupos = [];
+
+        foreach ($arbolesPorMes as $mes => $a) {
+            foreach ($a['errores'] as $e) {
+                $propio = !empty($a['canales'][$e['canal']]['mes_propio']);
+                $k = ($propio ? $mes : 0) . '|' . $e['canal'] . '|' . $e['texto'];
+
+                if (!isset($grupos[$k])) {
+                    $grupos[$k] = ['e' => $e, 'mes' => $propio ? intval($mes) : null, 'venta' => 0.0];
+                }
+
+                $grupos[$k]['venta'] += isset($ventaMes[$mes][$e['canal']]) ? $ventaMes[$mes][$e['canal']] : 0;
+            }
+        }
+
+        $avisos = [];
+
+        foreach ($grupos as $g) {
+            $avisos[] = self::avisoDelMix($g['e'], $g['venta'], $g['mes']);
+        }
+
+        return array_merge($avisos, self::avisoMixPlano($origen));
+    }
+
+    /**
+     * El aviso de un error del mix, con la plata que queda afuera. Con $mes,
+     * es el error de un mes con mix propio y el aviso empieza por el mes.
+     */
+    private static function avisoDelMix($e, $venta, $mes) {
+        $seccion = 'Mix de cobro';
+        $donde = $mes === null
+            ? ' Corregilo en Parámetros › Ventas › Mix de Cobro y Plazos.'
+            : ' Corregilo en Parámetros › Ventas › Mix de Cobro y Plazos, en ' . MixCobro::nombreMes($mes) . '.';
+        $importe = abs($e['afuera']) * $venta;
+        $plata = '$ ' . number_format($importe, 2, ',', '.');
+        $parte = MixCobro::porcentajeTexto(abs($e['afuera']));
+        $delCanal = $mes === null ? ' de la venta del canal, ' : ' de la venta del canal en ese mes, ';
+
+        switch ($e['tipo']) {
+            case 'SIN_DIAS':
+                $texto = $e['texto'] . ' Esa parte no se proyecta: queda fuera de la cobranza el '
+                    . $parte . $delCanal . $plata . '.';
+                break;
+
+            case 'SUMA':
+                $texto = $e['texto'] . ($e['afuera'] >= 0
+                    ? ' Queda fuera de la cobranza el ' . $parte . $delCanal . $plata . '.'
+                    : ' Se proyecta cobranza de más: el ' . $parte . $delCanal . $plata . '.');
+                break;
+
+            case 'SIN_HOJAS':
+                $texto = $e['texto'] . ' Queda afuera toda su venta: ' . $plata . '.';
+                break;
+
+            case 'SIN_VALOR_MES':
+                // Se proyecta con los valores del constante: no falta plata,
+                // pero el mes no es del todo lo que alguien guardo.
+                $texto = $e['texto'] . ' Guardá el mes para fijarlos.';
+                break;
+
+            default:
+                // CARGA: la hoja se proyecta, pero su neto sale negativo
+                $texto = $e['texto'] . ' Se proyecta igual, y su cobranza neta sale negativa.';
+        }
+
+        return Aviso::nuevo(Aviso::DANGER, ($mes === null ? '' : MixCobro::nombreMes($mes) . ': ')
+            . $texto . $donde, $seccion);
+    }
+
+    /** El aviso de que el mix sale todavia del plano */
+    private static function avisoMixPlano($origen) {
+        $avisos = [];
+        $seccion = 'Mix de cobro';
 
         if ($origen === 'PLANO') {
             $avisos[] = Aviso::nuevo(Aviso::INFO, 'El mix de cobro sale todavía del mix plano '

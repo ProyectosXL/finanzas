@@ -114,6 +114,40 @@
    .mix-canal-inicio, #formNuevoMedio) se fueron con su editor. Queda
    .mix-input, que comparten los campos numéricos, y .mix-inactivo. */
 
+/* ---- El mix por mes ----------------------------------------------------
+   La fila de meses va debajo del encabezado del canal, sin hover: no es un
+   nodo. El punto marca los meses con mix propio; nunca es la única señal,
+   el title y el texto escondido lo dicen. */
+#tablaMix .mixa-meses td {
+    background: var(--bg-light, #f7f8fb);
+    border-top: 0;
+}
+
+#tablaMix.table-hover .mixa-meses:hover td {
+    background: var(--bg-light, #f7f8fb);
+    --bs-table-accent-bg: transparent;
+}
+
+.mixa-meses-botones .btn {
+    min-width: 3.25rem;
+}
+
+.mixa-punto {
+    font-size: 0.45rem;
+    vertical-align: middle;
+}
+
+.mixa-meses-leyenda .mixa-punto {
+    color: var(--primary-color, #3366ff);
+}
+
+.mixa-modo-etiqueta {
+    background: var(--bg-light, #f0f2f7);
+    color: var(--text-secondary, #5a6178);
+    border: 1px solid var(--border-color, #e2e5ed);
+    font-weight: 500;
+}
+
 /* La fila de cada canal: abre su bloque y lleva Agregar y Guardar */
 #tablaMix .mixa-canal td {
     background-color: #eef2fb;

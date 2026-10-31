@@ -33,6 +33,18 @@ function bodyJson() {
 }
 
 /**
+ * El mes del mix que viene en el cuerpo: null (o vacio) es el constante, y si
+ * no, un mes de 1 a 12 validado en el servidor.
+ */
+function mesDelMix($data) {
+    if (!isset($data['mes']) || $data['mes'] === null || $data['mes'] === '') {
+        return null;
+    }
+
+    return MixCobro::validarMes($data['mes']);
+}
+
+/**
  * La sub-pestaña de lo que se guarda, para las acciones cuyo permiso depende
  * del parametro y no de la accion (saveParametro: lo usan Generales, Saldos,
  * Cobranzas y Compras Proyectadas). null en el resto, y tambien si la clave no
@@ -374,7 +386,8 @@ try {
 
         case 'previsualizarMixArbol':
             // Como quedaria el canal con lo que hay en pantalla, resuelto con
-            // la MISMA regla que el motor. No escribe nada.
+            // la MISMA regla que el motor. No escribe nada. Con 'mes' (1 a
+            // 12), como quedaria ESE MES del canal; sin el, el constante.
             $data = bodyJson();
 
             if (!isset($data['canal']) || !isset($data['nodos']) || !is_array($data['nodos'])) {
@@ -383,16 +396,20 @@ try {
 
             $mixCobro = new MixCobro();
             $arbol = $mixCobro->getArbol();
+            $mes = mesDelMix($data);
 
             echo json_encode([
                 'success' => true,
-                'data' => MixCobro::previsualizar($arbol['nodos'], $data['canal'], $data['nodos'])
+                'data' => MixCobro::previsualizar($arbol['nodos'], $data['canal'], $data['nodos'],
+                    $mes, $arbol['config'])
             ], JSON_UNESCAPED_UNICODE);
             break;
 
         case 'saveMixArbol':
-            // Valida el canal entero COMO QUEDARIA antes de abrir la
-            // transaccion, y escribe solo los nodos que cambiaron.
+            // Valida el canal -o el mes- entero COMO QUEDARIA antes de abrir la
+            // transaccion, y escribe solo lo que cambio. En el constante,
+            // 'inhabilitar_en_meses' apaga tambien en los meses cargados lo
+            // que este guardado apaga, en la misma transaccion.
             $data = bodyJson();
 
             if (!isset($data['canal']) || !isset($data['nodos']) || !is_array($data['nodos'])) {
@@ -400,14 +417,92 @@ try {
             }
 
             $mixCobro = new MixCobro();
-            $escritos = $mixCobro->guardarCanal($data['canal'], $data['nodos'], $usuario);
+            $mes = mesDelMix($data);
+
+            if ($mes !== null) {
+                $escritos = $mixCobro->guardarMes($data['canal'], $mes, $data['nodos'], $usuario);
+                $mensaje = $escritos === 0
+                    ? 'No había cambios que guardar.'
+                    : 'Mix de ' . MixCobro::nombreMes($mes) . ' guardado: ' . $escritos . ' nodo(s) modificado(s).';
+            } else {
+                // La lista de nodos para los que se tildo "Inhabilitarlo tambien
+                // en esos meses": la casilla se contesta nodo por nodo.
+                $enMeses = isset($data['inhabilitar_en_meses']) && is_array($data['inhabilitar_en_meses'])
+                    ? array_values(array_filter(array_map('intval', $data['inhabilitar_en_meses'])))
+                    : [];
+                $escritos = $mixCobro->guardarCanal($data['canal'], $data['nodos'], $usuario,
+                    count($enMeses) ? $enMeses : false);
+                $mensaje = $escritos === 0
+                    ? 'No había cambios que guardar.'
+                    : 'Mix de cobro guardado: ' . $escritos . ' nodo(s) modificado(s).';
+            }
 
             echo json_encode([
                 'success' => true,
-                'message' => $escritos === 0
-                    ? 'No había cambios que guardar.'
-                    : 'Mix de cobro guardado: ' . $escritos . ' nodo(s) modificado(s).',
+                'message' => $mensaje,
                 'data' => ['escritos' => $escritos]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveMixModo':
+            // Constante o variable. No toca ningun mes: volver a constante
+            // los deja guardados.
+            $data = bodyJson();
+
+            if (!isset($data['canal']) || !isset($data['modo'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $mixCobro = new MixCobro();
+            $cambio = $mixCobro->guardarModo($data['canal'], $data['modo'], $usuario);
+            $variable = strtoupper(trim((string) $data['modo'])) === 'VARIABLE';
+
+            echo json_encode([
+                'success' => true,
+                'message' => !$cambio
+                    ? 'El canal ya estaba así: no se cambió nada.'
+                    : MixCobro::nombreCanal(strtoupper($data['canal'])) . ($variable
+                        ? ' pasa a mix variable: los meses con mix propio usan el suyo y el resto, el constante.'
+                        : ' pasa a mix constante: los meses cargados quedan guardados para cuando vuelva a variable.'),
+                'data' => ['cambio' => $cambio]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'copiarMixMes':
+            // Copia un mes guardado a otros, todos o ninguno
+            $data = bodyJson();
+
+            if (!isset($data['canal']) || !isset($data['origen']) || !isset($data['destinos'])
+                    || !is_array($data['destinos'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $mixCobro = new MixCobro();
+            $copiados = $mixCobro->copiarMes($data['canal'], $data['origen'], $data['destinos'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => MixCobro::nombreMes(MixCobro::validarMes($data['origen'])) . ' copiado a '
+                    . $copiados . ' mes(es).',
+                'data' => ['copiados' => $copiados]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'quitarMixMes':
+            // "Usar el constante en este mes": baja logica del mes
+            $data = bodyJson();
+
+            if (!isset($data['canal']) || !isset($data['mes'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $mixCobro = new MixCobro();
+            $mixCobro->quitarMes($data['canal'], $data['mes'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => MixCobro::nombreMes(MixCobro::validarMes($data['mes'])) . ' vuelve a usar el mix '
+                    . 'constante. Sus valores quedan guardados: si lo volvés a cargar, se reactivan.'
             ], JSON_UNESCAPED_UNICODE);
             break;
 

@@ -96,12 +96,14 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2 flex-shrink-0">
-                    <!-- Lo engancha Js/tabla-export.js por el data-exportar. Baja lo
-                         que se ve, con el camino completo de cada nodo: cada nombre
-                         lleva su camino en un texto que la pantalla no muestra. -->
-                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaMix"
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar. Baja
+                         #tablaMixExport, que arma Js/Parametros.js escondida: el
+                         constante de cada canal y, en los canales con mix
+                         variable, los doce meses, con el camino completo de cada
+                         nodo. Baja lo guardado, no lo que se está editando. -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaMixExport"
                             data-exportar-nombre="Parametros_Mix_De_Cobro" data-lectura
-                            title="Exportar a Excel lo que se está viendo">
+                            title="Exportar a Excel el mix guardado de cada canal y, en los canales con mix variable, el de cada mes">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
                 </div>
@@ -143,6 +145,10 @@
                             <!-- Se genera dinámicamente -->
                         </tbody>
                     </table>
+
+                    <!-- Lo que baja Exportar: todos los meses, sin controles. No se
+                         ve; la llena generarExportMix(). -->
+                    <table id="tablaMixExport" class="d-none" aria-hidden="true"></table>
                 </div>
             </div>
         </div>

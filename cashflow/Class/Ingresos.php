@@ -1349,6 +1349,140 @@ class Ingresos {
         return $f;
     }
 
+    /* ====================================================================
+       FILTRO POR VENDEDOR (Cobranzas May)
+       ==================================================================== */
+
+    /** El valor del filtro que pide los clientes sin vendedor asignado */
+    const SIN_VENDEDOR = 'SIN';
+
+    /** Como se muestra un cliente sin vendedor */
+    const ROTULO_SIN_VENDEDOR = 'Sin vendedor';
+
+    /** Largo de GVA14.COD_VENDED */
+    const LARGO_COD_VENDED = 10;
+
+    /**
+     * El vendedor de un cliente, como viaja en la fila. Pura.
+     *
+     *   codigo  GVA14.COD_VENDED sin espacios, o null si viene vacio: Tango
+     *           guarda "sin vendedor" como cadena vacia, no como NULL.
+     *   nombre  GVA23.NOMBRE_VEN tal cual -para poder compararlo contra Tango-;
+     *           el codigo si no esta en el maestro, en vez de esconder que
+     *           tiene uno; "Sin vendedor" si no tiene.
+     *
+     * @param mixed $codigo
+     * @param mixed $nombre
+     * @return array ['codigo' => string|null, 'nombre' => string]
+     */
+    public static function vendedorDeCliente($codigo, $nombre) {
+        $c = trim((string) $codigo);
+        $n = trim((string) $nombre);
+
+        if ($c === '') {
+            return ['codigo' => null, 'nombre' => self::ROTULO_SIN_VENDEDOR];
+        }
+
+        return ['codigo' => $c, 'nombre' => $n !== '' ? $n : 'Vendedor ' . $c . ' (sin nombre en Tango)'];
+    }
+
+    /**
+     * Normaliza y valida el filtro por vendedor. Pura.
+     *
+     * ES UN FILTRO DE PANTALLA DEL SERVIDOR, como el de fecha de emision: se
+     * aplica antes de EjeVista para que el pie, las tarjetas y el Resumen
+     * describan lo filtrado. Y como se aplica en el controller y no en
+     * getCobranzasMay(), el tablero no se entera.
+     *
+     * @param mixed $valor '' o null = todos; SIN_VENDEDOR; o un COD_VENDED
+     * @return string|null null si no hay filtro
+     * @throws Exception si no es un codigo de vendedor posible
+     */
+    public static function validarFiltroVendedor($valor) {
+        $v = trim((string) $valor);
+
+        if ($v === '') {
+            return null;
+        }
+
+        if ($v === self::SIN_VENDEDOR) {
+            return $v;
+        }
+
+        if (strlen($v) > self::LARGO_COD_VENDED || !preg_match('/^[A-Za-z0-9_.\-]+$/', $v)) {
+            throw new Exception('El filtro por vendedor no es un código de vendedor válido.');
+        }
+
+        return $v;
+    }
+
+    /**
+     * Deja los comprobantes de un vendedor, o los de clientes sin vendedor.
+     * Pura. Sin filtro devuelve la lista entera.
+     *
+     * @param array $items Filas de getCobranzasMay()
+     * @param string|null $filtro Lo que devuelve validarFiltroVendedor()
+     * @return array
+     */
+    public static function filtrarPorVendedor($items, $filtro) {
+        $lista = is_array($items) ? $items : [];
+
+        if ($filtro === null) {
+            return $lista;
+        }
+
+        return array_values(array_filter($lista, function ($item) use ($filtro) {
+            $codigo = isset($item['COD_VENDED']) ? $item['COD_VENDED'] : null;
+
+            return $filtro === self::SIN_VENDEDOR ? $codigo === null : $codigo === $filtro;
+        }));
+    }
+
+    /**
+     * Las opciones del filtro: los vendedores que tienen alguna factura en la
+     * lista, por nombre, con "Sin vendedor" al final si hay clientes sin uno.
+     * Pura.
+     *
+     * Se arma con la cartera ENTERA, antes de los filtros de la pantalla: si
+     * saliera de lo filtrado, elegir una fecha de emision haria desaparecer
+     * vendedores del desplegable mientras uno lo esta usando.
+     *
+     * @param array $items Filas de getCobranzasMay()
+     * @return array [['valor', 'nombre', 'facturas'], ...]
+     */
+    public static function vendedoresDe($items) {
+        $porValor = [];
+
+        foreach ((is_array($items) ? $items : []) as $item) {
+            $codigo = isset($item['COD_VENDED']) ? $item['COD_VENDED'] : null;
+            $valor = $codigo === null ? self::SIN_VENDEDOR : $codigo;
+
+            if (!isset($porValor[$valor])) {
+                $porValor[$valor] = [
+                    'valor' => $valor,
+                    'nombre' => $codigo === null ? self::ROTULO_SIN_VENDEDOR : $item['VENDEDOR'],
+                    'facturas' => 0
+                ];
+            }
+
+            $porValor[$valor]['facturas']++;
+        }
+
+        $sin = isset($porValor[self::SIN_VENDEDOR]) ? $porValor[self::SIN_VENDEDOR] : null;
+        unset($porValor[self::SIN_VENDEDOR]);
+
+        $lista = array_values($porValor);
+        usort($lista, function ($a, $b) {
+            return strcasecmp($a['nombre'], $b['nombre']) ?: strcmp($a['valor'], $b['valor']);
+        });
+
+        if ($sin !== null) {
+            $lista[] = $sin;
+        }
+
+        return $lista;
+    }
+
     /** dd/mm/aaaa, para los mensajes de error */
     private static function formatoCorto($fecha) {
         $p = explode('-', substr((string) $fecha, 0, 10));
@@ -2069,7 +2203,13 @@ class Ingresos {
            EL TOPE DE 360 DIAS de antiguedad de emision es un corte DELIBERADO,
            no una limitacion tecnica: una factura de hace mas de un anio sin
            cobrar no es cobranza proyectable. Verificado: hoy deja afuera dos
-           facturas de 2017 por 44.652,05 en total. */
+           facturas de 2017 por 44.652,05 en total.
+
+           EL VENDEDOR ES EL DEL CLIENTE (GVA14.COD_VENDED), no el de la
+           factura: es quien atiende la cuenta y a quien se le pregunta por la
+           cobranza. Viene en esta misma lectura de GVA14, con su nombre de
+           GVA23 por LEFT JOIN -un codigo que no esta en el maestro no se lleva
+           puesta la factura-, y no en una segunda consulta por comprobante. */
         $sql_fac = "
             SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
             SET DATEFORMAT DMY
@@ -2079,6 +2219,8 @@ class Ingresos {
             SELECT
                 GVA12.COD_CLIENT,
                 GVA14.RAZON_SOCI,
+                GVA14.COD_VENDED,
+                GVA23.NOMBRE_VEN,
                 NULLIF(GVA12.FECHA_EMIS, '18000101') AS FECHA_EMIS,
                 GVA12.T_COMP,
                 GVA12.N_COMP,
@@ -2090,6 +2232,8 @@ class Ingresos {
                    AND GVA46.N_COMP = GVA12.N_COMP
             INNER JOIN GVA14
                     ON GVA14.COD_CLIENT = GVA12.COD_CLIENT
+            LEFT JOIN GVA23
+                    ON GVA23.COD_VENDED = GVA14.COD_VENDED
             OUTER APPLY (
                 SELECT SUM(CASE GVA07.T_COMP_CAN
                              WHEN 'REC' THEN -GVA07.IMPORT_CAN
@@ -2113,6 +2257,8 @@ class Ingresos {
             GROUP BY
                 GVA12.COD_CLIENT,
                 GVA14.RAZON_SOCI,
+                GVA14.COD_VENDED,
+                GVA23.NOMBRE_VEN,
                 GVA12.FECHA_EMIS,
                 GVA12.T_COMP,
                 GVA12.N_COMP,
@@ -2133,6 +2279,7 @@ class Ingresos {
             $key = $tComp . '|' . $nComp;
             $codCli = strtoupper(trim($row['COD_CLIENT']));
             $razonSoci = trim($row['RAZON_SOCI']);
+            $vendedor = self::vendedorDeCliente($row['COD_VENDED'], $row['NOMBRE_VEN']);
 
             // EL QUE VA AL EJE Y AL CASHFLOW ES EL PENDIENTE. El facturado
             // viaja como columna informativa y no se suma a nada.
@@ -2198,6 +2345,10 @@ class Ingresos {
             $items[] = [
                 'COD_CLI' => $codCli,
                 'RAZON_SOC' => $razonSoci,
+                // El del CLIENTE: es igual en todas sus facturas, asi que
+                // sobrevive al agrupado del Resumen. Ver vendedorDeCliente().
+                'COD_VENDED' => $vendedor['codigo'],
+                'VENDEDOR' => $vendedor['nombre'],
                 'FECHA' => $fEmisStr,
                 'T_COMP' => $tComp,
                 'N_COMP' => $nComp,

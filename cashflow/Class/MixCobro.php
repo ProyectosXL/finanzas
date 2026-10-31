@@ -94,6 +94,24 @@ class MixCobro {
     /** Separador del camino de nombres en pantalla y en los avisos */
     const SEPARADOR = ' › ';
 
+    /* ---- El mix por mes (sql/cashflow_ventas_mix_mes.sql) ----------------- */
+
+    const TABLA_CANAL = 'RO_T_CASHFLOW_VENTAS_MIX_CANAL';
+    const TABLA_MES = 'RO_T_CASHFLOW_VENTAS_MIX_MES';
+    const TABLA_NODO_MES = 'RO_T_CASHFLOW_VENTAS_MIX_NODO_MES';
+
+    /** Un canal sin fila en TABLA_CANAL es CONSTANTE */
+    const MODOS = ['CONSTANTE', 'VARIABLE'];
+
+    /**
+     * Lo que un mes puede cambiar de un nodo. La estructura -padre, nivel,
+     * nombre, orden- es del constante y no varia por mes.
+     */
+    const CAMPOS_MES = ['PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION', 'ACTIVO'];
+
+    const NOMBRES_MES = [1 => 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
+                         'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
     /* ====================================================================
        NORMALIZACION
        ==================================================================== */
@@ -452,13 +470,100 @@ class MixCobro {
      * cobran nada, sumen lo que sumen; exigirles el 100% impediria apagar una
      * rama sin rehacerla. Se informa la suma igual, marcado.
      *
+     * EL MIX DE UN MES. Con $mes y $config, cada canal en VARIABLE con mix
+     * propio para ese mes se resuelve con los valores del mes puestos sobre
+     * los nodos del constante (nodosDelMes()), y despues con EL MISMO
+     * algoritmo. Sin $mes, exactamente lo de siempre: es lo que hace que con
+     * todos los canales en constante la proyeccion no cambie ni un centavo.
+     * Con $mes, cada canal dice ademas si uso su mix propio ('mes_propio') y
+     * cada error lleva el mes.
+     *
      * @param array $nodos Nodos normalizados de todos los canales
+     * @param int|null $mes 1 a 12: el mes de la VENTA
+     * @param array|null $config La de getConfig() / armarConfig()
      * @return array ['nodos' => [clave => nodo resuelto] en orden de dibujo,
      *               'canales' => [CANAL => ['hojas' => [claves], 'grupos' => [...],
      *               'errores' => [...], 'valido' => bool]], 'errores' => [...],
      *               'valido' => bool]
      */
-    public static function resolver($nodos) {
+    public static function resolver($nodos, $mes = null, $config = null) {
+        if ($mes === null || $config === null) {
+            return self::resolverArbol($nodos);
+        }
+
+        $delMes = self::nodosDelMes($nodos, $config, $mes);
+        $r = self::resolverArbol($delMes['nodos']);
+        $r['mes'] = intval($mes);
+        $r['errores'] = [];
+
+        foreach (Parametros::CANALES as $canal) {
+            $c = $r['canales'][$canal];
+            $c['mes_propio'] = self::mesPropio($config, $canal, $mes);
+
+            // Un nodo sin valores en un mes cargado -una edicion directa en
+            // la base- se proyecta con los del constante, y se dice: el mes
+            // no es del todo lo que alguien guardo.
+            foreach ($delMes['faltan'] as $n) {
+                if ($n['CANAL'] === $canal && isset($r['nodos'][$n['clave']])) {
+                    $rama = self::textoCamino($canal, $r['nodos'][$n['clave']]['camino']);
+                    $c['errores'][] = [
+                        'tipo' => 'SIN_VALOR_MES', 'canal' => $canal, 'clave' => $n['clave'],
+                        'rama' => $rama, 'afuera' => 0.0,
+                        'texto' => $rama . ' no tiene valores cargados para ' . self::nombreMes($mes)
+                            . ': se usan los del mix constante.'
+                    ];
+                }
+            }
+
+            foreach ($c['errores'] as $i => $e) {
+                $c['errores'][$i]['mes'] = intval($mes);
+            }
+
+            $c['valido'] = count($c['errores']) === 0;
+            $r['canales'][$canal] = $c;
+            $r['errores'] = array_merge($r['errores'], $c['errores']);
+        }
+
+        $r['valido'] = count($r['errores']) === 0;
+
+        return $r;
+    }
+
+    /**
+     * Resuelve un arbol por cada mes del anio pedido. Pura.
+     *
+     * Un mes en el que ningun canal tiene mix propio comparte el MISMO
+     * resultado que el constante: no se resuelve de nuevo, y con todo en
+     * constante hay un solo arbol para todos los meses.
+     *
+     * @param array $nodos
+     * @param array $config
+     * @param array $meses Meses del anio, 1 a 12
+     * @return array [mes => resultado de resolver()]
+     */
+    public static function resolverPorMes($nodos, $config, $meses) {
+        $base = null;
+        $r = [];
+
+        foreach (array_unique(array_map('intval', $meses)) as $mes) {
+            $propio = false;
+
+            foreach (Parametros::CANALES as $canal) {
+                $propio = $propio || self::mesPropio($config, $canal, $mes);
+            }
+
+            if ($propio) {
+                $r[$mes] = self::resolver($nodos, $mes, $config);
+            } else {
+                $r[$mes] = $base !== null ? $base : ($base = self::resolverArbol($nodos));
+            }
+        }
+
+        return $r;
+    }
+
+    /** El algoritmo de resolver(), sobre nodos ya puestos en su mes */
+    private static function resolverArbol($nodos) {
         $porId = [];
         $hijosDe = [];
 
@@ -660,6 +765,494 @@ class MixCobro {
     /** 0.1296 -> "12,96%" */
     public static function porcentajeTexto($fraccion) {
         return number_format($fraccion * 100, 2, ',', '.') . '%';
+    }
+
+    /* ====================================================================
+       EL MIX POR MES
+       ====================================================================
+
+       Cada canal es CONSTANTE -un arbol para todos los meses, como siempre- o
+       VARIABLE: el MISMO arbol, con porcentaje, costo, tasa, dias y activo
+       propios para los meses del anio que se cargaron. Un mes sin mix propio
+       usa el constante. El mes que decide es el de la VENTA.
+
+       LA CONFIG (armarConfig()):
+         'tablas' => bool             si se corrio el script
+         'modos'  => [CANAL => 'CONSTANTE'|'VARIABLE']
+         'meses'  => [CANAL => [MES => ['id', 'activo', 'usuario_modif',
+                      'fecha_modif', 'valores' => [ID_NODO => CAMPOS_MES +
+                      USUARIO_MODIF, FECHA_MODIF]]]]
+       Trae tambien los meses dados de baja (activo 0): sus filas existen, y
+       volver a cargar el mes las reactiva en vez de insertar otras.
+       ==================================================================== */
+
+    /** Todo en constante: sin el script, o mientras no se cargue nada */
+    public static function configVacia() {
+        return ['tablas' => false, 'modos' => array_fill_keys(Parametros::CANALES, 'CONSTANTE'),
+                'meses' => []];
+    }
+
+    /**
+     * La config, de las filas de las tres tablas. Pura: los cruces del modulo
+     * van en PHP, no en un JOIN.
+     *
+     * @param array $canales Filas de TABLA_CANAL
+     * @param array $meses Filas de TABLA_MES
+     * @param array $valores Filas de TABLA_NODO_MES
+     * @return array
+     */
+    public static function armarConfig($canales, $meses, $valores) {
+        $cfg = self::configVacia();
+        $cfg['tablas'] = true;
+
+        foreach ((is_array($canales) ? $canales : []) as $f) {
+            $canal = strtoupper(trim((string) $f['CANAL']));
+            $modo = strtoupper(trim((string) $f['MODO']));
+
+            if (isset($cfg['modos'][$canal]) && in_array($modo, self::MODOS, true)) {
+                $cfg['modos'][$canal] = $modo;
+            }
+        }
+
+        $porId = [];
+
+        foreach ((is_array($meses) ? $meses : []) as $f) {
+            $canal = strtoupper(trim((string) $f['CANAL']));
+            $mes = intval($f['MES']);
+
+            $cfg['meses'][$canal][$mes] = [
+                'id' => intval($f['ID']),
+                'activo' => intval($f['ACTIVO']) === 1,
+                'usuario_modif' => isset($f['USUARIO_MODIF']) ? $f['USUARIO_MODIF'] : null,
+                'fecha_modif' => isset($f['FECHA_MODIF']) ? $f['FECHA_MODIF'] : null,
+                'valores' => []
+            ];
+            $porId[intval($f['ID'])] = [$canal, $mes];
+        }
+
+        foreach ((is_array($valores) ? $valores : []) as $f) {
+            $idMes = intval($f['ID_MIX_MES']);
+
+            if (!isset($porId[$idMes])) {
+                continue;
+            }
+
+            list($canal, $mes) = $porId[$idMes];
+            $cfg['meses'][$canal][$mes]['valores'][intval($f['ID_NODO'])] = self::valoresMes($f);
+        }
+
+        return $cfg;
+    }
+
+    /** Los CAMPOS_MES de una fila, con los tipos de nodo(): null se conserva */
+    private static function valoresMes($f) {
+        return [
+            'PORCENTAJE' => floatval($f['PORCENTAJE']),
+            'COSTO' => self::numeroONull(isset($f['COSTO']) ? $f['COSTO'] : null),
+            'TASA' => self::numeroONull(isset($f['TASA']) ? $f['TASA'] : null),
+            'DIAS_ACREDITACION' => (isset($f['DIAS_ACREDITACION']) && $f['DIAS_ACREDITACION'] !== null
+                    && $f['DIAS_ACREDITACION'] !== '')
+                ? intval($f['DIAS_ACREDITACION']) : null,
+            'ACTIVO' => intval($f['ACTIVO']) === 1 ? 1 : 0,
+            'USUARIO_MODIF' => isset($f['USUARIO_MODIF']) ? $f['USUARIO_MODIF'] : null,
+            'FECHA_MODIF' => isset($f['FECHA_MODIF']) ? $f['FECHA_MODIF'] : null
+        ];
+    }
+
+    /** "Diciembre" */
+    public static function nombreMes($mes) {
+        $m = intval($mes);
+
+        return isset(self::NOMBRES_MES[$m]) ? self::NOMBRES_MES[$m] : (string) $mes;
+    }
+
+    /** Un mes del anio valido, o una excepcion que lo diga */
+    public static function validarMes($mes) {
+        if (!is_numeric($mes) || floatval($mes) != intval($mes) || intval($mes) < 1 || intval($mes) > 12) {
+            throw new Exception('El mes tiene que ser un número de 1 a 12.');
+        }
+
+        return intval($mes);
+    }
+
+    /** Si el canal tiene ese mes cargado (activo), este en el modo que este */
+    public static function mesCargado($config, $canal, $mes) {
+        return !empty($config['meses'][$canal][intval($mes)]['activo']);
+    }
+
+    /**
+     * Si el canal usa su mix propio en ese mes: esta en VARIABLE y el mes esta
+     * cargado. Un canal en CONSTANTE ignora sus meses, aunque los tenga.
+     */
+    public static function mesPropio($config, $canal, $mes) {
+        return $config !== null && $mes !== null
+            && isset($config['modos'][$canal]) && $config['modos'][$canal] === 'VARIABLE'
+            && self::mesCargado($config, $canal, $mes);
+    }
+
+    /**
+     * Los nodos como quedan en un mes: los del constante, con los valores del
+     * mes encima en los canales que lo usan. Pura.
+     *
+     * LA ESTRUCTURA ES SIEMPRE LA DEL CONSTANTE: ID, padre, nivel, nombre y
+     * orden no se tocan, asi las claves de los nodos son las mismas en todos
+     * los meses. Un nodo sin fila en un mes cargado conserva los valores del
+     * constante y vuelve en 'faltan', para que resolver() lo diga.
+     *
+     * @return array ['nodos' => [...], 'faltan' => [nodos]]
+     */
+    public static function nodosDelMes($nodos, $config, $mes) {
+        $v = [];
+        $faltan = [];
+
+        foreach ($nodos as $n) {
+            if (self::mesPropio($config, $n['CANAL'], $mes)) {
+                $valores = $config['meses'][$n['CANAL']][intval($mes)]['valores'];
+
+                if (isset($valores[$n['ID']])) {
+                    $n = array_merge($n, $valores[$n['ID']]);
+                } else {
+                    $faltan[] = $n;
+                }
+            }
+
+            $v[] = $n;
+        }
+
+        return ['nodos' => $v, 'faltan' => $faltan];
+    }
+
+    /**
+     * Lo que un mes tiene hoy para cada nodo de un canal: sus valores si esta
+     * cargado, los del constante si no. Es de donde parte un guardado, lo que
+     * se copia a otros meses y lo que la pantalla muestra al elegir el mes.
+     * Pura. No mira el modo del canal: es lo guardado, no lo que se usa.
+     *
+     * @return array [ID_NODO => CAMPOS_MES + 'propio' => bool, ...]
+     */
+    public static function valoresDelMes($nodos, $config, $canal, $mes) {
+        $cargado = self::mesCargado($config, $canal, $mes);
+        $propios = $cargado ? $config['meses'][$canal][intval($mes)]['valores'] : [];
+        $v = [];
+
+        foreach ($nodos as $n) {
+            if ($n['CANAL'] !== $canal) {
+                continue;
+            }
+
+            $base = isset($propios[$n['ID']]) ? $propios[$n['ID']] : $n;
+            $fila = ['propio' => isset($propios[$n['ID']])];
+
+            foreach (array_merge(self::CAMPOS_MES, ['USUARIO_MODIF', 'FECHA_MODIF']) as $campo) {
+                $fila[$campo] = $base[$campo];
+            }
+
+            $v[$n['ID']] = $fila;
+        }
+
+        return $v;
+    }
+
+    /** La config con el canal en VARIABLE: para ver o validar un mes sin importar el modo */
+    private static function configVariable($config, $canal) {
+        $config['modos'][$canal] = 'VARIABLE';
+
+        return $config;
+    }
+
+    /**
+     * Que se escribe al guardar un mes, y como queda la config. Pura.
+     *
+     * EN UN MES SE CARGAN VALORES, NO ESTRUCTURA. Un nombre o un nivel que no
+     * es el del constante se rechaza: renombrar "Credito" solo en diciembre
+     * dejaria dos nodos con la misma clave y distinto nombre.
+     *
+     * UN MES QUE NO ESTABA CARGADO SE ESCRIBE ENTERO -todos los nodos del
+     * canal, todos sus campos-: desde ese momento el mes tiene sus propios
+     * valores y no sigue los cambios del constante. Uno ya cargado escribe
+     * solo lo que cambio. Un nodo sin fila en el mes se escribe entero.
+     *
+     * @param array $actuales Nodos normalizados de todos los canales
+     * @param array $config
+     * @param string $canal
+     * @param int $mes
+     * @param array $filas Las de resolverCambios()
+     * @return array ['cambios' => [['id', 'existe', 'campos']], 'nuevo' => bool,
+     *               'config' => la config como quedaria, con el canal en VARIABLE]
+     */
+    public static function resolverCambiosMes($actuales, $config, $canal, $mes, $filas) {
+        $canal = strtoupper(trim((string) $canal));
+        $mes = self::validarMes($mes);
+
+        if (!in_array($canal, Parametros::CANALES, true)) {
+            throw new Exception('Canal inválido: ' . $canal);
+        }
+
+        $nombreMes = self::nombreMes($mes);
+        $cargado = self::mesCargado($config, $canal, $mes);
+        $existentes = isset($config['meses'][$canal][$mes]) ? $config['meses'][$canal][$mes]['valores'] : [];
+        $base = self::valoresDelMes($actuales, $config, $canal, $mes);
+        $porId = [];
+
+        foreach ($actuales as $n) {
+            $porId[$n['ID']] = $n;
+        }
+
+        $nuevos = $base;
+        $vistos = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $id = isset($f['id']) ? intval($f['id']) : 0;
+
+            if (!isset($porId[$id])) {
+                throw new Exception('El nodo ' . $id . ' no existe: recargá la pantalla y volvé a guardar.');
+            }
+
+            if (isset($vistos[$id])) {
+                throw new Exception('El nodo ' . $id . ' vino dos veces en el mismo guardado.');
+            }
+
+            $vistos[$id] = true;
+            $nodo = $porId[$id];
+            $quien = '"' . $nodo['NOMBRE'] . '"';
+
+            if ($nodo['CANAL'] !== $canal) {
+                throw new Exception('El nodo ' . $quien . ' es de ' . self::nombreCanal($nodo['CANAL'])
+                    . ' y se está guardando ' . self::nombreCanal($canal) . '.');
+            }
+
+            if (array_key_exists('nombre', $f) && $f['nombre'] !== null
+                    && self::validarNombre($f['nombre']) !== $nodo['NOMBRE']) {
+                throw new Exception('En ' . $nombreMes . ' se cargan los valores de cada nodo: el nombre de '
+                    . $quien . ' se cambia en el mix constante, y vale para todos los meses.');
+            }
+
+            if (array_key_exists('nivel', $f) && $f['nivel'] !== null
+                    && strtoupper(trim((string) $f['nivel'])) !== $nodo['NIVEL']) {
+                throw new Exception('En ' . $nombreMes . ' se cargan los valores de cada nodo: el nivel de '
+                    . $quien . ' se cambia en el mix constante, y vale para todos los meses.');
+            }
+
+            $v = $nuevos[$id];
+
+            if (array_key_exists('porcentaje', $f)) {
+                $v['PORCENTAJE'] = self::validarFraccion($f['porcentaje'], 'El porcentaje de ' . $quien, false);
+            }
+
+            if (array_key_exists('costo', $f)) {
+                $v['COSTO'] = self::validarFraccion($f['costo'], 'El costo de ' . $quien, true);
+            }
+
+            if (array_key_exists('tasa', $f)) {
+                $v['TASA'] = self::validarFraccion($f['tasa'], 'La tasa de ' . $quien, true);
+            }
+
+            if (array_key_exists('dias', $f)) {
+                $v['DIAS_ACREDITACION'] = self::validarDias($f['dias'], $quien);
+            }
+
+            if (array_key_exists('activo', $f)) {
+                $v['ACTIVO'] = !empty($f['activo']) ? 1 : 0;
+            }
+
+            $nuevos[$id] = $v;
+        }
+
+        $cambios = [];
+        $valores = [];
+
+        foreach ($nuevos as $id => $v) {
+            $existe = isset($existentes[$id]);
+            $campos = [];
+
+            foreach (self::CAMPOS_MES as $col) {
+                $distinto = in_array($col, ['PORCENTAJE', 'COSTO', 'TASA'], true)
+                    ? self::numeroDistinto($base[$id][$col], $v[$col])
+                    : $base[$id][$col] !== $v[$col];
+
+                // Un mes nuevo, o un nodo que no tenia fila, va entero
+                if (!$cargado || !$base[$id]['propio'] || $distinto) {
+                    $campos[$col] = $v[$col];
+                }
+            }
+
+            if (count($campos)) {
+                $cambios[] = ['id' => $id, 'existe' => $existe, 'campos' => $campos];
+            }
+
+            unset($v['propio']);
+            $valores[$id] = $v;
+        }
+
+        $simulado = self::configVariable($config, $canal);
+        $simulado['meses'][$canal][$mes] = array_merge(
+            isset($config['meses'][$canal][$mes]) ? $config['meses'][$canal][$mes]
+                : ['id' => null, 'usuario_modif' => null, 'fecha_modif' => null],
+            ['activo' => true, 'valores' => $valores]
+        );
+
+        return ['cambios' => $cambios, 'nuevo' => !$cargado, 'config' => $simulado];
+    }
+
+    /**
+     * Que se escribe al guardar un mes, validado contra el mes COMO QUEDARIA.
+     * Pura. Lo mismo que planGuardado() para el constante: un mes invalido
+     * corta aca, antes de que el llamador abra la transaccion.
+     *
+     * @return array Lo de resolverCambiosMes()
+     */
+    public static function planGuardadoMes($actuales, $config, $canal, $mes, $filas) {
+        $canal = strtoupper(trim((string) $canal));
+        $vista = self::previsualizar($actuales, $canal, $filas, $mes, $config);
+
+        if (!$vista['valido']) {
+            throw new Exception('El mix de ' . self::nombreMes($mes) . ' de ' . self::nombreCanal($canal)
+                . ' no se guardó: ' . implode(' ', $vista['errores']));
+        }
+
+        return self::resolverCambiosMes($actuales, $config, $canal, $mes, $filas);
+    }
+
+    /**
+     * En que meses cargados siguen activos los nodos que el constante apaga,
+     * y como quedan si se los apaga tambien ahi. Pura.
+     *
+     * Es la casilla "Inhabilitarlo tambien en esos meses" del editor. Cada mes
+     * afectado se valida como quedaria, con la misma regla: si alguno queda
+     * invalido -un grupo que ya no suma 100%-, se corta TODO y se dice que mes
+     * y por que. No se guarda el constante a medias.
+     *
+     * Mira los meses cargados de cualquier canal en cualquier modo: un canal
+     * en constante conserva sus meses para cuando vuelva a variable.
+     *
+     * @param array $actuales Nodos ANTES del guardado del constante
+     * @param array $simulado Nodos como quedarian (resolverCambios())
+     * @param array $config
+     * @param string $canal
+     * @param array $cambios Los del constante (resolverCambios())
+     * @param array|null $soloIds Los nodos para los que se tildo la casilla;
+     *                   null = todos los que se apagan
+     * @return array [mes => ['id' => ID_MIX_MES, 'cambios' => [['id', 'existe', 'campos']]]]
+     */
+    public static function planInhabilitarEnMeses($actuales, $simulado, $config, $canal, $cambios,
+                                                  $soloIds = null) {
+        $apagados = [];
+        $solo = $soloIds === null ? null : array_map('intval', $soloIds);
+
+        foreach ($cambios as $c) {
+            if (array_key_exists('ACTIVO', $c['campos']) && $c['campos']['ACTIVO'] === 0
+                    && ($solo === null || in_array($c['id'], $solo, true))) {
+                $apagados[] = $c['id'];
+            }
+        }
+
+        $plan = [];
+        $meses = isset($config['meses'][$canal]) ? $config['meses'][$canal] : [];
+
+        if (!count($apagados)) {
+            return $plan;
+        }
+
+        ksort($meses);
+
+        foreach ($meses as $mes => $m) {
+            if (!$m['activo']) {
+                continue;
+            }
+
+            $valores = self::valoresDelMes($actuales, $config, $canal, $mes);
+            $filas = [];
+
+            foreach ($apagados as $id) {
+                if (isset($valores[$id]) && $valores[$id]['ACTIVO'] === 1) {
+                    $filas[] = ['id' => $id, 'activo' => false];
+                }
+            }
+
+            if (!count($filas)) {
+                continue;
+            }
+
+            $vista = self::previsualizar($simulado, $canal, $filas, $mes, $config);
+
+            if (!$vista['valido']) {
+                throw new Exception('No se guardó nada: al inhabilitarlo también en ' . self::nombreMes($mes)
+                    . ', ese mes queda mal. ' . implode(' ', $vista['errores'])
+                    . ' Reacomodá ' . self::nombreMes($mes) . ' antes, o destildá la casilla.');
+            }
+
+            $plan[$mes] = ['id' => $m['id'],
+                           'cambios' => self::resolverCambiosMes($simulado, $config, $canal, $mes, $filas)['cambios']];
+        }
+
+        return $plan;
+    }
+
+    /**
+     * Que se escribe al copiar un mes a otros. Pura.
+     *
+     * SE COPIA LO GUARDADO del mes de origen, que tiene que estar cargado y
+     * ser valido. Cada destino queda con exactamente esos valores, todos los
+     * nodos y todos los campos, tuviera o no mix propio: el dialogo avisa
+     * cuales se pisan.
+     *
+     * @return array [mes destino => ['id' => ID_MIX_MES|null, 'cambios' => [...]]]
+     */
+    public static function planCopia($actuales, $config, $canal, $origen, $destinos) {
+        $canal = strtoupper(trim((string) $canal));
+        $origen = self::validarMes($origen);
+
+        if (!in_array($canal, Parametros::CANALES, true)) {
+            throw new Exception('Canal inválido: ' . $canal);
+        }
+
+        if (!is_array($destinos) || !count($destinos)) {
+            throw new Exception('Elegí al menos un mes al que copiar ' . self::nombreMes($origen) . '.');
+        }
+
+        if (!self::mesCargado($config, $canal, $origen)) {
+            throw new Exception(self::nombreMes($origen) . ' usa el mix constante: guardalo como mes '
+                . 'propio antes de copiarlo.');
+        }
+
+        $vista = self::previsualizar($actuales, $canal, [], $origen, $config);
+
+        if (!$vista['valido']) {
+            throw new Exception(self::nombreMes($origen) . ' tiene problemas y no se copia: '
+                . implode(' ', $vista['errores']));
+        }
+
+        $valores = self::valoresDelMes($actuales, $config, $canal, $origen);
+        $plan = [];
+
+        foreach ($destinos as $d) {
+            $mes = self::validarMes($d);
+
+            if ($mes === $origen) {
+                throw new Exception('No se puede copiar ' . self::nombreMes($origen) . ' sobre sí mismo.');
+            }
+
+            if (isset($plan[$mes])) {
+                throw new Exception(self::nombreMes($mes) . ' vino dos veces.');
+            }
+
+            $existentes = isset($config['meses'][$canal][$mes]) ? $config['meses'][$canal][$mes]['valores'] : [];
+            $cambios = [];
+
+            foreach ($valores as $id => $v) {
+                $cambios[] = ['id' => $id, 'existe' => isset($existentes[$id]),
+                              'campos' => array_intersect_key($v, array_flip(self::CAMPOS_MES))];
+            }
+
+            $plan[$mes] = [
+                'id' => isset($config['meses'][$canal][$mes]) ? $config['meses'][$canal][$mes]['id'] : null,
+                'cambios' => $cambios
+            ];
+        }
+
+        ksort($plan);
+
+        return $plan;
     }
 
     /* ====================================================================
@@ -927,6 +1520,9 @@ class MixCobro {
     /** @var bool|null Cache del sondeo de la tabla */
     private $tabla = null;
 
+    /** @var bool|null Cache del sondeo de las tablas del mix por mes */
+    private $tablasMes = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -1010,16 +1606,94 @@ class MixCobro {
      * una senal para volver al mix viejo. Si no, borrar el ultimo nodo de un
      * canal resucitaria sin aviso un mix que ya nadie edita.
      *
-     * @return array ['origen' => 'NODO'|'PLANO', 'nodos' => [...]]
+     * 'config' es el mix por mes (getConfig()). Con el mix plano, todo
+     * constante: un mes no tiene nodos sobre los que cargar valores.
+     *
+     * @return array ['origen' => 'NODO'|'PLANO', 'nodos' => [...], 'config' => [...]]
      */
     public function getArbol() {
         if ($this->tablaCreada()) {
-            return ['origen' => 'NODO', 'nodos' => $this->getNodos()];
+            return ['origen' => 'NODO', 'nodos' => $this->getNodos(), 'config' => $this->getConfig()];
         }
 
         $parametros = new Parametros();
 
-        return ['origen' => 'PLANO', 'nodos' => self::desdeMixPlano($parametros->getMixCobro())];
+        return ['origen' => 'PLANO', 'nodos' => self::desdeMixPlano($parametros->getMixCobro()),
+                'config' => self::configVacia()];
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_ventas_mix_mes.sql: las tres tablas.
+     *
+     * Sin ellas nada se cae: todos los canales quedan en constante, que es
+     * exactamente la proyeccion de antes.
+     *
+     * @return bool
+     */
+    public function tablasMesCreadas() {
+        if ($this->tablasMes !== null) {
+            return $this->tablasMes;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT OBJECT_ID('dbo." . self::TABLA_CANAL . "', 'U') AS C,
+                    OBJECT_ID('dbo." . self::TABLA_MES . "', 'U') AS M,
+                    OBJECT_ID('dbo." . self::TABLA_NODO_MES . "', 'U') AS V");
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al verificar las tablas del mix por mes'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablasMes = ($row && $row['C'] !== null && $row['M'] !== null && $row['V'] !== null);
+
+        return $this->tablasMes;
+    }
+
+    /**
+     * El mix por mes: modos, meses y valores. Sin las tablas, todo constante.
+     * Tres lecturas sin JOIN: el cruce lo hace armarConfig(), en PHP.
+     *
+     * @return array
+     */
+    public function getConfig() {
+        if (!$this->tablaCreada() || !$this->tablasMesCreadas()) {
+            return self::configVacia();
+        }
+
+        return self::armarConfig(
+            $this->leer("SELECT CANAL, MODO FROM " . self::TABLA_CANAL, 'los modos del mix'),
+            $this->leer("SELECT ID, CANAL, MES, ACTIVO, USUARIO_MODIF, FECHA_MODIF FROM " . self::TABLA_MES,
+                'los meses del mix'),
+            $this->leer("SELECT ID_MIX_MES, ID_NODO, PORCENTAJE, COSTO, TASA, DIAS_ACREDITACION, ACTIVO,
+                                USUARIO_MODIF, FECHA_MODIF
+                         FROM " . self::TABLA_NODO_MES, 'los valores del mix por mes')
+        );
+    }
+
+    /** Las filas de una consulta, con FECHA_MODIF con hora (Js/auditoria.js) */
+    private function leer($sql, $que) {
+        $stmt = sqlsrv_query($this->conectar(), $sql);
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al leer ' . $que));
+        }
+
+        $filas = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            if (isset($row['FECHA_MODIF']) && $row['FECHA_MODIF'] instanceof DateTime) {
+                $row['FECHA_MODIF'] = $row['FECHA_MODIF']->format('Y-m-d H:i:s');
+            }
+
+            $filas[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $filas;
     }
 
     /* ====================================================================
@@ -1040,11 +1714,19 @@ class MixCobro {
      * SIN EL SCRIPT ('PLANO') NO ES EDITABLE: el arbol que se muestra es el
      * mix plano, de un nivel, y no hay tabla donde guardar un nodo nuevo.
      *
+     * EL MIX POR MES VIAJA ENTERO: el modo de cada canal y, por canal y por
+     * cada uno de los doce meses, si esta cargado y los valores de cada nodo
+     * (los propios, o los del constante si no lo esta). Elegir un mes en la
+     * pantalla no pide nada para mostrar los valores; lo heredado y las
+     * sumas los pide a previsualizarMixArbol con ese mes, como al editar.
+     *
      * @param array $nodos Nodos normalizados
      * @param string $origen 'NODO' | 'PLANO'
+     * @param array|null $config La de getConfig(); null es todo constante
      * @return array
      */
-    public static function datosEditor($nodos, $origen) {
+    public static function datosEditor($nodos, $origen, $config = null) {
+        $config = $config === null ? self::configVacia() : $config;
         $resuelto = self::resolver($nodos);
         $conHijos = [];
 
@@ -1086,8 +1768,66 @@ class MixCobro {
             'resuelto' => $resuelto,
             // El mix plano no tiene la forma de un arbol -Ecommerce no cuelga
             // de un marketplace- y no se edita: no se le aplica la estructura.
-            'estructura' => $origen === 'NODO' ? self::validarEstructura($nodos) : []
+            'estructura' => $origen === 'NODO' ? self::validarEstructura($nodos) : [],
+            // Sin el script del mix por mes, todo constante y el selector
+            // de modo deshabilitado diciendo que falta.
+            'por_mes' => $origen === 'NODO' && !empty($config['tablas']),
+            'modos' => $config['modos'],
+            'nombres_mes' => array_values(self::NOMBRES_MES),
+            'meses' => self::mesesEditor($nodos, $config),
+            'vistas_mes' => self::vistasMes($nodos, $config)
         ];
+    }
+
+    /**
+     * Los meses CARGADOS de cada canal, ya resueltos: lo heredado, las sumas
+     * y los errores de cada uno. Viajan en el payload porque quien no edita
+     * tambien ve el arbol de cada mes, y previsualizarMixArbol pide permiso
+     * de edicion. Un mes sin cargar se ve con lo resuelto del constante.
+     *
+     * @return array [CANAL => [MES => lo de previsualizar()]]
+     */
+    private static function vistasMes($nodos, $config) {
+        $v = [];
+
+        foreach (Parametros::CANALES as $canal) {
+            foreach (array_keys(self::NOMBRES_MES) as $mes) {
+                if (self::mesCargado($config, $canal, $mes)) {
+                    $v[$canal][$mes] = self::previsualizar($nodos, $canal, [], $mes, $config);
+                }
+            }
+        }
+
+        return $v;
+    }
+
+    /**
+     * Por canal y por mes: si esta cargado, quien lo toco por ultima vez, y
+     * los valores de cada nodo por clave. Pura.
+     */
+    private static function mesesEditor($nodos, $config) {
+        $v = [];
+        $claves = array_column($nodos, 'clave', 'ID');
+
+        foreach (Parametros::CANALES as $canal) {
+            foreach (self::NOMBRES_MES as $mes => $nombre) {
+                $m = isset($config['meses'][$canal][$mes]) ? $config['meses'][$canal][$mes] : null;
+                $valores = [];
+
+                foreach (self::valoresDelMes($nodos, $config, $canal, $mes) as $id => $val) {
+                    $valores[$claves[$id]] = $val;
+                }
+
+                $v[$canal][$mes] = [
+                    'cargado' => self::mesCargado($config, $canal, $mes),
+                    'usuario_modif' => $m ? $m['usuario_modif'] : null,
+                    'fecha_modif' => $m ? $m['fecha_modif'] : null,
+                    'valores' => $valores
+                ];
+            }
+        }
+
+        return $v;
     }
 
     /**
@@ -1099,14 +1839,27 @@ class MixCobro {
      * mal tipeado es un estado normal y la pantalla tiene que decir cual es y
      * bloquear Guardar, no tirar un cartel de error.
      *
+     * CON $mes, como quedaria ESE MES del canal: los valores que llegan se
+     * ponen sobre lo que el mes tiene -sus valores, o los del constante si
+     * todavia no esta cargado- y se resuelve con resolver($nodos, $mes). El
+     * canal se ve en variable aunque hoy este en constante: es el mes lo que
+     * se esta mirando.
+     *
      * @param array $actuales Nodos normalizados de todos los canales
      * @param string $canal
      * @param array $filas Las de resolverCambios()
+     * @param int|null $mes null es el constante
+     * @param array|null $config Obligatoria con $mes
      * @return array ['canal', 'valido', 'errores' => [textos], 'nodos' => [clave =>
-     *               nodo resuelto], 'grupos' => [...], 'cambios' => int]
+     *               nodo resuelto], 'grupos' => [...], 'cambios' => int, 'mes']
      */
-    public static function previsualizar($actuales, $canal, $filas) {
+    public static function previsualizar($actuales, $canal, $filas, $mes = null, $config = null) {
         $canal = strtoupper(trim((string) $canal));
+
+        if ($mes !== null) {
+            return self::previsualizarMes($actuales, $canal, $filas, $mes,
+                $config === null ? self::configVacia() : $config);
+        }
 
         try {
             $r = self::resolverCambios($actuales, $canal, $filas);
@@ -1131,6 +1884,34 @@ class MixCobro {
         }
 
         return self::vistaCanal($resuelto, $canal, $errores, count($r['cambios']));
+    }
+
+    /** previsualizar() de un mes */
+    private static function previsualizarMes($actuales, $canal, $filas, $mes, $config) {
+        try {
+            $mes = self::validarMes($mes);
+            $r = self::resolverCambiosMes($actuales, $config, $canal, $mes, $filas);
+        } catch (Exception $e) {
+            $mesOk = is_numeric($mes) && intval($mes) >= 1 && intval($mes) <= 12 ? intval($mes) : 1;
+            $resuelto = self::resolver($actuales, $mesOk, self::configVariable($config, $canal));
+            $vista = self::vistaCanal($resuelto, $canal, [$e->getMessage()], 0);
+            $vista['mes'] = $mesOk;
+
+            return $vista;
+        }
+
+        $resuelto = self::resolver($actuales, $mes, $r['config']);
+        $errores = [];
+
+        foreach ($resuelto['canales'][$canal]['errores'] as $e) {
+            $errores[] = $e['texto'];
+        }
+
+        $vista = self::vistaCanal($resuelto, $canal, $errores, count($r['cambios']));
+        $vista['mes'] = $mes;
+        $vista['nuevo'] = $r['nuevo'];
+
+        return $vista;
     }
 
     /** La parte de un canal de lo que resolvio la regla */
@@ -1200,21 +1981,39 @@ class MixCobro {
      * una transaccion. O se guardan todos o ninguno: un arbol a medio guardar
      * es un arbol cuyas sumas no dan, y el tablero lo proyectaria asi.
      *
+     * CON $inhabilitarEnMeses, lo que este guardado apaga se apaga tambien en
+     * los meses cargados donde seguia activo, en la MISMA transaccion. Cada
+     * mes afectado se valida antes como quedaria: si alguno queda invalido no
+     * se escribe nada. Ver planInhabilitarEnMeses().
+     *
      * @param string $canal
      * @param array $filas Las de resolverCambios()
      * @param string $usuario El de AuthCashflow
-     * @return int Cuantos nodos se escribieron
+     * @param bool|array $inhabilitarEnMeses true = todo lo que se apaga; una
+     *                   lista de IDs = solo esos nodos (la casilla se contesta
+     *                   nodo por nodo); false = ninguno
+     * @return int Cuantos nodos se escribieron (en el constante)
      */
-    public function guardarCanal($canal, $filas, $usuario) {
+    public function guardarCanal($canal, $filas, $usuario, $inhabilitarEnMeses = false) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         // Se valida ANTES de pedir la conexion de escritura: un arbol invalido
-        // no llega a abrir la transaccion.
-        $cambios = self::planGuardado($this->getNodos(), $canal, $filas);
+        // no llega a abrir la transaccion. Los meses tambien.
+        $actuales = $this->getNodos();
+        $cambios = self::planGuardado($actuales, $canal, $filas);
+        $enMeses = [];
 
         if (count($cambios) === 0) {
             return 0;
+        }
+
+        if ($inhabilitarEnMeses && $this->tablasMesCreadas()) {
+            $canal = strtoupper(trim((string) $canal));
+            $enMeses = self::planInhabilitarEnMeses($actuales,
+                self::resolverCambios($actuales, $canal, $filas)['simulado'],
+                $this->getConfig(), $canal, $cambios,
+                is_array($inhabilitarEnMeses) ? $inhabilitarEnMeses : null);
         }
 
         $cid = $this->conexionEscritura();
@@ -1226,6 +2025,12 @@ class MixCobro {
         try {
             foreach ($cambios as $c) {
                 $this->escribirNodo($cid, $c['id'], $c['campos'], $usuario);
+            }
+
+            foreach ($enMeses as $mes => $p) {
+                foreach ($p['cambios'] as $c) {
+                    $this->escribirValorMes($cid, $p['id'], $c['id'], $c['campos'], $c['existe'], $usuario);
+                }
             }
 
             if (sqlsrv_commit($cid) === false) {
@@ -1246,6 +2051,11 @@ class MixCobro {
      * Va al final de sus hermanos. El UNIQUE de la tabla es la ultima red: si
      * dos personas agregan el mismo nombre a la vez, la segunda choca ahi.
      *
+     * ENTRA TAMBIEN EN CADA MES DE SU CANAL que tenga fila -cargado o dado de
+     * baja, que puede volver-, igual que en el constante: inhabilitado, en 0%
+     * y con su costo, su tasa y sus dias. En la misma transaccion: un nodo sin
+     * valores en un mes cargado se proyectaria con los del constante.
+     *
      * @param array $datos Los de nodoNuevo()
      * @param string $usuario
      * @return int ID del nodo creado
@@ -1264,16 +2074,48 @@ class MixCobro {
             }
         }
 
+        $config = $this->getConfig();
+        $meses = isset($config['meses'][$fila['CANAL']]) ? $config['meses'][$fila['CANAL']] : [];
+        $cid = $this->conexionEscritura();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception(self::errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            $id = $this->insertarNodo($cid, $fila, $orden + 1, $usuario);
+
+            foreach ($meses as $m) {
+                $this->escribirValorMes($cid, $m['id'], $id, [
+                    'PORCENTAJE' => 0.0, 'COSTO' => $fila['COSTO'], 'TASA' => $fila['TASA'],
+                    'DIAS_ACREDITACION' => $fila['DIAS_ACREDITACION'], 'ACTIVO' => 0
+                ], false, $usuario);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception(self::errorSql('No se pudo confirmar el alta del nodo'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $id;
+    }
+
+    /** El INSERT del nodo nuevo: 0% e inhabilitado, sin parametro */
+    protected function insertarNodo($cid, $fila, $orden, $usuario) {
         $sql = "INSERT INTO " . self::TABLA . "
                     (CANAL, ID_PADRE, NIVEL, NOMBRE, PORCENTAJE, COSTO, TASA, DIAS_ACREDITACION,
                      ACTIVO, ORDEN, USUARIO_ALTA, USUARIO_MODIF)
                 OUTPUT INSERTED.ID
                 VALUES (?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?, ?)";
 
-        $stmt = sqlsrv_query($this->conexionEscritura(), $sql, [
+        $stmt = sqlsrv_query($cid, $sql, [
             $fila['CANAL'], $fila['ID_PADRE'], $fila['NIVEL'], $fila['NOMBRE'],
             $fila['COSTO'], $fila['TASA'], $fila['DIAS_ACREDITACION'],
-            $orden + 1, $usuario, $usuario
+            $orden, $usuario, $usuario
         ]);
 
         if ($stmt === false) {
@@ -1284,6 +2126,271 @@ class MixCobro {
         sqlsrv_free_stmt($stmt);
 
         return intval($nuevo['ID']);
+    }
+
+    /* ---- El mix por mes ------------------------------------------------ */
+
+    /** Corta si todavia no se corrio el script del mix por mes */
+    private function exigirTablasMes() {
+        $this->exigirTabla();
+
+        if (!$this->tablasMesCreadas()) {
+            throw new Exception('Falta correr sql/cashflow_ventas_mix_mes.sql: hasta entonces todos los '
+                . 'canales usan el mix constante y no se pueden cargar meses.');
+        }
+    }
+
+    /**
+     * Pasa un canal a CONSTANTE o VARIABLE. No toca ningun mes: volver a
+     * constante los deja guardados para cuando vuelva a variable.
+     *
+     * @return bool Si cambio algo
+     */
+    public function guardarModo($canal, $modo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablasMes();
+
+        $canal = strtoupper(trim((string) $canal));
+        $modo = strtoupper(trim((string) $modo));
+
+        if (!in_array($canal, Parametros::CANALES, true)) {
+            throw new Exception('Canal inválido: ' . $canal);
+        }
+
+        if (!in_array($modo, self::MODOS, true)) {
+            throw new Exception('El mix de un canal es CONSTANTE o VARIABLE, no "' . $modo . '".');
+        }
+
+        if ($this->getConfig()['modos'][$canal] === $modo) {
+            return false;
+        }
+
+        $this->escribirModo($this->conexionEscritura(), $canal, $modo, $usuario);
+
+        return true;
+    }
+
+    /**
+     * Guarda un mes de un canal: lo carga si no lo estaba -o lo reactiva si
+     * se habia dado de baja- y escribe sus valores, en una transaccion.
+     * Validado ANTES como quedaria, con planGuardadoMes(): un mes invalido no
+     * llega a abrir la transaccion.
+     *
+     * @return int Cuantos valores se escribieron
+     */
+    public function guardarMes($canal, $mes, $filas, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablasMes();
+
+        $canal = strtoupper(trim((string) $canal));
+        $config = $this->getConfig();
+        $plan = self::planGuardadoMes($this->getNodos(), $config, $canal, $mes, $filas);
+        $mes = self::validarMes($mes);
+
+        if (!$plan['nuevo'] && count($plan['cambios']) === 0) {
+            return 0;
+        }
+
+        $idMes = isset($config['meses'][$canal][$mes]) ? $config['meses'][$canal][$mes]['id'] : null;
+        $cid = $this->conexionEscritura();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception(self::errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            $idMes = $this->asegurarMes($cid, $canal, $mes, $idMes, $usuario);
+
+            foreach ($plan['cambios'] as $c) {
+                $this->escribirValorMes($cid, $idMes, $c['id'], $c['campos'], $c['existe'], $usuario);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception(self::errorSql('No se pudo confirmar el guardado del mes'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return count($plan['cambios']);
+    }
+
+    /**
+     * Copia un mes cargado a otros, en una transaccion: todos o ninguno.
+     * Ver planCopia().
+     *
+     * @return int Cuantos meses se escribieron
+     */
+    public function copiarMes($canal, $origen, $destinos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablasMes();
+
+        $canal = strtoupper(trim((string) $canal));
+        $plan = self::planCopia($this->getNodos(), $this->getConfig(), $canal, $origen, $destinos);
+        $cid = $this->conexionEscritura();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception(self::errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($plan as $mes => $p) {
+                $idMes = $this->asegurarMes($cid, $canal, $mes, $p['id'], $usuario);
+
+                foreach ($p['cambios'] as $c) {
+                    $this->escribirValorMes($cid, $idMes, $c['id'], $c['campos'], $c['existe'], $usuario);
+                }
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception(self::errorSql('No se pudo confirmar la copia'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return count($plan);
+    }
+
+    /**
+     * "Usar el constante en este mes": da de baja el mes, sin borrar nada.
+     * Sus valores quedan, y si se vuelve a cargar se reactiva la misma fila.
+     */
+    public function quitarMes($canal, $mes, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablasMes();
+
+        $canal = strtoupper(trim((string) $canal));
+        $mes = self::validarMes($mes);
+        $config = $this->getConfig();
+
+        if (!self::mesCargado($config, $canal, $mes)) {
+            throw new Exception(self::nombreMes($mes) . ' de ' . self::nombreCanal($canal)
+                . ' ya usa el mix constante.');
+        }
+
+        $this->bajaMes($this->conexionEscritura(), $config['meses'][$canal][$mes]['id'], $usuario);
+    }
+
+    /** El modo de un canal: UPDATE, o INSERT si el canal no tenia fila */
+    protected function escribirModo($cid, $canal, $modo, $usuario) {
+        $stmt = sqlsrv_query($cid,
+            "UPDATE " . self::TABLA_CANAL . " SET MODO = ?, " . Auditoria::SET_MODIF . " WHERE CANAL = ?;
+             IF @@ROWCOUNT = 0
+                 INSERT INTO " . self::TABLA_CANAL . " (CANAL, MODO, USUARIO_ALTA, USUARIO_MODIF)
+                 VALUES (?, ?, ?, ?);",
+            [$modo, $usuario, $canal, $canal, $modo, $usuario, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al guardar el modo del mix'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /**
+     * La fila del mes, activa: la reactiva si existia -limpiando la baja- o
+     * la crea.
+     *
+     * @return int ID_MIX_MES
+     */
+    protected function asegurarMes($cid, $canal, $mes, $idMes, $usuario) {
+        if ($idMes !== null) {
+            $stmt = sqlsrv_query($cid,
+                "UPDATE " . self::TABLA_MES . " SET ACTIVO = 1, USUARIO_BAJA = NULL, FECHA_BAJA = NULL, "
+                . Auditoria::SET_MODIF . " WHERE ID = ?",
+                [$usuario, intval($idMes)]);
+
+            if ($stmt === false) {
+                throw new Exception(self::errorSql('Error al cargar el mes del mix'));
+            }
+
+            sqlsrv_free_stmt($stmt);
+
+            return intval($idMes);
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "INSERT INTO " . self::TABLA_MES . " (CANAL, MES, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
+             OUTPUT INSERTED.ID
+             VALUES (?, ?, 1, ?, ?)",
+            [$canal, intval($mes), $usuario, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al cargar el mes del mix'));
+        }
+
+        $nuevo = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return intval($nuevo['ID']);
+    }
+
+    /**
+     * Los valores de un nodo en un mes: UPDATE de las columnas que cambiaron,
+     * o INSERT con todas si el nodo no tenia fila en ese mes.
+     *
+     * Las columnas salen de CAMPOS_MES, una lista cerrada. Si cambia ACTIVO
+     * en un UPDATE, la baja se sella o se limpia con el criterio del modulo.
+     */
+    protected function escribirValorMes($cid, $idMes, $idNodo, $campos, $existe, $usuario) {
+        if (!$existe) {
+            $stmt = sqlsrv_query($cid,
+                "INSERT INTO " . self::TABLA_NODO_MES . "
+                    (ID_MIX_MES, ID_NODO, PORCENTAJE, COSTO, TASA, DIAS_ACREDITACION, ACTIVO,
+                     USUARIO_ALTA, USUARIO_MODIF)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [intval($idMes), intval($idNodo), $campos['PORCENTAJE'], $campos['COSTO'], $campos['TASA'],
+                 $campos['DIAS_ACREDITACION'], $campos['ACTIVO'] ? 1 : 0, $usuario, $usuario]);
+        } else {
+            $sets = [];
+            $params = [];
+
+            foreach ($campos as $col => $valor) {
+                if (in_array($col, ['PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION'], true)) {
+                    $sets[] = $col . ' = ?';
+                    $params[] = $valor;
+                }
+            }
+
+            if (array_key_exists('ACTIVO', $campos)) {
+                $sets[] = Auditoria::sqlBajaSegunEstado('ACTIVO');
+                $params = array_merge($params, Auditoria::paramsBajaSegunEstado($campos['ACTIVO'], $usuario));
+                $sets[] = 'ACTIVO = ?';
+                $params[] = $campos['ACTIVO'] ? 1 : 0;
+            }
+
+            $sets[] = Auditoria::SET_MODIF;
+            $params[] = $usuario;
+            $params[] = intval($idMes);
+            $params[] = intval($idNodo);
+
+            $stmt = sqlsrv_query($cid, "UPDATE " . self::TABLA_NODO_MES . " SET " . implode(', ', $sets)
+                . " WHERE ID_MIX_MES = ? AND ID_NODO = ?", $params);
+        }
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al guardar el nodo ' . $idNodo . ' en el mes'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /** La baja logica de un mes: ACTIVO = 0, con quien y cuando */
+    protected function bajaMes($cid, $idMes, $usuario) {
+        $stmt = sqlsrv_query($cid,
+            "UPDATE " . self::TABLA_MES . " SET ACTIVO = 0, " . Auditoria::SET_BAJA . " WHERE ID = ?",
+            [$usuario, $usuario, intval($idMes)]);
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al volver el mes al mix constante'));
+        }
+
+        sqlsrv_free_stmt($stmt);
     }
 
     /**

@@ -113,6 +113,18 @@ $edita = AuthCashflow::puedeEditar('cobranzas_may');
                         <i class="fas fa-eraser"></i>
                     </button>
                 </div>
+
+                <!-- Filtro por vendedor del cliente, server-side como el de
+                     emisión: recalcula la grilla, el pie y las tarjetas. Es un
+                     filtro de pantalla: el tablero sigue con toda la cartera.
+                     Las opciones las trae el servidor. -->
+                <div class="d-flex align-items-center gap-1">
+                    <span class="text-muted small text-nowrap">Vendedor</span>
+                    <select id="vendedorCobMay" class="form-select form-select-sm"
+                            title="Mostrar sólo las facturas de los clientes de este vendedor">
+                        <option value="">Todos</option>
+                    </select>
+                </div>
             </div>
 
             <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -192,6 +204,11 @@ $edita = AuthCashflow::puedeEditar('cobranzas_may');
                             </th>
                             <th rowspan="2">COD_CLI</th>
                             <th rowspan="2" class="col-texto">RAZON_SOC</th>
+                            <!-- El vendedor del CLIENTE en Tango (GVA14), no el
+                                 de la factura. Se ve también en Resumen: es un
+                                 dato del cliente, igual en todas sus facturas. -->
+                            <th rowspan="2" class="col-texto"
+                                title="El vendedor asignado al cliente en Tango">Vendedor</th>
                             <th rowspan="2">FECHA</th>
                             <th rowspan="2">T_COMP</th>
                             <th rowspan="2">N_COMP</th>
@@ -238,7 +255,7 @@ $edita = AuthCashflow::puedeEditar('cobranzas_may');
                     </tbody>
                     <tfoot class="table-light">
                         <tr id="totalsRowCobMay">
-                            <td colspan="12" class="fw-bold text-end">TOTALES</td>
+                            <td colspan="13" class="fw-bold text-end">TOTALES</td>
                             <!-- Los totales se generan dinámicamente -->
                         </tr>
                     </tfoot>

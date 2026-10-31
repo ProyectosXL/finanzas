@@ -228,15 +228,21 @@ chequear('el UPDATE sella la modificacion', true,
     strpos($fuenteMix, '$sets[] = Auditoria::SET_MODIF;') !== false);
 chequear('y la baja segun el estado, como el resto del modulo', true,
     strpos($fuenteMix, "\$sets[] = Auditoria::sqlBajaSegunEstado('ACTIVO');") !== false);
-chequear('las dos escrituras resuelven el usuario', 2,
-    substr_count($fuenteMix, '$usuario = AuthCashflow::usuarioDeEscritura($usuario);'));
+// Cada escritura publica, la primera linea: sin usuario no se escribe nada.
+// Las del mix por mes entraron con feature/mayoristas-vendedora-mix-mensual.
+foreach (['guardarCanal', 'agregarNodo', 'guardarModo', 'guardarMes', 'copiarMes', 'quitarMes'] as $metodo) {
+    chequear($metodo . ' resuelve el usuario antes que nada', 1, preg_match(
+        '/public function ' . $metodo . '\([^)]*\) \{\n        \$usuario = AuthCashflow::usuarioDeEscritura\(\$usuario\);/',
+        $fuenteMix));
+}
+chequear('y no hay otras', 6, substr_count($fuenteMix, '$usuario = AuthCashflow::usuarioDeEscritura($usuario);'));
 
 seccion('las acciones del editor piden el permiso de Parametros -> Ventas');
 
 $authMG = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/AuthCashflow.php'));
 $ctrlMG = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/ParametrosController.php'));
 
-foreach (['previsualizarMixArbol', 'saveMixArbol', 'addMixNodo'] as $accion) {
+foreach (['previsualizarMixArbol', 'saveMixArbol', 'addMixNodo', 'saveMixModo', 'copiarMixMes', 'quitarMixMes'] as $accion) {
     chequear("$accion: en el mapa, con ['parametros', 'VENTAS']", 1,
         substr_count($authMG, "'" . $accion . "' => [['parametros', 'VENTAS']],"));
     chequear("$accion: en el controller", 1, substr_count($ctrlMG, "case '" . $accion . "':"));

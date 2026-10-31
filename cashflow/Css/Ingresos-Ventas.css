@@ -131,6 +131,19 @@
     color: var(--text-secondary, #5a6178);
 }
 
+/* El mix de cada mes (Cobranza Proyectada). Un nodo que no está en juego en
+   el mes elegido se atenúa: sus importes pueden ser de ventas de otros
+   meses, así que se ven igual. La etiqueta dice qué canal usó su mix propio. */
+.tab-ventas .fila-fuera-mes .col-concepto {
+    opacity: 0.55;
+}
+
+.tab-ventas .cob-mix-propio {
+    background: #e7eeff;
+    color: #24408e;
+    font-weight: 500;
+}
+
 /* Totales */
 .tab-ventas tfoot tr,
 .tab-ventas .fila-total td {

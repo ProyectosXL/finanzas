@@ -200,6 +200,38 @@ La columna de selección entró **primera**, siempre en el DOM y escondida en Re
 
 ---
 
+## El vendedor de cada cliente
+
+> **Nuevo** en `feature/mayoristas-vendedora-mix-mensual`.
+
+La columna **Vendedor** muestra el vendedor asignado **al cliente** en Tango (`GVA14.COD_VENDED`, con el nombre de `GVA23.NOMBRE_VEN`), **no el de la factura**: es quien atiende la cuenta y a quien se le pregunta por la cobranza.
+
+- **Viene en la misma consulta** de `getCobranzasMay()`, que ya leía `GVA14`: un `LEFT JOIN GVA23` y dos columnas más en el `GROUP BY`. No hay una segunda lectura por factura. El `LEFT` es a propósito: un código que no está en el maestro no se lleva puesta la factura.
+- **Cómo se muestra** (`Ingresos::vendedorDeCliente()`, pura y con pruebas): el nombre de Tango **tal cual**, para poder compararlo contra Tango; si el código no está en `GVA23`, *"Vendedor Z9 (sin nombre en Tango)"* en vez de esconder que tiene uno; si el código viene vacío —Tango guarda "sin vendedor" como cadena vacía, no como `NULL`—, **"Sin vendedor"**, en gris.
+- **Se ve en Resumen y en Detalle.** Es un dato del cliente, igual en todas sus facturas, así que sobrevive a la intersección de `EjeVista::armarAgrupado()`. Se ordena, sale en el export y el buscador rápido también lo encuentra.
+
+Al día del cambio, los 102 clientes con facturas pendientes tenían vendedor, y eran tres: Z3 (42 clientes), Z4 (41) y Z5 (19). *Sin vendedor* hoy no aparece; está cubierto y probado para el día que aparezca.
+
+### El filtro por vendedor
+
+Un desplegable en la barra, con **Todos**, un vendedor o **Sin vendedor**. Cada opción dice cuántas facturas tiene.
+
+- **Es del servidor**, como el de fecha de emisión y por el mismo motivo: se aplica antes de `EjeVista`, así la grilla, **las tarjetas y el pie** describen lo filtrado. El valor se valida en el servidor (`Ingresos::validarFiltroVendedor()`): vacío, `SIN` o un código posible de `COD_VENDED`.
+- **Es un filtro de pantalla y no cambia el tablero.** Lo aplica el controller (`IngresosController.php?action=getCobranzasMay&vendedor=…`) sobre lo que devolvió `getCobranzasMay()`; el tablero lee `getCobranzasMayTotales()`, que nunca lo ve. Con el filtro puesto, la pantalla lo dice al lado del período.
+- **Las opciones salen de la cartera entera** (`Ingresos::vendedoresDe()`), antes de cualquier filtro: si salieran de lo filtrado, elegir una fecha de emisión haría desaparecer vendedores del desplegable mientras se lo está usando.
+- **La selección masiva sobrevive al filtro**, igual que con el de emisión: las facturas de los otros vendedores no desaparecieron, sólo no se ven.
+
+**Los índices se corrieron otra vez.** Vendedor entró después de RAZON_SOC:
+
+| Qué | Antes | Ahora |
+| --- | --- | --- |
+| `.modo-resumen` — columnas de detalle | `nth-child(4..8)` | `nth-child(5..9)` |
+| `.modo-resumen` — columna `Cobro` | `nth-child(12)` | `nth-child(13)` |
+| Clave de las columnas fijas | `cobranzas_may.con_seleccion` | `cobranzas_may.con_vendedor` — **quien tenga columnas fijas elegidas vuelve una vez al default** |
+| `porDefecto` de `crearColumnasFijas()` | `[1, 2]` | `[1, 2]` — siguen siendo COD_CLI y RAZON_SOC |
+
+---
+
 ## Parámetros de Configuración
 
 En **Parámetros → Cobranzas**, se incorporó una tarjeta dedicada para **Cobranzas Mayoristas**:
@@ -220,6 +252,7 @@ La pestaña **Cobranzas May** cuenta con todos los componentes estándar del sis
 2. **Barra de Herramientas:**
    - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o comprobante.
    - **Filtro por fecha de emisión (desde – hasta):** dos `<input type="date">` y un botón de limpiar. Es **server-side**: los extremos se mandan como parámetros y los items se filtran antes de `EjeVista`, porque filtrar escondiendo filas dejaría las columnas del eje, el pie de totales y las tarjetas mostrando el total sin filtrar. La validación (formato, calendario y `desde <= hasta`) corre en el servidor. Está explicado en `README-cobranzas-fr.md`.
+   - **Filtro por vendedor:** Todos, un vendedor o *Sin vendedor*. También server-side, y no cambia el tablero. Ver *El vendedor de cada cliente*.
    - **Resumen vs Detalle Facturas**, en sub-solapas anidadas (`nav nav-tabs`) directamente arriba de la tabla. Antes eran un `btn-group`; el cambio está explicado en `README-cobranzas-fr.md`. El nombre viejo era *Deep Dive*: se renombró sólo de cara al usuario, y el identificador interno sigue siendo `deepdive`.
      - *Resumen:* **una fila por cliente**, con los importes repartidos en las columnas de la grilla según la fecha de cobro de cada comprobante. Quedan `COD_CLI`, `RAZON_SOC`, `Importe Factura`, `SALDO PENDIENTE` e `Importe Neto`.
      - *Detalle Facturas:* apertura individual por comprobante con fecha de emisión, tipo, número, importe y fecha de cobro.
@@ -260,6 +293,7 @@ Suite de pruebas implementada en `tests/test_cobranzas_may.php`:
 - **Fecha manual:** la jerarquía de `resolverFechaCobro()`, que los días se recalculan sobre la fecha resuelta, y que una fecha manual vencida **no** se reubica en el primer día del eje mientras que una proyectada sí.
 - **Que la fecha manual no cambia ningún importe:** sobre las filas reales, `importe_neto == importe_bruto` y `Desc == '0%'` en todas. Es la diferencia con Cobranzas FR y la que hay que dejar fijada, porque es justo lo que alguien podría copiar de allá por error.
 - **El aviso de pendientes negativos**, sin base: que no aparece con cero facturas, que es **uno solo** con siete, el singular y el plural, que el importe se muestra en valor absoluto —la palabra *NEGATIVO* ya está en la frase— y que dice explícitamente que esa plata **no entra al cashflow**.
+- **El vendedor**, sin base: la etiqueta con vendedor, sin vendedor (vacío o `NULL`) y con un código que no está en `GVA23`; el filtro con todos, un vendedor y *Sin vendedor*; el rechazo en el servidor de un valor que no es un código; las opciones ordenadas por nombre con *Sin vendedor* al final; y que el filtro vive en el controller y no en `getCobranzasMay()`, que es lo que lee el tablero. Sobre la base: que todas las filas traen el vendedor y que cada cliente tiene uno solo en todas sus facturas.
 - **Que lo que se cobra es el pendiente**, sobre las filas reales: que todos los comprobantes son `FAC`, que cada fila trae `IMPORTE_FACTURA`, que ninguna entra con pendiente cero o negativo, que **ningún pendiente supera a su importe facturado** —si lo hiciera, la tabla de signos de `IMPU` estaría al revés— y que la serie del tablero es **exactamente** el pendiente del listado y no el facturado.
 
 El gesto masivo se prueba en `tests/test_cobranzas_fecha_masiva.php`, junto con el de Cobranzas FR: el rechazo de la fecha pasada y del lote vacío en el servidor, la transacción única y todo-o-nada con una falla simulada —sobre una `#temporal`, sin tocar ninguna tabla real—, y el cableado de la barra en esta pestaña. Las reglas de `.modo-resumen` y el orden por defecto, en `tests/test_tablas_controles.php`.

@@ -469,6 +469,12 @@ $edita = AuthCashflow::puedeEditar('ventas');
                      Js/mix-niveles.js. Fuera de la tabla, para que Exportar no
                      la baje. -->
                 <div id="cobLeyenda" class="mix-niveles-leyenda px-3 pt-3 pb-2" style="display: none;"></div>
+                <!-- El mix de cada mes: qué árbol se aplicó a las ventas de cada
+                     mes de la ventana. Sólo aparece si algún canal tiene mix
+                     propio en algún mes; cambia las columnas % efectivo, Costo +
+                     tasa y Días sin recargar. Lo llena Js/Ingresos-Ventas.js.
+                     Fuera de la tabla, para que Exportar no lo baje. -->
+                <div id="cobMixMes" class="px-3 pb-2" style="display: none;"></div>
                 <div class="card-body p-0">
                     <div class="table-responsive tabla-temporal">
                         <!-- data-orden="no": es un árbol. Ordenar filas por una

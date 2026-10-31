@@ -1122,9 +1122,9 @@ seccion('Parametros: el editor del arbol del mix existe y esta enganchado');
 $paramTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/parametros.php'));
 $paramJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros.js'));
 
-chequear('la tabla del arbol, que no se ordena y se exporta', [1, 1, 1], [
+chequear('la tabla del arbol, que no se ordena, y Exportar baja la de todos los meses', [1, 1, 1], [
     substr_count($paramTab, '<table id="tablaMix" class="table table-hover mb-0" data-orden="no">'),
-    substr_count($paramTab, 'data-exportar="tablaMix"'),
+    substr_count($paramTab, 'data-exportar="tablaMixExport"'),
     substr_count($paramTab, '<tbody id="mixBody">')
 ]);
 chequear('las ocho columnas, en orden', ['Nombre', 'Nivel', '%', 'Costo %', 'Tasa %', 'Días', 'Activo', 'Última edición'],
