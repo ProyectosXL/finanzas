@@ -172,6 +172,11 @@ class AuthCashflow {
             'previsualizarMixArbol' => [['parametros', 'VENTAS']],
             'saveMixArbol' => [['parametros', 'VENTAS']],
             'addMixNodo' => [['parametros', 'VENTAS']],
+            /* El mix por mes: el modo de cada canal, copiar un mes a otros y
+               volver un mes al constante. Mismo permiso que el resto del mix. */
+            'saveMixModo' => [['parametros', 'VENTAS']],
+            'copiarMixMes' => [['parametros', 'VENTAS']],
+            'quitarMixMes' => [['parametros', 'VENTAS']],
             'saveRespaldo' => [['parametros', 'VENTAS']],
             'addCuentaSaldo' => [['parametros', 'SALDOS']],
             'saveCuentasSaldo' => [['parametros', 'SALDOS']],

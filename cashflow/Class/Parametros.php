@@ -326,13 +326,17 @@ class Parametros {
                     // MixCobro: la pantalla recibe la regla ya aplicada.
                     $mixCobro = new MixCobro();
                     $arbol = $mixCobro->getArbol();
-                    $modulo['mix'] = MixCobro::datosEditor($arbol['nodos'], $arbol['origen']);
+                    $modulo['mix'] = MixCobro::datosEditor($arbol['nodos'], $arbol['origen'], $arbol['config']);
 
                     if ($arbol['origen'] === 'PLANO') {
                         $modulo['avisos'][] = 'El mix de cobro todavía sale del mix plano y se '
                             . 'muestra sólo para consulta: corré sql/cashflow_ventas_mix_nodo.sql '
                             . 'contra la base central para abrirlo en árbol y poder editarlo. La '
                             . 'proyección sigue igual mientras tanto, bruta y sin costos de cobro.';
+                    } elseif (empty($arbol['config']['tablas'])) {
+                        $modulo['avisos'][] = 'Todavía no se puede cargar un mix distinto para cada '
+                            . 'mes: corré sql/cashflow_ventas_mix_mes.sql contra la base central. '
+                            . 'Mientras tanto todos los canales usan el mix constante, como hasta ahora.';
                     }
                 } elseif ($seccion === 'cuentas' || $seccion === 'sucursales') {
                     // Las dos tablas de parametros de Saldos las lee su propia

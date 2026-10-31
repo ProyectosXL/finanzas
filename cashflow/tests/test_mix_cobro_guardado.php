@@ -242,7 +242,7 @@ seccion('las acciones del editor piden el permiso de Parametros -> Ventas');
 $authMG = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/AuthCashflow.php'));
 $ctrlMG = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/ParametrosController.php'));
 
-foreach (['previsualizarMixArbol', 'saveMixArbol', 'addMixNodo'] as $accion) {
+foreach (['previsualizarMixArbol', 'saveMixArbol', 'addMixNodo', 'saveMixModo', 'copiarMixMes', 'quitarMixMes'] as $accion) {
     chequear("$accion: en el mapa, con ['parametros', 'VENTAS']", 1,
         substr_count($authMG, "'" . $accion . "' => [['parametros', 'VENTAS']],"));
     chequear("$accion: en el controller", 1, substr_count($ctrlMG, "case '" . $accion . "':"));

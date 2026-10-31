@@ -484,3 +484,16 @@ chequear('reactivar un mes limpia la baja', true,
     strpos($fuenteMix, 'SET ACTIVO = 1, USUARIO_BAJA = NULL, FECHA_BAJA = NULL, "') !== false);
 chequear('los cuatro INSERT -nodo, modo, mes y valor- llevan usuario de alta y de modificacion', 4,
     substr_count($fuenteMix, 'USUARIO_ALTA, USUARIO_MODIF)'));
+
+seccion('el controller: el mes se valida en el servidor');
+
+$ctrlMM = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/ParametrosController.php'));
+
+chequear('el mes del cuerpo pasa por MixCobro::validarMes()', true,
+    strpos($ctrlMM, "return MixCobro::validarMes(\$data['mes']);") !== false);
+chequear('la previsualizacion resuelve el mes con la config', true,
+    strpos($ctrlMM, "\$mes, \$arbol['config'])") !== false);
+chequear('guardar un mes va a guardarMes(), el constante a guardarCanal() con la casilla', [1, 1], [
+    substr_count($ctrlMM, "\$mixCobro->guardarMes(\$data['canal'], \$mes, \$data['nodos'], \$usuario)"),
+    substr_count($ctrlMM, "!empty(\$data['inhabilitar_en_meses'])")
+]);
