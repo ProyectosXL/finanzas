@@ -52,7 +52,7 @@ require_once __DIR__ . '/SaldoManual.php';
  * Los que estan en Interbanking se leen en vivo de BI_T_SALDOS_INTERBANKING y
  * NO estan en el catalogo: no se cargan, no se copian, y su saldo lo decide
  * SaldosInterbanking. Los que no estan -hoy, BTG Uy- son cuentas TIPO 'BANCO'
- * del catalogo y se cargan como siempre, en Nueva carga. El catalogo no tiene
+ * del catalogo y se cargan a mano, desde su fila. El catalogo no tiene
  * NRO_BANCO, asi que no hay forma de cruzar los dos: un banco no puede estar
  * de los dos lados, y la depuracion de los manuales que pasaron a Interbanking
  * la hizo una sola vez sql/cashflow_saldos_borrar_bancos_manuales.sql.
@@ -2874,7 +2874,7 @@ class Saldos {
             return null;
         }
 
-        return 'Es un banco de carga manual: sus saldos se cargan en Saldos › Nueva carga. Si '
+        return 'Es un banco de carga manual: su saldo se carga desde su fila en Saldos › Saldos. Si '
             . 'este banco ya viene por Interbanking, inhabilitalo: el disponible lo sumaría dos veces.';
     }
 

@@ -936,12 +936,11 @@ chequear('y manda los avisos con nivel', true, ibContiene($pestana, "'avisos_con
 
 $tabSalPhp = ibFuente(__DIR__ . '/../Tabs/saldos.php');
 $jsSalT = ibFuente(__DIR__ . '/../Js/Saldos.js');
-chequear('el KPI dice "Ultima carga manual"', true, ibContiene($tabSalPhp, '>Última carga manual<'));
-/* Mercado Pago ya no se carga a mano desde feature/saldos-efectivo-mp-en-vivo
-   (con su script corrido): el detalle habla de las cuentas manuales, sin
-   nombrarlas. */
-chequear('y el detalle aclara que es de las cuentas que se cargan a mano',
-    true, ibContiene($jsSalT, "'Las cuentas que se cargan a mano · '"));
+/* Desde feature/saldos-edicion-fila-ultimo-raf no hay "ultima carga": cada
+   edicion es una carga de una cuenta. El KPI mira el manual mas viejo de las
+   cuentas que solo se cargan a mano. */
+chequear('el KPI dice "Saldo manual más viejo"', true, ibContiene($tabSalPhp, '>Saldo manual más viejo<'));
+chequear('y sin ninguna, lo dice', true, ibContiene($jsSalT, "'Sin cuentas que se carguen a mano · '"));
 /* Los criticos ya no van en un bloque rojo aparte: van al panel plegable de
    todas las pestanas (Js/avisos-panel.js), que los pone primero, en rojo, y
    abre el panel solo. Lo que se fija aca es que la pestaña le pase los avisos
@@ -988,12 +987,10 @@ $tabSaldos = ibFuente(__DIR__ . '/../Tabs/saldos.php');
 
 chequear('Js/Saldos.js ya no dice "contable"', false, (bool) preg_match('/contable/i', $jsSaldos));
 chequear('Tabs/saldos.php ya no dice "contable"', false, (bool) preg_match('/contable/i', $tabSaldos));
-chequear('el dialogo del respaldo pide el saldo operativo',
-    true, ibContiene($tabSaldos, 'Saldo operativo (<span id="respaldoMoneda">'));
+chequear('el dialogo pide el saldo operativo en una cuenta de Interbanking',
+    true, ibContiene($jsSaldos, "texto('manualRotulo', esInterbanking(f) ? 'Saldo operativo' : 'Saldo');"));
 chequear('la cuenta sin dato lo dice con el saldo operativo',
     true, ibContiene($jsSaldos, "'operativo de esta cuenta. No suma al disponible.\">—</span>'"));
-chequear('el boton del respaldo tambien',
-    true, ibContiene($jsSaldos, 'Interbanking no trae el saldo operativo de esta cuenta'));
 
 // ============================================================================
 seccion('contra la base: la pestana y el proveedor suman lo mismo');

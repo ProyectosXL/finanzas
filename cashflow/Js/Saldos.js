@@ -33,27 +33,21 @@
     var fondosPedidos = false;
     var modalMovimientos = null;
 
-    // El respaldo manual de una cuenta de Interbanking: el modal y la cuenta
-    // que tiene abierta (la fila del payload).
-    var modalRespaldo = null;
-    var respaldoFila = null;
+    // El saldo manual de una cuenta, desde su fila: el modal y la cuenta que
+    // tiene abierta (la fila del payload).
+    var modalManual = null;
+    var manualFila = null;
 
     // Qué movimiento se está corrigiendo desde el formulario (null = alta).
     // Corregir no pisa: el servidor da de baja el anterior e inserta uno nuevo.
     var movReemplaza = null;
 
-    // Modo carga de la pestaña 1: los saldos manuales pasan a ser editables.
-    var enCarga = false;
-
     // Filtro por tipo de cuenta de la pestaña 1. '' es "todos". Es sólo de
-    // pantalla: filtra la tabla, el pie y los KPI, nunca lo que se guarda.
+    // pantalla: filtra la tabla, el pie y los KPI, nunca lo que suma el tablero.
     var filtroTipo = '';
 
     function inicializar() {
         conectar('btnRefreshSaldos', cargarSaldos);
-        conectar('btnNuevaCarga', function() { modoCarga(true); });
-        conectar('btnCancelarCarga', function() { modoCarga(false); });
-        conectar('btnGuardarCarga', guardarCarga);
 
         var selTipo = document.getElementById('filtroTipoSaldos');
 
@@ -82,25 +76,25 @@
             selCuenta.addEventListener('change', pintarMonedaMovimiento);
         }
 
-        conectar('btnGuardarRespaldo', guardarRespaldo);
-        conectar('btnQuitarRespaldo', quitarRespaldo);
+        conectar('btnGuardarManual', guardarManual);
+        conectar('btnQuitarManual', quitarManual);
 
-        var modalResp = document.getElementById('modalRespaldo');
+        var modalMan = document.getElementById('modalSaldoManual');
 
-        if (modalResp && window.bootstrap && bootstrap.Modal) {
-            modalRespaldo = new bootstrap.Modal(modalResp);
+        if (modalMan && window.bootstrap && bootstrap.Modal) {
+            modalManual = new bootstrap.Modal(modalMan);
         }
 
-        // Un solo listener para los botones de respaldo de todas las filas:
-        // la tabla se redibuja entera con cada filtro.
+        // Un solo listener para el lápiz de todas las filas: la tabla se
+        // redibuja entera con cada filtro.
         var cuerpoSaldos = document.getElementById('bodySaldos');
 
         if (cuerpoSaldos) {
             cuerpoSaldos.addEventListener('click', function(ev) {
-                var btn = ev.target.closest('.sal-btn-respaldo');
+                var btn = ev.target.closest('.sal-btn-editar');
 
                 if (btn) {
-                    abrirRespaldo(btn.dataset.clave);
+                    abrirManual(parseInt(btn.dataset.fila, 10));
                 }
             });
         }
@@ -191,16 +185,10 @@
         pedirJson(URL_SALDOS + '?action=getSaldos')
             .then(function(data) {
                 datosSaldos = data;
-                enCarga = false;
-
-                // Una recarga termina cualquier carga en curso (por ejemplo la
-                // que se acaba de guardar): el filtro vuelve a estar disponible.
-                filtrarTipo(filtroTipo, false);
 
                 pintarAvisos();
                 pintarKpiSaldos();
                 pintarTablaSaldos();
-                botonesCarga(false);
 
                 Cargando.ocultar('loadingSaldos');
                 mostrar('wrapperSaldos', true);
@@ -260,36 +248,39 @@
         texto('totalUsd', dolares(usd.total));
         texto('cuentasUsd', usd.cuentas + ' cuenta(s) en dólares' + sufijo);
 
-        var uc = datosSaldos.ultima_carga;
+        /* EL MANUAL MÁS VIEJO, entre las cuentas que sólo se cargan a mano
+           (bancos sin Interbanking y Otros). Lo calcula el servidor
+           (Saldos::avisosAntiguedad()); acá se muestra. Abajo, cuántas cuentas
+           usan hoy un saldo cargado a mano. */
+        var mv = datosSaldos.manual_mas_viejo;
+        var hoyManuales = datosSaldos.manuales_hoy || 0;
+        var deHoy = hoyManuales > 0
+            ? hoyManuales + ' cuenta(s) con saldo manual de hoy'
+            : 'Ninguna cuenta con saldo manual de hoy';
 
-        // Habla sólo de las cargas manuales: los bancos de Interbanking no se
-        // cargan, y su fecha está en cada fila.
-        texto('ultimaCargaSaldos', uc ? fechaHora(uc.fecha_carga) : 'Sin cargas');
-        texto('ultimaCargaSaldosDetalle', uc
-            ? ('Las cuentas que se cargan a mano · ' +
-               (uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado') +
-               ' · ' + (uc.observaciones || 'sin observaciones'))
-            : 'Las cuentas que se cargan a mano: todavía no se cargó ninguna');
+        texto('manualMasViejo', mv ? fecha(mv.fecha) : '—');
+        texto('manualMasViejoDetalle', mv
+            ? (mv.nombre + ' · ' + (mv.dias === 0 ? 'de hoy' : 'hace ' + mv.dias + ' día(s)') + ' · ' + deHoy)
+            : ('Sin cuentas que se carguen a mano · ' + deHoy));
 
         /* EL EFECTIVO SALE DE SU FILA, que el servidor ya leyó en vivo de SBA05
            (Saldos::getFilasDisponible()). Si la lectura falló, la fila trae el
-           de la última carga y lo dice. */
+           último guardado y lo dice. */
         var ec = datosSaldos.filas.filter(function(f) { return f.tipo === 'EFECTIVO_CENTRAL'; })[0];
 
         texto('efectivoCentral', ec && ec.cargada ? pesos(ec.saldo) : 'No disponible');
         texto('efectivoCentralDetalle', !ec ? 'No hay cuenta de efectivo de tesorería'
             : (ec.en_vivo ? ('En vivo de SBA05 · ' + fecha(ec.fecha_saldo))
-                : (ec.cargada ? ('No se pudo leer en vivo: es el de la carga del ' + fecha(ec.fecha_saldo))
+                : (ec.cargada ? ('No se pudo leer en vivo: es el último guardado, del ' + fecha(ec.fecha_saldo))
                     : 'No se pudo leer la consulta de tesorería')));
     }
 
     function pintarTablaSaldos() {
         var html = '';
+        var todas = datosSaldos.filas;
         var filas = filasVisibles();
 
         filas.forEach(function(f) {
-            var consulta = (f.origen_cuenta === 'CONSULTA');
-
             // Mismo resaltado que "no es de ayer" de Saldos Locales: es la
             // misma señal, un dato que tendría que haber llegado y no llegó.
             var clases = [];
@@ -305,15 +296,14 @@
             html += '<tr data-cuenta="' + (f.id_cuenta || '') + '"' +
                     (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>';
             html += '<td class="fw-semibold">' + escapar(f.nombre) + marcaNueva(f) +
-                    botonRespaldo(f) + detalleCuenta(f) + '</td>';
+                    detalleCuenta(f) + '</td>';
             html += '<td><span class="sal-badge">' + etiquetaTipo(f.tipo) + '</span></td>';
             html += '<td class="text-center">' + escapar(f.moneda) + '</td>';
 
-            // Un guion y no un cero: "esta cuenta nunca se cargó" no es lo mismo
-            // que "esta cuenta tiene cero pesos".
-            html += '<td class="text-end sal-saldo">' + celdaSaldo(f, consulta) + '</td>';
+            // El índice es el de la lista completa: el filtro no lo corre.
+            html += '<td class="text-end sal-saldo">' + celdaSaldo(f, todas.indexOf(f)) + '</td>';
             html += '<td class="text-center">' + celdaFechaSaldo(f) + '</td>';
-            html += '<td class="text-center">' + celdaOrigen(f, consulta) + '</td>';
+            html += '<td class="text-center">' + celdaOrigen(f) + '</td>';
 
             // La fecha de carga de CADA dato, que es la regla transversal del
             // relevamiento: sirve para ver cuál es la última actualización.
@@ -342,208 +332,270 @@
         document.getElementById('footSaldos').innerHTML =
             filaTotal('Total en pesos', pesos(t.ARS.total)) +
             filaTotal('Total en dólares', dolares(t.USD.total));
-
-        if (enCarga) {
-            document.querySelectorAll('.sal-input-saldo').forEach(function(i) {
-                i.addEventListener('input', recalcularTotalesEdicion);
-            });
-
-            recalcularTotalesEdicion();
-        }
-    }
-
-    /** Celda de saldo: texto cuando se mira, input cuando se está cargando */
-    function celdaSaldo(f, consulta) {
-        // Una cuenta de Interbanking no se tipea en la carga: su saldo lo
-        // trae la tabla de BI. Se ve igual que fuera de la carga.
-        if (!enCarga || esInterbanking(f)) {
-            if (!f.cargada) {
-                return esInterbanking(f)
-                    ? '<span class="text-muted" title="Interbanking no trajo ningún saldo ' +
-                      'operativo de esta cuenta. No suma al disponible.">—</span>'
-                    : '<span class="text-muted" title="Esta cuenta todavía no tiene ningún ' +
-                      'saldo cargado. No suma al disponible.">sin cargar</span>';
-            }
-
-            return importe(f.saldo, f.moneda);
-        }
-
-        if (consulta) {
-            // El efectivo y Mercado Pago no se tipean: el sistema relee SU
-            // consulta al guardar. Se muestra lo que la fila trae en vivo.
-            return '<span class="sal-consulta" title="Lo resuelve la consulta del sistema al ' +
-                   'guardar, no se carga a mano">' +
-                   (f.cargada ? importe(f.saldo, f.moneda) : 'no disponible') + '</span>';
-        }
-
-        return '<input type="number" step="0.01" class="form-control form-control-sm ' +
-               'text-end sal-input-saldo" data-cuenta="' + f.id_cuenta + '" ' +
-               'data-moneda="' + f.moneda + '" value="' + (f.cargada ? f.saldo : 0) + '">';
     }
 
     /**
-     * La fecha del saldo, y debajo "no es de hoy" cuando el saldo de
-     * Interbanking no es del día. La regla es del servidor (no_es_de_hoy): el
-     * navegador no decide qué es "hoy".
+     * La celda del saldo: el importe, el lápiz para editarlo y, si manda un
+     * saldo cargado a mano, la marca "manual".
+     *
+     * Un guion y no un cero: "esta cuenta nunca se cargó" no es lo mismo que
+     * "esta cuenta tiene cero pesos".
+     */
+    function celdaSaldo(f, indice) {
+        var html;
+
+        if (!f.cargada) {
+            html = esInterbanking(f)
+                ? '<span class="text-muted" title="Interbanking no trajo ningún saldo ' +
+                  'operativo de esta cuenta. No suma al disponible.">—</span>'
+                : '<span class="text-muted" title="Esta cuenta todavía no tiene ningún ' +
+                  'saldo cargado. No suma al disponible.">sin cargar</span>';
+        } else {
+            html = importe(f.saldo, f.moneda);
+        }
+
+        return html + botonEditar(f, indice) + marcaManual(f);
+    }
+
+    /**
+     * El lápiz de la fila. Lo decide el servidor (f.editable: todas menos el
+     * efectivo de tesorería, y con los scripts corridos) y el permiso de la
+     * pestaña. Sin permiso no se dibuja: lo que frena la escritura es el 403.
+     */
+    function botonEditar(f, indice) {
+        if (!f.editable || !Permisos.puedeEditar('bodySaldos')) {
+            return '';
+        }
+
+        return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 sal-btn-editar" ' +
+               'data-fila="' + indice + '" title="Cargar el saldo de hoy a mano: manda todo el día">' +
+               '<i class="fas fa-pen"></i></button>';
+    }
+
+    /**
+     * La marca "manual" de la fila cuyo saldo es uno cargado a mano. El
+     * tooltip dice quién, cuándo, la observación y qué trae la fuente
+     * automática en este momento: es lo que explica por qué la fila no
+     * muestra el dato de Interbanking o de Mercado Pago.
+     */
+    function marcaManual(f) {
+        var m = f.manual;
+
+        if (!m || !m.manda || !f.cargada) {
+            return '';
+        }
+
+        return '<div class="sal-subtitulo"><span class="sal-badge sal-badge-manual" title="' +
+               escapar(textoManual(f)) + '">manual</span></div>';
+    }
+
+    /** Quién, cuándo y por qué se cargó a mano, y qué trae la fuente automática */
+    function textoManual(f) {
+        var m = f.manual;
+        var fuente = nombreFuente(f);
+        var txt = 'Cargado a mano' +
+            (m.usuario ? ' por ' + Auditoria.quien(m.usuario) : ' (sin usuario registrado)') +
+            (m.fecha_alta ? ' el ' + fechaHora(m.fecha_alta) : '') +
+            (m.observacion ? ' · ' + m.observacion : '') + '.';
+
+        if (fuente) {
+            txt += ' ' + fuente + ': ' + (f.automatico
+                ? importe(f.automatico.saldo, f.moneda) + ' del ' + fecha(f.automatico.fecha)
+                : 'sin dato') + '.';
+        }
+
+        return txt;
+    }
+
+    /**
+     * Cómo se llama la fuente automática de una cuenta, o '' si no tiene
+     * (bancos sin Interbanking y Otros).
+     */
+    function nombreFuente(f) {
+        if (esInterbanking(f)) {
+            return 'Interbanking';
+        }
+
+        if (f.origen_cuenta === 'CONSULTA') {
+            return f.tipo === 'MERCADO_PAGO' ? 'Mercado Pago' : 'la consulta';
+        }
+
+        return '';
+    }
+
+    /**
+     * La fecha del saldo, y debajo "no es de hoy" cuando el saldo no es del
+     * día. La regla es del servidor (no_es_de_hoy): el navegador no decide qué
+     * es "hoy".
      */
     function celdaFechaSaldo(f) {
         var html = f.fecha_saldo ? fecha(f.fecha_saldo) : '—';
 
         if (f.no_es_de_hoy) {
-            html += '<div class="sal-subtitulo sal-error" title="' + escapar((f.en_vivo
-                        ? f.fuente_vivo : 'Interbanking') + ' no tiene el saldo de hoy de esta ' +
-                    'cuenta: se muestra el último que hay.') + '">no es de hoy</div>';
+            var quien = f.en_vivo ? f.fuente_vivo
+                : (esInterbanking(f) && !(f.manual && f.manual.manda) ? 'Interbanking' : null);
+
+            html += '<div class="sal-subtitulo sal-error" title="' + escapar(quien
+                        ? quien + ' no tiene el saldo de hoy de esta cuenta: se muestra el último que hay.'
+                        : 'El último saldo de esta cuenta es de otro día. Cargá el de hoy con el lápiz.') +
+                    '">no es de hoy</div>';
         }
 
         return html;
     }
 
-    /**
-     * La celda Origen. Un respaldo dice "Manual (respaldo)" y el tooltip
-     * cuenta quién lo cargó, cuándo y por qué, y qué trae Interbanking: es lo
-     * que explica por qué esa cuenta no muestra el dato de la integración.
-     */
-    function celdaOrigen(f, consulta) {
-        var origen = consulta ? 'CONSULTA'
-            : (esInterbanking(f) ? (f.origen || 'INTERBANKING') : (f.origen_dato || 'MANUAL'));
-        var titulo = '';
+    /** La celda Origen: de dónde sale el saldo que se está mostrando */
+    function celdaOrigen(f) {
+        var origen;
 
-        if (f.origen === 'RESPALDO' && f.respaldo) {
-            titulo = 'Cargado a mano' +
-                (f.respaldo.usuario ? ' por ' + Auditoria.quien(f.respaldo.usuario) : '') +
-                (f.respaldo.fecha_alta ? ' el ' + fechaHora(f.respaldo.fecha_alta) : '') +
-                (f.respaldo.observacion ? ' · ' + f.respaldo.observacion : '') +
-                '. Interbanking: ' + (f.interbanking
-                    ? importe(f.interbanking.saldo, f.moneda) + ' del ' + fecha(f.interbanking.fecha)
-                    : 'sin saldo operativo') + '.';
+        if (f.manual && f.manual.manda && f.cargada) {
+            origen = 'MANUAL';
+        } else if (f.origen_cuenta === 'CONSULTA') {
+            origen = 'CONSULTA';
+        } else if (esInterbanking(f)) {
+            origen = 'INTERBANKING';
+        } else {
+            origen = f.origen_dato || 'MANUAL';
         }
 
-        return '<span class="sal-origen"' + (titulo ? ' title="' + escapar(titulo) + '"' : '') + '>' +
-               etiquetaOrigen(origen) + '</span>';
+        return '<span class="sal-origen">' + etiquetaOrigen(origen) + '</span>';
     }
 
     /**
-     * El botón "Cargar saldo manual" de una cuenta de Interbanking. Sólo si se
-     * puede editar y si existe la tabla del respaldo; las filas que llegan son
-     * todas de bancos activos (las de uno inactivo no vienen). No se dibuja
-     * durante una carga: son dos cosas distintas.
+     * Abre el diálogo de una cuenta: qué manda ahora y de dónde sale, el
+     * manual de hoy si lo hay (quién y cuándo), y el formulario. La fecha no
+     * se elige: es hoy, y la pone el servidor.
      */
-    function botonRespaldo(f) {
-        if (!esInterbanking(f) || enCarga || !datosSaldos.respaldo_creado
-            || !Permisos.puedeEditar('bodySaldos')) {
-            return '';
-        }
+    function abrirManual(indice) {
+        var f = ((datosSaldos && datosSaldos.filas) || [])[indice];
 
-        return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 sal-btn-respaldo" ' +
-               'data-clave="' + escapar(f.clave) + '" title="Cargar saldo manual: para cuando ' +
-               'Interbanking no trae el saldo operativo de esta cuenta">' +
-               '<i class="fas fa-hand-holding-dollar"></i></button>';
-    }
-
-    /** Abre el diálogo del respaldo de una cuenta, con el vigente si lo tiene */
-    function abrirRespaldo(clave) {
-        var f = ((datosSaldos && datosSaldos.filas) || []).filter(function(x) {
-            return x.clave === clave;
-        })[0];
-
-        if (!f || !modalRespaldo) {
+        if (!f || !modalManual) {
             return;
         }
 
-        respaldoFila = f;
+        manualFila = f;
 
-        var hoy = hoyLocal();
-        var r = f.respaldo;
+        var m = f.manual;
+        var fuente = nombreFuente(f);
 
-        texto('respaldoCuenta', f.nombre);
-        texto('respaldoMoneda', f.moneda);
-        texto('respaldoInterbanking', f.interbanking
-            ? 'Interbanking: ' + importe(f.interbanking.saldo, f.moneda) + ' del ' +
-              fecha(f.interbanking.fecha) + '.'
-            : 'Interbanking no trae ningún saldo operativo de esta cuenta.');
+        texto('manualCuenta', f.nombre);
+        texto('manualRotulo', esInterbanking(f) ? 'Saldo operativo' : 'Saldo');
+        texto('manualMoneda', f.moneda);
 
-        var vigente = document.getElementById('respaldoVigente');
+        document.getElementById('manualManda').innerHTML = '<small>' + textoManda(f) + '</small>';
 
-        if (r) {
-            vigente.innerHTML = '<small><strong>Respaldo vigente:</strong> ' +
-                escapar(importe(r.saldo, f.moneda)) + ' del ' + escapar(fecha(r.fecha_saldo)) +
-                (r.usuario ? ', cargado por ' + escapar(Auditoria.quien(r.usuario)) : '') +
-                (r.fecha_alta ? ' el ' + escapar(fechaHora(r.fecha_alta)) : '') +
-                (r.observacion ? ' · ' + escapar(r.observacion) : '') +
+        var vigente = document.getElementById('manualVigente');
+        var hayVigente = !!m && (m.de_hoy || m.quitable);
+
+        if (hayVigente) {
+            vigente.innerHTML = '<small><strong>' + (m.de_hoy ? 'Saldo manual de hoy:' : 'Saldo manual vigente:') +
+                '</strong> ' + escapar(importe(m.saldo, f.moneda)) +
+                (m.de_hoy ? '' : ' del ' + escapar(fecha(m.fecha_saldo))) +
+                (m.usuario ? ', cargado por ' + escapar(Auditoria.quien(m.usuario)) : ', sin usuario registrado') +
+                (m.fecha_alta ? ' el ' + escapar(fechaHora(m.fecha_alta)) : '') +
+                (m.observacion ? ' · ' + escapar(m.observacion) : '') +
                 '. Guardar lo reemplaza; el anterior queda en el historial.</small>';
         }
 
-        mostrar('respaldoVigente', !!r);
-        mostrar('btnQuitarRespaldo', !!r, 'inline-block');
+        mostrar('manualVigente', hayVigente);
+        mostrar('btnQuitarManual', !!m && !!m.quitable, 'inline-block');
 
-        var inputFecha = document.getElementById('respaldoFecha');
-        inputFecha.max = hoy;
-        inputFecha.value = hoy;
-        document.getElementById('respaldoSaldo').value = '';
-        document.getElementById('respaldoObservacion').value = '';
+        texto('manualAyuda', fuente
+            ? 'La fecha es hoy. Este saldo manda hasta el final del día, aunque ' + fuente +
+              ' traiga otro; mañana vuelve a mandar ' + fuente + ' sin que nadie haga nada.'
+            : 'La fecha es hoy. Es el saldo de la cuenta hasta que se cargue otro.');
 
-        modalRespaldo.show();
+        var input = document.getElementById('manualSaldo');
+        input.value = '';
+        input.placeholder = f.cargada ? numero(f.saldo) : '';
+        document.getElementById('manualObservacion').value = '';
+
+        modalManual.show();
     }
 
-    /**
-     * Hoy en la zona del navegador, 'Y-m-d'. Sólo para proponer la fecha y
-     * topear el selector: quien decide si la fecha es futura es el servidor.
-     */
-    function hoyLocal() {
-        var d = new Date();
+    /** "Ahora manda: $ X, de <fuente>", y lo que trae la fuente si no manda */
+    function textoManda(f) {
+        var fuente = nombreFuente(f);
+        var m = f.manual;
+        var manual = !!m && m.manda && f.cargada;
+        var de;
 
-        return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
-               ('0' + d.getDate()).slice(-2);
+        if (!f.cargada) {
+            return 'Ahora no tiene saldo: no suma al disponible.';
+        }
+
+        if (manual) {
+            de = m.de_hoy ? 'el saldo manual de hoy' : 'el último saldo manual, del ' + fecha(m.fecha_saldo);
+        } else if (f.en_vivo) {
+            de = fuente + ', en vivo, del ' + fecha(f.fecha_saldo);
+        } else if (esInterbanking(f)) {
+            de = 'Interbanking, del ' + fecha(f.fecha_saldo);
+        } else {
+            de = 'el último saldo guardado, del ' + fecha(f.fecha_saldo);
+        }
+
+        var html = 'Ahora manda <strong>' + escapar(importe(f.saldo, f.moneda)) + '</strong>, de ' + escapar(de) + '.';
+
+        if (manual && fuente) {
+            html += '<br>' + escapar(fuente) + ' trae ' + (f.automatico
+                ? '<strong>' + escapar(importe(f.automatico.saldo, f.moneda)) + '</strong> del ' +
+                  escapar(fecha(f.automatico.fecha))
+                : 'ningún saldo') + '.';
+        }
+
+        return html;
     }
 
-    function guardarRespaldo() {
-        if (!respaldoFila) {
+    /** Lo que identifica a la cuenta ante el servidor: banco y cuenta, o el ID del catálogo */
+    function claveCuenta(f) {
+        return esInterbanking(f)
+            ? { nro_banco: f.nro_banco, nro_cuenta: f.nro_cuenta, moneda: f.moneda }
+            : { id_cuenta: f.id_cuenta };
+    }
+
+    function guardarManual() {
+        if (!manualFila) {
             return;
         }
 
-        var saldo = document.getElementById('respaldoSaldo').value.trim();
-        var fechaSaldo = document.getElementById('respaldoFecha').value;
+        var saldo = document.getElementById('manualSaldo').value.trim();
 
         // El servidor lo vuelve a rechazar: esto sólo explica antes de mandar.
-        if (saldo === '' || !fechaSaldo) {
-            Notificacion.advertencia('El saldo manual necesita fecha e importe.');
+        if (saldo === '' || isNaN(Number(saldo))) {
+            Notificacion.campoInvalido('manualSaldo', 'Cargá el saldo de hoy: puede ser negativo, pero no vacío.');
             return;
         }
 
-        if (fechaSaldo > hoyLocal()) {
-            Notificacion.advertencia('La fecha del saldo no puede ser posterior a hoy.');
-            return;
-        }
+        var datos = claveCuenta(manualFila);
+        datos.saldo = saldo;
+        datos.observacion = document.getElementById('manualObservacion').value;
 
-        conBoton('btnGuardarRespaldo', function() {
-            return pedirJson(URL_SALDOS + '?action=guardarRespaldoBanco', {
-                nro_banco: respaldoFila.nro_banco,
-                nro_cuenta: respaldoFila.nro_cuenta,
-                moneda: respaldoFila.moneda,
-                fecha_saldo: fechaSaldo,
-                saldo: saldo,
-                observacion: document.getElementById('respaldoObservacion').value
-            }).then(function() {
-                Notificacion.exito('Saldo manual guardado.');
-                modalRespaldo.hide();
+        conBoton('btnGuardarManual', function() {
+            return pedirJson(URL_SALDOS + '?action=guardarSaldoManual', datos).then(function() {
+                Notificacion.exito('Saldo manual guardado.', {
+                    detalle: 'Manda hasta el final del día. El total y el tablero ya lo incluyen.'
+                });
+                modalManual.hide();
                 cargarSaldos();
             });
         }, 'No se pudo guardar el saldo manual');
     }
 
-    function quitarRespaldo() {
-        var f = respaldoFila;
+    function quitarManual() {
+        var f = manualFila;
 
-        if (!f || !f.respaldo) {
+        if (!f || !f.manual || !f.manual.quitable) {
             return;
         }
 
+        var fuente = nombreFuente(f);
+
         Notificacion.confirmar({
             titulo: 'Quitar el saldo manual',
-            mensaje: '¿Quitar el saldo manual de ' + f.nombre + ' (' +
-                importe(f.respaldo.saldo, f.moneda) + ' del ' + fecha(f.respaldo.fecha_saldo) + ')?',
-            detalle: 'No se borra: queda en el historial, dado de baja. Si Interbanking no trae ' +
-                'el saldo operativo, la cuenta queda sin dato y no suma al disponible.',
+            mensaje: '¿Quitar el saldo manual de ' + f.nombre + ' (' + importe(f.manual.saldo, f.moneda) + ')?',
+            detalle: 'No se borra: queda en el historial, dado de baja. ' + (fuente
+                ? 'Vuelve a mandar ' + fuente + '.'
+                : 'Vuelve el último saldo de un día anterior; si no hay, la cuenta queda sin cargar y no suma.'),
             confirmar: 'Quitar',
             peligro: true
         }).then(function(ok) {
@@ -551,10 +603,13 @@
                 return;
             }
 
-            pedirJson(URL_SALDOS + '?action=quitarRespaldoBanco', { id: f.respaldo.id })
+            var datos = claveCuenta(f);
+            datos.id = f.manual.id;
+
+            pedirJson(URL_SALDOS + '?action=quitarSaldoManual', datos)
                 .then(function() {
                     Notificacion.exito('Saldo manual quitado.');
-                    modalRespaldo.hide();
+                    modalManual.hide();
                     cargarSaldos();
                 })
                 .catch(function(error) {
@@ -607,109 +662,6 @@
         }
 
         return partes.length ? '<div class="sal-subtitulo">' + partes.join(' · ') + '</div>' : '';
-    }
-
-    function modoCarga(activo) {
-        enCarga = activo;
-        botonesCarga(activo);
-        mostrar('formCarga', activo);
-
-        if (activo) {
-            document.getElementById('observacionesCarga').value = '';
-        }
-
-        // La carga es SIEMPRE de todas las cuentas: guardarCarga() toma el
-        // input de cada fila, y una fila que el filtro escondió no tiene
-        // input, así que su saldo viajaría en cero. Se quita el filtro y se
-        // bloquea el selector mientras dure la carga.
-        filtrarTipo(activo ? '' : filtroTipo, activo);
-
-        pintarKpiSaldos();
-        pintarTablaSaldos();
-    }
-
-    /** Fija el filtro por tipo y, si se pide, bloquea el selector */
-    function filtrarTipo(tipo, bloquear) {
-        filtroTipo = tipo;
-
-        var sel = document.getElementById('filtroTipoSaldos');
-
-        if (sel) {
-            sel.value = tipo;
-            sel.disabled = !!bloquear;
-        }
-    }
-
-    function botonesCarga(activo) {
-        mostrar('btnNuevaCarga', !activo, 'inline-block');
-        mostrar('btnGuardarCarga', activo, 'inline-block');
-        mostrar('btnCancelarCarga', activo, 'inline-block');
-    }
-
-    /** Mientras se carga, el pie muestra los totales de lo que se está tipeando */
-    function recalcularTotalesEdicion() {
-        var totales = { ARS: 0, USD: 0 };
-
-        datosSaldos.filas.forEach(function(f) {
-            if (f.origen_cuenta === 'CONSULTA') {
-                // Cada consulta con su saldo: antes se sumaba el efectivo por
-                // cada fila de consulta, y había una sola.
-                totales[f.moneda] = (totales[f.moneda] || 0) + (f.cargada ? (parseFloat(f.saldo) || 0) : 0);
-            } else if (esInterbanking(f) && f.cargada) {
-                totales[f.moneda] = (totales[f.moneda] || 0) + (parseFloat(f.saldo) || 0);
-            }
-        });
-
-        document.querySelectorAll('.sal-input-saldo').forEach(function(i) {
-            var m = i.dataset.moneda;
-            totales[m] = (totales[m] || 0) + (parseFloat(i.value) || 0);
-        });
-
-        document.getElementById('footSaldos').innerHTML =
-            filaTotal('Total en pesos', pesos(totales.ARS || 0)) +
-            filaTotal('Total en dólares', dolares(totales.USD || 0));
-    }
-
-    function guardarCarga() {
-        var filas = [];
-        var hoy = new Date().toISOString().slice(0, 10);
-
-        datosSaldos.filas.forEach(function(f) {
-            // Las cuentas de Interbanking no son de la carga: no tienen ID en
-            // el catálogo manual y el servidor las rechazaría.
-            if (esInterbanking(f)) {
-                return;
-            }
-
-            if (f.origen_cuenta === 'CONSULTA') {
-                // Va igual, pero sin saldo: el servidor lo relee de su consulta.
-                filas.push({ id_cuenta: f.id_cuenta, saldo: 0, fecha_saldo: hoy });
-                return;
-            }
-
-            var input = document.querySelector('.sal-input-saldo[data-cuenta="' + f.id_cuenta + '"]');
-
-            filas.push({
-                id_cuenta: f.id_cuenta,
-                saldo: input ? (parseFloat(input.value) || 0) : 0,
-                fecha_saldo: hoy
-            });
-        });
-
-        if (!filas.length) {
-            avisar('No hay ninguna cuenta para cargar.');
-            return;
-        }
-
-        conBoton('btnGuardarCarga', function() {
-            return pedirJson(URL_SALDOS + '?action=guardarCargaSaldos', {
-                filas: filas,
-                observaciones: document.getElementById('observacionesCarga').value
-            }).then(function() {
-                mostrar('formCarga', false);
-                cargarSaldos();
-            });
-        }, 'No se pudo guardar la carga');
     }
 
     /* ================================================================
@@ -1574,7 +1526,6 @@
     function etiquetaOrigen(origen) {
         var origenes = {
             'INTERBANKING': 'Interbanking',
-            'RESPALDO': 'Manual (respaldo)',
             'API': 'Interbanking',
             'MANUAL': 'Manual',
             'CONSULTA': 'Consulta'

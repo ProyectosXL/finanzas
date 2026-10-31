@@ -986,24 +986,35 @@ foreach (['btnGuardarBancosIb', 'btnGuardarBancosManuales', 'btnGuardarCuentas']
         (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<button id="' . $btn . '"/', $tabPs));
 }
 
-seccion('Saldos › Saldos: la accion de respaldo esta cableada');
+seccion('Saldos › Saldos: el saldo se edita desde la fila');
 
 $tabSal = contenidoTab(__DIR__ . '/../Tabs/saldos.php');
 $jsSal = file_get_contents(__DIR__ . '/../Js/Saldos.js');
 
-chequear('el dialogo del respaldo existe', true, strpos($tabSal, 'id="modalRespaldo"') !== false);
+chequear('Nueva carga ya no esta: ni el boton ni su formulario', false,
+    strpos($tabSal, 'btnNuevaCarga') !== false || strpos($tabSal, 'formCarga') !== false
+    || strpos($jsSal, 'guardarCargaSaldos') !== false);
+chequear('ni el dialogo del respaldo viejo', false,
+    strpos($tabSal, 'modalRespaldo') !== false || strpos($jsSal, 'sal-btn-respaldo') !== false);
+chequear('el dialogo del saldo manual existe', true, strpos($tabSal, 'id="modalSaldoManual"') !== false);
 chequear('y solo se dibuja con permiso de edicion', true,
-    (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<!--[^>]*?-->\s*<div class="modal fade" id="modalRespaldo"/s', $tabSal));
+    (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<!--[^>]*?-->\s*<div class="modal fade" id="modalSaldoManual"/s', $tabSal));
+preg_match('/id="modalSaldoManual".*?<\?php endif; \?>/s', $tabSal, $m);
+chequear('no pide fecha: es hoy', false, strpos(isset($m[0]) ? $m[0] : 'type="date"', 'type="date"') !== false);
 chequear('Guardar esta enganchado', true,
-    strpos($jsSal, "conectar('btnGuardarRespaldo', guardarRespaldo)") !== false);
+    strpos($jsSal, "conectar('btnGuardarManual', guardarManual)") !== false);
 chequear('Quitar esta enganchado', true,
-    strpos($jsSal, "conectar('btnQuitarRespaldo', quitarRespaldo)") !== false);
-chequear('los botones de cada fila abren el dialogo', true,
-    strpos($jsSal, "ev.target.closest('.sal-btn-respaldo')") !== false
-    && strpos($jsSal, 'abrirRespaldo(btn.dataset.clave)') !== false);
-chequear('el boton de la fila pregunta el permiso', true,
-    strpos($jsSal, "!Permisos.puedeEditar('bodySaldos')") !== false);
-chequear('y si existe la tabla del respaldo', true, strpos($jsSal, '!datosSaldos.respaldo_creado') !== false);
+    strpos($jsSal, "conectar('btnQuitarManual', quitarManual)") !== false);
+chequear('el lapiz de cada fila abre el dialogo', true,
+    strpos($jsSal, "ev.target.closest('.sal-btn-editar')") !== false
+    && strpos($jsSal, 'abrirManual(parseInt(btn.dataset.fila, 10))') !== false);
+chequear('el lapiz lo decide el servidor y pregunta el permiso', true,
+    strpos($jsSal, "if (!f.editable || !Permisos.puedeEditar('bodySaldos'))") !== false);
+chequear('guardar y quitar llaman a sus acciones', true,
+    strpos($jsSal, "'?action=guardarSaldoManual'") !== false
+    && strpos($jsSal, "'?action=quitarSaldoManual'") !== false);
+chequear('el KPI es el saldo manual mas viejo', true,
+    strpos($tabSal, 'Saldo manual más viejo') !== false && strpos($jsSal, 'datosSaldos.manual_mas_viejo') !== false);
 $ctrlSal = file_get_contents(__DIR__ . '/../Controller/SaldosController.php');
 chequear('las dos acciones existen en el controller', true,
     strpos($ctrlSal, "case 'guardarSaldoManual':") !== false

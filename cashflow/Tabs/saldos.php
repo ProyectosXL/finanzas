@@ -1,7 +1,7 @@
 <?php
 $tabName = 'Saldos';
 
-/* Sin permiso de edicion los controles de carga no se dibujan. Es comodidad:
+/* Sin permiso de edicion los controles de edicion no se dibujan. Es comodidad:
    lo que frena una escritura es el 403 del servidor. */
 $edita = AuthCashflow::puedeEditar('saldos');
 ?>
@@ -11,9 +11,10 @@ $edita = AuthCashflow::puedeEditar('saldos');
     Pestaña Saldos. Tres sub-pestañas que son tres cosas distintas:
 
       Saldos         -> alimenta la fila "Saldo Inicial" del tablero. Los
-                        bancos de Interbanking se leen en vivo; el efectivo,
-                        Mercado Pago, otros y los bancos sin Interbanking
-                        van en cargas.
+                        bancos de Interbanking, el efectivo y Mercado Pago se
+                        leen en vivo; los bancos sin Interbanking y Otros se
+                        cargan a mano. Todas, menos el efectivo, se editan
+                        desde su fila, y el manual de hoy manda todo el día.
       Saldos Locales -> alimenta la fila "Caja Locales". Sale de una consulta
                         contra Tango que se actualiza sola todos los días.
       Fondos         -> las cuentas de inversión y comitente, con su cuenta
@@ -99,14 +100,17 @@ $edita = AuthCashflow::puedeEditar('saldos');
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
-                        <!-- Sólo las cargas manuales: los bancos de Interbanking no se
-                             cargan, y la fecha de su saldo está en cada fila. -->
-                        <span class="kpi-card-title">Última carga manual</span>
+                        <!-- El manual más viejo entre las cuentas que sólo se
+                             cargan a mano (bancos sin Interbanking y Otros): es el
+                             dato que puede quedar viejo sin que nadie se entere.
+                             Interbanking y Mercado Pago traen el suyo, y la fecha
+                             de cada uno está en su fila. -->
+                        <span class="kpi-card-title">Saldo manual más viejo</span>
                         <div class="kpi-card-icon orange"><i class="fas fa-clock-rotate-left"></i></div>
                     </div>
-                    <div class="kpi-card-value kpi-card-value-sm" id="ultimaCargaSaldos">—</div>
+                    <div class="kpi-card-value kpi-card-value-sm" id="manualMasViejo">—</div>
                     <div class="kpi-card-footer">
-                        <span class="text-muted" id="ultimaCargaSaldosDetalle">Sin cargas</span>
+                        <span class="text-muted" id="manualMasViejoDetalle">Sin cuentas manuales</span>
                     </div>
                 </div>
             </div>
@@ -133,16 +137,16 @@ $edita = AuthCashflow::puedeEditar('saldos');
                     <h5 class="mb-0">Saldos por cuenta</h5>
                     <small class="text-muted">
                         Cada fila muestra su <strong>último saldo conocido</strong> con su fecha.
-                        Los bancos de <strong>Interbanking</strong> se leen todos los días; el
-                        resto se carga a mano y cada carga es un registro nuevo, sin pisar nada.
+                        <strong>Interbanking</strong>, Mercado Pago y el efectivo se leen solos; el
+                        resto se carga a mano. Con el lápiz de cada fila se carga el saldo de hoy:
+                        manda <strong>todo el día</strong>, aunque Interbanking o Mercado Pago
+                        traigan otro, y mañana vuelve a mandar la fuente automática.
                     </small>
                 </div>
                 <div class="d-flex gap-2 align-items-center">
                     <!-- Filtro por tipo de cuenta. Es de pantalla: los KPI, la
-                         tabla y el pie muestran lo filtrado, pero lo que se
-                         guarda y lo que consume el tablero es siempre todo.
-                         Mientras se carga se deshabilita: una carga con filas
-                         escondidas las guardaria en cero. -->
+                         tabla y el pie muestran lo filtrado, pero lo que
+                         consume el tablero es siempre todo. -->
                     <select id="filtroTipoSaldos" class="form-select form-select-sm w-auto"
                             title="Filtra la tabla y los totales por tipo de cuenta">
                         <option value="">Todos los tipos</option>
@@ -160,37 +164,8 @@ $edita = AuthCashflow::puedeEditar('saldos');
                     <button id="btnRefreshSaldos" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
-                    <?php if ($edita): ?>
-                    <button id="btnNuevaCarga" class="btn btn-sm btn-primary">
-                        <i class="fas fa-plus me-1"></i> Nueva carga
-                    </button>
-                    <button id="btnGuardarCarga" class="btn btn-sm btn-success" style="display: none;">
-                        <i class="fas fa-floppy-disk me-1"></i> Guardar carga
-                    </button>
-                    <button id="btnCancelarCarga" class="btn btn-sm btn-outline-secondary" style="display: none;">
-                        <i class="fas fa-xmark"></i>
-                    </button>
-                    <?php endif; ?>
                 </div>
             </div>
-
-            <?php if ($edita): ?>
-            <div class="card-body border-bottom" id="formCarga" style="display: none;">
-                <div class="alert alert-info py-2 px-3 mb-3">
-                    <small>
-                        <i class="fas fa-circle-info me-1"></i>
-                        El <strong>efectivo de tesorería</strong> no se tipea: lo vuelve a leer el
-                        sistema de su consulta al guardar. Acá se cargan Mercado Pago, los otros
-                        saldos y los <strong>bancos que no vienen por Interbanking</strong>. Las
-                        cuentas de Interbanking no son de esta carga: si una no trae el saldo
-                        operativo, se carga a mano desde su fila, con el botón de saldo manual.
-                    </small>
-                </div>
-                <label class="form-label form-label-sm">Observaciones de la carga</label>
-                <input type="text" id="observacionesCarga" class="form-control form-control-sm"
-                       maxlength="500" placeholder="Opcional: de dónde salieron los saldos, quién los pasó…">
-            </div>
-            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="cargando-slot" id="loadingSaldos" data-cargando="Cargando saldos…"></div>
@@ -216,59 +191,57 @@ $edita = AuthCashflow::puedeEditar('saldos');
         </div>
 
         <?php if ($edita): ?>
-        <!-- Respaldo manual de una cuenta de Interbanking. Para cuando la
-             integración no trae el saldo operativo: se carga a mano y se usa
-             mientras Interbanking no traiga uno igual o más nuevo. Reemplazar
-             da de baja el anterior; quitar también: nada se borra. La
-             validación que vale es la del servidor. -->
-        <div class="modal fade" id="modalRespaldo" tabindex="-1" aria-hidden="true">
+        <!-- El saldo de hoy de una cuenta, cargado a mano. Uno solo para todas
+             las cuentas menos el efectivo de tesorería. La fecha es hoy y la
+             pone el servidor: no se elige. El manual de hoy manda todo el día,
+             aunque Interbanking o Mercado Pago traigan otro. Reemplazar da de
+             baja el anterior; quitar también: nada se borra. La validación que
+             vale es la del servidor. -->
+        <div class="modal fade" id="modalSaldoManual" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h6 class="modal-title">
-                            <i class="fas fa-hand-holding-dollar me-1"></i>
-                            Saldo manual de <span id="respaldoCuenta"></span>
+                            <i class="fas fa-pen me-1"></i>
+                            Saldo de hoy de <span id="manualCuenta"></span>
                         </h6>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"
                                 aria-label="Cerrar"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="sal-subtitulo mb-2" id="respaldoInterbanking"></div>
-                        <div class="alert alert-secondary py-2 px-3 mb-3" id="respaldoVigente"
+                        <!-- Qué manda ahora y de dónde sale -->
+                        <div class="mb-2" id="manualManda"></div>
+                        <!-- El manual de hoy, si hay: quién y cuándo -->
+                        <div class="alert alert-secondary py-2 px-3 mb-3" id="manualVigente"
                              style="display: none;"></div>
                         <div class="row g-2">
-                            <div class="col-md-5">
-                                <label class="form-label form-label-sm" for="respaldoFecha">Fecha del saldo</label>
-                                <input type="date" id="respaldoFecha" class="form-control form-control-sm">
-                            </div>
-                            <div class="col-md-7">
-                                <label class="form-label form-label-sm" for="respaldoSaldo">
-                                    Saldo operativo (<span id="respaldoMoneda">ARS</span>)
+                            <div class="col-12">
+                                <!-- En Interbanking dice "Saldo operativo": es el
+                                     saldo que trae la integración y el que se carga. -->
+                                <label class="form-label form-label-sm" for="manualSaldo">
+                                    <span id="manualRotulo">Saldo</span> (<span id="manualMoneda">ARS</span>)
                                 </label>
-                                <input type="number" step="0.01" id="respaldoSaldo"
+                                <input type="number" step="0.01" id="manualSaldo"
                                        class="form-control form-control-sm text-end">
                             </div>
                             <div class="col-12">
-                                <label class="form-label form-label-sm" for="respaldoObservacion">Observación</label>
-                                <input type="text" id="respaldoObservacion" class="form-control form-control-sm"
-                                       maxlength="500" placeholder="Opcional: de dónde salió el saldo">
+                                <label class="form-label form-label-sm" for="manualObservacion">Observación</label>
+                                <input type="text" id="manualObservacion" class="form-control form-control-sm"
+                                       maxlength="500" placeholder="Opcional: por qué se carga a mano">
                             </div>
                         </div>
-                        <div class="param-hint mt-2">
-                            Se usa mientras Interbanking no traiga un saldo operativo de la misma
-                            fecha o más nuevo: a igual fecha manda Interbanking.
-                        </div>
+                        <div class="param-hint mt-2" id="manualAyuda"></div>
                     </div>
                     <div class="modal-footer justify-content-between">
-                        <button type="button" id="btnQuitarRespaldo" class="btn btn-sm btn-outline-danger"
+                        <button type="button" id="btnQuitarManual" class="btn btn-sm btn-outline-danger"
                                 style="display: none;">
-                            <i class="fas fa-trash-can me-1"></i> Quitar respaldo
+                            <i class="fas fa-trash-can me-1"></i> Quitar el manual
                         </button>
                         <div class="d-flex gap-2 ms-auto">
                             <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
                                 Cancelar
                             </button>
-                            <button type="button" id="btnGuardarRespaldo" class="btn btn-sm btn-primary">
+                            <button type="button" id="btnGuardarManual" class="btn btn-sm btn-primary">
                                 <i class="fas fa-floppy-disk me-1"></i> Guardar
                             </button>
                         </div>

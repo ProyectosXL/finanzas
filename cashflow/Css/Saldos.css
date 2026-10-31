@@ -145,17 +145,27 @@
     vertical-align: 1px;
 }
 
-/* La accion de saldo manual de una cuenta de Interbanking: un icono al lado
-   del nombre, para no sumar una columna que casi siempre estaria vacia. */
-.tab-saldos .sal-btn-respaldo {
+/* Editar el saldo de una cuenta: un icono al lado del saldo, para no sumar
+   una columna. Mismo tamano que el del ultimo envio de Saldos Locales. */
+.tab-saldos .sal-btn-editar,
+.tab-saldos .sal-btn-movlocal {
     font-size: 12px;
     line-height: 1;
     color: var(--text-muted, #8c93a8);
     vertical-align: 0;
+    text-decoration: none;
 }
 
-.tab-saldos .sal-btn-respaldo:hover {
+.tab-saldos .sal-btn-editar:hover,
+.tab-saldos .sal-btn-movlocal:hover {
     color: var(--primary-color, #0d6efd);
+}
+
+/* Un local sin envios o depositos registrados, o la vista sin leer: el icono
+   se ve, apagado, con el motivo en el tooltip. */
+.tab-saldos .sal-btn-movlocal.sal-apagado {
+    opacity: 0.35;
+    cursor: default;
 }
 
 /* Un saldo tipeado distinto del que vino, todavia sin guardar */
