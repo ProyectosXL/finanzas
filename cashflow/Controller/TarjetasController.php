@@ -721,13 +721,19 @@ try {
                 'fecha_vencimiento' => isset($data['fecha_vencimiento'])
                     ? $data['fecha_vencimiento'] : null,
                 'origen' => isset($data['origen']) ? $data['origen'] : null,
-                'observacion' => isset($data['observacion']) ? $data['observacion'] : null
+                'observacion' => isset($data['observacion']) ? $data['observacion'] : null,
+                'tarjetas' => isset($data['tarjetas']) ? $data['tarjetas'] : null,
+                'titular' => isset($data['titular']) ? $data['titular'] : null
             ], $usuario);
 
             /* SE DICE QUE PISA LA ESTIMACION, y en el mismo mensaje: un "guardado"
                a secas no explica por que la fila del tablero cambio de numero. */
             $mensaje = ($r['nuevo'] ? 'Resumen cargado' : 'Resumen corregido')
-                . ' para ' . $r['mes'] . '. Pisa la estimación de ese mes.'
+                . ' para ' . $r['mes'] . '. '
+                . (empty($r['adicionales'])
+                    ? 'Pisa la estimación de ese mes.'
+                    : 'Incluye ' . (count($r['adicionales']) + 1) . ' tarjetas: pisa la '
+                      . 'estimación de todas y suma una sola vez, en la titular.')
                 . ($r['aviso'] !== '' ? ' ' . $r['aviso'] : '');
 
             echo json_encode([
@@ -769,8 +775,9 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Resumen de ' . $r['mes'] . ' dado de baja. No se borra: queda en '
-                    . 'el historial, y ese mes vuelve a proyectarse con la estimación.',
+                'message' => 'Resumen de ' . $r['mes'] . ' dado de baja, de todas las tarjetas '
+                    . 'que incluía. No se borra: queda en el historial, y ese mes vuelve a '
+                    . 'proyectarse con la estimación.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

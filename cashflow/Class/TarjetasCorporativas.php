@@ -710,6 +710,10 @@ class TarjetasCorporativas {
                 $vencido = ($r['FECHA_VENCIMIENTO'] !== null
                             && $r['FECHA_VENCIMIENTO'] < $hoyStr);
 
+                /* UN COMPARTIDO SUMA SOLO EN SU TITULAR. Aca se lista igual, para
+                   que se vea que cubre a esta tarjeta, pero no entra. */
+                $titular = !isset($r['ES_TITULAR']) || $r['ES_TITULAR'];
+
                 $v[] = [
                     'id_tarjeta' => $id,
                     'id_resumen' => $r['ID'],
@@ -718,8 +722,12 @@ class TarjetasCorporativas {
                     'usd' => isset($r['IMPORTE_USD']) ? $r['IMPORTE_USD'] : null,
                     'fecha' => $r['FECHA_VENCIMIENTO'],
                     'pagado' => $pagado,
-                    'proyecta' => (!$pagado && $ars !== null && $ars > 0 && !$vencido),
-                    'motivo' => $pagado
+                    'compartido' => !empty($r['COMPARTIDO']),
+                    'es_titular' => $titular,
+                    'proyecta' => ($titular && !$pagado && $ars !== null && $ars > 0 && !$vencido),
+                    'motivo' => !$titular
+                        ? 'Resumen compartido: lo proyecta su tarjeta titular, una sola vez.'
+                        : ($pagado
                         ? 'Pagado: sale del horizonte, porque esa plata ya está reflejada en el '
                           . 'saldo bancario.'
                         : ($ars === null
@@ -729,7 +737,7 @@ class TarjetasCorporativas {
                                 ? 'Venció el ' . self::corto($r['FECHA_VENCIMIENTO'])
                                   . ' y no está marcado como pagado: no se proyecta, pero '
                                   . 'convendría marcarlo.'
-                                : null))
+                                : null)))
                 ];
             }
         }

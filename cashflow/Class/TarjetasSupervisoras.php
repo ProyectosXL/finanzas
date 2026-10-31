@@ -583,11 +583,28 @@ class TarjetasSupervisoras {
     public static function tarjetaDelMes($importe, $tarjeta, $vencimiento, $resumen, $hoy) {
         $hoyStr = substr((string) $hoy, 0, 10);
 
+        /* 1b. UN RESUMEN COMPARTIDO DEL QUE ESTA TARJETA NO ES TITULAR: pisa la
+               estimacion -el resumen ya incluye estos gastos- y NO SUMA aca. Lo
+               lleva al tablero la titular, una sola vez. Ver TarjetasResumen. */
+        if ($resumen !== null && isset($resumen['ES_TITULAR']) && !$resumen['ES_TITULAR']) {
+            return [
+                'fecha' => $resumen['FECHA_VENCIMIENTO'],
+                'importe' => isset($resumen['IMPORTE_ARS']) ? $resumen['IMPORTE_ARS'] : null,
+                'estimado' => $importe,
+                'proyecta' => false,
+                'origen' => 'RESUMEN_COMPARTIDO',
+                'pagado' => !empty($resumen['PAGADO']),
+                'compartido' => true,
+                'motivo' => 'Resumen compartido: lo proyecta su tarjeta titular, una sola vez.'
+            ];
+        }
+
         /* 1. EL RESUMEN MANDA. Importe Y fecha: las dos cosas son lo real. */
         if ($resumen !== null) {
             $pagado = !empty($resumen['PAGADO']);
 
             return [
+                'compartido' => !empty($resumen['COMPARTIDO']),
                 'fecha' => $resumen['FECHA_VENCIMIENTO'],
                 'importe' => isset($resumen['IMPORTE_ARS']) ? $resumen['IMPORTE_ARS'] : null,
                 'estimado' => $importe,

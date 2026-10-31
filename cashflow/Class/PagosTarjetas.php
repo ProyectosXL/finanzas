@@ -125,6 +125,7 @@ class PagosTarjetas {
             'tablas' => [
                 'tarjetas' => $this->tarjetas->tablaCreada(),
                 'resumen' => $this->resumen->tablaCreada(),
+                'resumen_compartido' => $this->resumen->tablaCompartidoCreada(),
                 'factura' => $this->vinculo->tablaCreada(),
                 'exclusion' => $this->exclusion->tablaCreada(),
                 'factura_vto' => $this->vtoEdit->tablaCreada(),
@@ -273,6 +274,7 @@ class PagosTarjetas {
             $fila['tarjetas_activas'] = count($tarjetasDe);
             $fila['motivo_tarjeta'] = $motivoTarjeta;
             $fila['celdas'] = [];
+            $fila['compartidos'] = [];
 
             foreach ($meses as $mes) {
                 $celda = $fila['meses'][$mes];
@@ -301,6 +303,21 @@ class PagosTarjetas {
 
                 $tar = TarjetasSupervisoras::tarjetaDelMes($celda['tarjeta'], $tarjeta, $vto,
                     $resumenMes, $hoy);
+
+                /* UN RESUMEN COMPARTIDO SE MARCA EN LA FILA, sume o no aca: es lo
+                   que explica por que la parte tarjeta de este mes no es la
+                   estimacion. */
+                if ($resumenMes !== null && !empty($resumenMes['COMPARTIDO'])) {
+                    $tar['nota_compartido'] = TarjetasResumen::notaCompartido($resumenMes,
+                        $tarjeta['ID'], $tarjetas);
+                    $fila['compartidos'][] = [
+                        'mes' => $mes,
+                        'importe' => $resumenMes['IMPORTE_ARS'],
+                        'fecha' => $resumenMes['FECHA_VENCIMIENTO'],
+                        'es_titular' => !empty($resumenMes['ES_TITULAR']),
+                        'nota' => $tar['nota_compartido']
+                    ];
+                }
 
                 $celda['pagos_efectivo'] = $pagosEfectivo;
                 $celda['tarjeta_pago'] = $tar;
@@ -629,6 +646,11 @@ class PagosTarjetas {
 
         $salida['resumenes'] = TarjetasCorporativas::resumenesAProyectar($corporativas,
             $resumenes, $meses, $hoy);
+
+        foreach ($salida['resumenes'] as $i => $res) {
+            $salida['resumenes'][$i]['nota'] = TarjetasResumen::notaCompartido(
+                $resumenes[$res['id_tarjeta']][$res['mes']], $res['id_tarjeta'], $tarjetas);
+        }
 
         /* LO QUE VA AL EJE: las facturas que proyectan, la cobertura y los
            resumenes. Las excluidas van aparte, a su serie informativa. */
