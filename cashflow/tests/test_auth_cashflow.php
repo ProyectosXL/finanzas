@@ -125,7 +125,7 @@ if (AuthCashflow::estaAutenticado()) {
 
     chequearLanza('una accion de escritura tambien termina en 401, no en 403', function () {
         try {
-            AuthCashflow::exigirAccion('Saldos', 'guardarCargaSaldos');
+            AuthCashflow::exigirAccion('Saldos', 'guardarSaldoManual');
         } catch (AuthCashflowSinUsuario $e) {
             throw new Exception('401');
         }

@@ -1004,9 +1004,14 @@ chequear('los botones de cada fila abren el dialogo', true,
 chequear('el boton de la fila pregunta el permiso', true,
     strpos($jsSal, "!Permisos.puedeEditar('bodySaldos')") !== false);
 chequear('y si existe la tabla del respaldo', true, strpos($jsSal, '!datosSaldos.respaldo_creado') !== false);
+$ctrlSal = file_get_contents(__DIR__ . '/../Controller/SaldosController.php');
 chequear('las dos acciones existen en el controller', true,
-    strpos(file_get_contents(__DIR__ . '/../Controller/SaldosController.php'), "case 'guardarRespaldoBanco':") !== false
-    && strpos(file_get_contents(__DIR__ . '/../Controller/SaldosController.php'), "case 'quitarRespaldoBanco':") !== false);
+    strpos($ctrlSal, "case 'guardarSaldoManual':") !== false
+    && strpos($ctrlSal, "case 'quitarSaldoManual':") !== false);
+chequear('y las de Nueva carga y el respaldo viejo ya no', false,
+    strpos($ctrlSal, "case 'guardarCargaSaldos':") !== false
+    || strpos($ctrlSal, "case 'guardarRespaldoBanco':") !== false
+    || strpos($ctrlSal, "case 'quitarRespaldoBanco':") !== false);
 
 seccion('Parametros › Saldos: Marcar como vistas esta cableado');
 

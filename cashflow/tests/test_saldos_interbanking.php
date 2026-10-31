@@ -464,7 +464,8 @@ chequear('sin pedir que se actualice una carga',
 
 $d = Saldos::armarSerieDisponible([$filaCarga(700.0, '2026-10-01')], $hIb);
 chequear('lo manual viejo conserva su aviso critico', Aviso::DANGER, $d['avisos_con_nivel'][0]['nivel']);
-chequear('el de siempre', true, ibContiene($d['avisos'][0], 'Actualizá la carga de saldos'));
+chequear('que pide actualizar el saldo desde su fila', true,
+    ibContiene($d['avisos'][0], 'Actualizá el saldo desde su fila en Saldos › Saldos'));
 
 $d = Saldos::armarSerieDisponible([['nombre' => 'sin origen', 'moneda' => 'ARS', 'saldo' => 10.0,
     'fecha_saldo' => '2026-10-01']], $hIb);
@@ -479,13 +480,15 @@ $d = Saldos::armarSerieDisponible([$filaCarga(100.0, IB_HOY, 'USD', 'BANCO')], $
 chequear('un banco manual en USD entra con su cotizacion', 140000.0, $d['serie']['dias'][IB_HOY]);
 
 // ============================================================================
-seccion('la carga vieja habla solo de las cargas manuales');
+seccion('la antiguedad habla solo de las cuentas sin fuente automatica');
 // ============================================================================
 
-chequear('el aviso de carga vieja dice que es la manual', true, ibContiene(
-    implode(' ', Saldos::avisosAntiguedad('2026-09-01', 7, IB_HOY)), 'última carga manual'));
-chequear('y nombra lo que se carga a mano', true, ibContiene(
-    implode(' ', Saldos::avisosAntiguedad('2026-09-01', 7, IB_HOY)), 'bancos manuales'));
+$viejas = Saldos::avisosAntiguedad([
+    array_merge($filaCarga(10.0, '2026-09-01', 'USD', 'BANCO'), ['nombre' => 'BTG Uy']),
+    array_merge($filaIb(5.0, '2026-09-01'), ['nombre' => 'GALICIA · 100'])], 7, IB_HOY);
+chequear('el banco manual viejo se avisa, con su fecha', true,
+    ibContiene(implode(' ', $viejas['avisos']), 'el último saldo manual es del 01/09/2026'));
+chequear('la cuenta de Interbanking vieja no: tiene su propio aviso', 1, count($viejas['avisos']));
 
 // ============================================================================
 seccion('respaldo manual: que saldo se usa');
@@ -685,9 +688,10 @@ chequear('el script deja un solo respaldo vigente por cuenta', true,
         $sqlIb));
 
 $authSrc = ibFuente(__DIR__ . '/../Class/AuthCashflow.php');
-chequear('las acciones del respaldo piden el permiso de carga de saldos', true,
-    ibContiene($authSrc, "'guardarRespaldoBanco' => [['saldos', null]]")
-    && ibContiene($authSrc, "'quitarRespaldoBanco' => [['saldos', null]]"));
+chequear('las acciones del saldo manual piden el permiso que tenia Nueva carga', true,
+    ibContiene($authSrc, "'guardarSaldoManual' => [['saldos', null]]")
+    && ibContiene($authSrc, "'quitarSaldoManual' => [['saldos', null]]"));
+chequear('y Nueva carga ya no tiene accion', false, ibContiene($authSrc, "'guardarCargaSaldos'"));
 
 // ============================================================================
 seccion('bancos sin Interbanking: carga manual');

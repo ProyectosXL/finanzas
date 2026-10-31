@@ -65,29 +65,6 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'guardarCargaSaldos':
-            $data = bodyJson();
-
-            if (!isset($data['filas']) || !is_array($data['filas'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            // El saldo del efectivo central NO se toma de lo que manda el
-            // cliente: lo vuelve a leer la clase de su consulta de origen.
-            $id = $saldos->guardarCargaSaldos(
-                $data['filas'],
-                isset($data['observaciones']) ? $data['observaciones'] : null,
-                $usuario
-            );
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Carga de saldos guardada. Las cargas anteriores quedan en el '
-                           . 'histórico: no se pisó ninguna.',
-                'data' => ['id' => $id]
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
         case 'guardarCargaLocales':
             $data = bodyJson();
 
@@ -122,38 +99,29 @@ try {
             break;
 
         /* ============================================================
-           RESPALDO MANUAL DE UNA CUENTA DE INTERBANKING
+           EL SALDO MANUAL DE UNA CUENTA, DESDE SU FILA
 
-           La validacion es de la clase: fecha no posterior a hoy, importe
-           obligatorio, cuenta que exista y banco activo. Aca solo se pasa lo
-           que mando el cliente.
+           Una cuenta de Interbanking llega con nro_banco, nro_cuenta y
+           moneda; una del catalogo, con id_cuenta. La validacion es de la
+           clase: importe obligatorio, cuenta que exista, banco activo, y el
+           efectivo de tesoreria rechazado. La fecha no viaja: es hoy.
            ============================================================ */
 
-        case 'guardarRespaldoBanco':
-            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
-
-            $r = (new SaldosInterbanking())->guardarRespaldo(bodyJson(), $usuario);
+        case 'guardarSaldoManual':
+            $r = $saldos->guardarSaldoManual(bodyJson(), $usuario);
 
             echo json_encode([
                 'success' => true,
-                'message' => ($r['reemplaza'] === null)
-                    ? 'Saldo manual guardado. Se usa mientras Interbanking no traiga uno igual o '
-                      . 'más nuevo.'
-                    : 'Saldo manual reemplazado. El anterior queda en el historial.',
+                'message' => (($r['reemplaza'] === null)
+                    ? 'Saldo manual guardado.'
+                    : 'Saldo manual reemplazado: el anterior queda en el historial.')
+                    . ' Manda hasta el final del día, aunque la fuente automática traiga otro.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'quitarRespaldoBanco':
-            $data = bodyJson();
-
-            if (!isset($data['id'])) {
-                throw new Exception('Falta el saldo manual a quitar');
-            }
-
-            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
-
-            (new SaldosInterbanking())->quitarRespaldo($data['id'], $usuario);
+        case 'quitarSaldoManual':
+            $saldos->quitarSaldoManual(bodyJson(), $usuario);
 
             echo json_encode([
                 'success' => true,
