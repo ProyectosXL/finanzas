@@ -87,6 +87,92 @@ chequear('dice que no entran al cashflow', true,
     strpos($varias[0], 'No se muestran ni entran al cashflow') !== false);
 
 // ============================================================================
+// EL VENDEDOR DEL CLIENTE Y SU FILTRO, sin base
+// ============================================================================
+
+seccion('el vendedor de cada cliente');
+
+chequear('cliente con vendedor: el nombre de Tango tal cual',
+    ['codigo' => 'Z3', 'nombre' => 'VALERIA VILLAREAL'],
+    Ingresos::vendedorDeCliente('Z3  ', ' VALERIA VILLAREAL'));
+chequear('codigo vacio: Tango lo guarda asi, y es "Sin vendedor"',
+    ['codigo' => null, 'nombre' => 'Sin vendedor'], Ingresos::vendedorDeCliente('  ', null));
+chequear('codigo NULL, tambien', ['codigo' => null, 'nombre' => 'Sin vendedor'],
+    Ingresos::vendedorDeCliente(null, null));
+chequear('un codigo que no esta en GVA23 no se esconde: se muestra el codigo',
+    ['codigo' => 'Z9', 'nombre' => 'Vendedor Z9 (sin nombre en Tango)'],
+    Ingresos::vendedorDeCliente('Z9', null));
+
+seccion('el filtro por vendedor');
+
+chequear('vacio es sin filtro', null, Ingresos::validarFiltroVendedor(''));
+chequear('null tambien', null, Ingresos::validarFiltroVendedor(null));
+chequear('"Sin vendedor" tiene su valor', 'SIN', Ingresos::validarFiltroVendedor('SIN'));
+chequear('un codigo, sin espacios', 'Z3', Ingresos::validarFiltroVendedor(' Z3 '));
+chequearLanza('un valor que no es un codigo se rechaza en el servidor', function () {
+    Ingresos::validarFiltroVendedor("Z3' OR 1=1 --");
+}, 'El filtro por vendedor no es un código de vendedor válido.');
+chequearLanza('ni uno mas largo que la columna', function () {
+    Ingresos::validarFiltroVendedor('ABCDEFGHIJK');
+});
+
+/** Una factura de mayoristas, solo con lo que mira el filtro */
+function facturaVendMay($comp, $cliente, $codVend, $nombre) {
+    $v = Ingresos::vendedorDeCliente($codVend, $nombre);
+
+    return ['N_COMP' => $comp, 'COD_CLI' => $cliente, 'COD_VENDED' => $v['codigo'],
+            'VENDEDOR' => $v['nombre'], 'importe_neto' => 100.0];
+}
+
+$carteraVend = [
+    facturaVendMay('1', 'MA1', 'Z4', 'SERGIO LOPEZ COBOS'),
+    facturaVendMay('2', 'MA2', 'Z3', 'VALERIA VILLAREAL'),
+    facturaVendMay('3', 'MA1', 'Z4', 'SERGIO LOPEZ COBOS'),
+    facturaVendMay('4', 'MA3', '', null),
+    facturaVendMay('5', 'MA2', 'Z3', 'VALERIA VILLAREAL')
+];
+$compDe = function ($items) { return array_column($items, 'N_COMP'); };
+
+chequear('sin filtro, la cartera entera', ['1', '2', '3', '4', '5'],
+    $compDe(Ingresos::filtrarPorVendedor($carteraVend, null)));
+chequear('un vendedor: solo las facturas de sus clientes', ['2', '5'],
+    $compDe(Ingresos::filtrarPorVendedor($carteraVend, 'Z3')));
+chequear('"Sin vendedor": solo las de clientes sin vendedor', ['4'],
+    $compDe(Ingresos::filtrarPorVendedor($carteraVend, 'SIN')));
+chequear('un codigo que no tiene facturas: ninguna, no todas', [],
+    Ingresos::filtrarPorVendedor($carteraVend, 'Z5'));
+
+chequear('las opciones: por nombre, con "Sin vendedor" al final y cuantas facturas tiene cada uno', [
+    ['valor' => 'Z4', 'nombre' => 'SERGIO LOPEZ COBOS', 'facturas' => 2],
+    ['valor' => 'Z3', 'nombre' => 'VALERIA VILLAREAL', 'facturas' => 2],
+    ['valor' => 'SIN', 'nombre' => 'Sin vendedor', 'facturas' => 1]
+], Ingresos::vendedoresDe($carteraVend));
+chequear('sin clientes sin vendedor, no se ofrece la opcion', ['Z3'],
+    array_column(Ingresos::vendedoresDe([$carteraVend[1]]), 'valor'));
+
+// EL FILTRO ES DE PANTALLA. El controller lo aplica sobre lo que devolvio
+// getCobranzasMay(), y el tablero lee getCobranzasMayTotales(), que nunca lo
+// ve. Si alguien lo moviera adentro de la consulta, el tablero mostraria la
+// cobranza de un solo vendedor.
+$fuenteIngresos = file_get_contents(__DIR__ . '/../Class/Ingresos.php');
+$cuerpoMay = substr($fuenteIngresos, strpos($fuenteIngresos, 'public function getCobranzasMay()'));
+$cuerpoMay = substr($cuerpoMay, 0, strpos($cuerpoMay, 'public function avisosPendienteSinSaldo'));
+$controllerIng = file_get_contents(__DIR__ . '/../Controller/IngresosController.php');
+
+chequear('getCobranzasMay() no filtra por vendedor', false,
+    strpos($cuerpoMay, 'filtrarPorVendedor') !== false || strpos($cuerpoMay, "\$_GET") !== false);
+chequear('lo filtra el controller, antes del payload', 1,
+    preg_match('/payloadCobranzas\(Ingresos::filtrarPorVendedor\(\$itemsMay, \$vendedor\)/', $controllerIng));
+chequear('y las opciones salen de la cartera sin filtrar', 1,
+    preg_match('/vendedoresDe\(\$itemsMay\)/', $controllerIng));
+
+// La misma lectura de GVA14, no una segunda consulta por factura
+chequear('el vendedor viene en la consulta de mayoristas, con su nombre de GVA23', true,
+    strpos($cuerpoMay, 'GVA14.COD_VENDED') !== false
+    && strpos($cuerpoMay, 'LEFT JOIN GVA23') !== false);
+chequear('y la consulta sigue siendo una sola', 1, substr_count($cuerpoMay, 'sqlsrv_query('));
+
+// ============================================================================
 // Consultas y estructura de datos contra la base (si hay conexión)
 // ============================================================================
 
@@ -108,6 +194,18 @@ if (count($comprobantes) > 0) {
     $fila = $comprobantes[0];
     chequear('la fila tiene COD_CLI', true, isset($fila['COD_CLI']));
     chequear('la fila tiene RAZON_SOC', true, isset($fila['RAZON_SOC']));
+
+    $sinVendedor = array_filter($comprobantes, function ($c) {
+        return !array_key_exists('COD_VENDED', $c) || !isset($c['VENDEDOR']) || $c['VENDEDOR'] === '';
+    });
+    chequear('todas las filas traen el vendedor, o "Sin vendedor"', 0, count($sinVendedor));
+
+    // El vendedor es del cliente: no puede cambiar entre sus facturas, o el
+    // agrupado del Resumen lo descartaria.
+    $vendPorCliente = [];
+    foreach ($comprobantes as $c) { $vendPorCliente[$c['COD_CLI']][$c['VENDEDOR']] = true; }
+    chequear('cada cliente tiene un solo vendedor en todas sus facturas', 0,
+        count(array_filter($vendPorCliente, function ($v) { return count($v) > 1; })));
     chequear('la fila tiene Cobro', true, isset($fila['Cobro']));
     chequear('la fila tiene importe_neto', true, isset($fila['importe_neto']));
     chequear('la fila tiene TIPO_REGISTRO PROYECCION', 'PROYECCION', $fila['TIPO_REGISTRO']);

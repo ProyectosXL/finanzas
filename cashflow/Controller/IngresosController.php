@@ -172,9 +172,20 @@ try {
 
         case 'getCobranzasMay':
             $summary = isset($_GET['type']) && $_GET['type'] === 'deepdive' ? false : true;
+            $rango = rangoEmisionPedido();
+            $vendedor = Ingresos::validarFiltroVendedor(isset($_GET['vendedor']) ? $_GET['vendedor'] : null);
 
-            $payloadMay = payloadCobranzas($ingresos->getCobranzasMay(), $summary,
-                rangoEmisionPedido());
+            /* EL FILTRO POR VENDEDOR ES DE PANTALLA: se aplica aca, antes del
+               payload -asi el pie, las tarjetas y el Resumen lo reflejan- y no
+               en getCobranzasMay(), que es lo que lee el tablero. Las opciones
+               salen de la cartera entera, antes de cualquier filtro. */
+            $itemsMay = $ingresos->getCobranzasMay();
+            $vendedores = Ingresos::vendedoresDe($itemsMay);
+
+            $payloadMay = payloadCobranzas(Ingresos::filtrarPorVendedor($itemsMay, $vendedor),
+                $summary, $rango);
+            $payloadMay['vendedores'] = $vendedores;
+            $payloadMay['filtro_vendedor'] = $vendedor;
 
             /* Las facturas con pendiente NEGATIVO no estan en el listado -no son
                plata a cobrar- pero el aviso si tiene que estar: se lee DESPUES
