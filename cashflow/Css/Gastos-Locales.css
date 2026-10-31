@@ -1,0 +1,41 @@
+/* ============================================================================
+   Gastos Locales
+   ----------------------------------------------------------------------------
+   Casi todo lo dibujan Bootstrap y las clases compartidas del modulo. Aca va
+   SOLO lo propio de esta pantalla.
+   ============================================================================ */
+
+.tab-gastos_locales #tablaGastosLocales td,
+.tab-gastos_locales #tablaGastosLocales tfoot td,
+.tab-gastos_locales #tablaComprobantesLocal td {
+    font-variant-numeric: tabular-nums;
+}
+
+.tab-gastos_locales #tablaGastosLocales th,
+.tab-gastos_locales #tablaGastosLocales td {
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    vertical-align: middle;
+}
+
+/* El detalle por cuenta de un local: mas chico y con sangria, para que se lea
+   como parte de la fila de arriba y no como otro local. */
+.tab-gastos_locales .gl-detalle td {
+    background: var(--bs-light, #f8f9fa);
+    font-size: 0.775rem;
+}
+
+.tab-gastos_locales .gl-detalle .gl-cuenta {
+    padding-left: 2rem;
+}
+
+.tab-gastos_locales .gl-toggle {
+    cursor: pointer;
+    width: 1rem;
+    display: inline-block;
+}
+
+/* La leyenda de un local sin egresos: un cero que es un dato, no un faltante */
+.tab-gastos_locales .gl-sin-egresos {
+    font-size: 0.7rem;
+}

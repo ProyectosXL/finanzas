@@ -41,7 +41,7 @@ $disponibles = array_values(array_filter($todos, function ($p) { return $p['disp
 // Exportaciones Tasky, Saldo de Inversiones, Cobertura, Proveedores Locales,
 // Logistica y Pagos con Tarjetas y Otros. Los dos de Otros Ingresos estan
 // retirados pero siguen disponibles: sirven lo que tienen cargado.
-chequear('hay 19 modulos con datos reales', 19, count($disponibles));
+chequear('hay 20 modulos con datos reales', 20, count($disponibles));
 
 /* TARJETAS es el ultimo en sumarse, y LOGISTICA el anterior: son los dos unicos
    del grupo de egresos pendientes que ya tienen proveedor. Los demas -Haberes,

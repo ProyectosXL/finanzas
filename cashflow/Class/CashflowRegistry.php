@@ -256,6 +256,26 @@ class CashflowRegistry {
             'series' => ['PAGOS' => 'Pagos proyectados a fleteros']
         ],
 
+        /* Lo que los locales propios pagan con la caja: el promedio de los
+           ultimos 90 dias de los egresos de cuentas 5 (CTA29, servidor
+           'locales'), con inflacion compuesta. Todo es proyeccion, como
+           Logistica. No declara componentes: es un universo propio.
+
+           La fila la crea sql/cashflow_estructura_gastos_locales.sql, en
+           Costos Indirectos, al lado de Pagos con Tarjetas y Otros. */
+        'GASTOS_LOCALES' => [
+            'nombre' => 'Gastos Locales',
+            'descripcion' => 'Gastos que los locales propios pagan con la caja: el promedio de los '
+                . 'ultimos 90 dias de las cuentas 5, una semana por pago en el tramo diario y '
+                . 'un importe por mes despues, con inflacion compuesta',
+            'archivo' => 'Providers/GastosLocalesProvider.php',
+            'clase' => 'GastosLocalesProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'tab' => 'gastos_locales',
+            'series' => ['PAGOS' => 'Gastos de caja de los locales, proyectados']
+        ],
+
         'SALDOS' => [
             'nombre' => 'Saldos',
             'descripcion' => 'Disponible inicial en bancos, Mercado Pago y efectivo de tesoreria',

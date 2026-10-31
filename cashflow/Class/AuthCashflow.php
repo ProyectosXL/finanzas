@@ -279,6 +279,7 @@ class AuthCashflow {
             'getHistorialPagado', 'getHistorialFecha', 'getCronoNacionalizacion', 'getPagosNac'],
         'ComprasProyectadas' => ['getGrilla', 'getDetalleVersion', 'getHistorialAjustes'],
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
+        'GastosLocales' => ['getPlanilla', 'getComprobantes'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',

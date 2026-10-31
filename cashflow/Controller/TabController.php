@@ -32,6 +32,7 @@ $validTabs = [
     'compras_proyectadas',
     'proveedores_locales',
     'logistica_local',
+    'gastos_locales',
     'haberes',
     'impuestos',
     'alquileres',

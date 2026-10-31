@@ -270,3 +270,108 @@ chequear('y octubre no tiene dias despues de hoy', 0,
     GastosLocalesCalculo::diasFueraDelTramo($hSinTramo)['2026-10']['dias']);
 chequear('noviembre entero va al mes', 30,
     GastosLocalesCalculo::diasFueraDelTramo($hSinTramo)['2026-11']['dias']);
+
+/* ================================================================
+   EL PROVEEDOR DEL TABLERO
+   ================================================================ */
+require_once __DIR__ . '/../Class/CashflowRegistry.php';
+require_once __DIR__ . '/../Class/Providers/GastosLocalesProvider.php';
+
+seccion('el proveedor: registrado, sin componentes, en pesos');
+
+chequear('GASTOS_LOCALES existe y esta disponible', [true, true],
+    [CashflowRegistry::existe('GASTOS_LOCALES'), CashflowRegistry::disponible('GASTOS_LOCALES')]);
+$metaGL = CashflowRegistry::meta('GASTOS_LOCALES');
+chequear('sirve solo PAGOS', ['PAGOS'], array_keys($metaGL['series']));
+chequear('apunta a su pestana', 'gastos_locales', $metaGL['tab']);
+chequear('no declara componentes: es un universo propio', false, isset($metaGL['componentes']));
+chequear('se puede instanciar', 'GastosLocalesProvider',
+    get_class(CashflowRegistry::instanciar('GASTOS_LOCALES')));
+
+/** El proveedor con la lectura reemplazada por lo que se le pase */
+class GastosLocalesProviderDoble extends GastosLocalesProvider {
+    private $doble;
+    public function __construct($codigo, $doble) { parent::__construct($codigo); $this->doble = $doble; }
+    protected function modulo() { return $this->doble; }
+}
+
+class GastosLocalesDatosDoble {
+    public $datos;
+    public function __construct($datos) { $this->datos = $datos; }
+    public function planilla($h) {
+        if ($this->datos instanceof Exception) { throw $this->datos; }
+        return $this->datos;
+    }
+}
+
+seccion('la fila del tablero es la suma de los locales de la pestana');
+
+$pProv = GastosLocalesCalculo::proyectar($loc, $hSab, $semSab, $infl);
+$datosProv = ['leido' => true, 'locales' => $pProv['locales'], 'avisos' => [],
+              'avisos_con_nivel' => [Aviso::nuevo(Aviso::WARNING, 'un aviso de la planilla')]];
+$prov = new GastosLocalesProviderDoble('GASTOS_LOCALES', new GastosLocalesDatosDoble($datosProv));
+$serieProv = $prov->series($hSab)['PAGOS'];
+
+$sumaLocales = 0;
+foreach ($pProv['locales'] as $l) { $sumaLocales += $l['total_proyectado']; }
+
+chequear('el total de la fila es la suma de las filas de la pestana', $sumaLocales,
+    array_sum($serieProv['dias']) + array_sum($serieProv['meses']));
+chequear('el lunes 02/11 lleva las tres semanas de los locales, con la inflacion de noviembre',
+    (7000.0 + 700.0 + 0.0) * 1.02, $serieProv['dias']['2026-11-02']);
+chequear('la columna de hoy no recibe nada', 0, $serieProv['dias']['2026-10-31']);
+chequear('noviembre mensual lleva solo los 3 dias de la cola', 3 * 1100.0 * 1.02,
+    $serieProv['meses']['2026-11']);
+chequear('nada fuera del horizonte', 0, $serieProv['fuera_horizonte']);
+chequear('en pesos', 'ARS', $serieProv['moneda_origen']);
+chequear('los avisos de la planilla suben al tablero con su nivel', true,
+    in_array(Aviso::nuevo(Aviso::WARNING, 'un aviso de la planilla'), $prov->avisos(), true));
+
+seccion('si la consulta falla, la fila va en cero con un aviso critico');
+
+$datosFalla = ['leido' => false, 'locales' => [], 'avisos' => [],
+               'avisos_con_nivel' => [Aviso::nuevo(Aviso::DANGER, 'No se pudieron leer los egresos')]];
+$provFalla = new GastosLocalesProviderDoble('GASTOS_LOCALES', new GastosLocalesDatosDoble($datosFalla));
+
+chequear('no rinde ninguna serie', [], $provFalla->series($hSab));
+chequear('y el aviso es critico', Aviso::DANGER, $provFalla->avisos()[0]['nivel']);
+
+$provLanza = new GastosLocalesProviderDoble('GASTOS_LOCALES',
+    new GastosLocalesDatosDoble(new Exception('se cayo el servidor')));
+chequear('un modulo que lanza no tumba el tablero', [], $provLanza->series($hSab));
+chequear('y lo dice como critico', Aviso::DANGER, $provLanza->avisos()[0]['nivel']);
+
+seccion('las cuentas excluidas: se validan en el servidor');
+
+chequear('una lista con espacios, comas y repetidos se normaliza', ['522400', '531250'],
+    GastosLocales::validarCuentas(' 531250, 522400;522400 '));
+chequear('vacia vale: no se excluye ninguna', [], GastosLocales::validarCuentas(''));
+chequearLanza('un codigo con letras se rechaza', function () {
+    GastosLocales::validarCuentas('5224AB');
+});
+chequearLanza('la cuenta cero no existe', function () {
+    GastosLocales::validarCuentas('000');
+});
+
+seccion('la consulta: los filtros que se confirmaron');
+
+$fuenteGL = file_get_contents(__DIR__ . '/../Class/GastosLocales.php');
+chequear('lee del servidor de locales', true, strpos($fuenteGL, "conectar('locales')") !== false);
+chequear('solo locales propios y habilitados', true,
+    strpos($fuenteGL, "D.CANAL = 'PROPIOS' AND D.HABILITADO = 1") !== false);
+chequear('solo egresos de cuentas 5, sin la sucursal 1', true,
+    strpos($fuenteGL, "A.D_H = 'D'") !== false && strpos($fuenteGL, "LIKE '5%'") !== false
+    && strpos($fuenteGL, 'A.NRO_SUCURS <> 1') !== false);
+chequear('la ventana son 90 dias que terminan ayer, sin hora', true,
+    strpos($fuenteGL, 'A.FECHA < CAST(GETDATE() AS DATE)') !== false
+    && strpos($fuenteGL, 'DATEADD(day, -" . GastosLocalesCalculo::DIAS_VENTANA') !== false);
+chequear('las excluidas salen del parametro, no del codigo', true,
+    strpos($fuenteGL, "NOT IN ('522400')") === false
+    && strpos($fuenteGL, 'NOT IN ("') !== false);
+
+$sqlFila = file_get_contents(__DIR__ . '/../sql/cashflow_estructura_gastos_locales.sql');
+chequear('el script de la fila la crea en Costos Indirectos, orden 47, como egreso', true,
+    strpos($sqlFila, "('GASTOS_LOCALES', 'Gastos Locales', 'COSTOS_INDIRECTOS', 'EGRESO', 1,") !== false
+    && strpos($sqlFila, "'GASTOS_LOCALES', 'PAGOS', 47, 1)") !== false);
+chequear('y es reejecutable', true,
+    strpos($sqlFila, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_CONF_FILA WHERE CODIGO = 'GASTOS_LOCALES')") !== false);
