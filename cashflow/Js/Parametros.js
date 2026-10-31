@@ -165,6 +165,24 @@
     /** Demora entre un cambio y el pedido: junta los cambios de un mismo gesto */
     var mixTimer = {};
 
+    /*
+       EL MIX POR MES. Un canal en VARIABLE tiene, arriba del árbol, la fila de
+       meses: Constante · Ene … Dic. El árbol muestra los valores del mes
+       elegido —los suyos, o los del constante si no tiene mix propio— y lo que
+       se guarda es ese mes. La estructura (nombres, niveles, nodos nuevos) se
+       edita sólo en Constante: un mes guarda valores, no nodos.
+     */
+
+    /** Por canal: el mes que se está viendo (1 a 12), o null para el constante */
+    var mesMix = {};
+
+    /**
+     * Por canal: los nodos apagados en el constante para los que se tildó
+     * "Inhabilitarlo también en esos meses". La casilla se contesta nodo por
+     * nodo, y el guardado manda la lista.
+     */
+    var apagarEnMeses = {};
+
     function datosMix() {
         return modulo.mix;
     }
@@ -174,20 +192,73 @@
         return !!datosMix().editable && Permisos.puedeEditar('mixBody');
     }
 
-    /** Los nodos de un canal en el orden del árbol, con lo que resolvió la regla */
-    function nodosDeCanal(canal) {
-        var resueltos = datosMix().resuelto.nodos;
+    /** Si se corrió el script del mix por mes */
+    function mixPorMes() {
+        return !!datosMix().por_mes;
+    }
+
+    function modoCanal(canal) {
+        return (datosMix().modos || {})[canal] || 'CONSTANTE';
+    }
+
+    /** El mes que se ve de un canal: null en Constante, o si el canal no es variable */
+    function mesDe(canal) {
+        return (mixPorMes() && modoCanal(canal) === 'VARIABLE' && mesMix[canal]) ? mesMix[canal] : null;
+    }
+
+    /** Lo que el payload dice de un mes: cargado, quién y cuándo, y los valores */
+    function infoMes(canal, mes) {
+        return datosMix().meses[canal][mes];
+    }
+
+    function nombreMes(mes) {
+        return datosMix().nombres_mes[mes - 1];
+    }
+
+    /** Los meses cargados de un canal, en orden */
+    function mesesCargados(canal) {
+        var v = [];
+
+        for (var m = 1; m <= 12; m++) {
+            if (infoMes(canal, m).cargado) { v.push(m); }
+        }
+
+        return v;
+    }
+
+    /**
+     * Los nodos de un canal en el orden del árbol, con lo que resolvió la
+     * regla. En un mes, los valores son los del mes; con `desdeConstante`, los
+     * del constante (Copiar del constante).
+     */
+    function nodosDeCanal(canal, desdeConstante) {
+        var resueltos = vistaInicial(canal).nodos;
+        var mes = mesDe(canal);
         var crudos = {};
 
-        datosMix().nodos.forEach(function(n) { crudos[n.clave] = n; });
+        datosMix().nodos.forEach(function(n) {
+            crudos[n.clave] = (mes && !desdeConstante)
+                ? Object.assign({}, n, infoMes(canal, mes).valores[n.clave] || {})
+                : n;
+        });
 
         return Object.keys(resueltos)
             .filter(function(k) { return resueltos[k].canal === canal; })
             .map(function(k) { return { crudo: crudos[k], resuelto: resueltos[k] }; });
     }
 
-    /** La vista inicial de un canal, armada del payload */
+    /**
+     * La vista inicial de un canal, armada del payload. Un mes cargado viene
+     * ya resuelto (vistas_mes); uno sin cargar se ve como el constante.
+     */
     function vistaInicial(canal) {
+        var mes = mesDe(canal);
+        var delMes = mes && (datosMix().vistas_mes || {})[canal] && datosMix().vistas_mes[canal][mes];
+
+        if (delMes) {
+            return Object.assign({}, delMes, { cambios: 0 });
+        }
+
         var r = datosMix().resuelto;
         var nodos = {};
 
@@ -220,24 +291,75 @@
         vistaMix = {};
         mixPendiente = {};
         mixSucio = {};
+        apagarEnMeses = {};
 
         pintarAvisosMix();
 
         mix.canales.forEach(function(canal) {
-            vistaMix[canal] = vistaInicial(canal);
-            html += filaCanalMix(canal, editable);
-            html += '<tr class="mixa-errores" data-errores="' + canal + '" style="display: none;">' +
-                        '<td colspan="8"></td></tr>';
-
-            nodosDeCanal(canal).forEach(function(n) {
-                html += filaNodoMix(n.crudo, n.resuelto, editable);
-            });
+            html += htmlCanal(canal, editable, false);
         });
 
         document.getElementById('mixBody').innerHTML = html;
 
         mix.canales.forEach(pintarVistaMix);
         pintarLeyendaMix();
+        generarExportMix();
+    }
+
+    /**
+     * Las filas de un canal: su encabezado, la fila de meses, sus errores y
+     * sus nodos. Todas llevan data-bloque, para redibujar el canal solo —al
+     * cambiar de mes— sin perder lo que se está editando en los otros.
+     */
+    function htmlCanal(canal, editable, desdeConstante) {
+        var enMes = mesDe(canal) !== null;
+        var html = '';
+
+        vistaMix[canal] = vistaInicial(canal);
+        mixPendiente[canal] = false;
+        mixSucio[canal] = false;
+
+        html += filaCanalMix(canal, editable);
+        html += filaMesesMix(canal, editable);
+        html += '<tr class="mixa-errores" data-errores="' + canal + '" data-bloque="' + canal + '" ' +
+                    'style="display: none;"><td colspan="8"></td></tr>';
+
+        nodosDeCanal(canal, desdeConstante).forEach(function(n) {
+            html += filaNodoMix(n.crudo, n.resuelto, editable, enMes);
+        });
+
+        return html;
+    }
+
+    /** Redibuja un canal en su lugar, con el mes que tenga elegido */
+    function redibujarCanal(canal, desdeConstante) {
+        var cuerpo = document.getElementById('mixBody');
+        var filas = cuerpo.querySelectorAll('tr[data-bloque="' + canal + '"]');
+
+        cerrarAltaMix();
+
+        if (!filas.length) {
+            return;
+        }
+
+        filas[0].insertAdjacentHTML('beforebegin', htmlCanal(canal, mixEditable(), desdeConstante));
+        filas.forEach(function(tr) { tr.remove(); });
+
+        pintarVistaMix(canal);
+        pintarLeyendaMix();
+    }
+
+    /** Si hay cambios sin guardar en el canal, pregunta antes de perderlos */
+    function descartarCambios(canal, que) {
+        if (!mixSucio[canal]) {
+            return Promise.resolve(true);
+        }
+
+        return Notificacion.confirmar({
+            mensaje: 'Hay cambios sin guardar en ' + titulo(canal) + '.',
+            detalle: que + ' Esos cambios se pierden. Guardalos antes si los querés.',
+            confirmar: 'Seguir igual'
+        });
     }
 
     /**
@@ -280,24 +402,139 @@
 
     function filaCanalMix(canal, editable) {
         var acciones = '';
+        var mes = mesDe(canal);
 
         if (editable) {
-            acciones = '<button type="button" class="btn btn-sm btn-outline-primary me-2" ' +
-                           'data-agregar="" data-canal="' + canal + '" ' +
-                           'title="Agregar un nodo al primer nivel de ' + titulo(canal) + '">' +
-                           '<i class="fas fa-plus me-1"></i> Agregar</button>' +
+            // Agregar es estructura: sólo en el constante
+            acciones = (mes === null
+                    ? '<button type="button" class="btn btn-sm btn-outline-primary me-2" ' +
+                          'data-agregar="" data-canal="' + canal + '" ' +
+                          'title="Agregar un nodo al primer nivel de ' + titulo(canal) + '">' +
+                          '<i class="fas fa-plus me-1"></i> Agregar</button>'
+                    : '') +
                        '<button type="button" class="btn btn-sm btn-primary" ' +
                            'data-guardar-canal="' + canal + '" disabled>' +
-                           '<i class="fas fa-floppy-disk me-1"></i> Guardar ' + titulo(canal) + '</button>';
+                           '<i class="fas fa-floppy-disk me-1"></i> Guardar ' +
+                           (mes === null ? titulo(canal) : nombreMes(mes) + ' de ' + titulo(canal)) + '</button>';
         }
 
-        return '<tr class="mixa-canal" data-canal-fila="' + canal + '">' +
+        return '<tr class="mixa-canal" data-canal-fila="' + canal + '" data-bloque="' + canal + '">' +
                    '<td colspan="2"><strong>' + titulo(canal) + '</strong> ' +
-                       '<span class="mixa-suma" data-suma="' + canal + '"></span></td>' +
+                       '<span class="mixa-suma" data-suma="' + canal + '"></span>' +
+                       controlModoMix(canal, editable) + '</td>' +
                    '<td colspan="6" class="text-end">' +
                        '<small class="text-muted me-2" data-estado="' + canal + '"></small>' + acciones +
                    '</td>' +
                '</tr>';
+    }
+
+    /**
+     * Constante / Variable. Con permiso, dos botones; sin permiso, el modo
+     * como etiqueta. Sin el script del mix por mes, nada: todo es constante.
+     */
+    function controlModoMix(canal, editable) {
+        if (!mixPorMes()) {
+            return '';
+        }
+
+        var modo = modoCanal(canal);
+        var guardados = mesesCargados(canal).length;
+        var nota = (modo === 'CONSTANTE' && guardados)
+            ? ' <small class="text-muted ms-1" title="Quedan guardados: vuelven si el canal se pasa a Variable">' +
+              guardados + ' mes(es) con mix propio guardado(s), sin usar</small>'
+            : '';
+
+        if (!editable) {
+            return ' <span class="badge mixa-modo-etiqueta ms-2">Mix ' +
+                   (modo === 'VARIABLE' ? 'variable' : 'constante') + '</span>' + nota;
+        }
+
+        return ' <div class="btn-group btn-group-sm ms-2 mixa-modo" role="group" ' +
+                   'aria-label="Mix de ' + titulo(canal) + '">' +
+               [['CONSTANTE', 'Constante', 'El mismo mix todos los meses'],
+                ['VARIABLE', 'Variable', 'Un mix propio para los meses que se carguen; el resto usa el constante']]
+                   .map(function(o) {
+                       var activo = o[0] === modo;
+
+                       return '<button type="button" class="btn ' +
+                              (activo ? 'btn-secondary' : 'btn-outline-secondary') + '" ' +
+                              'data-modo="' + o[0] + '" data-canal="' + canal + '" ' +
+                              'aria-pressed="' + activo + '" title="' + o[2] + '">' + o[1] + '</button>';
+                   }).join('') +
+               '</div>' + nota;
+    }
+
+    /**
+     * La fila de meses de un canal en Variable: Constante · Ene … Dic, con
+     * los meses que tienen mix propio marcados, y lo que se puede hacer con
+     * el mes elegido. Sin permiso se eligen meses igual: se ve el árbol de
+     * cada uno, sin controles.
+     */
+    function filaMesesMix(canal, editable) {
+        if (!mixPorMes() || modoCanal(canal) !== 'VARIABLE') {
+            return '';
+        }
+
+        var mes = mesDe(canal);
+        var botones = '<button type="button" class="btn btn-sm ' +
+                      (mes === null ? 'btn-primary' : 'btn-outline-primary') + '" ' +
+                      'data-ver-mes="" data-canal="' + canal + '" ' +
+                      'title="El mix que usan los meses sin mix propio. Acá se edita la estructura.">' +
+                      'Constante</button>';
+
+        for (var m = 1; m <= 12; m++) {
+            var info = infoMes(canal, m);
+            var clase = m === mes ? 'btn-primary'
+                : (info.cargado ? 'btn-outline-primary mixa-mes-propio' : 'btn-outline-secondary mixa-mes-constante');
+            var tit = nombreMes(m) + (info.cargado
+                ? ': mix propio' + (info.usuario_modif
+                    ? ' (' + Auditoria.linea('modif', info.usuario_modif, info.fecha_modif) + ')' : '')
+                : ': usa el constante');
+
+            botones += '<button type="button" class="btn btn-sm ' + clase + '" data-ver-mes="' + m + '" ' +
+                       'data-canal="' + canal + '" title="' + escapar(tit) + '" aria-pressed="' + (m === mes) + '">' +
+                       (info.cargado ? '<i class="fas fa-circle mixa-punto me-1" aria-hidden="true"></i>' : '') +
+                       nombreMes(m).slice(0, 3) +
+                       '<span class="visually-hidden">' + (info.cargado ? ' (mix propio)' : ' (constante)') + '</span>' +
+                       '</button>';
+        }
+
+        var cargado = mes !== null && infoMes(canal, mes).cargado;
+        var nota = mes === null
+            ? 'Mix constante: lo usan los meses sin mix propio. Los nombres, los niveles y los nodos nuevos se editan acá.'
+            : (cargado
+                ? nombreMes(mes) + ' tiene mix propio: vale para todos los ' + nombreMes(mes).toLowerCase() +
+                  ' del horizonte. Los nombres y los niveles son los del constante.'
+                : nombreMes(mes) + ' usa el mix constante: lo que ves son sus valores. Cambiá algo y guardá ' +
+                  'para que tenga mix propio.');
+        var acciones = '';
+
+        if (editable && mes !== null) {
+            acciones =
+                '<button type="button" class="btn btn-sm btn-outline-secondary" data-copiar-constante="' + canal + '" ' +
+                    'title="Pone en pantalla los valores del mix constante. No se guarda hasta que guardes.">' +
+                    '<i class="fas fa-clone me-1"></i> Copiar del constante</button>' +
+                (cargado
+                    ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-copiar-meses="' + canal + '" ' +
+                          'title="Copia lo guardado de ' + nombreMes(mes) + ' a los meses que elijas">' +
+                          '<i class="fas fa-copy me-1"></i> Copiar a otros meses…</button>' +
+                      '<button type="button" class="btn btn-sm btn-outline-danger" data-quitar-mes="' + canal + '" ' +
+                          'title="' + nombreMes(mes) + ' vuelve al mix constante. Sus valores quedan guardados.">' +
+                          '<i class="fas fa-rotate-left me-1"></i> Usar el constante en este mes</button>'
+                    : '');
+        }
+
+        return '<tr class="mixa-meses" data-bloque="' + canal + '"><td colspan="8">' +
+                   '<div class="d-flex flex-wrap align-items-center gap-2">' +
+                       '<div class="btn-group btn-group-sm flex-wrap mixa-meses-botones" role="group" ' +
+                           'aria-label="Mes del mix de ' + titulo(canal) + '">' + botones + '</div>' +
+                       '<small class="text-muted mixa-meses-leyenda">' +
+                           '<i class="fas fa-circle mixa-punto" aria-hidden="true"></i> mix propio · ' +
+                           'sin marca: usa el constante</small>' +
+                       (acciones ? '<div class="d-flex flex-wrap gap-2 ms-auto">' + acciones + '</div>' : '') +
+                   '</div>' +
+                   '<div class="param-hint mt-1">' + escapar(nota) + '</div>' +
+               '</td></tr>';
     }
 
     /**
@@ -312,14 +549,18 @@
      * del nombre y el desplegable de Nivel toman el color de ahí. Es por tipo
      * y no por sangría porque se pueden saltear niveles. data-nivel es el
      * nivel que se ve, y de ahí sale la leyenda.
+     *
+     * EN UN MES (enMes), el nombre y el nivel van como texto y no hay "+":
+     * un mes carga valores, la estructura es la del constante.
      */
-    function filaNodoMix(n, r, editable) {
+    function filaNodoMix(n, r, editable, enMes) {
         var camino = titulo(n.CANAL) + ' › ' +
             r.camino.slice(0, -1).map(function(c) { return c.nombre; }).concat(['']).join(' › ');
         var sangria = '<span class="mixa-sangria" style="width: ' + (r.profundidad * 20) + 'px"></span>';
         var pct = function(v) { return (v === null || v === undefined) ? '' : (v * 100).toFixed(2); };
+        var estructura = editable && !enMes;
         var html = '<tr class="mixa-nodo ' + MixNiveles.clase(n.NIVEL) + '" data-id="' + n.ID + '" ' +
-                   'data-clave="' + n.clave + '" data-canal="' + n.CANAL + '" ' +
+                   'data-clave="' + n.clave + '" data-canal="' + n.CANAL + '" data-bloque="' + n.CANAL + '" ' +
                    'data-padre="' + (r.padre || '') + '" data-nivel="' + escapar(n.NIVEL) + '">';
 
         // ---- Nombre ---------------------------------------------------
@@ -328,7 +569,7 @@
         html += '<td class="mixa-nombre"><span class="visually-hidden">' + escapar(camino) + '</span>' +
                 sangria + MixNiveles.barra();
 
-        if (editable) {
+        if (estructura) {
             html += '<input type="text" class="form-control form-control-sm d-inline-block mixa-campo" ' +
                     'data-campo="nombre" maxlength="50" value="' + escapar(n.NOMBRE) + '">';
         } else {
@@ -339,7 +580,7 @@
             html += ' <span class="mixa-suma" data-suma="' + n.clave + '"></span>';
         }
 
-        if (editable && n.niveles_hijo.length) {
+        if (estructura && n.niveles_hijo.length) {
             html += ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 mixa-mas" ' +
                     'data-agregar="' + n.ID + '" data-canal="' + n.CANAL + '" ' +
                     'title="Agregar un nodo debajo de ' + escapar(n.NOMBRE) + '">' +
@@ -354,7 +595,7 @@
         // El desplegable toma el color de la fila (mix-nivel-select); sin
         // permiso, el rótulo va en una etiqueta del mismo color. En los dos
         // casos el rótulo se lee: el color nunca es la única señal.
-        if (editable) {
+        if (estructura) {
             var opciones = n.niveles_permitidos.indexOf(n.NIVEL) === -1
                 ? [n.NIVEL].concat(n.niveles_permitidos) : n.niveles_permitidos;
 
@@ -389,7 +630,10 @@
             : (activo ? 'Sí' : 'No')) + '</td>';
 
         // ---- Última edición -------------------------------------------
+        // En un mes, la del valor del mes; en uno sin cargar, la del constante
+        // con la aclaración, para que no se lea como una edición del mes.
         html += '<td><small class="text-muted">' +
+                (enMes && n.propio === false ? 'del constante: ' : '') +
                 escapar(Auditoria.linea('modif', n.USUARIO_MODIF, n.FECHA_MODIF)) + '</small></td>';
 
         return html + '</tr>';
@@ -560,7 +804,7 @@
             mixPedido[canal] = numero;
 
             pedir('Controller/ParametrosController.php?action=previsualizarMixArbol',
-                  { canal: canal, nodos: nodosEnPantalla(canal) })
+                  { canal: canal, mes: mesDe(canal), nodos: nodosEnPantalla(canal) })
                 .then(function(vista) {
                     if (mixPedido[canal] !== numero) { return; }
 
@@ -589,29 +833,67 @@
     /**
      * Inhabilitar un nodo con ramas debajo saca de la proyección todas sus
      * hojas: se pregunta antes, diciendo cuántas.
+     *
+     * EN EL CONSTANTE, si el nodo sigue activo en meses con mix propio, se
+     * pregunta siempre: el diálogo dice en cuántos y ofrece la casilla
+     * "Inhabilitarlo también en esos meses", tildada. La respuesta queda en
+     * apagarEnMeses y viaja con el guardado; el servidor valida cada mes como
+     * quedaría y, si alguno queda mal, no guarda nada y dice cuál.
      */
     function confirmarInhabilitar(chk, canal) {
         var tr = chk.closest('tr');
         var clave = tr.dataset.clave;
+        var id = parseInt(tr.dataset.id, 10);
         var v = vistaMix[canal];
         var hojas = Object.keys(v.nodos).filter(function(k) {
             var n = v.nodos[k];
 
             return n.hoja && k !== clave && n.camino.some(function(c) { return c.clave === clave; });
         }).length;
+        var nombre = v.nodos[clave] ? v.nodos[clave].nombre : clave;
+        var activoEn = mesDe(canal) !== null ? [] : mesesCargados(canal).filter(function(m) {
+            var val = infoMes(canal, m).valores[clave];
+
+            return val && parseInt(val.ACTIVO, 10) === 1;
+        });
+
+        apagarEnMeses[canal] = (apagarEnMeses[canal] || []).filter(function(x) { return x !== id; });
+
+        var detalle = (hojas
+            ? 'Saca ' + hojas + ' hoja(s) de la proyección. '
+            : '') + 'No se borra nada: se puede volver a habilitar. Después hay que reacomodar '
+            + 'los porcentajes de su grupo para que vuelvan a sumar 100%.';
+
+        if (activoEn.length) {
+            return Notificacion.elegirOpciones({
+                titulo: 'Inhabilitar ' + nombre,
+                mensaje: '¿Inhabilitar "' + nombre + '"' + (hojas ? ' y todo lo que cuelga de él?' : '?'),
+                detalle: detalle + ' En el mix constante. Sigue activo en ' + activoEn.length
+                    + ' mes(es) con mix propio: ' + activoEn.map(nombreMes).join(', ') + '.',
+                opciones: [{ valor: 'meses', rotulo: 'Inhabilitarlo también en esos meses', marcada: true }],
+                confirmar: 'Inhabilitar',
+                peligro: true
+            }).then(function(r) {
+                if (r === null) {
+                    return false;
+                }
+
+                if (r.indexOf('meses') !== -1) {
+                    apagarEnMeses[canal].push(id);
+                }
+
+                return true;
+            });
+        }
 
         if (hojas === 0) {
             return Promise.resolve(true);
         }
 
-        var nombre = tr.querySelector('[data-campo="nombre"]').value;
-
         return Notificacion.confirmar({
             titulo: 'Inhabilitar ' + nombre,
             mensaje: '¿Inhabilitar "' + nombre + '" y todo lo que cuelga de él?',
-            detalle: 'Saca ' + hojas + ' hoja(s) de la proyección. No se borra nada: se puede '
-                   + 'volver a habilitar. Después hay que reacomodar los porcentajes de su grupo '
-                   + 'para que vuelvan a sumar 100%.',
+            detalle: detalle,
             confirmar: 'Inhabilitar',
             peligro: true
         });
@@ -683,10 +965,19 @@
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Guardando...';
 
+        var mes = mesDe(canal);
+        // Los nodos tildados para apagar también en los meses, si siguen apagados
+        var enMeses = (apagarEnMeses[canal] || []).filter(function(id) {
+            var chk = document.querySelector('#mixBody tr.mixa-nodo[data-id="' + id + '"] [data-campo="activo"]');
+
+            return chk && !chk.checked;
+        });
+
         pedir('Controller/ParametrosController.php?action=saveMixArbol',
-              { canal: canal, nodos: nodosEnPantalla(canal) })
+              { canal: canal, mes: mes, nodos: nodosEnPantalla(canal), inhabilitar_en_meses: enMeses })
             .then(function() {
-                Notificacion.exito('Mix de ' + titulo(canal) + ' guardado.');
+                Notificacion.exito('Mix de ' + (mes ? nombreMes(mes) + ' de ' : '') + titulo(canal) + ' guardado.',
+                    enMeses.length ? { detalle: 'También se inhabilitó en los meses con mix propio.' } : undefined);
                 cargar();
             })
             .catch(function(error) {
@@ -813,6 +1104,220 @@
         });
     }
 
+    /* ---- El mix por mes ---------------------------------------------- */
+
+    /** Constante / Variable: se guarda en el momento, con confirmación */
+    function cambiarModoMix(canal, modo) {
+        if (modo === modoCanal(canal)) {
+            return;
+        }
+
+        var cargados = mesesCargados(canal);
+        var aVariable = modo === 'VARIABLE';
+        var detalle = aVariable
+            ? (cargados.length
+                ? 'Los meses con mix propio (' + cargados.map(nombreMes).join(', ') + ') pasan a usar el suyo, '
+                  + 'y la proyección de esos meses cambia. El resto sigue con el constante.'
+                : 'Todavía no hay ningún mes con mix propio, así que la proyección no cambia hasta que '
+                  + 'cargues alguno.')
+            : (cargados.length
+                ? 'Todos los meses vuelven al mix constante y la proyección de '
+                  + cargados.map(nombreMes).join(', ') + ' cambia. Los meses cargados no se borran: '
+                  + 'vuelven si pasás ' + titulo(canal) + ' otra vez a Variable.'
+                : 'No hay meses con mix propio, así que la proyección no cambia.');
+
+        descartarCambios(canal, 'Cambiar el modo recarga el mix.')
+            .then(function(ok) {
+                return ok && Notificacion.confirmar({
+                    titulo: 'Mix de ' + titulo(canal),
+                    mensaje: '¿Pasar ' + titulo(canal) + ' a mix ' + (aVariable ? 'variable' : 'constante') + '?',
+                    detalle: detalle,
+                    confirmar: aVariable ? 'Pasar a variable' : 'Pasar a constante'
+                });
+            })
+            .then(function(ok) {
+                if (!ok) { return; }
+
+                return pedir('Controller/ParametrosController.php?action=saveMixModo',
+                             { canal: canal, modo: modo })
+                    .then(function() {
+                        mesMix[canal] = null;
+                        Notificacion.exito(titulo(canal) + ' pasa a mix ' + (aVariable ? 'variable' : 'constante') + '.');
+                        cargar();
+                    });
+            })
+            .catch(function(error) {
+                Notificacion.error('No se pudo cambiar el modo: ' + error.message);
+            });
+    }
+
+    /** Ver otro mes del canal (null = constante): redibuja sólo ese canal */
+    function verMesMix(canal, mes) {
+        if (mes === mesDe(canal)) {
+            return;
+        }
+
+        descartarCambios(canal, 'Cambiar de mes muestra otros valores.').then(function(ok) {
+            if (!ok) { return; }
+
+            mesMix[canal] = mes;
+            redibujarCanal(canal);
+        });
+    }
+
+    /**
+     * Pone en pantalla los valores del constante en el mes elegido. NO
+     * GUARDA: queda como cualquier edición, revisada por el servidor y lista
+     * para Guardar.
+     */
+    function copiarDelConstante(canal) {
+        var mes = mesDe(canal);
+
+        if (mes === null) { return; }
+
+        descartarCambios(canal, 'Copiar del constante reemplaza lo que hay en pantalla.').then(function(ok) {
+            if (!ok) { return; }
+
+            redibujarCanal(canal, true);
+            mixSucio[canal] = true;
+            previsualizarMix(canal);
+            Notificacion.info('Los valores del constante están en ' + nombreMes(mes) + '. Guardá para que queden.');
+        });
+    }
+
+    /** Copia lo GUARDADO del mes elegido a los meses que se tilden */
+    function copiarAOtrosMeses(canal) {
+        var mes = mesDe(canal);
+
+        if (mes === null) { return; }
+
+        if (mixSucio[canal]) {
+            Notificacion.advertencia('Guardá ' + nombreMes(mes) + ' antes de copiarlo: se copia lo guardado.');
+            return;
+        }
+
+        var opciones = [];
+
+        for (var m = 1; m <= 12; m++) {
+            if (m !== mes) {
+                opciones.push({
+                    valor: m,
+                    rotulo: nombreMes(m),
+                    nota: infoMes(canal, m).cargado ? '(tiene mix propio: se pisa)' : ''
+                });
+            }
+        }
+
+        Notificacion.elegirOpciones({
+            titulo: 'Copiar ' + nombreMes(mes) + ' de ' + titulo(canal),
+            mensaje: '¿A qué meses copiás el mix de ' + nombreMes(mes) + '?',
+            detalle: 'Cada mes elegido queda con exactamente los valores de ' + nombreMes(mes)
+                + ', tenga o no mix propio. La proyección de esos meses cambia.',
+            opciones: opciones,
+            enColumnas: true,
+            minimo: 1,
+            invalido: 'Elegí al menos un mes.',
+            confirmar: 'Copiar'
+        }).then(function(destinos) {
+            if (destinos === null) { return; }
+
+            return pedir('Controller/ParametrosController.php?action=copiarMixMes',
+                         { canal: canal, origen: mes, destinos: destinos })
+                .then(function() {
+                    Notificacion.exito(nombreMes(mes) + ' copiado a ' + destinos.map(nombreMes).join(', ') + '.');
+                    cargar();
+                });
+        }).catch(function(error) {
+            Notificacion.error('No se pudo copiar: ' + error.message);
+        });
+    }
+
+    /** "Usar el constante en este mes": baja del mes, sin borrar sus valores */
+    function usarConstanteEnMes(canal) {
+        var mes = mesDe(canal);
+
+        if (mes === null) { return; }
+
+        descartarCambios(canal, 'El mes vuelve al constante.').then(function(ok) {
+            return ok && Notificacion.confirmar({
+                titulo: nombreMes(mes) + ' de ' + titulo(canal),
+                mensaje: '¿Usar el mix constante en ' + nombreMes(mes) + '?',
+                detalle: 'Mueve la proyección: las ventas de ' + nombreMes(mes).toLowerCase()
+                    + ' se cobran con el mix constante. Los valores de ' + nombreMes(mes)
+                    + ' quedan guardados: si lo volvés a cargar, se reactivan.',
+                confirmar: 'Usar el constante',
+                peligro: true
+            });
+        }).then(function(ok) {
+            if (!ok) { return; }
+
+            return pedir('Controller/ParametrosController.php?action=quitarMixMes', { canal: canal, mes: mes })
+                .then(function() {
+                    Notificacion.exito(nombreMes(mes) + ' vuelve a usar el mix constante.');
+                    cargar();
+                });
+        }).catch(function(error) {
+            Notificacion.error('No se pudo volver al constante: ' + error.message);
+        });
+    }
+
+    /**
+     * La tabla que baja Exportar, escondida: una fila por nodo del constante
+     * y, en los canales en Variable, una por nodo y por cada uno de los doce
+     * meses, diciendo si el mes tiene mix propio o usa el constante. Sale del
+     * payload, así que baja lo GUARDADO, no lo que se está editando.
+     */
+    function generarExportMix() {
+        var tabla = document.getElementById('tablaMixExport');
+
+        if (!tabla) { return; }
+
+        var mix = datosMix();
+        var pct = function(v) {
+            return (v === null || v === undefined || v === '') ? '' : (Number(v) * 100).toFixed(2).replace('.', ',') + '%';
+        };
+        var porClave = {};
+
+        Object.keys(mix.resuelto.nodos).forEach(function(k) { porClave[k] = mix.resuelto.nodos[k]; });
+
+        var crudos = {};
+
+        mix.nodos.forEach(function(n) { crudos[n.clave] = n; });
+
+        var fila = function(canal, mesTexto, origen, clave, v) {
+            var r = porClave[clave];
+
+            return '<tr><td>' + escapar(titulo(canal)) + '</td><td>' + escapar(mesTexto) + '</td><td>' +
+                   escapar(origen) + '</td><td>' +
+                   escapar(r.camino.map(function(c) { return c.nombre; }).join(' › ')) + '</td><td>' +
+                   escapar(rotuloNivel(r.nivel)) + '</td><td>' + pct(v.PORCENTAJE) + '</td><td>' +
+                   pct(v.COSTO) + '</td><td>' + pct(v.TASA) + '</td><td>' +
+                   (v.DIAS_ACREDITACION === null || v.DIAS_ACREDITACION === undefined ? '' : v.DIAS_ACREDITACION) +
+                   '</td><td>' + (parseInt(v.ACTIVO, 10) === 1 ? 'Sí' : 'No') + '</td></tr>';
+        };
+        var html = '<thead><tr><th>Canal</th><th>Mix</th><th>Origen</th><th>Camino</th><th>Nivel</th>' +
+                   '<th>%</th><th>Costo %</th><th>Tasa %</th><th>Días</th><th>Activo</th></tr></thead><tbody>';
+
+        mix.canales.forEach(function(canal) {
+            var claves = Object.keys(porClave).filter(function(k) { return porClave[k].canal === canal; });
+
+            claves.forEach(function(k) { html += fila(canal, 'Constante', 'Constante', k, crudos[k]); });
+
+            if (mixPorMes() && modoCanal(canal) === 'VARIABLE') {
+                for (var m = 1; m <= 12; m++) {
+                    var info = infoMes(canal, m);
+
+                    claves.forEach(function(k) {
+                        html += fila(canal, nombreMes(m), info.cargado ? 'Mix propio' : 'Usa el constante', k,
+                            info.valores[k] || crudos[k]);
+                    });
+                }
+            }
+        });
+
+        tabla.innerHTML = html + '</tbody>';
+    }
+
     /** Un solo juego de listeners en el tbody: el editor se redibuja entero al recargar */
     function engancharMix() {
         var cuerpo = document.getElementById('mixBody');
@@ -824,8 +1329,23 @@
         cuerpo.addEventListener('click', function(e) {
             var agregar = e.target.closest('[data-agregar]');
             var guardar = e.target.closest('[data-guardar-canal]');
+            var modo = e.target.closest('[data-modo]');
+            var verMes = e.target.closest('[data-ver-mes]');
+            var copiarConstante = e.target.closest('[data-copiar-constante]');
+            var copiarMeses = e.target.closest('[data-copiar-meses]');
+            var quitarMes = e.target.closest('[data-quitar-mes]');
 
-            if (agregar) {
+            if (modo) {
+                cambiarModoMix(modo.dataset.canal, modo.dataset.modo);
+            } else if (verMes) {
+                verMesMix(verMes.dataset.canal, verMes.dataset.verMes ? parseInt(verMes.dataset.verMes, 10) : null);
+            } else if (copiarConstante) {
+                copiarDelConstante(copiarConstante.dataset.copiarConstante);
+            } else if (copiarMeses) {
+                copiarAOtrosMeses(copiarMeses.dataset.copiarMeses);
+            } else if (quitarMes) {
+                usarConstanteEnMes(quitarMes.dataset.quitarMes);
+            } else if (agregar) {
                 abrirAltaMix(agregar);
             } else if (guardar) {
                 guardarMixCanal(guardar.dataset.guardarCanal);

@@ -425,8 +425,13 @@ try {
                     ? 'No había cambios que guardar.'
                     : 'Mix de ' . MixCobro::nombreMes($mes) . ' guardado: ' . $escritos . ' nodo(s) modificado(s).';
             } else {
+                // La lista de nodos para los que se tildo "Inhabilitarlo tambien
+                // en esos meses": la casilla se contesta nodo por nodo.
+                $enMeses = isset($data['inhabilitar_en_meses']) && is_array($data['inhabilitar_en_meses'])
+                    ? array_values(array_filter(array_map('intval', $data['inhabilitar_en_meses'])))
+                    : [];
                 $escritos = $mixCobro->guardarCanal($data['canal'], $data['nodos'], $usuario,
-                    !empty($data['inhabilitar_en_meses']));
+                    count($enMeses) ? $enMeses : false);
                 $mensaje = $escritos === 0
                     ? 'No había cambios que guardar.'
                     : 'Mix de cobro guardado: ' . $escritos . ' nodo(s) modificado(s).';

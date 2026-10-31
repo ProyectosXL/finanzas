@@ -1130,13 +1130,18 @@ class MixCobro {
      * @param array $config
      * @param string $canal
      * @param array $cambios Los del constante (resolverCambios())
+     * @param array|null $soloIds Los nodos para los que se tildo la casilla;
+     *                   null = todos los que se apagan
      * @return array [mes => ['id' => ID_MIX_MES, 'cambios' => [['id', 'existe', 'campos']]]]
      */
-    public static function planInhabilitarEnMeses($actuales, $simulado, $config, $canal, $cambios) {
+    public static function planInhabilitarEnMeses($actuales, $simulado, $config, $canal, $cambios,
+                                                  $soloIds = null) {
         $apagados = [];
+        $solo = $soloIds === null ? null : array_map('intval', $soloIds);
 
         foreach ($cambios as $c) {
-            if (array_key_exists('ACTIVO', $c['campos']) && $c['campos']['ACTIVO'] === 0) {
+            if (array_key_exists('ACTIVO', $c['campos']) && $c['campos']['ACTIVO'] === 0
+                    && ($solo === null || in_array($c['id'], $solo, true))) {
                 $apagados[] = $c['id'];
             }
         }
@@ -1769,8 +1774,31 @@ class MixCobro {
             'por_mes' => $origen === 'NODO' && !empty($config['tablas']),
             'modos' => $config['modos'],
             'nombres_mes' => array_values(self::NOMBRES_MES),
-            'meses' => self::mesesEditor($nodos, $config)
+            'meses' => self::mesesEditor($nodos, $config),
+            'vistas_mes' => self::vistasMes($nodos, $config)
         ];
+    }
+
+    /**
+     * Los meses CARGADOS de cada canal, ya resueltos: lo heredado, las sumas
+     * y los errores de cada uno. Viajan en el payload porque quien no edita
+     * tambien ve el arbol de cada mes, y previsualizarMixArbol pide permiso
+     * de edicion. Un mes sin cargar se ve con lo resuelto del constante.
+     *
+     * @return array [CANAL => [MES => lo de previsualizar()]]
+     */
+    private static function vistasMes($nodos, $config) {
+        $v = [];
+
+        foreach (Parametros::CANALES as $canal) {
+            foreach (array_keys(self::NOMBRES_MES) as $mes) {
+                if (self::mesCargado($config, $canal, $mes)) {
+                    $v[$canal][$mes] = self::previsualizar($nodos, $canal, [], $mes, $config);
+                }
+            }
+        }
+
+        return $v;
     }
 
     /**
@@ -1961,7 +1989,9 @@ class MixCobro {
      * @param string $canal
      * @param array $filas Las de resolverCambios()
      * @param string $usuario El de AuthCashflow
-     * @param bool $inhabilitarEnMeses
+     * @param bool|array $inhabilitarEnMeses true = todo lo que se apaga; una
+     *                   lista de IDs = solo esos nodos (la casilla se contesta
+     *                   nodo por nodo); false = ninguno
      * @return int Cuantos nodos se escribieron (en el constante)
      */
     public function guardarCanal($canal, $filas, $usuario, $inhabilitarEnMeses = false) {
@@ -1982,7 +2012,8 @@ class MixCobro {
             $canal = strtoupper(trim((string) $canal));
             $enMeses = self::planInhabilitarEnMeses($actuales,
                 self::resolverCambios($actuales, $canal, $filas)['simulado'],
-                $this->getConfig(), $canal, $cambios);
+                $this->getConfig(), $canal, $cambios,
+                is_array($inhabilitarEnMeses) ? $inhabilitarEnMeses : null);
         }
 
         $cid = $this->conexionEscritura();

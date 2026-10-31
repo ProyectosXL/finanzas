@@ -242,6 +242,25 @@ var Notificacion = (function() {
          */
         pedirFecha: pedirFecha,
 
+        /**
+         * Pide que se TILDEN OPCIONES antes de una acción. Es `confirmar()`
+         * con casillas adentro: una sola ("Inhabilitarlo también en esos
+         * meses") o varias ("a qué meses copiar").
+         *
+         * MISMO CONTRATO QUE pedirTexto(): null al cancelar, y al confirmar la
+         * lista de los `valor` tildados -vacía si no se tildó ninguno y
+         * `minimo` es 0-.
+         *
+         * @param {Object} opciones Las de confirmar(), más:
+         * @param {Array} opciones.opciones [{valor, rotulo, marcada?, nota?}]
+         * @param {string} [opciones.etiqueta] Rótulo arriba de las casillas
+         * @param {number} [opciones.minimo] Cuántas hay que tildar, como mínimo (0)
+         * @param {string} [opciones.invalido] Qué decir si no llegan al mínimo
+         * @param {boolean} [opciones.enColumnas] Las casillas en tres columnas
+         * @returns {Promise<Array|null>}
+         */
+        elegirOpciones: elegirOpciones,
+
         /** Cierra todo lo que haya en pantalla */
         limpiar: function() {
             if (contenedor) {
@@ -485,6 +504,67 @@ var Notificacion = (function() {
                 campo.addEventListener('input', pintar);
                 pintar();
             }
+        });
+    }
+
+    function elegirOpciones(opciones) {
+        opciones = opciones || {};
+
+        var lista = opciones.opciones || [];
+        var minimo = opciones.minimo || 0;
+
+        // Sin Bootstrap: un confirm por la acción entera, con lo marcado por
+        // defecto. Es lo que menos sorprende -lo que el diálogo proponía-.
+        if (!window.bootstrap || !bootstrap.Modal) {
+            var marcadas = lista.filter(function(o) { return o.marcada; })
+                .map(function(o) { return o.valor; });
+
+            return Promise.resolve(
+                (marcadas.length >= minimo && window.confirm(opciones.mensaje
+                    + (opciones.detalle ? '\n\n' + opciones.detalle : ''))) ? marcadas : null);
+        }
+
+        var base = 'cf-dlg-opc-' + Math.random().toString(36).slice(2);
+        var cuerpo =
+            '<div class="mt-3">' +
+                (opciones.etiqueta
+                    ? '<div class="form-label form-label-sm">' + escapar(opciones.etiqueta) + '</div>'
+                    : '') +
+                '<div class="' + (opciones.enColumnas ? 'row row-cols-3 g-1' : '') + '">' +
+                lista.map(function(o, i) {
+                    return '<div class="' + (opciones.enColumnas ? 'col ' : '') + 'form-check">' +
+                        '<input class="form-check-input cf-dlg-opcion" type="checkbox" ' +
+                            'id="' + base + i + '" data-indice="' + i + '"' + (o.marcada ? ' checked' : '') + '>' +
+                        '<label class="form-check-label" for="' + base + i + '">' + escapar(o.rotulo) +
+                            (o.nota ? ' <small class="text-muted">' + escapar(o.nota) + '</small>' : '') +
+                        '</label></div>';
+                }).join('') +
+                '</div>' +
+                '<small class="invalid-feedback d-block cf-dlg-error"></small>' +
+            '</div>';
+
+        return abrirDialogo(opciones, {
+            cuerpo: cuerpo,
+            foco: '.cf-dlg-opcion',
+
+            alConfirmar: function(modal) {
+                var elegidas = [];
+
+                modal.querySelectorAll('.cf-dlg-opcion').forEach(function(chk) {
+                    if (chk.checked) {
+                        elegidas.push(lista[parseInt(chk.dataset.indice, 10)].valor);
+                    }
+                });
+
+                if (elegidas.length < minimo) {
+                    modal.querySelector('.cf-dlg-error').textContent =
+                        opciones.invalido || 'Elegí al menos ' + minimo + '.';
+                    return undefined;
+                }
+
+                return elegidas;
+            },
+            alCancelar: null
         });
     }
 

@@ -493,7 +493,49 @@ chequear('el mes del cuerpo pasa por MixCobro::validarMes()', true,
     strpos($ctrlMM, "return MixCobro::validarMes(\$data['mes']);") !== false);
 chequear('la previsualizacion resuelve el mes con la config', true,
     strpos($ctrlMM, "\$mes, \$arbol['config'])") !== false);
-chequear('guardar un mes va a guardarMes(), el constante a guardarCanal() con la casilla', [1, 1], [
+chequear('guardar un mes va a guardarMes(), el constante a guardarCanal() con los nodos tildados', [1, 1], [
     substr_count($ctrlMM, "\$mixCobro->guardarMes(\$data['canal'], \$mes, \$data['nodos'], \$usuario)"),
-    substr_count($ctrlMM, "!empty(\$data['inhabilitar_en_meses'])")
+    substr_count($ctrlMM, "count(\$enMeses) ? \$enMeses : false")
 ]);
+
+seccion('la casilla se contesta nodo por nodo');
+
+// Apagar Efectivo y Debito en el constante, con la casilla tildada solo para
+// Efectivo: en diciembre se apaga solo Efectivo.
+$cfgDos = configMM('VARIABLE', [valorMM(100, 1, 0.0, null, null, 1), valorMM(100, 2, 1.0),
+    valorMM(100, 3, 0.4, 0.03, null, 7), valorMM(100, 4, 0.6, 0.05, null, 20)]);
+$filasDos = filasMM([1 => ['activo' => false], 2 => ['porcentaje' => 1.0], 3 => ['activo' => false],
+                     4 => ['porcentaje' => 1.0]]);
+$cambDos = MixCobro::resolverCambios(arbolMM(), 'LOCALES', $filasDos);
+
+chequear('solo los nodos tildados se apagan en los meses', [['id' => 1, 'existe' => true, 'campos' => ['ACTIVO' => 0]]],
+    MixCobro::planInhabilitarEnMeses(arbolMM(), $cambDos['simulado'], $cfgDos, 'LOCALES', $cambDos['cambios'], [1])[12]['cambios']);
+
+seccion('el editor: el mes viaja, la estructura solo en el constante');
+
+$jsMM = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Js/Parametros.js'));
+$tabMM = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Tabs/parametros.php'));
+
+chequear('la previsualizacion manda el mes que se ve', true,
+    strpos($jsMM, "{ canal: canal, mes: mesDe(canal), nodos: nodosEnPantalla(canal) }") !== false);
+chequear('el guardado manda el mes y los nodos tildados para apagar en los meses', true,
+    strpos($jsMM, "{ canal: canal, mes: mes, nodos: nodosEnPantalla(canal), inhabilitar_en_meses: enMeses }") !== false);
+chequear('en un mes, el nombre, el nivel y el + van solo con estructura', 3,
+    substr_count($jsMM, 'if (estructura') );
+chequear('las acciones nuevas del mes', [1, 1, 1], [
+    substr_count($jsMM, "action=saveMixModo'"), substr_count($jsMM, "action=copiarMixMes'"),
+    substr_count($jsMM, "action=quitarMixMes'")
+]);
+chequear('sin permiso se eligen meses igual: los cargados vienen resueltos en el payload', true,
+    strpos($jsMM, 'datosMix().vistas_mes') !== false);
+chequear('Exportar baja la tabla de todos los meses', true,
+    strpos($tabMM, 'data-exportar="tablaMixExport"') !== false && strpos($tabMM, '<table id="tablaMixExport"') !== false);
+chequear('el dialogo de casillas existe en Notificacion', true,
+    strpos(file_get_contents(__DIR__ . '/../Js/notificaciones.js'), 'elegirOpciones: elegirOpciones,') !== false);
+
+$edMM = MixCobro::datosEditor(arbolMM(), 'NODO', configMM());
+
+chequear('el payload trae resuelto solo lo cargado: diciembre de Locales', ['LOCALES' => [12]],
+    array_map('array_keys', $edMM['vistas_mes']));
+chequear('con sus valores: Credito 90% x 60%', 0.54,
+    round($edMM['vistas_mes']['LOCALES'][12]['nodos']['N4']['porcentaje_efectivo'], 6));
