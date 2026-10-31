@@ -62,10 +62,12 @@
         // Volvió a cambiar con la columna de selección, que entró PRIMERA:
         // un `[0, 1]` viejo fijaría el check y COD_CLI. El check no queda fijo
         // por defecto, igual que en Cobranzas FR y en tablaCorp.
+        //
+        // Y otra vez con Vendedor, que entró después de RAZON_SOC.
         crearColumnasFijas({
             tabla: 'tablaCobranzasMay',
             control: 'colFijasCobMay',
-            clave: 'cobranzas_may.con_seleccion',
+            clave: 'cobranzas_may.con_vendedor',
             porDefecto: [1, 2]
         });
 
@@ -102,6 +104,7 @@
         }
 
         conectarFiltroEmision();
+        conectarFiltroVendedor();
         conectarSeleccion();
 
         cargarDatos();
@@ -167,6 +170,60 @@
         if (limpiar) limpiar.disabled = !f.desde && !f.hasta;
     }
 
+    /* ================================================================
+       FILTRO POR VENDEDOR
+
+       Server-side, por el mismo motivo que el de emisión. Es un filtro de
+       pantalla: el controller lo aplica sobre la cartera y el tablero no se
+       entera. Las opciones vienen del servidor, armadas con la cartera
+       entera, así que no cambian al tocar otro filtro.
+       ================================================================ */
+
+    function filtroVendedor() {
+        var sel = document.getElementById('vendedorCobMay');
+
+        return sel ? sel.value : '';
+    }
+
+    function conectarFiltroVendedor() {
+        var sel = document.getElementById('vendedorCobMay');
+
+        if (sel) {
+            sel.addEventListener('change', cargarDatos);
+        }
+    }
+
+    /** Las opciones que trajo el servidor, conservando lo elegido */
+    function pintarOpcionesVendedor() {
+        var sel = document.getElementById('vendedorCobMay');
+
+        if (!sel) {
+            return;
+        }
+
+        var elegido = (datosCobranzas && datosCobranzas.filtro_vendedor) || '';
+        var lista = (datosCobranzas && datosCobranzas.vendedores) || [];
+        var html = '<option value="">Todos</option>';
+        var esta = elegido === '';
+
+        lista.forEach(function(v) {
+            esta = esta || v.valor === elegido;
+            html += '<option value="' + escaparAttr(v.valor) + '">' + escaparAttr(v.nombre)
+                + ' (' + v.facturas + ')</option>';
+        });
+
+        // Un vendedor que ya no tiene facturas sigue elegido: si se lo sacara
+        // del desplegable, la pantalla diría "Todos" mostrando ninguna.
+        if (!esta) {
+            html += '<option value="' + escaparAttr(elegido) + '">' + escaparAttr(elegido)
+                + ' (0)</option>';
+        }
+
+        sel.innerHTML = html;
+        sel.value = elegido;
+        sel.classList.toggle('border-primary', elegido !== '');
+    }
+
     /** El filtro aplicado, al lado del rótulo del período */
     function pintarFiltroPeriodo() {
         var el = document.getElementById('filtroPeriodoCobMay');
@@ -176,20 +233,34 @@
         }
 
         var r = (datosCobranzas && datosCobranzas.filtro_emision) || {};
+        var partes = [];
 
-        if (!r.desde && !r.hasta) {
+        if (r.desde || r.hasta) {
+            partes.push(r.desde && r.hasta
+                ? 'emitidas del ' + formatDate(r.desde) + ' al ' + formatDate(r.hasta)
+                : (r.desde
+                    ? 'emitidas desde el ' + formatDate(r.desde)
+                    : 'emitidas hasta el ' + formatDate(r.hasta)));
+        }
+
+        var vend = datosCobranzas && datosCobranzas.filtro_vendedor;
+
+        if (vend) {
+            var opcion = ((datosCobranzas.vendedores || []).filter(function(v) {
+                return v.valor === vend;
+            })[0]) || { nombre: vend };
+
+            partes.push('vendedor ' + opcion.nombre);
+        }
+
+        if (!partes.length) {
             el.innerHTML = '';
             return;
         }
 
-        var rango = r.desde && r.hasta
-            ? 'emitidas del ' + formatDate(r.desde) + ' al ' + formatDate(r.hasta)
-            : (r.desde
-                ? 'emitidas desde el ' + formatDate(r.desde)
-                : 'emitidas hasta el ' + formatDate(r.hasta));
-
         el.innerHTML = ' <span class="badge bg-secondary-subtle text-secondary-emphasis">'
-            + '<i class="fas fa-filter me-1"></i>Filtro: ' + rango + '</span>';
+            + '<i class="fas fa-filter me-1"></i>Filtro: ' + escaparAttr(partes.join(' · ')) + '</span>'
+            + (vend ? ' <small class="text-muted">El tablero sigue mostrando la cartera entera.</small>' : '');
     }
     
     function texto(id, valor) {
@@ -253,7 +324,8 @@
         var url = 'Controller/IngresosController.php?action=getCobranzasMay'
             + '&type=' + encodeURIComponent(modoVista)
             + '&desde=' + encodeURIComponent(f.desde)
-            + '&hasta=' + encodeURIComponent(f.hasta);
+            + '&hasta=' + encodeURIComponent(f.hasta)
+            + '&vendedor=' + encodeURIComponent(filtroVendedor());
 
         // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
         // la grilla no lo espera. Ver Js/avisos-panel.js.
@@ -278,6 +350,7 @@
                     calcularResumenes();
                     pintarAvisos();
                     pintarFiltroPeriodo();
+                    pintarOpcionesVendedor();
                     acotarExtremos();
                     mostrarCargando(false);
                 } else {
@@ -385,7 +458,15 @@
 
             html += '<td class="col-texto" title="' + escaparAttr(razon) + '">'
                 + escaparAttr(razon) + '</td>';
-            
+
+            // El vendedor del cliente: se ve en Resumen y en Detalle. "Sin
+            // vendedor" en gris, para que no se lea como un nombre más.
+            var vendedor = item.VENDEDOR || '';
+
+            html += '<td class="col-texto' + (item.COD_VENDED ? '' : ' text-muted') + '" title="'
+                + escaparAttr(item.COD_VENDED ? vendedor + ' (' + item.COD_VENDED + ')' : vendedor) + '">'
+                + escaparAttr(vendedor) + '</td>';
+
             // Columnas ocultables en resumen
             html += `<td class="center col-detail">${formatDate(item.FECHA)}</td>`;
             html += `<td class="center col-detail">${item.T_COMP || ''}</td>`;
@@ -676,6 +757,12 @@
         var r = (datosCobranzas && datosCobranzas.filtro_emision) || {};
 
         if (!vistaEditable() || r.desde || r.hasta) {
+            return;
+        }
+
+        // Con el filtro por vendedor tampoco: las facturas de los otros no
+        // desaparecieron, sólo no se ven.
+        if (datosCobranzas.filtro_vendedor) {
             return;
         }
 
@@ -1075,6 +1162,7 @@
         return datosCobranzas.filas.filter(function(item) {
             return (item.COD_CLI || '').toLowerCase().includes(term)
                 || (item.RAZON_SOC || '').toLowerCase().includes(term)
+                || (item.VENDEDOR || '').toLowerCase().includes(term)
                 || (item.N_COMP || '').toLowerCase().includes(term);
         });
     }

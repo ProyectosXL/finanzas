@@ -405,3 +405,26 @@ chequear('tiene un title que explica que es lo que falta cobrar',
 
 chequear('la columna informativa del facturado sigue estando',
     true, strpos($visibleMay, 'Importe Factura') !== false);
+
+// ============================================================================
+// LA COLUMNA Y EL FILTRO POR VENDEDOR EN PANTALLA
+// ============================================================================
+
+seccion('la columna Vendedor y su filtro');
+
+$jsMay = file_get_contents(__DIR__ . '/../Js/Ingresos-Cobranzas_may.js');
+
+chequear('la columna Vendedor va despues de RAZON_SOC', 1,
+    preg_match('/>RAZON_SOC<\/th>\s*(<!--.*?-->\s*)*<th\b[^>]*>Vendedor<\/th>/s', $tabMay));
+chequear('no se excluye del export ni del orden', 0,
+    preg_match('/<th\b[^>]*(data-exportar-omitir|data-orden="no")[^>]*>Vendedor<\/th>/s', $tabMay));
+chequear('el pie cubre una columna mas', true, strpos($tabMay, 'colspan="13"') !== false);
+chequear('hay un desplegable de vendedor con la opcion "Todos"', 1,
+    preg_match('/<select id="vendedorCobMay"[^>]*>\s*<option value="">Todos<\/option>/s', $tabMay));
+chequear('el pedido manda el vendedor elegido', true,
+    strpos($jsMay, "'&vendedor=' + encodeURIComponent(filtroVendedor())") !== false);
+chequear('cambiarlo vuelve a pedir al servidor: no esconde filas', true,
+    strpos($jsMay, "sel.addEventListener('change', cargarDatos);") !== false);
+chequear('cada fila dibuja el vendedor', true, strpos($jsMay, 'var vendedor = item.VENDEDOR') !== false);
+chequear('y el buscador tambien lo encuentra', true,
+    strpos($jsMay, "(item.VENDEDOR || '').toLowerCase().includes(term)") !== false);

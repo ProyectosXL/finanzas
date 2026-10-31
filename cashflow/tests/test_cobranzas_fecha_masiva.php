@@ -416,7 +416,8 @@ $pestanasMasivas = [
         'cuerpo' => 'tableBodyCobMay',
         'sufijo' => 'CobMay',
         'permiso' => 'cobranzas_may',
-        'claveFijas' => 'cobranzas_may.con_seleccion',
+        // Cambio otra vez con la columna Vendedor, despues de RAZON_SOC
+        'claveFijas' => 'cobranzas_may.con_vendedor',
         // Mayoristas tiene un solo origen: se edita en Detalle Facturas.
         'vista' => "return modoVista === 'deepdive';"
     ]
