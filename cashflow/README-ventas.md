@@ -94,6 +94,23 @@ El primero va después de `sql/ventas_proyeccion.sql` (crea el mix plano que mig
 
 **Apenas se corren, la proyección da exactamente lo mismo que antes.** Medido contra la base el 09/10/2026, con el código de `develop`, el código nuevo sin el script y el código nuevo con el árbol migrado (sobre `#temporales`), uno detrás del otro: las 160 celdas de cobranza por canal (28 días + 12 meses × 4 canales) dan iguales **al último bit**, el tramo da $ 2.441.776.733,02 y el horizonte $ 43.706.286.291,98 en las tres corridas, y el costo de cobro da 0,00. Ver *El invariante de la migración*.
 
+### 6. El mix de cobro por mes
+
+**Este script NO se corrió todavía.** Se corre **en el mismo momento de publicar** el código de `feature/mayoristas-vendedora-mix-mensual`, contra `central`, **después** de `sql/cashflow_ventas_mix_nodo.sql` (sus FK apuntan al árbol, y si el árbol no está corta con un error):
+
+```sql
+-- sql/cashflow_ventas_mix_mes.sql
+```
+
+Crea tres tablas **vacías** —el modo de cada canal, qué meses tienen mix propio y los valores de cada nodo en cada mes— y no toca nada de lo que hay. Es reejecutable: cada tabla se crea sólo si no existe, y no tiene `DROP`, `INSERT` ni `UPDATE`.
+
+| Si no se corre | |
+| --- | --- |
+| Ventas y el tablero | Todos los canales en constante: la proyección de siempre, sin aviso |
+| Parámetros | El selector Constante / Variable no aparece, y la tarjeta dice qué script falta |
+
+**Apenas se corre, la proyección da exactamente lo mismo que antes**: con las tablas vacías todos los canales están en constante. Medido contra la base: ver *El invariante del mix por mes*.
+
 ---
 
 ## Modelo de cálculo
@@ -111,6 +128,8 @@ FechaAcreditación      = d + Días(h)
 ```
 
 `h` es una **hoja** del árbol del mix de cobro del canal: su % efectivo es el producto de los porcentajes de su rama, su costo y su tasa se suman a lo largo de la rama y sus días son los del nivel más cercano que los tenga. Ver *Mix de cobro: el árbol*. El costo cae en la **misma fecha** que el bruto del que sale.
+
+**El árbol es el del MES DE LA VENTA `M(d)`**: el constante, o el del mes si el canal está en mix variable y ese mes tiene mix propio. Una venta del 30/11 que se acredita en diciembre se cobra con el mix de noviembre. Ver *Mix de cobro por mes*.
 
 Toda la venta del módulo es **estimada**. El histórico de Tango se usa únicamente como base de cálculo.
 
@@ -246,6 +265,7 @@ La grilla de cobranza de la sub-pestaña Proyección es un **árbol que se abre 
 - **Los KPIs** de cobranza del tramo y del horizonte muestran la neta al lado de la bruta.
 - **Las hojas al 0%** se muestran igual, en cero. Los nodos inhabilitados —y todo lo que cuelga de ellos— no aparecen.
 - **La pantalla no resuelve nada**: el % efectivo, la carga, los días y los importes de cada nodo vienen de `Ventas::cobranzaPorHojas()`, que usa la regla de `MixCobro::resolver()`.
+- **El mix de cada mes.** Si algún canal tiene mix propio en algún mes de la ventana, arriba del árbol aparece **"Mix de las ventas de: [mes ▾]"**, que arranca en el mes en curso. Al elegir un mes, las columnas *% efectivo*, *Costo + tasa* y *Días* pasan a las de ese mes, **sin recargar**: el servidor ya manda lo resuelto para cada nodo en cada mes de venta (`cobranza.por_mes`). El canal que usó su mix propio en ese mes lleva la etiqueta *mix propio*, y un nodo que ese mes no está en juego se ve atenuado, con un guion. **Los importes no cambian con el selector**: cada columna de fecha ya trae cada venta cobrada con el mix de su mes, y el tooltip lo aclara —en la columna de diciembre hay ventas de noviembre—. Con todo en constante no hay `por_mes` y el selector no aparece. Las filas del árbol son los nodos en juego en *algún* mes: un nodo que sólo se usa en diciembre es una fila más.
 - **Exportar** baja lo que se ve: las ramas cerradas no van, y los importes son los de la medida elegida. La tabla no se ordena por columna: es un árbol, y ordenar separaría cada nodo de su rama.
 
 Un mix inválido —un grupo de hermanos activos que no suma 100%, una hoja sin días en toda su rama o un canal sin hojas— **no corta la proyección**: se calcula con lo que hay y se avisa como **crítico**, arriba de la grilla y en el tablero, diciendo el canal, la rama y cuánta venta de la ventana queda afuera. Una hoja sin días **no se proyecta**: sin plazo no hay fecha, y una fecha inventada sería plata en un día que nadie eligió. Parámetros no deja guardar un árbol así, así que si aparece es porque la tabla se tocó por otro lado.
@@ -281,7 +301,7 @@ Los meses sin cotización **no están** en el mapa: la clave ausente es lo que d
 
 ## Parámetros
 
-Ningún valor de negocio está escrito en el código. Todo sale de `RO_T_CASHFLOW_PARAMETROS` y del árbol del mix de cobro, `RO_T_CASHFLOW_VENTAS_MIX_NODO`, y se edita desde la pestaña **Parámetros**. Lo único fijo en el código son los **tipos de nivel** del árbol, que son estructura y no valores (ver *Mix de cobro: el árbol*).
+Ningún valor de negocio está escrito en el código. Todo sale de `RO_T_CASHFLOW_PARAMETROS` y del árbol del mix de cobro, `RO_T_CASHFLOW_VENTAS_MIX_NODO` —con sus valores por mes, ver *Mix de cobro por mes*—, y se edita desde la pestaña **Parámetros**. Lo único fijo en el código son los **tipos de nivel** del árbol, que son estructura y no valores (ver *Mix de cobro: el árbol*).
 
 ### Agrupados por módulo
 
@@ -397,10 +417,64 @@ Se administra desde **Parámetros → Ventas → Mix de Cobro y Plazos**, un blo
 - **Inhabilitar** es el switch de *Activo*: no se borra nada. Inhabilitar un nodo con ramas debajo pide confirmación y dice cuántas hojas saca de la proyección.
 - **Renombrar** se permite, respetando el único entre hermanos. **Cambiar el nivel de un nodo con hijos no**: si quedó mal, se inhabilita y se crea otro. Un nodo tampoco se mueve de rama.
 - **Guardar** es por canal. Manda el árbol del canal y el servidor escribe **sólo los nodos que cambiaron**, en una transacción, después de volver a validar el canal entero como quedaría: un árbol inválido corta antes de abrir la transacción. Otro canal roto —por una edición directa en la base— no impide guardar este.
-- **Exportar** baja lo que se ve, con el camino completo de cada nodo.
+- **Exportar** baja el mix **guardado** de cada canal, con el camino completo de cada nodo, y en los canales con mix variable una fila por nodo **y por cada uno de los doce meses**, diciendo si el mes tiene mix propio o usa el constante. Sale de una tabla escondida que arma el JS (`#tablaMixExport`), no de lo que se está editando.
 - **Sin permiso de edición** (`['parametros', 'VENTAS']`), el árbol se ve sin ningún control. **Sin el script**, también, y la tarjeta dice qué correr.
 
-Las acciones son `previsualizarMixArbol`, `saveMixArbol` y `addMixNodo`. Las del mix plano —`getMixCobro`, `saveMixCobro`, `addMixCobro`— se retiraron, junto con su editor.
+Las acciones son `previsualizarMixArbol`, `saveMixArbol` y `addMixNodo`, y las del mix por mes, `saveMixModo`, `copiarMixMes` y `quitarMixMes`, todas con `['parametros', 'VENTAS']`. Las del mix plano —`getMixCobro`, `saveMixCobro`, `addMixCobro`— se retiraron, junto con su editor.
+
+### Mix de cobro por mes
+
+> **Nuevo** en `feature/mayoristas-vendedora-mix-mensual`.
+
+Cada canal elige:
+
+- **Mix constante**: un árbol para todos los meses, como hasta ahora.
+- **Mix variable**: **el mismo árbol**, con **%, costo, tasa, días y activo propios** para los meses del año que se carguen. Sirve para la estacionalidad que se repite año a año: diciembre se vende más con crédito y en cuotas que febrero.
+
+**Las reglas:**
+
+| | |
+| --- | --- |
+| **Mismo árbol, otros valores** | Padre, nivel, nombre y orden son los del constante y se editan sólo ahí. Un mes guarda valores, no nodos: si guardara su propio árbol, renombrar "Crédito" dejaría doce "Crédito" viejos dando vueltas |
+| **Activo varía por mes** | Apagar "Go Cuotas" sólo en febrero es un caso de negocio. Por eso inhabilitar un nodo en el constante **no** lo apaga solo en los meses: el editor lo ofrece (ver abajo) |
+| **Mes del año, no mes puntual** | El mix de diciembre vale para todos los diciembres del horizonte |
+| **Un mes sin mix propio usa el constante** | Cargar un mes es opcional |
+| **El mes que decide es el de la venta** | No el de la acreditación |
+| **Cada mes se valida como el constante** | Hermanos activos al 100%, toda hoja con días, costo + tasa < 100%, al menos una hoja. Un mes inválido no se guarda: el servidor lo rechaza diciendo qué mes y por qué |
+| **Un nodo nuevo entra en todos los meses** | Con una fila en cada mes de su canal —cargado o dado de baja—, inhabilitado y en 0%, con su costo, su tasa y sus días, en la misma transacción del alta |
+| **Volver a constante no borra nada** | Los meses quedan y vuelven si el canal se pasa otra vez a variable |
+
+**Las tablas** (`sql/cashflow_ventas_mix_mes.sql`, todas con auditoría y sin bajas físicas):
+
+| Tabla | Qué guarda |
+| --- | --- |
+| `RO_T_CASHFLOW_VENTAS_MIX_CANAL` | El modo de cada canal. **Un canal sin fila es constante**: por eso las tablas nacen vacías sin cambiar la proyección |
+| `RO_T_CASHFLOW_VENTAS_MIX_MES` | Una fila por canal y mes que tiene o tuvo mix propio. `ACTIVO = 0` es *"Usar el constante en este mes"*: baja lógica con `USUARIO_BAJA` y `FECHA_BAJA`; volver a cargarlo reactiva **la misma fila** |
+| `RO_T_CASHFLOW_VENTAS_MIX_NODO_MES` | Los valores de cada nodo en ese mes: `PORCENTAJE`, `COSTO`, `TASA`, `DIAS_ACREDITACION` y `ACTIVO`, con los mismos rangos y el mismo significado de `NULL` que el árbol |
+
+**La regla sigue siendo una sola.** `MixCobro::resolver($nodos, $mes, $config)` pone los valores del mes sobre los nodos del constante (`nodosDelMes()`) en los canales que lo usan y después corre **el mismo algoritmo** de siempre. Sin `$mes`, es exactamente lo de antes. Un nodo sin fila en un mes cargado —sólo por una edición directa en la base— se proyecta con los valores del constante y avisa (`SIN_VALOR_MES`). La usan el motor, Parámetros (`previsualizarMixArbol` con `mes`) y Cobranza Proyectada.
+
+**El motor.** `Ventas::calcular()` resuelve un árbol por cada mes del año que tiene venta en la ventana (`MixCobro::resolverPorMes()`): un mes en el que ningún canal tiene mix propio **comparte el resultado del constante**, así que con todo en constante hay un solo árbol. `cobranzaPorHojas()` reparte cada día de venta con las hojas del árbol de **su** mes. Los avisos de un mes con mix propio inválido dicen el mes y la plata de la venta de ese mes; los del constante se dicen una vez, con la venta de todos los meses que lo usan (`avisosDelMixPorMes()`).
+
+**El editor** (*Parámetros › Ventas › Mix de Cobro y Plazos*):
+
+- En el encabezado de cada canal, **Constante / Variable**. Se guarda en el momento y pregunta antes, diciendo qué meses cargados empiezan —o dejan— de usarse.
+- En Variable, arriba del árbol, la fila **Constante · Ene … Dic**. Los meses con mix propio llevan un punto. Al elegir uno, el árbol muestra sus valores —los suyos, o los del constante si no tiene mix propio— con lo heredado a la vista, como siempre. Cambiar de mes con cambios sin guardar pregunta antes.
+- En un mes, **el nombre y el nivel van como texto y no hay *Agregar***: la estructura se edita en *Constante*. El servidor también lo rechaza.
+- **Guardar** es por canal y por mes, con la misma previsualización: `previsualizarMixArbol` y `saveMixArbol` reciben el `mes`. Un mes que no estaba cargado se guarda **entero** —todos los nodos, todos los campos—: desde ahí tiene sus propios valores y no sigue los cambios del constante.
+- **Copiar del constante** pone en pantalla los valores del constante; no guarda hasta *Guardar*.
+- **Copiar a otros meses…** copia lo **guardado** del mes a los que se tilden, en una transacción; el diálogo marca cuáles ya tienen mix propio y se pisan. Con cambios sin guardar pide guardar antes.
+- **Usar el constante en este mes** da de baja el mes, sin borrar sus valores, y pregunta antes porque mueve la proyección.
+- **Inhabilitar en el constante** un nodo que sigue activo en meses con mix propio abre un diálogo que dice **en cuántos y cuáles**, con la casilla *"Inhabilitarlo también en esos meses"* tildada. Se contesta nodo por nodo. Si se tilda, se apaga también en esos meses **en la misma transacción**, y cada mes se valida como quedaría: si alguno queda mal —un grupo que ya no suma 100%— **no se guarda nada** y el mensaje dice qué mes y por qué.
+- **Sin permiso de edición** se eligen meses igual y se ve el árbol de cada uno, sin controles. Como `previsualizarMixArbol` pide permiso de edición, los meses cargados vienen **ya resueltos en el payload** (`vistas_mes`).
+- Un canal en constante con meses guardados lo dice al lado del selector: *"N mes(es) con mix propio guardado(s), sin usar"*.
+
+**Las pruebas:**
+- `tests/test_mix_cobro_mes.php` cubre `resolver()` con un mes con mix propio, con un mes sin él (toma el constante), con un canal en constante con meses cargados (los ignora) y con un nodo sin fila. También cubre el rechazo en el servidor de un mes inválido —sin abrir la conexión de escritura— y de un cambio de nombre o de nivel en un mes; copiar, usar el constante, el modo, inhabilitar en los meses nodo por nodo, el alta de un nodo en los meses, y el payload del editor. Las escrituras corren con una subclase que anota y no escribe en ninguna tabla.
+- `tests/test_ventas_mix_mes.php` fija que la venta del 30/11 que se acredita en diciembre se cobra con el mix de noviembre, el invariante, `por_mes` y los avisos por mes.
+- `tests/test_ventas_mix_mes_sql.php` lee el script: reejecutable, con auditoría, sin `DROP` ni escrituras.
+
+El editor se probó además en un navegador sin cabeza, con el JS real y un payload armado por `MixCobro::datosEditor()`: los pasos del checklist, con permiso y sin permiso.
 
 ### El invariante de la migración
 
@@ -424,6 +498,25 @@ Todos los medios son nodos de `MEDIO_PAGO`, con mayúscula inicial y sin costo n
 **Apenas se publica, la proyección da exactamente lo mismo que antes**: sin costos cargados, el bruto es el de antes y la fila de costos da cero. Vtex entra al 100% y sin días, así que no cambia ni el porcentaje ni el plazo de lo que cuelga de él. Medido contra la base el 09/10/2026 —ver el paso 5 de *Orden de ejecución*—: 160 celdas iguales al último bit.
 
 `RO_T_CASHFLOW_VENTAS_MIX` **no se borra**: deja de leerse cuando existe la tabla nueva —aunque esté vacía: un árbol vacío es un mix sin medios, que se avisa, no una señal para volver al mix viejo— y queda por el histórico.
+
+### El invariante del mix por mes
+
+**Con todos los canales en constante, la proyección es la de antes, al centavo y al último bit.** No es una aproximación: con todo en constante `resolverPorMes()` devuelve el mismo árbol para todos los meses, y `cobranzaPorHojas()` hace las mismas cuentas, sobre los mismos montos y en el mismo orden.
+
+**Medido contra la base el 30/10/2026**, con el árbol real (21 nodos en `RO_T_CASHFLOW_VENTAS_MIX_NODO`) y **sólo lecturas**: el `.env` local apunta a producción, así que no se creó ninguna tabla, ni siquiera una `#temporal`. Cuatro corridas de `Ventas::proyectarCobranzas()`, una detrás de la otra:
+
+| Corrida | Código | Mix por mes | Resultado contra A |
+| --- | --- | --- | --- |
+| A | `develop` | — | (la referencia) |
+| B | esta rama | sin las tablas: como queda al publicar | **idénticas** las 486 celdas, y los mismos avisos |
+| C | esta rama | todos los canales en **constante**, con Locales con diciembre cargado y bien distinto | **idénticas** las 486 celdas, y los mismos avisos |
+| D | esta rama | lo mismo que C, con Locales en **variable** | cambian **sólo** Locales en dic-26, ene-27 y feb-27 |
+
+Las 486 celdas son la cobranza bruta, el costo y el neto de cada canal en cada columna del eje —28 días + 12 meses × 4 canales = 160 celdas por medida— más el tramo y el horizonte de cada medida. En A: tramo bruto $ 1.191.423.391,17, horizonte bruto $ 38.797.840.566,94 y costo del horizonte $ 909.378.697,05.
+
+La config de C y D se inyectó reemplazando sólo `MixCobro::getConfig()` en una copia del código: diciembre de Locales con los porcentajes de cada grupo de hermanos dados vuelta —siguen sumando 100%—, dos puntos más de costo y diez días más en cada nivel con días. D es el control de que la medición mide algo: cambian las columnas donde se acreditan **las ventas de diciembre** (diciembre, y con diez días más, enero y febrero), y no el tramo, ni octubre, ni noviembre, ni los otros canales.
+
+`tests/test_ventas_mix_mes.php` fija lo mismo sin base: la cobranza con un solo árbol es `===` a la de los árboles por mes con todo en constante, con o sin meses cargados.
 
 ---
 
@@ -568,6 +661,7 @@ sql/SJ_CASHFLOW_VENTAS_HIST.sql         Stored procedure del histórico
 sql/RO_V_DOLAR_OFICIAL_BCRA.sql         Vista del T/C de cierre por mes
 sql/cashflow_ventas_mix_nodo.sql        El árbol del mix de cobro y la migración del plano
 sql/cashflow_estructura_costos_cobro.sql  La fila "Costos de cobro" del tablero
+sql/cashflow_ventas_mix_mes.sql         El mix de cobro por mes: modo por canal, meses y valores
 cashflow/Class/Ventas.php               Motor de proyección
 cashflow/Class/MixCobro.php             El árbol del mix: la regla, el editor y su escritura
 cashflow/Class/Cotizacion.php           Tipo de cambio — punto de acceso del cashflow
