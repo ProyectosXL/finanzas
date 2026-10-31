@@ -467,7 +467,8 @@ chequear('deduplica el grupo con ROW_NUMBER', true,
 seccion('lo que se valua es el pendiente, no el FOB');
 
 chequear('la valuacion se pide sobre PENDIENTE_USD', true,
-    strpos($comexSrc, "self::valuar(\$row, \$curva, 'PENDIENTE_USD')") !== false);
+    strpos($comexSrc,
+        "self::valuar(\$row, \$curva, 'PENDIENTE_USD', 'FECHA_PAGO_EFECTIVA', \$bcra)") !== false);
 
 $ctrlSrc = codigoSinComentariosSP(__DIR__ . '/../Controller/ComexController.php');
 

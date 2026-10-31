@@ -136,10 +136,10 @@ seccion('El proveedor valua cada serie por SU fecha');
 $src = codigoSinComentariosCPP($provider);
 
 chequear('el FOB se valua por la fecha de pago',
-    true, strpos($src, "valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO')") !== false);
+    true, strpos($src, "valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO', \$bcra)") !== false);
 
 chequear('la nacionalizacion por la suya',
-    true, strpos($src, "valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC')") !== false);
+    true, strpos($src, "valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC', \$bcra)") !== false);
 
 chequear('y cada serie se ubica en el eje por su propia fecha',
     true, strpos($src, "agrupar(\$filas, 'FECHA_PAGO', 'IMPORTE_FOB_ARS')") !== false

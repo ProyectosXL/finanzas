@@ -257,3 +257,47 @@ chequear('el script siembra M = 3', true,
     strpos($srcSql, "''comex_bcra_antiguedad_max'', ''3'', ''INT''") !== false);
 chequear('y los iniciales del codigo son los mismos', [7, 3],
     [DolarFuturo::DIAS_BCRA_INICIAL, DolarFuturo::ANTIGUEDAD_BCRA_INICIAL]);
+
+/* ================================================================
+   LAS TRES PANTALLAS, UNA SOLA REGLA
+   ================================================================ */
+seccion('las tres pantallas valuan con la misma funcion y la misma regla');
+
+$srcComex = file_get_contents(__DIR__ . '/../Class/Comex.php');
+$srcCompras = file_get_contents(__DIR__ . '/../Class/Providers/ComprasProyectadasProvider.php');
+$srcDolar = file_get_contents(__DIR__ . '/../Class/DolarFuturo.php');
+
+chequear('Proveedores Exterior: Comex::valuar() con la regla', true,
+    strpos($srcComex, "self::valuar(\$row, \$curva, 'PENDIENTE_USD', 'FECHA_PAGO_EFECTIVA', \$bcra)")
+        !== false);
+chequear('Crono Nacionalizacion: Comex::valuar() con la regla', true,
+    strpos($srcComex, "self::valuar(\$row, \$curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA', \$bcra)")
+        !== false);
+chequear('Compras Proyectadas, el FOB: Comex::valuar() con la regla', true,
+    strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO', \$bcra)") !== false);
+chequear('Compras Proyectadas, la nacionalizacion: Comex::valuar() con la regla', true,
+    strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC', \$bcra)") !== false);
+chequear('las dos regla salen de DolarFuturo::bcra()', 2,
+    substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy);'));
+chequear('y la de Compras tambien', 1, substr_count($srcCompras, '$bcra = $dolar->bcra($h->hoy());'));
+
+/* Fuera de DolarFuturo, solo Comex::valuar() resuelve con la regla: nadie
+   mas en el modulo arma su propia version. TarjetasSocios llama a resolver()
+   para la curva y decide su proximo vencimiento aparte, a proposito. */
+$conRegla = [];
+
+foreach (glob(__DIR__ . '/../Class/{,Providers/}*.php', GLOB_BRACE) as $archivo) {
+    if (preg_match('/DolarFuturo::resolver\([^;]*\$bcra/s', file_get_contents($archivo))) {
+        $conRegla[] = basename($archivo);
+    }
+}
+
+chequear('solo Comex.php resuelve con la regla', ['Comex.php'], $conRegla);
+
+chequear('bcra() pide la punta VENDEDORA al leer la cotizacion', 1,
+    preg_match('/ultimaHasta\(\$hoy, Cotizacion::VENDEDOR\)/', $srcDolar));
+
+chequear('los avisos del dolar salen en las dos pestanas de Comex', 2,
+    substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel()'));
+chequear('y en Compras Proyectadas', 1,
+    substr_count($srcCompras, '$dolar->avisosDolarConNivel($h->hoy())'));

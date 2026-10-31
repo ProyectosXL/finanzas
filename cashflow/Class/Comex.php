@@ -626,6 +626,9 @@ class Comex {
      */
     public function avisosExteriorConNivel($filas) {
         $avisos = array_merge(
+            /* La curva que no esta al dia y el dolar BCRA viejo: los mismos
+               textos en las tres pantallas. Ver DolarFuturo. */
+            $this->dolarFuturo()->avisosDolarConNivel(),
             self::avisosValuacionConNivel($filas, $this->dolarFuturo()->ultimoMes(),
                 'PENDIENTE_USD'),
             /* Sin el eje: ninguna vencida entra en ninguna columna. Se informa
@@ -686,6 +689,7 @@ class Comex {
         }
 
         return array_merge(
+            $this->dolarFuturo()->avisosDolarConNivel(),
             self::avisosValuacionConNivel($estimadas, $this->dolarFuturo()->ultimoMes(),
                 'IMPORTE_EST', 'fecha de nacionalización'),
             self::avisosVencidosConNivel($proyectables, 'FECHA_SALDO_EFECTIVA', 'SALDO_ARS',
@@ -1564,8 +1568,11 @@ class Comex {
 
         $v = [];
 
-        // La curva se lee UNA vez para todo el listado, no una por fila.
+        // La curva se lee UNA vez para todo el listado, no una por fila. Y la
+        // regla del dolar BCRA, tambien: los pagos de los proximos dias van a
+        // dolar de hoy. Ver DolarFuturo.
         $curva = $this->dolarFuturo()->curva();
+        $bcra = $this->dolarFuturo()->bcra($hoy);
 
         /* Se resuelve UNA vez y no por fila: la existencia de la columna no
            cambia en medio de un listado, y tieneFechaPagoConf() haria una
@@ -1585,7 +1592,7 @@ class Comex {
                clase-, asi que la curva se aplica sobre PENDIENTE_USD y no sobre
                el FOB. */
             $row = self::conSaldo($row);
-            $row = self::valuar($row, $curva, 'PENDIENTE_USD');
+            $row = self::valuar($row, $curva, 'PENDIENTE_USD', 'FECHA_PAGO_EFECTIVA', $bcra);
 
             /* LAS OTRAS DOS VALUACIONES, con la MISMA cotizacion de la fila.
                Lo ya pagado y el FOB completo no entran a la proyeccion, pero
@@ -3313,8 +3320,9 @@ class Comex {
         $v = [];
 
         // La curva se lee UNA vez para todo el listado, no una por fila, igual
-        // que en getProveedoresExterior().
+        // que en getProveedoresExterior(). La regla del dolar BCRA, igual.
         $curva = $this->dolarFuturo()->curva();
+        $bcra = $this->dolarFuturo()->bcra($hoy);
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',
@@ -3341,8 +3349,9 @@ class Comex {
             /* EL GASTO ESTA EN DOLARES: se valua con la curva del mes de la
                fecha de NACIONALIZACION, que es cuando se mueve. IMPORTE_EST
                queda como esta -es el importe en dolares y la grilla lo
-               muestra-. */
-            $row = self::valuar($row, $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+               muestra-. Si se nacionaliza en los proximos dias, con dolar
+               BCRA: la fecha que decide es la misma. */
+            $row = self::valuar($row, $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA', $bcra);
 
             /* LA BASE, EL SALDO Y LO QUE APORTA A CADA SERIE, en una sola
                funcion pura: repartoNacionalizacion(). Sin pagos parciales da lo

@@ -151,6 +151,12 @@ class DolarFuturo {
     /** @var string|null Por que no se pudo leer la curva, si no se pudo */
     private $error = null;
 
+    /** @var array Cache de bcra(), indexado por hoy */
+    private $reglas = [];
+
+    /** @var array Cache de ultimoHabil(), indexado por hoy */
+    private $habiles = [];
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -311,6 +317,166 @@ class DolarFuturo {
         }
 
         return $ultima;
+    }
+
+    /**
+     * La regla del dolar BCRA de hoy: los dos parametros y la ultima
+     * cotizacion BCRA VENDEDORA publicada hasta hoy. Es lo que reciben
+     * resolver() y Comex::valuar().
+     *
+     * UNA LECTURA POR PEDIDO, cacheada por dia: la usan las filas de las dos
+     * pestanas de Comex y los meses de Compras Proyectadas, y la cotizacion es
+     * la misma para todos.
+     *
+     * NO LANZA, como curva(). Sin parametros usa los iniciales; sin la vista
+     * del BCRA deja la cotizacion en null y el motivo en 'error', y los pagos
+     * de los proximos dias quedan sin valuar con su aviso. Con N = 0 ni
+     * siquiera se pide la cotizacion: nadie la usa.
+     *
+     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy.
+     * @return array Lo que devuelve reglaBcra()
+     */
+    public function bcra($hoy = null) {
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        if (isset($this->reglas[$hoy])) {
+            return $this->reglas[$hoy];
+        }
+
+        $params = $this->parametrosBcra();
+        $dias = self::diasBcra($params[self::PARAM_DIAS_BCRA]);
+        $cotizacion = null;
+        $error = null;
+
+        if ($dias > 0) {
+            try {
+                require_once __DIR__ . '/Cotizacion.php';
+
+                $cotizacion = (new Cotizacion())->ultimaHasta($hoy, Cotizacion::VENDEDOR);
+            } catch (Throwable $e) {
+                $error = $e->getMessage();
+            }
+        }
+
+        $this->reglas[$hoy] = self::reglaBcra($hoy, $dias,
+            $params[self::PARAM_ANTIGUEDAD_BCRA], $cotizacion, $error);
+
+        return $this->reglas[$hoy];
+    }
+
+    /**
+     * El ultimo dia habil anterior o igual a hoy, segun RO_T_CALENDARIO con
+     * el respaldo de lunes a viernes. Es contra lo que se mide si la curva
+     * esta al dia.
+     *
+     * La direccion -hacia atras- es la de CronogramaPagos::habilAnterior(), y
+     * se usa esa: el calendario se lee con la misma puerta que el resto del
+     * modulo (Ventas::getDiasHabiles()). Si no se puede leer, el mapa vacio
+     * deja solo el respaldo de lunes a viernes; si ni asi aparece un habil,
+     * null, y no se avisa nada.
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return string|null 'Y-m-d'
+     */
+    public function ultimoHabil($hoy = null) {
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        if (array_key_exists($hoy, $this->habiles)) {
+            return $this->habiles[$hoy];
+        }
+
+        require_once __DIR__ . '/CronogramaPagos.php';
+
+        $mapa = [];
+
+        try {
+            require_once __DIR__ . '/Ventas.php';
+
+            $mapa = (new Ventas())->getDiasHabiles(
+                date('Y-m-d', strtotime($hoy . ' -' . CronogramaPagos::MAX_CORRIMIENTO . ' days')),
+                $hoy);
+        } catch (Throwable $e) {
+            $mapa = [];
+        }
+
+        try {
+            $this->habiles[$hoy] = CronogramaPagos::habilAnterior($hoy, $mapa)['fecha'];
+        } catch (Throwable $e) {
+            $this->habiles[$hoy] = null;
+        }
+
+        return $this->habiles[$hoy];
+    }
+
+    /**
+     * Los avisos del dolar que no dependen de las filas: la curva que no esta
+     * al dia, la cotizacion BCRA vieja y la que no se pudo leer.
+     *
+     * UN SOLO TEXTO PARA LAS TRES PANTALLAS Y EL TABLERO: lo emiten
+     * Comex::avisosExteriorConNivel(), avisosNacionalizacionConNivel() y
+     * ComprasProyectadasProvider, y la pestana saca los repetidos comparando
+     * el texto.
+     *
+     * La curva que no se pudo leer NO esta aca: es critica y la dice
+     * Comex::avisoSinCurva(). Cuantos pagos quedaron sin BCRA tampoco: eso es
+     * de las filas, y lo cuenta Comex::avisosValuacionConNivel().
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosDolarConNivel($hoy = null) {
+        require_once __DIR__ . '/Aviso.php';
+
+        $regla = $this->bcra($hoy);
+        $avisos = [];
+
+        if ($this->disponible()) {
+            $avisos[] = self::avisoCurvaDesactualizada($this->actualizada(),
+                $this->ultimoHabil($hoy), $regla);
+        }
+
+        $avisos[] = self::avisoBcraVieja($regla);
+
+        /* El motivo tecnico va aparte y en atencion: lo que no se pudo valuar
+           por esto ya lo cuenta, critico, el aviso de las filas. */
+        if ($regla['error'] !== null) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer el dólar BCRA para los pagos '
+                . 'de los próximos ' . $regla['dias'] . ' días: ' . $regla['error']);
+        }
+
+        return array_values(array_filter($avisos));
+    }
+
+    /**
+     * Los dos parametros de la regla, tal como estan en la base. Sin la fila
+     * -no se corrio el script- o sin poder leerla, null: reglaBcra() pone el
+     * inicial. El aviso de que falta el script va solo en Parametros.
+     *
+     * @return array [PARAM_DIAS_BCRA => mixed, PARAM_ANTIGUEDAD_BCRA => mixed]
+     */
+    private function parametrosBcra() {
+        $out = [self::PARAM_DIAS_BCRA => null, self::PARAM_ANTIGUEDAD_BCRA => null];
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return $out;
+        }
+
+        $stmt = @sqlsrv_query($cid,
+            "SELECT CLAVE, VALOR FROM RO_T_CASHFLOW_PARAMETROS WHERE CLAVE IN (?, ?)",
+            [self::PARAM_DIAS_BCRA, self::PARAM_ANTIGUEDAD_BCRA]);
+
+        if ($stmt === false) {
+            return $out;
+        }
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $out[$row['CLAVE']] = $row['VALOR'];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $out;
     }
 
     /* ====================================================================

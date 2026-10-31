@@ -166,6 +166,10 @@ class ComprasProyectadasProvider extends CashflowProvider {
             return $this->seriesVacias();
         }
 
+        /* La curva que no esta al dia y el dolar BCRA viejo: el mismo texto
+           que las dos pestanas de Comex. */
+        $this->avisarTodos($dolar->avisosDolarConNivel($h->hoy()));
+
         /* Sin la tabla de pagos de Comex se descuenta de mas y se proyecta de
            MENOS: critico. Sin la tabla de ajustes solo se apaga la edicion:
            atencion, alguien tiene que correr el script. */
@@ -276,6 +280,11 @@ class ComprasProyectadasProvider extends CashflowProvider {
 
         $curva = $dolar->curva();
 
+        /* La regla del dolar BCRA: el mes cuyo pago -o nacionalizacion- cae en
+           los proximos dias, o ya paso, va a dolar de hoy. La misma de las dos
+           pestanas de Comex. Ver DolarFuturo. */
+        $bcra = $dolar->bcra($h->hoy());
+
         /* --- La ventana, derivada del eje y de los parametros ------------- */
         $ventana = ComprasProyectadas::ventana(
             substr($h->hoy(), 0, 7),
@@ -327,17 +336,19 @@ class ComprasProyectadasProvider extends CashflowProvider {
             /* DOS LLAMADAS Y NO UNA, con los resultados guardados en campos
                propios: Comex::valuar() escribe siempre sobre COTIZ_USD e
                IMPORTE_ARS, asi que la segunda pisaria a la primera. */
-            $vFob = Comex::valuar($fila, $curva, 'FOB_USD', 'FECHA_PAGO');
-            $vNac = Comex::valuar($fila, $curva, 'NAC_USD', 'FECHA_NAC');
+            $vFob = Comex::valuar($fila, $curva, 'FOB_USD', 'FECHA_PAGO', $bcra);
+            $vNac = Comex::valuar($fila, $curva, 'NAC_USD', 'FECHA_NAC', $bcra);
 
             $fila['COTIZ_FOB'] = $vFob['COTIZ_USD'];
             $fila['COTIZ_FOB_ORIGEN'] = $vFob['COTIZ_ORIGEN'];
             $fila['COTIZ_FOB_DETALLE'] = $vFob['COTIZ_DETALLE'];
+            $fila['COTIZ_FOB_BCRA_FECHA'] = $vFob['COTIZ_BCRA_FECHA'];
             $fila['IMPORTE_FOB_ARS'] = $vFob['IMPORTE_ARS'];
 
             $fila['COTIZ_NAC'] = $vNac['COTIZ_USD'];
             $fila['COTIZ_NAC_ORIGEN'] = $vNac['COTIZ_ORIGEN'];
             $fila['COTIZ_NAC_DETALLE'] = $vNac['COTIZ_DETALLE'];
+            $fila['COTIZ_NAC_BCRA_FECHA'] = $vNac['COTIZ_BCRA_FECHA'];
             $fila['IMPORTE_NAC_ARS'] = $vNac['IMPORTE_ARS'];
 
             $filas[] = $fila;
