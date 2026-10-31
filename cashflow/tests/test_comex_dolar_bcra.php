@@ -240,3 +240,20 @@ chequear('actualizada hoy mismo: no avisa', false,
     DolarFuturo::curvaDesactualizada('2026-11-03 08:00:00', $habil));
 chequear('sin fecha de actualizacion no se afirma nada', false,
     DolarFuturo::curvaDesactualizada(null, $habil));
+
+seccion('el servidor valida al guardar, no solo el JavaScript');
+
+$srcParam = file_get_contents(__DIR__ . '/../Class/Parametros.php');
+chequear('saveParametro() pasa los dos por DolarFuturo::validarParametro()', true,
+    strpos($srcParam, '$clave === DolarFuturo::PARAM_DIAS_BCRA || $clave === '
+        . 'DolarFuturo::PARAM_ANTIGUEDAD_BCRA') !== false
+    && strpos($srcParam, '$valor = DolarFuturo::validarParametro($clave, $valor);') !== false);
+
+$srcSql = file_get_contents(__DIR__ . '/../sql/cashflow_comex_dolar_bcra.sql');
+chequear('el script siembra N = 7 en Compras Exterior', true,
+    strpos($srcSql, "''comex_dias_bcra'', ''7'', ''INT''") !== false
+    && strpos($srcSql, "''GENERAL'', ''COMPRAS_PROY''") !== false);
+chequear('el script siembra M = 3', true,
+    strpos($srcSql, "''comex_bcra_antiguedad_max'', ''3'', ''INT''") !== false);
+chequear('y los iniciales del codigo son los mismos', [7, 3],
+    [DolarFuturo::DIAS_BCRA_INICIAL, DolarFuturo::ANTIGUEDAD_BCRA_INICIAL]);

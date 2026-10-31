@@ -420,9 +420,10 @@ foreach (array_keys(ComprasProyectadasProvider::DEFAULTS) as $clave) {
 
 /* Cada campo VALIDA ANTES DE MANDAR, con su rango: un dia 45 o un porcentaje
    negativo son numeros validos para la base y producen una proyeccion que no
-   significa nada. */
+   significa nada. Son los siete de la proyeccion y los dos del dolar BCRA de
+   Comercio Exterior (sql/cashflow_comex_dolar_bcra.sql). */
 chequear('cada parametro declara su rango',
-    7, preg_match_all('/min:\s*-?\d+,\s*max:\s*\d+/', $srcParamJs)
+    9, preg_match_all('/min:\s*-?\d+,\s*max:\s*\d+/', $srcParamJs)
      + preg_match_all("/tipo:\s*'opciones'/", $srcParamJs));
 
 chequear('y se valida contra ese rango antes de guardar',
