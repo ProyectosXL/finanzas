@@ -50,8 +50,10 @@ Todos contra `central`, reejecutables, y ninguno borra nada.
 | 2 | `sql/cashflow_tarjetas_facturas.sql` | Crea `RO_T_CASHFLOW_TARJETAS_FACTURA` y `RO_T_CASHFLOW_TARJETAS_FACTURA_EXCLUIDA` | Pagos Corporativos **se lee igual** —las facturas salen de Tango— pero no se puede vincular ni excluir ninguna: los botones de la barra se dibujan apagados nombrando el archivo, no hay cobertura y nadie está excluido |
 | 4 | `sql/cashflow_tarjetas_vto_mensual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_FACTURA_VTO` (el vencimiento corregido de una cuota) y `RO_T_CASHFLOW_TARJETAS_MENSUAL` (las facturas marcadas como mensuales). **Corta si falta el 1**: la segunda tiene una FK contra el maestro | Pagos Corporativos se lee igual: los controles de **corregir el vencimiento** y **marcar mensual** se dibujan apagados nombrando el archivo, todas las cuotas usan el vencimiento de Tango y no hay estimaciones. El tablero no cambia |
 | 3 | `sql/cashflow_tarjetas_fila.sql` | Crea la fila `TARJETAS_PAGOS` en *Costos Indirectos*, orden 45, apuntada a `TARJETAS` / `TOTAL` | **El tablero queda exactamente como hoy** y no falta nada, porque hasta hoy esta plata no estaba en el cuadro. La pestaña funciona igual y avisa que lo que muestra todavía no llega al tablero |
+| 5 | `sql/cashflow_tarjetas_resumen_compartido.sql` | Crea `RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA`: las tarjetas **adicionales** de un resumen compartido. **No migra nada**: los resúmenes que ya están son de una tarjeta, que es su titular | Todo funciona igual, con resúmenes de una sola tarjeta. En el formulario no aparece la lista de tarjetas, y el servidor rechaza un resumen de varias nombrando el script |
+| 6 | `sql/cashflow_tarjetas_historico_manual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_HIST_MANUAL`: el histórico de 3 meses de quien tiene tarjeta Supervisora y no carga gastos | Esas personas aparecen en Gastos Supervisoras sin proyección, y no hay botón para cargarles el histórico. El tablero no cambia |
 
-El **2 y el 4 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero.
+El **2, el 4 y el 5 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero. **El 5 y el 6 son de `feature/tarjetas-resumenes-seguros`** y se corren después de los anteriores, en cualquier orden entre ellos.
 
 **La vista `RO_V_CASHFLOW_USUARIOS_TARJETAS` no la crea ningún script de este repo.** Ya existe y se mantiene aparte. El script 1 sólo verifica que esté con `OBJECT_ID` y avisa si falta; la pantalla hace lo mismo y se dibuja apagada en vez de fallar.
 
@@ -61,6 +63,17 @@ El **2 y el 4 dependen del 1** (tienen una FK contra el maestro) y cortan con un
 - Para las de tipo **SUPERVISORA**, el nombre del usuario tiene que coincidir con el de la supervisora en `RO_T_SUPERVISORAS_COMERCIAL`: es por nombre que se asocian. Ver la sección 3.
 - **Vincular las facturas corporativas** a su tarjeta. Desde `feature/cronogramas-tarjetas-corporativas`, **ninguna factura sin tarjeta entra al flujo**, vencida o no (ver la sección 4).
 - Verificar que **ninguna fila activa de Proveedores Locales** use `PAGOS_TODO` ni `PAGOS_FUERA_CRONOGRAMA`. Las dos incluyen las facturas de tarjeta corporativa, que desde el script 3 entran por acá: el mismo peso se contaría dos veces. El script lo verifica e imprime el resultado. Ver la sección 7.
+
+### Los datos que hay que cargar el mismo día del pase (`feature/tarjetas-resumenes-seguros`)
+
+Lo que falte cargar **no rompe nada**, pero deja plata fuera del tablero. Cada fila dice qué pasa si falta.
+
+| Qué | Dónde | Si falta |
+| --- | --- | --- |
+| **La tarjeta Supervisora de quien no carga gastos** (Johanna) y su **histórico manual** de 3 meses | *Parámetros › Tarjetas* y el botón ↺ de su fila en Gastos Supervisoras | Aparece en la grilla sin proyección (`SIN_HISTORICO`) y un aviso la nombra. Su gasto no entra al tablero |
+| **Los resúmenes compartidos**: volver a cargar como uno solo los de las tarjetas adicionales de una misma cuenta (hoy las 6 supervisoras y las corporativas 7 y 8 son del banco 025 y vencen el 5) | El formulario de resumen, eligiendo todas y la titular | Cada resumen cargado por separado sigue valiendo en su tarjeta, como hasta hoy. Si el banco manda uno solo y está cargado entero en cada tarjeta, se cuenta una vez por tarjeta |
+
+> Las secciones de **Tarjetas Socios por banco** y **Seguros** se completan en sus etapas.
 
 ---
 
@@ -96,6 +109,35 @@ La misma tarjeta puede tener consumos en pesos y en dólares, así que la moneda
 ### Un resumen no puede ser cero ni negativo
 
 Los dos importes son opcionales —al menos uno tiene que estar— pero cuando están, son `> 0`. Un cero no se distingue de un campo vacío, que ya significa *"ese mes no hubo consumos en esa moneda"*. Y un negativo —un saldo a favor— **convertiría un `EGRESO` del tablero en un ingreso que nadie afirmó**, en una fila cuyo `TIPO` es `EGRESO`. Si algún día hay que modelarlo, es una decisión y no una carga.
+
+### El formulario de carga
+
+> Desde `feature/tarjetas-resumenes-seguros`. Antes un resumen se cargaba como una línea con separadores (`2026-10 | 450000 |  | 2026-10-12`), y un `|` de más corría todos los campos.
+
+Se abre desde el mismo lugar —el ícono de resúmenes de la fila de la tarjeta, y *Cargar resumen* en el historial— y viene con esa tarjeta elegida. Los campos van separados: **período** (selector de mes), **importe en $**, **importe en U$S**, **vencimiento** y **observación**.
+
+- Lo arma `Notificacion.formulario()` (`Js/notificaciones.js`), que sirve para cualquier diálogo con campos tipados y para una **grilla de N renglones**. Marca el campo que está mal y no cierra; **la validación que vale sigue siendo la del servidor**, con las mismas reglas de siempre.
+- **Los importes se escriben con el formato del módulo** —`1.234.567,89`— y se convierten a número antes de viajar (`Notificacion.importe.parsear()`). Al salir del campo se reescriben con ese formato, así se ve el número que se va a guardar. Sin coma, un punto con uno o dos dígitos al final es decimal (`320.50`) y los grupos de tres son miles (`1.500`). Lo prueba `tests/js/importe_formulario.wsf` con cscript.
+- La **base histórica** es el mismo formulario como grilla de 3 renglones (ver la sección 5), y el **histórico manual** de Gastos Supervisoras también (ver la sección 3).
+
+### Un resumen para varias tarjetas
+
+> Desde `feature/tarjetas-resumenes-seguros`. Script: `sql/cashflow_tarjetas_resumen_compartido.sql`.
+
+Las **tarjetas adicionales de una misma cuenta** —mismo banco, mismo vencimiento— reciben **un solo resumen** del banco. Cargarlo en cada tarjeta lo contaría una vez por tarjeta; cargarlo en una sola dejaría a las otras proyectando su estimación arriba de un resumen que ya las incluye.
+
+En el formulario, en una tarjeta Supervisora o Corporativa, se eligen **varias tarjetas, de los dos tipos mezclados**, y se marca **la titular**.
+
+| | Cómo es |
+| --- | --- |
+| **El modelo** | `RO_T_CASHFLOW_TARJETAS_RESUMEN.ID_TARJETA` es la **titular**. Las **adicionales** van en `RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA`, con el `MES` copiado para que el índice único filtrado `(ID_TARJETA, MES) WHERE VIGENTE = 1` diga *"una tarjeta, un resumen por mes"*. **Los resúmenes que ya estaban no se migran**: son de una tarjeta, que es su titular |
+| **Qué valida el servidor** | `TarjetasResumen::validarTarjetas()`: **mismo banco y mismo día de vencimiento**, sólo Supervisora y Corporativa, **todas activas**, y la titular entre las elegidas. Con una sola tarjeta es el resumen de siempre, de cualquier tipo. Y que ninguna de las tarjetas esté ya en **otro** resumen de ese mes: si están en uno, se corrige ese; si están en dos distintos, se rechaza, porque juntarlos sería decidir cuál importe vale |
+| **Cómo se lee** | `vigentes()` devuelve el mismo resumen **en cada tarjeta que incluye**, con `ES_TITULAR` (`TarjetasResumen::conCompartidos()`) |
+| **Pisa la estimación de todas** | En Supervisoras reemplaza la parte tarjeta; en Corporativas cubre las facturas vinculadas, las estimaciones y la cobertura de esas tarjetas en ese mes. Es la misma regla de un resumen de una tarjeta, porque las reglas leen el mismo mapa |
+| **Suma una sola vez** | En la serie de la **titular** (`SUPERVISORAS` o `CORPORATIVAS`). En la otra sub-pestaña se ve **informativo**: `tarjetaDelMes()` devuelve `RESUMEN_COMPARTIDO` sin proyectar y `resumenesAProyectar()` lo lista sin entrar. El invariante del tablero no se toca, y la prueba lo fija con un compartido adentro |
+| **Cómo se ve** | En la fila de cada tarjeta incluida, una marca *"compartido 2026-11"* —*"· no suma acá"* en las que no son titular— con el tooltip *"Resumen compartido con: … Se proyecta una sola vez, en <sub-pestaña de la titular>"* (`TarjetasResumen::notaCompartido()`). En *Cobertura y resúmenes* aparece como *Resumen compartido*, y en el historial de cada tarjeta incluida, con las tarjetas que incluye |
+| **La baja** | Lo saca **de todas a la vez**: el resumen y sus adicionales, en una transacción. Corregirlo puede cambiar la titular y las adicionales; las que salen quedan de baja, con quién y cuándo |
+| **La base histórica** | Es de una tarjeta. Una adicional no recibe base propia en un mes que ya cubre un compartido |
 
 ---
 
@@ -229,6 +271,35 @@ Hoy es el caso de **JULIETA DALMEIDA**: activa, con su último gasto el 11/03/20
 **Sin tarjeta, la parte tarjeta no entra al tablero** y se avisa con el importe. Sin tarjeta no hay día de vencimiento, y no se inventa una fecha. La parte en efectivo entra igual.
 
 > Al 26/09/2026, con ninguna tarjeta cargada: seis supervisoras proyectan **$ 1.537.183,69** de efectivo y quedan **$ 60.118.164,98** de parte tarjeta fuera del tablero.
+
+### Quien tiene tarjeta Supervisora y no carga gastos: el histórico manual
+
+> Desde `feature/tarjetas-resumenes-seguros`.
+
+El universo eran **los nombres con gastos en la ventana**. Una persona de la vista de usuarios con una tarjeta de tipo Supervisora que no carga gastos en la app de supervisión —alguien del equipo de ventas— no tenía fila, y su gasto no estaba en ningún lado.
+
+**Ahora cada tarjeta Supervisora activa sin gastos en la ventana genera su fila.** Sin histórico, la fila dice `SIN_HISTORICO` —*"no carga gastos: cargale el histórico"*—, queda en blanco y no en cero, y tiene el botón ↺ para cargarlo.
+
+**El histórico manual** son 3 meses cerrados con su importe, en una grilla de 3 renglones que arranca con los meses de la ventana (`RO_T_CASHFLOW_TARJETAS_HIST_MANUAL`, `TarjetasHistManual`). Con él se proyecta **igual que una supervisora** (`TarjetasSupervisoras::promedioManual()`):
+
+| | Regla |
+| --- | --- |
+| Promedio | Suma de los 3 meses **÷ 3**, también con un mes en cero: un mes sin gastos es un dato |
+| Proporción | **Todo tarjeta**: no hay parte en efectivo |
+| Mes base | **El último mes cargado**, y la inflación **compuesta** desde el siguiente. `estimar()` resuelve un factor por mes base, porque los gastos están en moneda del último mes de la ventana |
+| Débito | El vencimiento de **su tarjeta**, con su % de cobertura. El resumen cargado lo pisa |
+
+- **La persona es el `ID_USUARIO` de la vista**, el de su tarjeta, y **no** se cruza contra `RO_T_SUPERVISORAS_COMERCIAL`: quien carga un histórico justamente no está ahí. Para cargarlo el servidor exige que esté en la vista y que tenga una tarjeta Supervisora activa.
+- **Mandan los gastos.** Si la persona empieza a tener gastos en la ventana, el histórico deja de usarse —no se suman: serían el mismo gasto dos veces— y un aviso **informativo** lo dice. El histórico queda vigente, como historia.
+- **Volver a cargarlo** da de baja el anterior y graba el nuevo, en una transacción. Las validaciones son del servidor (`TarjetasHistManual::validar()`): exactamente 3 meses distintos y anteriores al mes en curso, importe obligatorio y ≥ 0, y que no sumen cero.
+
+### Una tarjeta Supervisora activa cuenta como activa
+
+Quien **no está** en `RO_T_SUPERVISORAS_COMERCIAL` pero tiene una tarjeta Supervisora **activa** se trata como activa (`TarjetasSupervisoras::estadosConTarjeta()`). La tarjeta se da de alta contra la vista de usuarios activos, y eso es saber que trabaja. Sin esta regla, alguien del equipo de ventas que empieza a cargar gastos quedaría `SIN_SUPERVISORA` y dejaría de proyectar justo cuando mandan los gastos.
+
+**Quien sí está en el maestro sigue su estado de allá**: una inactiva en el maestro dejó de trabajar, aunque su tarjeta siga activa.
+
+El aviso de *"supervisoras activas sin gastos en la ventana"* ya no nombra a quien tiene fila por su tarjeta: su fila dice qué hacer.
 
 ---
 
@@ -380,6 +451,10 @@ Y es la regla **contraria** a Gastos Supervisoras. No es una inconsistencia: son
 Dividir por tres con dos resúmenes afirmaría que ese mes no hubo gastos —algo que nadie dijo— y proyectaría de menos. Con menos de tres se promedia lo que hay **y se avisa**. Sin ninguno: `null` y el aviso dice *"cargá la base histórica"*.
 
 > **Un resumen sin importe en una moneda sí cuenta como cero en esa moneda.** El resumen existe y no tuvo consumos en dólares ese mes: eso es un dato, y es distinto de que el resumen falte.
+
+### La base histórica se carga en una grilla de tres renglones
+
+Desde `feature/tarjetas-resumenes-seguros` la base es una grilla de **exactamente 3 renglones** —período, $, U$S, vencimiento— y **el servidor exige los tres** (`TarjetasResumen::validarBase()`): con dos la tarjeta estimaría un promedio distinto sin que nadie se entere. Sigue entrando en una sola transacción.
 
 ### La inflación ajusta sólo el componente en pesos
 
@@ -576,6 +651,9 @@ php cashflow/tests/run.php tarjetas      los cinco archivos del módulo
 | `tests/test_tarjetas_supervisoras.php` | El efectivo en **los lunes del mes** —quintos en un mes de cinco, cuartos en uno de cuatro, sin cambiar la parte cuando los primeros ya pasaron—; la **ventana dinámica** —incluido el cruce de año y que no se mueva dentro del mes—, que **siempre se divida por 3**, la proporción de la ventana, la inflación compuesta con un mes faltante, los cuatro motivos para no proyectar, el **reparto en 2 pagos** con el que cae hoy y el que ya pasó, que el **resumen pise importe y fecha**, que un **resumen pagado salga del horizonte**, y que sin tarjeta no se invente una fecha |
 | `tests/test_tarjetas_corporativas.php` | Que **una no vinculada no suma**, vencida o no, y que no haya aviso de doble conteo; el **vencimiento corregido** reemplazando al de Tango en vencida, reubicación, cobertura y resumen, que deshacer vuelva al de Tango, que sea **por cuota**, la **fecha mínima hoy** y la **corrección inerte** con su aviso; la **estimación mensual** desde el mes siguiente, con el **día acotado** en meses cortos y sin correr al hábil, **reemplazada por la factura real** del mismo proveedor y mes, **cubierta por resumen**, con **cobertura**, sin tarjeta activa, con la factura de origen ya pagada y **una por proveedor**; y que **lea el `FECHA_VTO` de Tango** y no la fecha que reubica el cronograma de Proveedores Locales. Además: el universo por forma vigente, que **lo vencido no se apile en el día uno**, la reubicación al próximo pago, que una vencida sin vincular no proyecte, que la **exclusión saque de la serie y no del universo**, la **cobertura sobre las vinculadas** —y no sobre las que no suman—, que el **resumen reemplace facturas y cobertura**, que las **no vinculadas sigan sumando con aviso**, y el próximo pago mirando resúmenes y estimaciones |
 | `tests/test_tarjetas_socios.php` | La base de 3 resúmenes y que **se divida por los que hay**, que la **inflación no toque el componente en U$S**, la **regla BCRA para el próximo y futuro para los siguientes**, que un resumen del mes en curso sea el próximo pago, que un pagado salga del horizonte, que sin cotización quede en `null`, y que el **total no sume un `null` como cero** |
+| `tests/test_tarjetas_formulario.php` | El **formato de los importes** (`1.234.567,89`, `1.500`, `320.50`, vacío es `null`) con cscript; la **base histórica de exactamente 3 renglones** validada en el servidor —dos o cuatro rechazados, el renglón con error nombrado, mes repetido, fecha que no existe—; las validaciones del resumen suelto; y que la pantalla ya no parta una línea por `|` |
+| `tests/test_tarjetas_compartido.php` | Que las tarjetas de **distinto banco o distinto día** se rechacen, también un socio, una de baja o sin titular; que el resumen aparezca en **todas** las tarjetas que incluye y sea titular en una; que **pise la estimación** de la supervisora adicional y cubra las facturas de la corporativa adicional, sin cobertura aparte; que **sume una sola vez**, en la serie de la titular, con el **invariante** adentro; y el script |
+| `tests/test_tarjetas_hist_manual.php` | Los **3 meses cerrados** validados en el servidor; el promedio **sobre 3**, todo tarjeta, con el mes base en el último cargado; la **inflación compuesta** desde ahí y el mes sin inflación en `null`; el **débito en su tarjeta** con su cobertura, y el resumen que lo pisa; quién entra a la grilla —con histórico, sin histórico— y que **manden los gastos**; que una **tarjeta Supervisora activa** cuente como activa a quien no está en el maestro, pero no a una inactiva del maestro; y el script |
 | `tests/test_tarjetas_provider.php` | **`TOTAL = SUPERVISORAS + CORPORATIVAS + SOCIOS` columna por columna**, también con **estimaciones mensuales** adentro y su celda anotada, que las excluidas no entren al total, los importes en positivo, que el eje ubique cada pago, el `detalle` de las celdas con resumen —y que **sobreviva a `normalizar()`**—, que dos resúmenes en la misma columna **junten sus notas**, los casos de fila en cero **con su aviso**, y que un módulo que lanza **no tumbe el tablero** |
 | `tests/test_menu.php` | Que `pagos_tarjetas` **dejó de ser un placeholder**, que el menú la declara con datos, que las otras dos de Financiero siguen pendientes y que la categoría pasa a **1 de 3** |
 | `tests/test_providers.php` | **19 módulos** con datos reales (eran 18), que `FINANCIERO` **no se tocó** y que el total declara sus tres componentes |
@@ -603,6 +681,7 @@ Class/
   TarjetasExclusion.php        la exclusión por factura, de esta pestaña
   TarjetasFacturaVto.php       el vencimiento corregido de una cuota
   TarjetasMensual.php          las facturas marcadas como mensuales
+  TarjetasHistManual.php       el histórico manual de quien no carga gastos
   GastosSupervision.php        los gastos autorizados y el maestro de supervisoras
   PagosTarjetas.php            el armador: lee una vez y arma las tres sub-pestañas
   Inflacion.php                + compuesta(), compuestaParaMeses() y avisoFaltan()
@@ -630,8 +709,14 @@ sql/
   cashflow_tarjetas_facturas.sql
   cashflow_tarjetas_fila.sql
   cashflow_tarjetas_vto_mensual.sql
+  cashflow_tarjetas_resumen_compartido.sql
+  cashflow_tarjetas_historico_manual.sql
 
 tests/
+  js/importe_formulario.wsf
+  test_tarjetas_formulario.php
+  test_tarjetas_compartido.php
+  test_tarjetas_hist_manual.php
   test_tarjetas_vencimiento.php
   test_tarjetas_maestro.php
   test_tarjetas_supervisoras.php
