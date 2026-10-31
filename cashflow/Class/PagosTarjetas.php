@@ -13,6 +13,7 @@ require_once __DIR__ . '/TarjetasCorporativas.php';
 require_once __DIR__ . '/TarjetasSocios.php';
 require_once __DIR__ . '/GastosSupervision.php';
 require_once __DIR__ . '/TarjetasHistManual.php';
+require_once __DIR__ . '/TarjetasProvProyecta.php';
 require_once __DIR__ . '/CronogramaDatos.php';
 require_once __DIR__ . '/Inflacion.php';
 require_once __DIR__ . '/DolarFuturo.php';
@@ -76,6 +77,9 @@ class PagosTarjetas {
     /** @var GastosSupervision */
     private $gastos;
 
+    /** @var TarjetasProvProyecta Los proveedores que proyectan */
+    private $provProyecta;
+
     /** @var TarjetasHistManual El historico de quien no carga gastos */
     private $histManual;
 
@@ -97,6 +101,7 @@ class PagosTarjetas {
         $this->mensual = new TarjetasMensual();
         $this->gastos = new GastosSupervision();
         $this->histManual = new TarjetasHistManual();
+        $this->provProyecta = new TarjetasProvProyecta();
         $this->cronograma = new CronogramaDatos();
         $this->inflacion = new Inflacion();
     }
@@ -135,6 +140,7 @@ class PagosTarjetas {
                 'exclusion' => $this->exclusion->tablaCreada(),
                 'factura_vto' => $this->vtoEdit->tablaCreada(),
                 'mensual' => $this->mensual->tablaCreada(),
+                'prov_proyecta' => $this->provProyecta->tablaCreada(),
                 'gastos' => $this->gastos->tablaCreada(),
                 'historico_manual' => $this->histManual->tablaCreada(),
                 'vista_usuarios' => $this->tarjetas->vistaUsuariosCreada()
@@ -660,29 +666,35 @@ class PagosTarjetas {
             $r['filas'][$i]['EXCLUSION_FECHA'] = isset($excluidas[$c]) ? $excluidas[$c]['FECHA_ALTA'] : null;
         }
 
-        /* LAS ESTIMACIONES MENSUALES: las facturas marcadas como abono, mes por
-           mes desde el siguiente al de su vencimiento. Se comportan como una
-           factura vinculada -cobertura y resumen- y se apagan solas en el mes en
-           que aparece la factura real del proveedor. Ver
-           TarjetasCorporativas::estimaciones(). */
-        $mensuales = $this->leer(function () { return $this->mensual->vigentes(); },
-            'las estimaciones mensuales', $salida['avisos'], []);
-        $porCuota = [];
-
-        foreach ($mensuales as $m) {
-            $porCuota[TarjetasCorporativas::claveCuota($m)] = $m;
-        }
+        /* LAS ESTIMACIONES POR PROVEEDOR: las facturas del ultimo mes de cada
+           proveedor que proyecta se repiten hasta el fin del horizonte. Se
+           comportan como una factura vinculada -cobertura y resumen-. Desde
+           feature/tarjetas-resumenes-seguros reemplazan a las marcas mensuales,
+           que quedan como historial. Ver
+           TarjetasCorporativas::estimacionesPorProveedor(). */
+        $marcados = $this->leer(function () { return $this->proveedoresQueProyectan(); },
+            'los proveedores que proyectan', $salida['avisos'], []);
 
         foreach ($r['filas'] as $i => $f) {
-            $m = isset($porCuota[$f['CLAVE_CUOTA']]) ? $porCuota[$f['CLAVE_CUOTA']] : null;
-            $r['filas'][$i]['MENSUAL'] = ($m !== null);
-            $r['filas'][$i]['MENSUAL_ID'] = ($m === null) ? null : $m['ID'];
+            $r['filas'][$i]['PROVEEDOR_PROYECTA'] = isset($marcados[$f['COD_PROVEE']]);
         }
 
-        $salida['estimaciones'] = TarjetasCorporativas::estimaciones($mensuales, $r['filas'],
-            $tarjetas, $resumenes, $meses, $hoy);
+        $ep = TarjetasCorporativas::estimacionesPorProveedor($marcados, $r['filas'], $tarjetas,
+            $resumenes, $habiles, $meses, $hoy);
+        $salida['estimaciones'] = $ep['estimaciones'];
+        $salida['proveedores_proyectan'] = array_values($marcados);
+
+        foreach ($ep['faltan_calendario'] as $m) {
+            if (!in_array($m, $r['faltan_calendario'], true)) {
+                $r['faltan_calendario'][] = $m;
+            }
+        }
 
         foreach (TarjetasCorporativas::avisosEstimaciones($salida['estimaciones']) as $a) {
+            $salida['avisos'][] = $a;
+        }
+
+        foreach (TarjetasCorporativas::avisosPorProveedor($marcados, $r['filas']) as $a) {
             $salida['avisos'][] = $a;
         }
 
@@ -780,6 +792,20 @@ class PagosTarjetas {
         }
 
         return null;
+    }
+
+    /**
+     * Los proveedores que proyectan: Mapa COD_PROVEE => fila.
+     *
+     * Es una costura, como TarjetasProvider::modulo(): lo que este metodo
+     * devuelve decide cuanto se estima, y medir el tablero con otra lista -por
+     * ejemplo, con los proveedores de las marcas mensuales viejas- no tiene que
+     * pasar por escribir en la base.
+     *
+     * @return array
+     */
+    protected function proveedoresQueProyectan() {
+        return $this->provProyecta->vigentes();
     }
 
     /* ====================================================================

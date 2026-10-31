@@ -3,6 +3,7 @@
 require_once __DIR__ . '/TarjetasVencimiento.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/ProveedoresCategorias.php';
+require_once __DIR__ . '/Inflacion.php';
 
 /**
  * TarjetasCorporativas
@@ -980,6 +981,202 @@ class TarjetasCorporativas {
         }
 
         return $v;
+    }
+
+    /* ====================================================================
+       LA PROYECCION POR PROVEEDOR
+
+       Desde feature/tarjetas-resumenes-seguros reemplaza a "marcar mensual":
+       en Parametros -> Tarjetas se marcan PROVEEDORES, y sus facturas se repiten
+       hacia adelante. RO_T_CASHFLOW_TARJETAS_MENSUAL queda como historial y deja
+       de leerse.
+       ==================================================================== */
+
+    /**
+     * Las estimaciones de los proveedores que proyectan.
+     *
+     * LA REGLA
+     * --------
+     * Para cada proveedor marcado:
+     *
+     *   1. SU ULTIMO MES es el mes del vencimiento vigente -el corregido si lo
+     *      hay- mas tardio entre sus facturas pendientes VINCULADAS a una
+     *      tarjeta, excluidas incluidas. Una sin vincular no cuenta: no suma, asi
+     *      que no duplica nada, y se avisa aparte. Una excluida si cuenta: corta
+     *      la repeticion de las anteriores, aunque ella no se repita.
+     *
+     *   2. SE REPITEN LAS FACTURAS DE ESE MES, vinculadas y no excluidas: cada una
+     *      con su importe de cuota (IMPORTE_VTO, sin inflacion) y su tarjeta,
+     *      todos los meses DESPUES DE SU MES DE PAGO y hasta el fin del
+     *      horizonte, en el vencimiento de su tarjeta. Las de meses anteriores
+     *      cuentan solo en su mes: por eso cuando se carga la factura de
+     *      noviembre deja de repetirse la de octubre, y el abono no se duplica.
+     *
+     *   3. UNA FACTURA QUE SE CANCELA SALE DE PENDIENTES, y con ella sus
+     *      estimaciones. Entre el pago de una y la carga de la siguiente puede no
+     *      haber proyeccion: es lo esperado.
+     *
+     * Cada mes estimado se comporta como una factura vinculada: CUBIERTA si la
+     * tarjeta tiene resumen ese mes, PASADA si la fecha es hoy o antes, y
+     * SIN_TARJETA si la tarjeta esta inactiva o dejo de ser corporativa.
+     *
+     * DEVUELVE LA MISMA FORMA QUE estimaciones(), asi la grilla, la cobertura y
+     * el tablero las tratan igual.
+     *
+     * Estatica y pura.
+     *
+     * @param array $proveedores Mapa COD_PROVEE => ['COD_PROVEE', 'RAZON_SOC', ...]
+     * @param array $filas Lo que devolvio resolver()['filas']
+     * @param array $tarjetas Mapa ID => tarjeta, TODAS
+     * @param array $resumenes Mapa ID_TARJETA => ['Y-m' => resumen]
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @param array $meses Los meses del horizonte
+     * @param string $hoy 'Y-m-d'
+     * @return array ['estimaciones' => [...], 'faltan_calendario' => ['Y-m']]
+     */
+    public static function estimacionesPorProveedor($proveedores, $filas, $tarjetas, $resumenes,
+                                                    $habiles, $meses, $hoy) {
+        $hoyStr = substr((string) $hoy, 0, 10);
+        $porProveedor = [];
+        $faltan = [];
+
+        foreach ($filas as $f) {
+            $cod = $f['COD_PROVEE'];
+
+            if (!isset($proveedores[$cod]) || empty($f['ID_TARJETA'])) {
+                continue;
+            }
+
+            $porProveedor[$cod][] = $f;
+        }
+
+        $v = [];
+
+        foreach ($porProveedor as $cod => $suyas) {
+            $ultimo = null;
+
+            foreach ($suyas as $f) {
+                $vto = self::vtoVigente($f);
+
+                if ($vto !== null && ($ultimo === null || substr($vto, 0, 7) > $ultimo)) {
+                    $ultimo = substr($vto, 0, 7);
+                }
+            }
+
+            foreach ($suyas as $f) {
+                $vto = self::vtoVigente($f);
+
+                if ($vto === null || substr($vto, 0, 7) !== $ultimo
+                    || !empty($f['EXCLUIDA_TARJETAS']) || empty($f['MES_PAGO'])) {
+                    continue;
+                }
+
+                $id = intval($f['ID_TARJETA']);
+                $t = isset($tarjetas[$id]) ? $tarjetas[$id] : null;
+                $tarjetaOk = ($t !== null && !empty($t['ACTIVA']) && $t['TIPO'] === 'CORPORATIVA');
+                $importe = round(floatval(isset($f['IMPORTE_VTO']) ? $f['IMPORTE_VTO'] : 0), 2);
+
+                $est = [
+                    'ID' => 'P|' . self::claveCuota($f),
+                    'COD_PROVEE' => $cod,
+                    'RAZON_SOC' => isset($proveedores[$cod]['RAZON_SOC']) && $proveedores[$cod]['RAZON_SOC']
+                        ? $proveedores[$cod]['RAZON_SOC'] : (isset($f['RAZON_SOC']) ? $f['RAZON_SOC'] : null),
+                    'T_COMP' => $f['T_COMP'],
+                    'N_COMP' => $f['N_COMP'],
+                    'FECHA_VTO_TANGO' => $f['FECHA_VTO'],
+                    'FECHA_VTO_ORIGEN' => $vto,
+                    'MES_PAGO_ORIGEN' => $f['MES_PAGO'],
+                    'ID_TARJETA' => $id,
+                    'TARJETA' => $t,
+                    'TARJETA_OK' => $tarjetaOk,
+                    'IMPORTE' => $importe,
+                    'DIA' => ($t !== null) ? intval($t['DIA_VENCIMIENTO']) : null,
+                    'MES_DESDE' => Inflacion::mesMas($f['MES_PAGO'], 1),
+                    'ORIGEN_PENDIENTE' => true,
+                    'meses' => []
+                ];
+
+                foreach ($meses as $mes) {
+                    if ($mes <= $f['MES_PAGO']) {
+                        continue;
+                    }
+
+                    $resumen = isset($resumenes[$id][$mes]) ? $resumenes[$id][$mes] : null;
+                    $fecha = null;
+
+                    if ($resumen !== null) {
+                        $fecha = $resumen['FECHA_VENCIMIENTO'];
+                    } elseif ($t !== null) {
+                        $vt = TarjetasVencimiento::delMes($t['DIA_VENCIMIENTO'], $mes, $habiles);
+                        $fecha = $vt['fecha'];
+
+                        foreach ($vt['faltan'] as $m) {
+                            if (!in_array($m, $faltan, true)) {
+                                $faltan[] = $m;
+                            }
+                        }
+                    }
+
+                    if (!$tarjetaOk) {
+                        $estado = self::EST_SIN_TARJETA;
+                    } elseif ($fecha !== null && $fecha <= $hoyStr) {
+                        $estado = self::EST_PASADA;
+                    } elseif ($resumen !== null) {
+                        $estado = self::EST_CUBIERTA;
+                    } else {
+                        $estado = self::EST_PROYECTA;
+                    }
+
+                    $est['meses'][] = [
+                        'mes' => $mes,
+                        'fecha' => $fecha,
+                        'importe' => $importe,
+                        'estado' => $estado,
+                        'por' => null,
+                        'proyecta' => ($estado === self::EST_PROYECTA)
+                    ];
+                }
+
+                $v[] = $est;
+            }
+        }
+
+        return ['estimaciones' => $v, 'faltan_calendario' => $faltan];
+    }
+
+    /**
+     * Los avisos de los proveedores que proyectan: el que tiene una factura sin
+     * vincular. No suma ni corta la repeticion -sin tarjeta no se sabe en que
+     * debito sale-, asi que la proyeccion sigue con la factura anterior hasta que
+     * se la vincule.
+     *
+     * Estatica y pura.
+     *
+     * @param array $proveedores Mapa COD_PROVEE => [...]
+     * @param array $filas Lo que devolvio resolver()['filas']
+     * @return array Lista de textos
+     */
+    public static function avisosPorProveedor($proveedores, $filas) {
+        $sin = [];
+
+        foreach ($filas as $f) {
+            if (isset($proveedores[$f['COD_PROVEE']]) && empty($f['ID_TARJETA'])
+                && empty($f['EXCLUIDA_TARJETAS'])) {
+                $nombre = !empty($proveedores[$f['COD_PROVEE']]['RAZON_SOC'])
+                    ? $proveedores[$f['COD_PROVEE']]['RAZON_SOC']
+                    : (isset($f['RAZON_SOC']) && $f['RAZON_SOC'] ? $f['RAZON_SOC'] : $f['COD_PROVEE']);
+                $sin[$f['COD_PROVEE']] = $nombre;
+            }
+        }
+
+        $avisos = [];
+
+        foreach ($sin as $nombre) {
+            $avisos[] = $nombre . ' tiene una factura sin vincular; vinculala para que reemplace '
+                . 'la proyección.';
+        }
+
+        return $avisos;
     }
 
     /**
