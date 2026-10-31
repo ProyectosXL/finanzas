@@ -194,3 +194,21 @@ $avisosC = Ventas::avisosDelMixPorMes(MixCobro::resolverPorMes($arbolSinDias, co
 chequear('un error del constante va una sola vez, sin mes', [1, false],
     [count($avisosC), strpos($avisosC[0]['texto'], 'Diciembre') !== false]);
 chequear('con la venta de toda la ventana: 39 dias x 100', true, strpos($avisosC[0]['texto'], '$ 3.900,00') !== false);
+
+seccion('Cobranza Proyectada muestra el arbol de cada mes, sin recargar');
+
+$jsVM = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Js/Ingresos-Ventas.js'));
+$tabVM = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Tabs/ventas.php'));
+$claseVM = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Ventas.php'));
+
+chequear('el contenedor del selector, fuera de la tabla', true,
+    strpos($tabVM, '<div id="cobMixMes"') !== false && strpos($tabVM, '<div id="cobMixMes"') < strpos($tabVM, '<table id="tablaCobranza"'));
+chequear('cambiar de mes redibuja con lo que ya vino: no pide nada', true,
+    strpos($jsVM, "mesCobranza = parseInt(e.target.value, 10);\n            generarTablaCobranza();") !== false);
+chequear('las columnas descriptivas salen del mes elegido', true,
+    strpos($jsVM, 'var d = delMes ? Object.assign({}, n, delMes.datos.nodos[n.clave]) : n;') !== false);
+chequear('sin por_mes, el selector no aparece', true, strpos($jsVM, "if (!porMes) {\n            cont.style.display = 'none';") !== false);
+chequear('el motor manda el mes en curso y los meses propios', [1, 1], [
+    substr_count($claseVM, "'meses_propios' => self::mesesPropios(\$arboles),"),
+    substr_count($claseVM, "'mes_hoy' => \$mesHoy,")
+]);

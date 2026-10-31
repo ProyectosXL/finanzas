@@ -1289,6 +1289,94 @@
      */
     var abiertosCobranza = null;
 
+    /*
+       EL MIX DE CADA MES. Si algún canal tiene mix propio en algún mes de la
+       ventana, el servidor manda cobranza.por_mes: lo que la regla resolvió
+       para cada nodo con el árbol de cada mes de VENTA. El selector "Mix de
+       las ventas de" cambia las columnas % efectivo, Costo + tasa y Días a
+       las de ese mes, sin pedir nada. Los importes no cambian: cada columna
+       de fecha ya trae lo de cada venta con el mix de su mes —una venta del
+       30/11 que se acredita en diciembre usa el de noviembre—.
+     */
+
+    /** El mes de venta (1 a 12) cuyo mix se ve en el árbol; null = el del mes en curso */
+    var mesCobranza = null;
+
+    /** Lo resuelto para el mes elegido, o null si todos los meses usan el mismo árbol */
+    function mixDelMes() {
+        var porMes = datosProyeccion.cobranza.por_mes;
+
+        if (!porMes) {
+            return null;
+        }
+
+        var mes = mesCobranza !== null && porMes[mesCobranza] ? mesCobranza : (datosProyeccion.mix || {}).mes_hoy;
+
+        return porMes[mes] ? { mes: mes, datos: porMes[mes] } : null;
+    }
+
+    /**
+     * El selector de mes, arriba del árbol. Sólo cuando algún mes usa otro
+     * árbol: con todo en constante no hay nada que elegir. Los meses van en
+     * el orden del horizonte, empezando por el actual.
+     */
+    function pintarMesCobranza() {
+        var cont = document.getElementById('cobMixMes');
+        var porMes = datosProyeccion.cobranza.por_mes;
+
+        if (!cont) {
+            return;
+        }
+
+        if (!porMes) {
+            cont.style.display = 'none';
+            cont.innerHTML = '';
+            return;
+        }
+
+        var mix = datosProyeccion.mix || {};
+        var hoy = mix.mes_hoy;
+        var actual = mixDelMes();
+        var meses = Object.keys(porMes).map(Number).sort(function(a, b) {
+            return ((a - hoy + 12) % 12) - ((b - hoy + 12) % 12);
+        });
+        var nombre = function(m) { return (mix.nombres_mes || [])[m - 1] || m; };
+        var propios = datosProyeccion.canales.filter(function(c) {
+            return actual && actual.datos.canales[c] && actual.datos.canales[c].mes_propio;
+        });
+
+        cont.innerHTML =
+            '<div class="d-flex align-items-center gap-2 flex-wrap">' +
+                '<label class="small text-muted mb-0" for="cobMixMesSel">Mix de las ventas de</label>' +
+                '<select id="cobMixMesSel" class="form-select form-select-sm w-auto">' +
+                meses.map(function(m) {
+                    var conPropio = datosProyeccion.canales.some(function(c) {
+                        return porMes[m].canales[c] && porMes[m].canales[c].mes_propio;
+                    });
+
+                    return '<option value="' + m + '"' + (actual && actual.mes === m ? ' selected' : '') + '>' +
+                           escapar(nombre(m)) + (m === hoy ? ' (mes en curso)' : '') +
+                           (conPropio ? ' · mix propio' : '') + '</option>';
+                }).join('') +
+                '</select>' +
+                '<small class="text-muted">' +
+                    (propios.length
+                        ? 'Con mix propio en ' + escapar(nombre(actual.mes)) + ': ' +
+                          escapar(propios.map(titulo).join(', ')) + '. El resto, con el constante.'
+                        : 'En ' + escapar(nombre(actual.mes)) + ' todos los canales usan el mix constante.') +
+                '</small>' +
+                '<i class="fas fa-info-circle text-muted" title="El % efectivo, el costo + tasa y los días ' +
+                    'son los del mix con que se cobran las VENTAS de ese mes. Los importes no cambian: cada ' +
+                    'columna ya trae cada venta con el mix de su mes, aunque se acredite en el siguiente."></i>' +
+            '</div>';
+        cont.style.display = '';
+
+        document.getElementById('cobMixMesSel').addEventListener('change', function(e) {
+            mesCobranza = parseInt(e.target.value, 10);
+            generarTablaCobranza();
+        });
+    }
+
     /** La grilla de una medida: la raíz es el bruto, 'costo' y 'neto' cuelgan */
     function grillaDe(medida) {
         var cob = datosProyeccion.cobranza;
@@ -1331,14 +1419,18 @@
         }
 
         var html = '';
+        var delMes = mixDelMes();
 
         datosProyeccion.canales.forEach(function(canal) {
             var cc = claveCanal(canal);
-            var resumen = (cob.resumen_canal || {})[canal] || {};
+            var resumen = (delMes ? delMes.datos.canales : (cob.resumen_canal || {}))[canal] || {};
 
             html += '<tr class="fila-canal" data-clave="' + cc + '">';
             html += '<td class="col-concepto">' + chevron(cc, conHijos[cc]) +
-                    '<strong>' + escapar(titulo(canal)) + '</strong></td>';
+                    '<strong>' + escapar(titulo(canal)) + '</strong>' +
+                    (resumen.mes_propio
+                        ? ' <span class="badge cob-mix-propio" title="Las ventas de este mes se cobran con su mix propio">mix propio</span>'
+                        : '') + '</td>';
             html += '<td class="text-center text-muted">' + porcentajeOVacio(resumen.porcentaje_efectivo) + '</td>';
             html += '<td class="text-center text-muted">' + porcentajeOVacio(resumen.carga_ponderada) + '</td>';
             html += '<td></td>';
@@ -1357,16 +1449,21 @@
             // La fila del canal y el pie no son niveles: van sin color.
             arbol.filter(function(n) { return n.canal === canal; }).forEach(function(n) {
                 var padre = n.padre || cc;
+                // Lo resuelto en el mes elegido; la forma de la fila es la de siempre
+                var d = delMes ? Object.assign({}, n, delMes.datos.nodos[n.clave]) : n;
+                var fuera = delMes && !d.en_juego;
 
-                html += '<tr class="' + (n.hoja ? 'fila-hoja' : 'fila-subtotal') + ' ' + MixNiveles.clase(n.nivel) + '"' +
+                html += '<tr class="' + (n.hoja ? 'fila-hoja' : 'fila-subtotal') + ' ' + MixNiveles.clase(n.nivel) +
+                        (fuera ? ' fila-fuera-mes' : '') + '"' +
                         ' data-clave="' + n.clave + '" data-padre="' + padre + '">';
-                html += '<td class="col-concepto" title="' + escapar(tituloNodo(n)) + '">' +
+                html += '<td class="col-concepto" title="' + escapar(tituloNodo(d) +
+                            (fuera ? ' — No se usa en las ventas de este mes.' : '')) + '">' +
                         '<span class="arbol-sangria" style="width: ' + ((n.profundidad + 1) * 16) + 'px"></span>' +
                         chevron(n.clave, conHijos[n.clave]) + MixNiveles.barra() + escapar(n.nombre) + '</td>';
-                html += '<td class="text-center text-muted">' + formatPercent(n.porcentaje_efectivo) + '</td>';
+                html += '<td class="text-center text-muted">' + (fuera ? '—' : formatPercent(d.porcentaje_efectivo)) + '</td>';
                 html += '<td class="text-center text-muted">' +
-                        porcentajeOVacio(n.hoja ? n.carga : n.carga_ponderada) + '</td>';
-                html += '<td class="text-center text-muted">' + (n.hoja && n.dias !== null ? n.dias : '') + '</td>';
+                        (fuera ? '' : porcentajeOVacio(d.hoja ? d.carga : d.carga_ponderada)) + '</td>';
+                html += '<td class="text-center text-muted">' + (!fuera && d.hoja && d.dias !== null ? d.dias : '') + '</td>';
 
                 cols.forEach(function(col) {
                     html += celdaImporte(conSigno(medidaCobranza, valorEn(grilla, n.clave, col)), col);
@@ -1379,6 +1476,7 @@
         document.getElementById('cobBody').innerHTML = html;
         aplicarAperturaCobranza();
         pintarLeyendaCobranza(arbol);
+        pintarMesCobranza();
 
         // EL PIE MUESTRA LAS TRES COSAS, sea cual sea la medida elegida: es lo
         // que permite leer bruta − costos = neta sin cambiar el selector. Los
