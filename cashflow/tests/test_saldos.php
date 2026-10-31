@@ -524,14 +524,19 @@ chequear('el total en dolares queda en dolares',
     10000.0, floatval($totales['USD']['total']));
 chequear('con su conteo de cuentas', 1, $totales['ARS']['cuentas']);
 
-seccion('avisos sobre la antiguedad de la carga');
+seccion('avisos sobre la antiguedad de los saldos manuales');
 
-chequear('sin ninguna carga se avisa', 1,
-    count(Saldos::avisosAntiguedad(null, 7, '2026-09-08')));
-chequear('una carga de hace 2 dias con alerta a 7 no avisa', 0,
-    count(Saldos::avisosAntiguedad('2026-09-06', 7, '2026-09-08')));
+$filaOtra = function ($fecha) {
+    return ['nombre' => 'Otra', 'origen' => Saldos::ORIGEN_CARGA, 'moneda' => 'ARS',
+            'cargada' => $fecha !== null, 'saldo' => 1.0, 'fecha_saldo' => $fecha];
+};
+
+chequear('una cuenta sin ningun saldo se avisa', 1,
+    count(Saldos::avisosAntiguedad([$filaOtra(null)], 7, '2026-09-08')['avisos']));
+chequear('una de hace 2 dias con alerta a 7 no avisa', 0,
+    count(Saldos::avisosAntiguedad([$filaOtra('2026-09-06')], 7, '2026-09-08')['avisos']));
 chequear('una de hace 10 dias si avisa', 1,
-    count(Saldos::avisosAntiguedad('2026-08-29', 7, '2026-09-08')));
+    count(Saldos::avisosAntiguedad([$filaOtra('2026-08-29')], 7, '2026-09-08')['avisos']));
 
 /* ================================================================
    Registro y proveedor
@@ -613,7 +618,7 @@ chequear('si la lectura falla, queda el de la ultima carga', [552255.60, '2026-1
      $fallaConCarga['filas'][0]['en_vivo']]);
 chequear('y se avisa en atencion, con el motivo y la fecha', ['warning', true],
     [$fallaConCarga['avisos'][0]['nivel'], strpos($fallaConCarga['avisos'][0]['texto'],
-        '(la base no responde); se usa el de la carga del 19/10/2026') !== false]);
+        '(la base no responde); se usa el último saldo guardado, del 19/10/2026') !== false]);
 
 $fallaSinCarga = Saldos::aplicarConsultas(
     [$filaConsulta(3, 'MERCADO_PAGO', 'Mercado Pago', false, 0, null)],
@@ -630,11 +635,11 @@ chequear('va a la primera columna, como todo saldo viejo', 1355896.24, $serieMp[
 // no arreglaria nada, porque la carga relee la misma consulta.
 chequear('pero sin el critico de la carga ni el de Interbanking', [], $serieMp['avisos_con_nivel']);
 
-seccion('la carga y el alta usan la misma regla');
+seccion('el alta y la lectura usan la misma regla');
 
 $srcSaldos = file_get_contents(__DIR__ . '/../Class/Saldos.php');
-chequear('la carga lee cada consulta por su tipo', true,
-    strpos($srcSaldos, '$this->leerConsulta($cuenta[\'TIPO\'], $cuenta[\'MONEDA\'], $map)') !== false);
+chequear('la lectura en vivo es una por tipo', true,
+    strpos($srcSaldos, '$this->leerConsulta($f[\'tipo\'], $f[\'moneda\'], $map)') !== false);
 chequear('el alta deduce CONSULTA con la lista de tipos', true,
     strpos($srcSaldos, 'in_array($tipo, self::TIPOS_CONSULTA, true) ? self::ORIGEN_CONSULTA') !== false);
 chequear('y Mercado Pago esta en la lista', true, in_array('MERCADO_PAGO', Saldos::TIPOS_CONSULTA, true));

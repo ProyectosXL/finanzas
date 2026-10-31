@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Aviso.php';
+require_once __DIR__ . '/SaldoManual.php';
 
 /**
  * SaldosInterbanking
@@ -110,9 +111,6 @@ class SaldosInterbanking {
      * se espera de el es lo mismo, el saldo del dia.
      */
     const ORIGENES_DEL_DIA = [self::ORIGEN_INTERBANKING, self::ORIGEN_RESPALDO];
-
-    /** Largo maximo de la observacion de un respaldo: el de la columna */
-    const OBSERVACION_MAX = 500;
 
     /** Seccion de los avisos en el tablero: van con los del disponible */
     const SECCION = 'Saldo Inicial';
@@ -362,19 +360,20 @@ class SaldosInterbanking {
     }
 
     /**
-     * Un respaldo manual validado, antes de abrir la transaccion.
+     * Un saldo manual validado, antes de abrir la transaccion.
      *
-     * LA FECHA NO PUEDE SER POSTERIOR A HOY: un saldo es lo que hay en la
-     * cuenta, y un saldo "de manana" es una proyeccion. Ademas ganaria contra
-     * el dato de Interbanking de hoy por ser mas nuevo, y lo taparia.
+     * LA FECHA ES HOY Y NO VIAJA: la pone el servidor. Un saldo cargado a mano
+     * es lo que hay en la cuenta ahora; uno "de ayer" competiria con
+     * Interbanking por fecha y no diria lo que quien lo cargo quiso decir.
+     * Hasta feature/saldos-edicion-fila-ultimo-raf la fecha se elegia en el
+     * dialogo.
      *
-     * EL IMPORTE ES OBLIGATORIO y puede ser negativo -una cuenta en descubierto
-     * tiene saldo operativo negativo-, pero no vacio: un vacio tomado como cero
-     * diria "esta cuenta no tiene plata" sin que nadie lo haya dicho.
+     * El importe y la observacion los valida SaldoManual::validar(), la misma
+     * que usan las cuentas del catalogo.
      *
-     * @param array $d ['nro_banco', 'nro_cuenta', 'moneda', 'fecha_saldo', 'saldo', 'observacion']
+     * @param array $d ['nro_banco', 'nro_cuenta', 'moneda', 'saldo', 'observacion']
      * @param string $hoy 'Y-m-d'
-     * @return array Los mismos campos, normalizados
+     * @return array Los mismos campos normalizados, con 'fecha_saldo' = hoy
      */
     public static function validarRespaldo($d, $hoy) {
         $d = is_array($d) ? $d : [];
@@ -390,38 +389,15 @@ class SaldosInterbanking {
             throw new Exception('Falta el banco, la cuenta o la moneda del saldo manual.');
         }
 
-        $fecha = $campo('fecha_saldo');
-        $f = DateTime::createFromFormat('!Y-m-d', $fecha);
-
-        if ($f === false || $f->format('Y-m-d') !== $fecha) {
-            throw new Exception('La fecha del saldo manual no es válida.');
-        }
-
-        if ($fecha > substr((string) $hoy, 0, 10)) {
-            throw new Exception('La fecha del saldo manual no puede ser posterior a hoy: un saldo es '
-                . 'lo que hay en la cuenta, no lo que va a haber.');
-        }
-
-        $saldo = $campo('saldo');
-
-        if ($saldo === '' || !is_numeric($saldo)) {
-            throw new Exception('El saldo manual necesita un importe.');
-        }
-
-        $obs = $campo('observacion');
-
-        if (mb_strlen($obs) > self::OBSERVACION_MAX) {
-            throw new Exception('La observación no puede superar los ' . self::OBSERVACION_MAX
-                . ' caracteres.');
-        }
+        $v = SaldoManual::validar($d);
 
         return [
             'nro_banco' => $banco,
             'nro_cuenta' => $cuenta,
             'moneda' => $moneda,
-            'fecha_saldo' => $fecha,
-            'saldo' => round(floatval($saldo), 2),
-            'observacion' => ($obs === '') ? null : $obs
+            'fecha_saldo' => substr((string) $hoy, 0, 10),
+            'saldo' => $v['saldo'],
+            'observacion' => $v['observacion']
         ];
     }
 
@@ -584,34 +560,41 @@ class SaldosInterbanking {
     }
 
     /**
-     * Que saldo se usa para una cuenta: el de Interbanking o el respaldo
-     * manual.
+     * Que saldo se usa para una cuenta: el de Interbanking o el manual.
      *
-     * GANA LA FECHA MAS NUEVA, Y A IGUAL FECHA GANA INTERBANKING, que es la
-     * fuente oficial. Asi, cuando BI se arregla y vuelve a traer el operativo,
-     * manda solo, sin que nadie tenga que quitar el respaldo. Es la regla
-     * inversa a la caja de los locales -alla gana el manual a igual fecha-
-     * porque aca el manual no corrige un dato, tapa uno que falta.
+     * LA REGLA ES LA DE TODAS LAS CUENTAS, SaldoManual::resolver(): el manual
+     * DE HOY manda todo el dia, aunque Interbanking traiga un saldo de hoy mas
+     * nuevo -Interbanking actualiza cada hora, y el manual se carga para
+     * ajustar el saldo por cheques por acreditar: no se puede perder en la
+     * proxima actualizacion-. Fuera de hoy gana la fecha mas nueva y, a igual
+     * fecha, Interbanking, que es la fuente oficial: desde manana vuelve a
+     * mandar solo, sin que nadie quite el manual, y un manual viejo sigue
+     * sirviendo de respaldo si BI no trae el dato.
+     *
+     * Hasta feature/saldos-edicion-fila-ultimo-raf la regla era "a igual
+     * fecha, Interbanking" tambien hoy: el manual solo tapaba un dato que
+     * faltaba.
      *
      * Compara solo fechas, no importes: el registro de Interbanking ya llega
      * elegido por elegirRegistro(), que es el que mira COLUMNA_SALDO, asi que
      * "trae un saldo operativo de esa fecha" ya esta resuelto.
      *
      * @param array|null $interbanking El registro elegido por elegirRegistro()
-     * @param array|null $respaldo El respaldo vigente, con FECHA_SALDO
+     * @param array|null $respaldo El manual vigente, con FECHA_SALDO
+     * @param string $hoy 'Y-m-d'
      * @return string|null ORIGEN_INTERBANKING, ORIGEN_RESPALDO, o null si no hay ninguno
      */
-    public static function resolverSaldo($interbanking, $respaldo) {
-        if ($respaldo === null) {
-            return ($interbanking === null) ? null : self::ORIGEN_INTERBANKING;
+    public static function resolverSaldo($interbanking, $respaldo, $hoy) {
+        $r = SaldoManual::resolver(
+            ($interbanking === null) ? null : $interbanking['FECHA_OPERACION'],
+            ($respaldo === null) ? null : $respaldo['FECHA_SALDO'],
+            $hoy);
+
+        if ($r === null) {
+            return null;
         }
 
-        if ($interbanking === null) {
-            return self::ORIGEN_RESPALDO;
-        }
-
-        return ((string) $respaldo['FECHA_SALDO'] > (string) $interbanking['FECHA_OPERACION'])
-            ? self::ORIGEN_RESPALDO : self::ORIGEN_INTERBANKING;
+        return ($r === SaldoManual::MANUAL) ? self::ORIGEN_RESPALDO : self::ORIGEN_INTERBANKING;
     }
 
     /**
@@ -705,24 +688,21 @@ class SaldosInterbanking {
 
             $eleccion = self::elegirRegistro($c['registros']);
             $respaldo = isset($respaldos[$clave]) ? $respaldos[$clave] : null;
-            $fuente = self::resolverSaldo($eleccion['usado'], $respaldo);
+            $fuente = self::resolverSaldo($eleccion['usado'], $respaldo, $hoy);
             $nombre = $banco['nombre'] . ' · ' . $c['nro_cuenta'];
 
             if ($fuente === null && $leido) {
                 $avisos[] = Aviso::nuevo(Aviso::DANGER, $nombre . ': Interbanking nunca trajo su '
-                    . self::NOMBRE_SALDO . ' y no tiene carga manual de respaldo, así que no suma al '
-                    . 'disponible. Cargalo desde Saldos › Saldos.', self::SECCION);
+                    . self::NOMBRE_SALDO . ' y no tiene saldo manual, así que no suma al '
+                    . 'disponible. Editalo desde su fila en Saldos › Saldos.', self::SECCION);
             } elseif ($fuente === self::ORIGEN_RESPALDO && $leido
-                && Horizonte::normalizarFecha($respaldo['FECHA_SALDO']) !== $hoy) {
-                /* Se acusa la falla de la integracion mientras se usa el
-                   respaldo, PERO SOLO SI EL RESPALDO NO ES DE HOY. Con la carga
-                   manual del dia el saldo esta al dia y no hay nada que hacer:
-                   el aviso se repetia todos los dias sobre una cuenta que
-                   alguien ya habia actualizado. Con un respaldo viejo si es
-                   atencion: la plata esta, pero es de otro dia y alguien tiene
-                   que cargarla o ver por que BI no la trae. */
+                && !SaldoManual::esDeHoy($respaldo['FECHA_SALDO'], $hoy)) {
+                /* Un manual viejo solo manda si Interbanking no trae nada o trae
+                   algo mas viejo: se acusa la falla de la integracion. Con el
+                   manual del dia no hay aviso: manda porque alguien lo cargo
+                   hoy, y esa persona ya sabe por que. */
                 $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Interbanking no trae el '
-                    . self::NOMBRE_SALDO . ' de ' . $nombre . '; se usa la carga manual del '
+                    . self::NOMBRE_SALDO . ' de ' . $nombre . '; se usa el saldo manual del '
                     . self::diaMes($respaldo['FECHA_SALDO']) . '.', self::SECCION);
             } elseif ($fuente === self::ORIGEN_INTERBANKING && $eleccion['tapado']) {
                 $avisos[] = Aviso::nuevo(Aviso::WARNING, $nombre . ': el registro del '
@@ -896,9 +876,11 @@ class SaldosInterbanking {
      * que la pestana, los totales y la serie la traten igual que a una cuenta
      * manual. 'cargada' en false es "sin dato": el saldo va null, no cero.
      *
-     * 'respaldo' es el vigente aunque no se este usando: el dialogo lo muestra
-     * para reemplazarlo o quitarlo. 'interbanking' es lo que trajo BI, para
-     * el tooltip cuando manda el respaldo.
+     * 'manual' es el vigente aunque no se este usando: el dialogo lo muestra
+     * para reemplazarlo o quitarlo. 'automatico' es lo que trajo BI, para el
+     * tooltip cuando manda el manual. Las dos claves tienen la misma forma en
+     * las cuentas del catalogo (Saldos::aplicarManuales()): el dialogo es uno
+     * solo para todas las cuentas.
      *
      * Los dos importes son el mismo saldo, el operativo: el de BI sale de
      * COLUMNA_SALDO y el del respaldo, de COLUMNA_RESPALDO, que es como se
@@ -945,15 +927,18 @@ class SaldosInterbanking {
             'usuario_carga' => $cargadoPor,
             'ultimo_registro' => ($eleccion['mas_nuevo'] === null)
                 ? null : $eleccion['mas_nuevo']['FECHA_OPERACION'],
-            'interbanking' => ($ib === null) ? null
-                : ['fecha' => $ib['FECHA_OPERACION'], 'saldo' => floatval($ib[self::COLUMNA_SALDO])],
-            'respaldo' => ($respaldo === null) ? null : [
+            'automatico' => ($ib === null) ? null
+                : ['fecha' => $ib['FECHA_OPERACION'], 'saldo' => floatval($ib[self::COLUMNA_SALDO]),
+                   'fuente' => 'Interbanking', 'momento' => $ib['CREATED_AT']],
+            'manual' => ($respaldo === null) ? null : [
                 'id' => intval($respaldo['ID']),
                 'fecha_saldo' => $respaldo['FECHA_SALDO'],
                 'saldo' => floatval($respaldo[self::COLUMNA_RESPALDO]),
                 'observacion' => $respaldo['OBSERVACION'],
                 'usuario' => $respaldo['USUARIO_ALTA'],
-                'fecha_alta' => $respaldo['FECHA_ALTA']
+                'fecha_alta' => $respaldo['FECHA_ALTA'],
+                'de_hoy' => SaldoManual::esDeHoy($respaldo['FECHA_SALDO'], $hoy),
+                'manda' => ($fuente === self::ORIGEN_RESPALDO)
             ]
         ];
     }
@@ -1575,21 +1560,23 @@ class SaldosInterbanking {
     }
 
     /**
-     * Carga, o reemplaza, el respaldo manual de una cuenta de Interbanking.
+     * Carga, o reemplaza, el saldo manual de una cuenta de Interbanking. La
+     * fecha es hoy (validarRespaldo()), y con ella manda todo el dia sobre lo
+     * que traiga Interbanking (resolverSaldo()).
      *
      * REEMPLAZAR NO ES UN UPDATE: da de baja el vigente (VIGENTE = 0, con
      * usuario y fecha de baja) e inserta el nuevo apuntando al anterior por
-     * ID_REEMPLAZA, en UNA transaccion. Si solo insertara, el anterior seguiria
-     * vigente y una correccion con fecha anterior perderia contra el. El
-     * indice unico filtrado del script es la segunda red: dos vigentes de la
-     * misma cuenta no pueden existir.
+     * ID_REEMPLAZA, en UNA transaccion. Dos ediciones el mismo dia: manda la
+     * ultima y la anterior queda en el historial. El indice unico filtrado del
+     * script es la segunda red: dos vigentes de la misma cuenta no pueden
+     * existir.
      *
      * Se valida en el servidor que la cuenta exista -que venga en
-     * Interbanking o que ya tenga respaldo- y que su banco este activo: un
-     * banco inactivo no usa el respaldo, asi que cargarlo no tendria efecto y
+     * Interbanking o que ya tenga un manual- y que su banco este activo: un
+     * banco inactivo no usa el manual, asi que cargarlo no tendria efecto y
      * nada lo diria.
      *
-     * @param array $datos ['nro_banco', 'nro_cuenta', 'moneda', 'fecha_saldo', 'saldo', 'observacion']
+     * @param array $datos ['nro_banco', 'nro_cuenta', 'moneda', 'saldo', 'observacion']
      * @param string $usuario
      * @param string|null $hoy 'Y-m-d'; null es hoy
      * @return array ['id' => int, 'reemplaza' => int|null]

@@ -234,14 +234,13 @@ class AuthCashflow {
             'asignarRetencion' => [['proveedores_locales', null]]
         ],
         'Saldos' => [
-            'guardarCargaSaldos' => [['saldos', null]],
             'guardarCargaLocales' => [['saldos', null]],
             'guardarMovimientoFondo' => [['saldos', null]],
             'bajaMovimientoFondo' => [['saldos', null]],
-            // El respaldo manual de una cuenta de Interbanking es una carga de
-            // saldo como Nueva carga: el mismo permiso.
-            'guardarRespaldoBanco' => [['saldos', null]],
-            'quitarRespaldoBanco' => [['saldos', null]]
+            // El saldo de cada cuenta se edita desde su fila: el permiso que
+            // tenia Nueva carga, que ya no existe.
+            'guardarSaldoManual' => [['saldos', null]],
+            'quitarSaldoManual' => [['saldos', null]]
         ],
         'Tarjetas' => [
             'vincularFacturas' => [['pagos_tarjetas', null]],
@@ -282,7 +281,7 @@ class AuthCashflow {
             'getHistorialRubroPct'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
-        'Saldos' => ['getSaldos', 'getLocales', 'getFondos', 'getMovimientosFondo'],
+        'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],
         'Tarjetas' => ['getDatos', 'getHistorialFactura', 'getTarjetas', 'getResumenes'],
         'Ventas' => ['getProyeccionVentas', 'getProyeccionCobranzas', 'getAnalisisVentas',
             'getVentaAcumulada', 'getVentaBalance', 'getParametros']

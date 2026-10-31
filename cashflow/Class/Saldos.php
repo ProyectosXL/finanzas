@@ -8,6 +8,7 @@ require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 require_once __DIR__ . '/DiasHabiles.php';
 require_once __DIR__ . '/SaldosInterbanking.php';
+require_once __DIR__ . '/SaldoManual.php';
 
 /**
  * Saldos
@@ -51,7 +52,7 @@ require_once __DIR__ . '/SaldosInterbanking.php';
  * Los que estan en Interbanking se leen en vivo de BI_T_SALDOS_INTERBANKING y
  * NO estan en el catalogo: no se cargan, no se copian, y su saldo lo decide
  * SaldosInterbanking. Los que no estan -hoy, BTG Uy- son cuentas TIPO 'BANCO'
- * del catalogo y se cargan como siempre, en Nueva carga. El catalogo no tiene
+ * del catalogo y se cargan a mano, desde su fila. El catalogo no tiene
  * NRO_BANCO, asi que no hay forma de cruzar los dos: un banco no puede estar
  * de los dos lados, y la depuracion de los manuales que pasaron a Interbanking
  * la hizo una sola vez sql/cashflow_saldos_borrar_bancos_manuales.sql.
@@ -156,6 +157,33 @@ class Saldos {
      */
     const TIPOS_CONSULTA = ['EFECTIVO_CENTRAL', 'MERCADO_PAGO'];
 
+    /**
+     * El ORIGEN de la cabecera de una carga hecha desde la fila de una cuenta:
+     * una carga, una cuenta. Las de "Nueva carga", que ya no existe, son
+     * 'MIXTA' y tienen todas las cuentas del catalogo. Solo una carga propia
+     * de hoy se reemplaza o se quita: ver guardarSaldoManual().
+     */
+    const ORIGEN_EDICION = 'MANUAL';
+
+    /**
+     * El efectivo de tesoreria no se edita: es un dato de la contabilidad
+     * (SBA05) y se lee en vivo. El servidor lo rechaza.
+     */
+    const TIPO_NO_EDITABLE = 'EFECTIVO_CENTRAL';
+
+    /** El script que agrega ID_REEMPLAZA a la cabecera de carga */
+    const SCRIPT_EDICION = 'sql/cashflow_saldos_edicion_fila.sql';
+
+    /**
+     * El comprobante de Tango con el que un local entrega su efectivo, segun
+     * su gestion: el que ENVIA lo manda con un RAF; el que DEPOSITA, con una
+     * boleta de deposito (BDE). Ver armarUltimosMovimientos().
+     */
+    const COMPROBANTE_GESTION = [self::DEPOSITA => 'BDE', self::ENVIA => 'RAF'];
+
+    /** La vista de Tango, en el servidor 'locales', con los comprobantes de caja de cada local */
+    const VISTA_GASTOS_CAJA = 'RO_V_GASTOS_CAJA_SUCURSALES';
+
     /** El saldo de Mercado Pago: el ultimo registro por CREATED_AT */
     const TABLA_MP = 'MP_T_SALDO_DEMANDA';
 
@@ -176,6 +204,9 @@ class Saldos {
 
     /** @var bool|null Cache del chequeo de las columnas del dia de acreditacion */
     private $acreditacion = null;
+
+    /** @var bool|null Cache del chequeo de SCRIPT_EDICION. Ver edicionCreada(). */
+    private $edicion = null;
 
     /** @var Fondos|null Puerta al modulo de fondos; la resuelve fondos() */
     private $fondos = null;
@@ -1412,9 +1443,10 @@ class Saldos {
            cotizacion se valuo es un criterio (informativo). */
         if ($reubicado != 0) {
             $avisos[] = Aviso::nuevo(Aviso::DANGER, self::plata($reubicado) . ' corresponden a '
-                . 'saldos cargados el ' . self::fechaCorta($fechaMasVieja) . ' o antes y se '
-                . 'muestran en la primera columna, que es la apertura del horizonte. Actualizá la '
-                . 'carga de saldos para que el disponible sea el de hoy.', 'Saldo Inicial');
+                . 'saldos cargados a mano el ' . self::fechaCorta($fechaMasVieja) . ' o antes y se '
+                . 'muestran en la primera columna, que es la apertura del horizonte. Actualizá el '
+                . 'saldo desde su fila en Saldos › Saldos para que el disponible sea el de hoy.',
+                'Saldo Inicial');
         }
 
         /* Lo de Interbanking que no es de hoy es ATENCION, no critico, y no pide
@@ -1499,36 +1531,67 @@ class Saldos {
     }
 
     /**
-     * Avisos sobre la antiguedad de la ultima carga MANUAL.
+     * La antiguedad de los saldos manuales, CUENTA POR CUENTA, y lo que
+     * muestra el KPI "Saldo manual más viejo". PURA.
      *
-     * Solo habla de las cargas de la pestana: los saldos de Interbanking no
-     * se cargan, y su antiguedad la avisa cada fila ("no es de hoy"). Por eso
-     * saldos_dias_alerta_carga aplica solo aca.
+     * Solo miran las cuentas SIN FUENTE AUTOMATICA (los bancos sin
+     * Interbanking y Otros): son las unicas cuyo saldo es siempre el ultimo
+     * manual. Interbanking y Mercado Pago traen el suyo, y su antiguedad la
+     * avisa cada fila ("no es de hoy"). Por eso saldos_dias_alerta_carga
+     * aplica solo aca.
      *
-     * La regla transversal del relevamiento es que se vea la fecha de carga de
-     * cada dato. El aviso es el complemento: que la pantalla lo diga sola cuando
-     * el dato quedo viejo, en vez de esperar que alguien mire la columna.
+     * Hasta feature/saldos-edicion-fila-ultimo-raf miraba "la ultima carga",
+     * que tenia todas las cuentas. Ahora cada edicion es una carga de una
+     * cuenta, y la ultima carga diria "al dia" por haber editado Mercado Pago
+     * con BTG Uy sin tocar hace un mes.
      *
-     * @param string|null $fechaCarga 'Y-m-d' de la ultima carga, o null si no hay
+     * @param array $filas Las de getFilasDisponible()
      * @param int $diasAlerta Dias a partir de los cuales se avisa
      * @param string $hoy 'Y-m-d'
-     * @return array Lista de avisos
+     * @return array ['avisos' => [string], 'mas_viejo' => ['nombre', 'fecha', 'dias',
+     *               'usuario'] o null, 'manuales_hoy' => int]
      */
-    public static function avisosAntiguedad($fechaCarga, $diasAlerta, $hoy) {
-        if ($fechaCarga === null || $fechaCarga === '') {
-            return ['Todavía no hay ninguna carga manual de saldos (Mercado Pago, otros y bancos '
-                . 'manuales): hasta la primera, esas cuentas no suman al Saldo Inicial.'];
+    public static function avisosAntiguedad($filas, $diasAlerta, $hoy) {
+        $hoy = substr((string) $hoy, 0, 10);
+        $avisos = [];
+        $masViejo = null;
+        $manualesHoy = 0;
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $m = isset($f['manual']) ? $f['manual'] : null;
+
+            // Cuantas cuentas usan hoy un saldo cargado a mano, de cualquier tipo
+            if ($m !== null && !empty($m['de_hoy']) && !empty($m['manda'])) {
+                $manualesHoy++;
+            }
+
+            $sinFuente = isset($f['origen']) && $f['origen'] === self::ORIGEN_CARGA;
+
+            if (!$sinFuente) {
+                continue;
+            }
+
+            if (empty($f['cargada']) || $f['fecha_saldo'] === null) {
+                $avisos[] = $f['nombre'] . ' todavía no tiene ningún saldo cargado, así que no suma '
+                    . 'al Saldo Inicial. Editalo desde su fila.';
+                continue;
+            }
+
+            $dias = (int) floor((strtotime($hoy) - strtotime($f['fecha_saldo'])) / 86400);
+
+            if ($masViejo === null || $f['fecha_saldo'] < $masViejo['fecha']) {
+                $masViejo = ['nombre' => $f['nombre'], 'fecha' => $f['fecha_saldo'], 'dias' => $dias,
+                             'usuario' => isset($f['usuario_carga']) ? $f['usuario_carga'] : null];
+            }
+
+            if ($diasAlerta > 0 && $dias > $diasAlerta) {
+                $avisos[] = $f['nombre'] . ': el último saldo manual es del '
+                    . self::fechaCorta($f['fecha_saldo']) . ', hace ' . $dias . ' días. Actualizalo '
+                    . 'desde su fila.';
+            }
         }
 
-        $dias = (int) floor((strtotime($hoy) - strtotime(substr($fechaCarga, 0, 10))) / 86400);
-
-        if ($diasAlerta > 0 && $dias > $diasAlerta) {
-            return ['La última carga manual de saldos (Mercado Pago, otros y bancos manuales) es '
-                . 'del ' . self::fechaCorta($fechaCarga) . ', hace ' . $dias . ' días: esos saldos no '
-                . 'son los de hoy.'];
-        }
-
-        return [];
+        return ['avisos' => $avisos, 'mas_viejo' => $masViejo, 'manuales_hoy' => $manualesHoy];
     }
 
     /* ====================================================================
@@ -1608,6 +1671,40 @@ class Saldos {
         $this->manuales = ($row && $row['M'] !== null && $row['O'] !== null);
 
         return $this->manuales;
+    }
+
+    /**
+     * Si se corrio SCRIPT_EDICION: la columna ID_REEMPLAZA de la cabecera de
+     * carga, con la que una edicion de hoy da de baja a la anterior y la
+     * nombra. Sin ella las cuentas del catalogo no se editan -la pestana lo
+     * dice- y las de Interbanking si: su manual tiene tabla propia.
+     *
+     * @return bool
+     */
+    public function edicionCreada() {
+        if ($this->edicion !== null) {
+            return $this->edicion;
+        }
+
+        if (!$this->tablasCreadas()) {
+            $this->edicion = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_CARGA', 'ID_REEMPLAZA') AS R");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la edición de saldos'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->edicion = ($row && $row['R'] !== null);
+
+        return $this->edicion;
     }
 
     /**
@@ -1800,7 +1897,9 @@ class Saldos {
      * mostraban el valor guardado en la ultima carga, y quedaba atrasado
      * respecto de Tesoreria (administracion/tesoreria/saldoCaja.php, que hace
      * la misma cuenta con RO_SP_MAYOR_CTA_100101) desde el primer movimiento
-     * posterior. Cada carga sigue guardando el valor del dia: es el historico.
+     * posterior. Las fotos que guardaba "Nueva carga" quedan como historico;
+     * desde feature/saldos-edicion-fila-ultimo-raf no se toman mas: SBA05 ya
+     * es el historico de la cuenta.
      *
      * La cuenta contable sale del parametro saldos_cta_tesoreria y va como
      * PARAMETRO de la consulta: es un numero de cuenta del plan contable y
@@ -1904,8 +2003,7 @@ class Saldos {
     /**
      * El saldo en vivo de una cuenta "por consulta", segun su tipo. Es el UNICO
      * lugar que sabe de donde sale cada una: lo usan la pestana y el tablero
-     * (getFilasDisponible()) y la carga (guardarCargaSaldos()), asi que los
-     * tres leen lo mismo.
+     * (getFilasDisponible()), asi que los dos leen lo mismo.
      *
      * @param string $tipo Uno de TIPOS_CONSULTA
      * @param string $moneda
@@ -1932,20 +2030,32 @@ class Saldos {
     }
 
     /**
-     * Pone el saldo en vivo en las filas de las cuentas "por consulta". PURA.
+     * Pone el saldo en vivo en las filas de las cuentas "por consulta", o el
+     * manual si es el que manda. PURA.
      *
-     *   - CON LECTURA: el saldo y la fecha leidos, 'en_vivo' y cargada. Si la
-     *     fecha no es de hoy -Mercado Pago, cuando su proceso se atraso- la fila
-     *     queda 'no_es_de_hoy' y se avisa en atencion con la fecha del dato.
-     *   - SIN LECTURA Y CON CARGA: el valor guardado en la ultima carga, con su
-     *     fecha, y un aviso de atencion que dice que no es en vivo. Es un dato
-     *     real y fechado; mejor que dejar la cuenta en blanco.
-     *   - SIN LECTURA Y SIN CARGA: no suma, y el aviso es critico.
+     * QUE MANDA LO DECIDE SaldoManual::resolver(), la regla de todas las
+     * cuentas: el manual de hoy manda todo el dia aunque la consulta traiga
+     * otro saldo; fuera de hoy gana la fecha mas nueva y, a igual fecha, la
+     * consulta. El efectivo de tesoreria nunca tiene manual: no se edita.
+     *
+     *   - CON LECTURA Y MANDA LA CONSULTA: el saldo y la fecha leidos,
+     *     'en_vivo' y cargada. Si la fecha no es de hoy -Mercado Pago, cuando
+     *     su proceso se atraso- la fila queda 'no_es_de_hoy' y se avisa en
+     *     atencion con la fecha del dato.
+     *   - CON LECTURA Y MANDA EL MANUAL: el manual, con su fecha. Lo leido va
+     *     igual en 'automatico', para el tooltip. Un manual de otro dia que
+     *     manda -la consulta esta mas atrasada que el- se avisa en atencion.
+     *   - SIN LECTURA Y CON ALGO GUARDADO: el ultimo saldo guardado (un manual
+     *     o una foto de las viejas cargas), con su fecha, y un aviso de
+     *     atencion que dice que no es en vivo -salvo que sea un manual de hoy,
+     *     que manda igual-. Es un dato real y fechado; mejor que dejar la
+     *     cuenta en blanco.
+     *   - SIN LECTURA Y SIN NADA GUARDADO: no suma, y el aviso es critico.
      *
      * TODAS SALEN CON 'origen' = CONSULTA, y no CARGA: armarSerieDisponible()
-     * le pide a un saldo viejo DE UNA CARGA que se actualice la carga, y aca eso
-     * no arregla nada -la carga relee la misma consulta-. El aviso de un saldo
-     * de otro dia lo da esta funcion, con la fuente.
+     * le pide a un saldo viejo de una cuenta manual que se actualice, y a una
+     * cuenta en vivo eso no le arregla nada. El aviso de un saldo de otro dia
+     * lo da esta funcion, con la fuente.
      *
      * @param array $filas Las de getSaldosActuales()
      * @param array $lecturas id_cuenta => leerConsulta(), o ['error' => texto]
@@ -1966,8 +2076,35 @@ class Saldos {
             $id = isset($f['id_cuenta']) ? $f['id_cuenta'] : null;
             $l = isset($lecturas[$id]) ? $lecturas[$id] : ['error' => 'no se leyó'];
             $f['origen'] = self::ORIGEN_CONSULTA;
+            $manual = isset($f['manual']) ? $f['manual'] : null;
+            $deHoy = ($manual !== null) && SaldoManual::esDeHoy($manual['fecha_saldo'], $hoy);
 
             if (!isset($l['error'])) {
+                $f['automatico'] = ['saldo' => floatval($l['saldo']), 'fecha' => $l['fecha'],
+                    'fuente' => $l['fuente'], 'momento' => isset($l['momento']) ? $l['momento'] : null];
+                $manda = SaldoManual::resolver($l['fecha'],
+                    ($manual === null) ? null : $manual['fecha_saldo'], $hoy);
+
+                if ($manda === SaldoManual::MANUAL) {
+                    $f['saldo'] = floatval($manual['saldo']);
+                    $f['fecha_saldo'] = $manual['fecha_saldo'];
+                    $f['cargada'] = true;
+                    $f['en_vivo'] = false;
+                    $f['no_es_de_hoy'] = !$deHoy;
+                    $f['manual']['de_hoy'] = $deHoy;
+                    $f['manual']['manda'] = true;
+
+                    if (!$deHoy) {
+                        $avisos[] = Aviso::nuevo(Aviso::WARNING, $f['nombre'] . ': se usa el saldo '
+                            . 'manual del ' . self::fechaCorta($manual['fecha_saldo']) . ', más nuevo '
+                            . 'que el último de ' . $l['fuente'] . ' (' . self::fechaCorta($l['fecha'])
+                            . '). Revisá el proceso que alimenta esa tabla.', 'Saldo Inicial');
+                    }
+
+                    $out[] = $f;
+                    continue;
+                }
+
                 $f['saldo'] = floatval($l['saldo']);
                 $f['fecha_saldo'] = $l['fecha'];
                 $f['cargada'] = true;
@@ -1975,6 +2112,11 @@ class Saldos {
                 $f['fuente_vivo'] = $l['fuente'];
                 $f['momento_vivo'] = isset($l['momento']) ? $l['momento'] : null;
                 $f['no_es_de_hoy'] = ($l['fecha'] < $hoy);
+
+                if ($manual !== null) {
+                    $f['manual']['de_hoy'] = $deHoy;
+                    $f['manual']['manda'] = false;
+                }
 
                 if ($f['no_es_de_hoy']) {
                     $avisos[] = Aviso::nuevo(Aviso::WARNING, $f['nombre'] . ': el último saldo de '
@@ -1988,14 +2130,23 @@ class Saldos {
             }
 
             $f['en_vivo'] = false;
+            $f['no_es_de_hoy'] = !empty($f['cargada']) && $f['fecha_saldo'] !== null
+                && $f['fecha_saldo'] < $hoy;
 
-            if (!empty($f['cargada'])) {
+            if ($manual !== null) {
+                $f['manual']['de_hoy'] = $deHoy;
+                $f['manual']['manda'] = true;
+            }
+
+            if ($deHoy) {
+                // Un manual de hoy manda igual: el saldo esta al dia.
+            } elseif (!empty($f['cargada'])) {
                 $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer en vivo el saldo de '
-                    . $f['nombre'] . ' (' . $l['error'] . '); se usa el de la carga del '
+                    . $f['nombre'] . ' (' . $l['error'] . '); se usa el último saldo guardado, del '
                     . self::fechaCorta($f['fecha_saldo']) . '.', 'Saldo Inicial');
             } else {
                 $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer en vivo el saldo de '
-                    . $f['nombre'] . ' (' . $l['error'] . ') y no tiene ninguna carga guardada, '
+                    . $f['nombre'] . ' (' . $l['error'] . ') y no tiene ningún saldo guardado, '
                     . 'así que no suma al disponible.', 'Saldo Inicial');
             }
 
@@ -2003,6 +2154,49 @@ class Saldos {
         }
 
         return ['filas' => $out, 'avisos' => $avisos];
+    }
+
+    /**
+     * Marca el manual de las cuentas SIN FUENTE AUTOMATICA -los bancos sin
+     * Interbanking y Otros-: su saldo es siempre el ultimo manual, y la fila
+     * dice si es de hoy. PURA.
+     *
+     * Pasa por SaldoManual::resolver() como todas: sin dato automatico, manda
+     * el manual de la fecha que sea. Un manual que no es de hoy queda
+     * 'no_es_de_hoy', la misma marca que una cuenta de Interbanking sin el
+     * saldo del dia. Cuanto puede envejecer antes de avisarse lo decide
+     * avisosAntiguedad().
+     *
+     * Las filas por consulta y las de Interbanking no se tocan: las resuelven
+     * aplicarConsultas() y SaldosInterbanking.
+     *
+     * @param array $filas
+     * @param string $hoy 'Y-m-d'
+     * @return array Las mismas filas
+     */
+    public static function aplicarManuales($filas, $hoy) {
+        $hoy = substr((string) $hoy, 0, 10);
+        $out = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $esCarga = isset($f['origen']) && $f['origen'] === self::ORIGEN_CARGA;
+            $manual = isset($f['manual']) ? $f['manual'] : null;
+
+            if ($esCarga && $manual !== null) {
+                $f['manual']['de_hoy'] = SaldoManual::esDeHoy($manual['fecha_saldo'], $hoy);
+                $f['manual']['manda'] = (SaldoManual::resolver(null, $manual['fecha_saldo'], $hoy)
+                    === SaldoManual::MANUAL);
+            }
+
+            if ($esCarga) {
+                $f['no_es_de_hoy'] = !empty($f['cargada']) && $f['fecha_saldo'] !== null
+                    && $f['fecha_saldo'] < $hoy;
+            }
+
+            $out[] = $f;
+        }
+
+        return $out;
     }
 
     /**
@@ -2075,6 +2269,7 @@ class Saldos {
                            D.DAY_BALANCE, D.TOTAL_DEBITS, D.TOTAL_CREDITS,
                            D.MESSAGE, D.ORIGEN_DATO,
                            C.ID AS ID_CARGA, C.FECHA_CARGA, C.USUARIO_MODIF AS USUARIO_CARGA,
+                           C.ORIGEN AS ORIGEN_CARGA, C.OBSERVACIONES AS OBSERVACIONES_CARGA,
                            ROW_NUMBER() OVER (
                                PARTITION BY D.ID_CUENTA
                                ORDER BY D.FECHA_SALDO DESC, C.FECHA_CARGA DESC, D.ID DESC
@@ -2091,7 +2286,8 @@ class Saldos {
                        U.CURRENT_OPERATING_BALANCE, U.PROJECTED_BALANCE_24HS,
                        U.PROJECTED_BALANCE_48HS, U.DAY_BALANCE, U.TOTAL_DEBITS,
                        U.TOTAL_CREDITS, U.MESSAGE, U.ORIGEN_DATO,
-                       U.ID_CARGA, U.FECHA_CARGA, U.USUARIO_CARGA
+                       U.ID_CARGA, U.FECHA_CARGA, U.USUARIO_CARGA, U.ORIGEN_CARGA,
+                       U.OBSERVACIONES_CARGA
                 FROM RO_T_CASHFLOW_SALDOS_CUENTA CU
                 LEFT JOIN Ultimo U ON U.ID_CUENTA = CU.ID AND U.RN = 1
                 WHERE CU.ACTIVO = 1" . $sinFondos . "
@@ -2159,11 +2355,12 @@ class Saldos {
         }
 
         $enVivo = self::aplicarConsultas($filas, $lecturas, $hoy);
+        $catalogo = self::aplicarManuales($enVivo['filas'], $hoy);
 
         $bancarias = $this->interbanking()->getCuentasBancarias($hoy);
 
         return [
-            'filas' => array_merge($enVivo['filas'], $bancarias['filas']),
+            'filas' => array_merge($catalogo, $bancarias['filas']),
             'avisos' => array_merge($enVivo['avisos'], $bancarias['avisos']),
             'respaldo_creado' => !empty($bancarias['respaldo_creado']),
             'depurado' => !empty($bancarias['depurado'])
@@ -2197,6 +2394,7 @@ class Saldos {
      */
     private function filaSaldo($row) {
         $cargada = ($row['ID_CARGA'] !== null);
+        $fecha = Horizonte::normalizarFecha($row['FECHA_SALDO']);
 
         return [
             'id_cuenta' => intval($row['ID']),
@@ -2225,10 +2423,27 @@ class Saldos {
             'creditos' => $this->numeroONull($row['TOTAL_CREDITS']),
             'mensaje' => $row['MESSAGE'],
             'origen_dato' => $row['ORIGEN_DATO'],
-            'fecha_saldo' => Horizonte::normalizarFecha($row['FECHA_SALDO']),
+            'fecha_saldo' => $fecha,
             'id_carga' => $cargada ? intval($row['ID_CARGA']) : null,
             'fecha_carga' => $this->fechaHora($row['FECHA_CARGA']),
-            'usuario_carga' => $row['USUARIO_CARGA']
+            'usuario_carga' => $row['USUARIO_CARGA'],
+            /* El ultimo saldo guardado, si se cargo a mano: misma forma que el
+               manual de Interbanking, para que el dialogo sea uno solo. Si es
+               de hoy y si manda lo deciden aplicarConsultas() y
+               aplicarManuales(). Una foto de una cuenta por consulta
+               (ORIGEN_DATO = 'CONSULTA') no es un manual. 'id' es la carga:
+               desde feature/saldos-edicion-fila-ultimo-raf cada edicion es una
+               carga con una sola cuenta (ORIGEN = 'MANUAL'). */
+            'manual' => ($cargada && $row['ORIGEN_DATO'] === self::SALDO_MANUAL) ? [
+                'id' => intval($row['ID_CARGA']),
+                'fecha_saldo' => $fecha,
+                'saldo' => floatval($row['COUNTABLE_BALANCE']),
+                'observacion' => $row['OBSERVACIONES_CARGA'],
+                'usuario' => $row['USUARIO_CARGA'],
+                'fecha_alta' => $this->fechaHora($row['FECHA_CARGA']),
+                'carga_propia' => ($row['ORIGEN_CARGA'] === self::ORIGEN_EDICION)
+            ] : null,
+            'automatico' => null
         ];
     }
 
@@ -2331,6 +2546,145 @@ class Saldos {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /**
+     * El ultimo envio (RAF) y el ultimo deposito (BDE) de cada local propio
+     * habilitado, desde RO_V_GASTOS_CAJA_SUCURSALES en el servidor 'locales'.
+     *
+     * UNA SOLA CONSULTA PARA TODOS LOS LOCALES, no una por fila, y trae los
+     * dos comprobantes: la gestion se puede cambiar en la pantalla antes de
+     * guardar, y el icono tiene que seguirla sin volver a preguntar. De cada
+     * local y comprobante, TODOS los de su ultima fecha: si ese dia hubo mas
+     * de uno, se suman. Solo las columnas que se muestran.
+     *
+     * ES SOLO INFORMATIVO: no toca ningun importe de la serie Caja Locales.
+     * Por eso va en un pedido aparte de getPestanaLocales() -la vista tarda un
+     * par de segundos y la tabla no tiene por que esperarla- y nunca lanza:
+     * una falla es un aviso de atencion y los iconos apagados.
+     *
+     * @return array ['locales' => mapa de armarUltimosMovimientos(), 'leido' => bool,
+     *               'avisos' => [string]]
+     */
+    public function getUltimosMovimientosLocales() {
+        try {
+            $cid = $this->conectar('locales');
+            $p = $this->prefijoLocales();
+            $vista = $p . self::VISTA_GASTOS_CAJA;
+            $comps = "'" . implode("', '", array_values(self::COMPROBANTE_GESTION)) . "'";
+
+            $sql = "WITH U AS (
+                        SELECT G.NRO_SUCURS, G.COD_COMP, MAX(G.FECHA) AS FECHA
+                        FROM {$vista} G
+                        INNER JOIN {$p}SUCURSALES_LAKERS B ON G.NRO_SUCURS = B.NRO_SUCURSAL
+                        WHERE G.COD_COMP IN ({$comps}) AND B.CANAL = 'PROPIOS' AND B.HABILITADO = 1
+                        GROUP BY G.NRO_SUCURS, G.COD_COMP
+                    )
+                    SELECT G.FECHA, G.NRO_SUCURS, G.COD_COMP, G.N_COMP, G.MONTO, G.MONEDA
+                    FROM {$vista} G
+                    INNER JOIN U ON U.NRO_SUCURS = G.NRO_SUCURS AND U.COD_COMP = G.COD_COMP
+                                AND U.FECHA = G.FECHA
+                    ORDER BY G.NRO_SUCURS, G.COD_COMP, G.N_COMP";
+
+            $stmt = sqlsrv_query($cid, $sql);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer ' . self::VISTA_GASTOS_CAJA));
+            }
+
+            $v = [];
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $v[] = $row;
+            }
+
+            sqlsrv_free_stmt($stmt);
+        } catch (Throwable $e) {
+            return ['locales' => [], 'leido' => false, 'avisos' => [
+                'No se pudieron leer los últimos envíos y depósitos de los locales ('
+                . $e->getMessage() . '): los íconos se ven apagados. Los saldos y lo que aporta '
+                . 'cada local no cambian.']];
+        }
+
+        return ['locales' => self::armarUltimosMovimientos($v), 'leido' => true, 'avisos' => []];
+    }
+
+    /**
+     * Agrupa por local y comprobante lo que devolvio la vista. PURA.
+     *
+     * Cada bloque es la ultima fecha de ese comprobante en ese local: la
+     * lista de comprobantes (COD_COMP + N_COMP, sin los espacios de Tango) y
+     * EL TOTAL POR MONEDA. Un local manda pesos y a veces dolares por RAF, y
+     * sumarlos daria un numero que no es ni una cosa ni la otra: es la regla
+     * de todo el modulo.
+     *
+     * Si la consulta trajo, para un mismo local y comprobante, mas de una
+     * fecha -no deberia-, se queda con la mas nueva: el helper no confia en
+     * que la consulta haya filtrado.
+     *
+     * @param array $filas Filas crudas: FECHA, NRO_SUCURS, COD_COMP, N_COMP, MONTO, MONEDA
+     * @return array Mapa NRO_SUCURSAL => ['RAF' => bloque|null, 'BDE' => bloque|null], con
+     *         bloque = ['fecha' => 'Y-m-d', 'comprobantes' => [['cod_comp', 'n_comp',
+     *         'comprobante', 'monto', 'moneda']], 'totales' => ['ARS' => float, ...]]
+     */
+    public static function armarUltimosMovimientos($filas) {
+        $v = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $r) {
+            $nro = intval($r['NRO_SUCURS']);
+            $comp = strtoupper(trim((string) $r['COD_COMP']));
+            $fecha = Horizonte::normalizarFecha($r['FECHA']);
+
+            if (!in_array($comp, self::COMPROBANTE_GESTION, true) || $fecha === null) {
+                continue;
+            }
+
+            if (!isset($v[$nro])) {
+                $v[$nro] = array_fill_keys(array_values(self::COMPROBANTE_GESTION), null);
+            }
+
+            $b = $v[$nro][$comp];
+
+            if ($b === null || $fecha > $b['fecha']) {
+                $b = ['fecha' => $fecha, 'comprobantes' => [], 'totales' => []];
+            } elseif ($fecha < $b['fecha']) {
+                continue;
+            }
+
+            $nComp = trim((string) $r['N_COMP']);
+            $moneda = strtoupper(trim((string) $r['MONEDA']));
+            $moneda = ($moneda === '') ? 'ARS' : $moneda;
+            $monto = round(floatval($r['MONTO']), 2);
+
+            $b['comprobantes'][] = ['cod_comp' => $comp, 'n_comp' => $nComp,
+                                    'comprobante' => $comp . ' ' . $nComp,
+                                    'monto' => $monto, 'moneda' => $moneda];
+            $b['totales'][$moneda] = (isset($b['totales'][$moneda]) ? $b['totales'][$moneda] : 0) + $monto;
+
+            $v[$nro][$comp] = $b;
+        }
+
+        ksort($v);
+
+        return $v;
+    }
+
+    /**
+     * El bloque que corresponde a la gestion del local: el ultimo RAF si
+     * envia, el ultimo BDE si deposita, o null si no tiene. PURA. La pantalla
+     * hace lo mismo con la gestion que haya en pantalla.
+     *
+     * @param array $mapa armarUltimosMovimientos()
+     * @param int $nro
+     * @param string $gestion DEPOSITA o ENVIA
+     * @return array|null
+     */
+    public static function ultimoMovimiento($mapa, $nro, $gestion) {
+        $gestion = strtoupper(trim((string) $gestion));
+        $comps = self::COMPROBANTE_GESTION;
+        $comp = array_key_exists($gestion, $comps) ? $comps[$gestion] : $comps[self::DEPOSITA];
+
+        return isset($mapa[intval($nro)][$comp]) ? $mapa[intval($nro)][$comp] : null;
     }
 
     /**
@@ -2669,7 +3023,7 @@ class Saldos {
             return null;
         }
 
-        return 'Es un banco de carga manual: sus saldos se cargan en Saldos › Nueva carga. Si '
+        return 'Es un banco de carga manual: su saldo se carga desde su fila en Saldos › Saldos. Si '
             . 'este banco ya viene por Interbanking, inhabilitalo: el disponible lo sumaría dos veces.';
     }
 
@@ -2912,37 +3266,48 @@ class Saldos {
             $avisos[] = $a;
         }
 
-        // Sin la tabla del respaldo la accion no se dibuja: se dice por que.
-        // Sin depurar no hay filas de Interbanking, y el aviso ya es otro.
+        // Sin la tabla del manual de Interbanking esas filas no se editan: se
+        // dice por que. Sin depurar no hay filas de Interbanking, y el aviso
+        // ya es otro.
         if ($disponible['depurado'] && !$disponible['respaldo_creado']) {
-            $avisos[] = 'Todavía no se puede cargar a mano el saldo de una cuenta de Interbanking '
-                . 'que no trae dato: corré sql/cashflow_saldos_interbanking.sql contra la base central.';
+            $avisos[] = 'Todavía no se puede cargar a mano el saldo de una cuenta de Interbanking: '
+                . 'corré sql/cashflow_saldos_interbanking.sql contra la base central.';
         }
 
-        $cargas = $this->getCargas(self::CARGA_SALDOS);
-        $ultima = self::ultimaCarga($cargas);
+        $edicion = false;
+
+        try {
+            $edicion = $this->edicionCreada();
+        } catch (Throwable $e) {
+            $avisos[] = 'No se pudo verificar si se puede editar el saldo de las cuentas: '
+                . $e->getMessage();
+        }
+
+        if ($this->tablasCreadas() && !$edicion) {
+            $avisos[] = 'Todavía no se puede editar el saldo de Mercado Pago, de los bancos sin '
+                . 'Interbanking ni de Otros: corré ' . self::SCRIPT_EDICION . ' contra la base central.';
+        }
+
+        $filas = self::marcarEditables($filas, $edicion, $disponible['respaldo_creado']);
 
         // El efectivo y Mercado Pago ya vienen leidos en vivo en las filas, con
         // su aviso si la lectura fallo: ver getFilasDisponible().
 
         $diasAlerta = isset($map[self::PARAM_DIAS_ALERTA])
             ? intval($map[self::PARAM_DIAS_ALERTA]) : 0;
+        $antiguedad = self::avisosAntiguedad($filas, $diasAlerta, date('Y-m-d'));
 
-        if ($this->tablasCreadas()) {
-            foreach (self::avisosAntiguedad(
-                $ultima === null ? null : $this->fechaHora($ultima['FECHA_CARGA']),
-                $diasAlerta,
-                date('Y-m-d')
-            ) as $a) {
-                $avisos[] = $a;
-            }
+        foreach ($antiguedad['avisos'] as $a) {
+            $avisos[] = $a;
         }
 
-        // Las cuentas bancarias cuyo saldo no es de hoy, cada una con su fecha.
-        // Sin las leidas en vivo: Mercado Pago de otro dia ya tiene su aviso,
-        // con la fuente (aplicarConsultas()).
+        // Las cuentas de Interbanking cuyo saldo no es de hoy, cada una con su
+        // fecha. Mercado Pago de otro dia ya tiene su aviso, con la fuente
+        // (aplicarConsultas()), y las cuentas sin fuente automatica el suyo
+        // (avisosAntiguedad()).
         $noEsDeHoy = SaldosInterbanking::avisoNoEsDeHoy(array_filter($filas, function ($f) {
-            return !isset($f['origen']) || $f['origen'] !== self::ORIGEN_CONSULTA;
+            return isset($f['origen_cuenta'])
+                && $f['origen_cuenta'] === SaldosInterbanking::ORIGEN_INTERBANKING;
         }));
 
         if ($noEsDeHoy !== null) {
@@ -2961,23 +3326,12 @@ class Saldos {
             'totales' => self::totalesPorMoneda(array_filter($filas, function ($f) {
                 return $f['cargada'];
             })),
-            'ultima_carga' => $ultima === null ? null : [
-                'id' => $ultima['ID'],
-                'fecha_carga' => $this->fechaHora($ultima['FECHA_CARGA']),
-                'origen' => $ultima['ORIGEN'],
-                'observaciones' => $ultima['OBSERVACIONES'],
-                'usuario' => $ultima['USUARIO']
-            ],
-            'cargas' => array_map(function ($c) {
-                return [
-                    'id' => $c['ID'],
-                    'fecha_carga' => $this->fechaHora($c['FECHA_CARGA']),
-                    'origen' => $c['ORIGEN'],
-                    'observaciones' => $c['OBSERVACIONES'],
-                    'usuario' => $c['USUARIO']
-                ];
-            }, $cargas),
+            // El KPI "Saldo manual más viejo": ver avisosAntiguedad()
+            'manual_mas_viejo' => $antiguedad['mas_viejo'],
+            'manuales_hoy' => $antiguedad['manuales_hoy'],
+            'dias_alerta' => $diasAlerta,
             'respaldo_creado' => $disponible['respaldo_creado'],
+            'edicion_creada' => $edicion,
             // Los textos, como siempre, y la misma lista con nivel: la pestana
             // pinta los criticos aparte. Un texto suelto es atencion.
             'avisos' => Aviso::textos($avisos),
@@ -3147,95 +3501,126 @@ class Saldos {
        ==================================================================== */
 
     /**
-     * Guarda una carga de saldos (pestana 1).
+     * Que filas de la pestana 1 se pueden editar, y que manual se puede
+     * quitar. PURA: el servidor decide, el navegador solo dibuja.
      *
-     * El detalle NO pisa nada: inserta filas nuevas colgadas de una cabecera
-     * nueva. Las cargas anteriores quedan enteras.
+     *   - TODAS MENOS EL EFECTIVO DE TESORERIA, que es un dato de la
+     *     contabilidad y sigue en vivo de SBA05 (TIPO_NO_EDITABLE).
+     *   - Las de Interbanking, si existe la tabla de su manual
+     *     (sql/cashflow_saldos_interbanking.sql).
+     *   - Las del catalogo, si se corrio SCRIPT_EDICION.
      *
-     * El saldo de las cuentas "por consulta" -el efectivo central y Mercado
-     * Pago- no viene del cliente aunque este en la pantalla: se vuelve a leer
-     * de SU consulta (leerConsulta(), por tipo) en el momento de guardar. Es un
-     * dato del sistema, y aceptarlo del navegador permitiria guardar cualquier
-     * cosa como si fuera lo que dice la contabilidad. La pantalla y el tablero
-     * ya muestran ese valor en vivo; lo que guarda la carga es la foto del dia,
-     * para el historico.
+     * QUITAR: en Interbanking, el manual vigente, de la fecha que sea -es el
+     * respaldo de una cuenta que BI no trae, y quitarlo ya se podia-. En las
+     * del catalogo, solo el manual DE HOY y hecho desde la fila (una carga
+     * propia): uno de otro dia es el historico de la cuenta, y uno de "Nueva
+     * carga" esta en una carga con todas las demas.
      *
-     * @param array $filas [['id_cuenta' => int, 'saldo' => float, 'fecha_saldo' => 'Y-m-d'], ...]
-     * @param string|null $observaciones
-     * @param string $usuario
-     * @return int ID de la carga creada
+     * @param array $filas Las de getFilasDisponible()
+     * @param bool $edicionCreada edicionCreada()
+     * @param bool $respaldoCreado Si existe la tabla del manual de Interbanking
+     * @return array Las mismas filas, con 'editable' y 'manual.quitable'
      */
-    public function guardarCargaSaldos($filas, $observaciones, $usuario) {
+    public static function marcarEditables($filas, $edicionCreada, $respaldoCreado) {
+        $out = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $ib = isset($f['origen_cuenta'])
+                && $f['origen_cuenta'] === SaldosInterbanking::ORIGEN_INTERBANKING;
+
+            $f['editable'] = $ib
+                ? (bool) $respaldoCreado
+                : ((bool) $edicionCreada && (!isset($f['tipo']) || $f['tipo'] !== self::TIPO_NO_EDITABLE));
+
+            if (isset($f['manual']) && $f['manual'] !== null) {
+                $f['manual']['quitable'] = $f['editable'] && ($ib
+                    || (!empty($f['manual']['de_hoy']) && !empty($f['manual']['carga_propia'])));
+            }
+
+            $out[] = $f;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Si una cuenta del catalogo admite un saldo manual. PURA: corta antes
+     * de abrir la transaccion. Lanza con el motivo.
+     *
+     * EL EFECTIVO DE TESORERIA SE RECHAZA aunque el pedido llegue sin pasar
+     * por la pantalla: es un dato de la contabilidad (SBA05) y aceptarlo del
+     * navegador permitiria guardar cualquier cosa como si fuera lo que dice
+     * Tesoreria. Un fondo tampoco: no es disponibilidad, y su saldo es su
+     * cuenta corriente (pestana Fondos).
+     *
+     * @param array|null $cuenta ['ID', 'NOMBRE', 'TIPO', 'CLASE'], o null si no existe o
+     *        esta inhabilitada
+     */
+    public static function validarEdicionCuenta($cuenta) {
+        if ($cuenta === null) {
+            throw new Exception('La cuenta no existe o está inhabilitada.');
+        }
+
+        if ($cuenta['TIPO'] === self::TIPO_NO_EDITABLE) {
+            throw new Exception('El efectivo de tesorería de Casa Central no se edita: se lee en vivo '
+                . 'de SBA05, que es lo que dice la contabilidad.');
+        }
+
+        if (isset($cuenta['CLASE']) && Fondos::esFondo($cuenta['CLASE'])) {
+            throw new Exception('"' . $cuenta['NOMBRE'] . '" es un fondo: su saldo sale de sus '
+                . 'movimientos, en la pestaña Fondos.');
+        }
+    }
+
+    /**
+     * Guarda el saldo manual de una cuenta, desde su fila de la pestana 1.
+     * La fecha es HOY y la pone el servidor; con ella el manual manda todo el
+     * dia sobre la fuente automatica (SaldoManual::resolver()).
+     *
+     * DOS CAMINOS, UNA REGLA:
+     *   - Una cuenta de Interbanking ('nro_banco', 'nro_cuenta', 'moneda') va
+     *     a su tabla, RO_T_CASHFLOW_SALDOS_BANCO_MANUAL: ver
+     *     SaldosInterbanking::guardarRespaldo().
+     *   - Una del catalogo ('id_cuenta') es UNA CARGA CON UNA SOLA CUENTA:
+     *     cabecera ORIGEN_EDICION y una fila de detalle MANUAL. El historico
+     *     es el de siempre y getSaldosActuales() la lee sin cambios.
+     *
+     * DOS EDICIONES EL MISMO DIA: MANDA LA ULTIMA. La nueva da de baja la
+     * carga propia de hoy de esa cuenta (ACTIVO = 0, con usuario y fecha de
+     * baja) y la nombra en ID_REEMPLAZA, en una transaccion y con el vigente
+     * bloqueado: dos guardados simultaneos no pueden dejar dos de hoy. Las de
+     * dias anteriores no se tocan: son el historico, y el respaldo de la
+     * cuenta si un dia la fuente no trae nada.
+     *
+     * @param array $datos ['id_cuenta' | 'nro_banco', 'nro_cuenta', 'moneda'] + ['saldo', 'observacion']
+     * @param string $usuario
+     * @param string|null $hoy 'Y-m-d'; null es hoy
+     * @return array ['id' => int, 'reemplaza' => int|null, 'interbanking' => bool]
+     */
+    public function guardarSaldoManual($datos, $usuario, $hoy = null) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $datos = is_array($datos) ? $datos : [];
+
+        if (empty($datos['id_cuenta'])) {
+            $r = $this->interbanking()->guardarRespaldo($datos, $usuario, $hoy);
+            $r['interbanking'] = true;
+
+            return $r;
+        }
 
         if (!$this->tablasCreadas()) {
-            throw new Exception('No existen las tablas del módulo Saldos. '
-                . 'Corré sql/cashflow_saldos.sql.');
+            throw new Exception('No existen las tablas del módulo Saldos. Corré sql/cashflow_saldos.sql.');
         }
 
-        if (!is_array($filas) || empty($filas)) {
-            throw new Exception('La carga no tiene ninguna cuenta');
+        if (!$this->edicionCreada()) {
+            throw new Exception('Todavía no se puede editar el saldo de esta cuenta: corré '
+                . self::SCRIPT_EDICION . ' contra la base central.');
         }
 
-        $cuentas = $this->cuentasPorId();
-
-        /* Las cuentas por consulta las resuelve el sistema, no el navegador, y
-           CADA UNA CON LA SUYA: antes cualquier cuenta de origen CONSULTA
-           guardaba el efectivo de tesoreria, que era la unica. Se lee una vez
-           por cuenta. */
-        $map = null;
-
-        $aInsertar = [];
-        $hoy = date('Y-m-d');
-
-        foreach ($filas as $f) {
-            $id = intval(isset($f['id_cuenta']) ? $f['id_cuenta'] : 0);
-
-            if (!isset($cuentas[$id])) {
-                throw new Exception('La cuenta ' . $id . ' no existe o está inhabilitada');
-            }
-
-            $cuenta = $cuentas[$id];
-            $esConsulta = ($cuenta['ORIGEN_DATO'] === self::ORIGEN_CONSULTA);
-            $lectura = null;
-
-            if ($esConsulta) {
-                try {
-                    if ($map === null) {
-                        $map = (new Parametros())->getParametrosMap();
-                    }
-
-                    $lectura = $this->leerConsulta($cuenta['TIPO'], $cuenta['MONEDA'], $map);
-                } catch (Throwable $e) {
-                    throw new Exception('No se pudo leer el saldo de "' . $cuenta['NOMBRE'] . '" de '
-                        . 'su consulta de origen (' . $e->getMessage() . '), así que la carga no se '
-                        . 'guarda: guardarla dejaría ese saldo en cero y el disponible quedaría '
-                        . 'informado de menos.');
-                }
-            }
-
-            $saldo = $esConsulta
-                ? $lectura['saldo']
-                : floatval(isset($f['saldo']) ? $f['saldo'] : 0);
-
-            /* La fecha de lo leido es la del dato: hoy para el efectivo, la del
-               ultimo registro para Mercado Pago. */
-            $fecha = $esConsulta
-                ? $lectura['fecha']
-                : Horizonte::normalizarFecha(isset($f['fecha_saldo']) ? $f['fecha_saldo'] : null);
-
-            if ($fecha === null) {
-                $fecha = $hoy;
-            }
-
-            $aInsertar[] = [
-                'id_cuenta' => $id,
-                'moneda' => $cuenta['MONEDA'],
-                'saldo' => $saldo,
-                'fecha_saldo' => $fecha,
-                'origen' => $esConsulta ? 'CONSULTA' : 'MANUAL'
-            ];
-        }
+        $cuenta = $this->cuentaParaEditar(intval($datos['id_cuenta']));
+        self::validarEdicionCuenta($cuenta);
+        $v = SaldoManual::validar($datos);
 
         $cid = $this->conectar('central');
 
@@ -3244,35 +3629,177 @@ class Saldos {
         }
 
         try {
-            $idCarga = $this->insertarCabecera($cid, self::CARGA_SALDOS, 'MIXTA',
-                $observaciones, $usuario);
+            $anteriores = $this->cargasPropiasDeHoy($cid, $cuenta['ID'], $hoy);
+            $reemplaza = empty($anteriores) ? null : max($anteriores);
 
-            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_DETALLE
-                        (ID_CARGA, ID_CUENTA, FECHA_SALDO, MONEDA, COUNTABLE_BALANCE,
-                         ORIGEN_DATO, USUARIO_ALTA, USUARIO_MODIF)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            foreach ($anteriores as $id) {
+                $ok = sqlsrv_query($cid,
+                    "UPDATE RO_T_CASHFLOW_SALDOS_CARGA SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
+                     WHERE ID = ? AND ACTIVO = 1",
+                    [$usuario, $usuario, $id]);
 
-            foreach ($aInsertar as $d) {
-                $params = [
-                    $idCarga, $d['id_cuenta'], $d['fecha_saldo'], $d['moneda'],
-                    $d['saldo'], $d['origen'], $usuario, $usuario
-                ];
-
-                if (sqlsrv_query($cid, $sql, $params) === false) {
-                    throw new Exception($this->errorSql('Error al guardar el saldo de la cuenta '
-                        . $d['id_cuenta']));
+                if ($ok === false) {
+                    throw new Exception($this->errorSql('Error al dar de baja el saldo manual anterior'));
                 }
             }
 
+            $idCarga = $this->insertarCabecera($cid, self::CARGA_SALDOS, self::ORIGEN_EDICION,
+                $v['observacion'], $usuario, $reemplaza);
+
+            $ok = sqlsrv_query($cid,
+                "INSERT INTO RO_T_CASHFLOW_SALDOS_DETALLE
+                    (ID_CARGA, ID_CUENTA, FECHA_SALDO, MONEDA, COUNTABLE_BALANCE,
+                     ORIGEN_DATO, USUARIO_ALTA, USUARIO_MODIF)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [$idCarga, $cuenta['ID'], $hoy, $cuenta['MONEDA'], $v['saldo'], self::SALDO_MANUAL,
+                 $usuario, $usuario]);
+
+            if ($ok === false) {
+                throw new Exception($this->errorSql('Error al guardar el saldo de "'
+                    . $cuenta['NOMBRE'] . '"'));
+            }
+
             if (sqlsrv_commit($cid) === false) {
-                throw new Exception($this->errorSql('No se pudo confirmar la carga'));
+                throw new Exception($this->errorSql('No se pudo confirmar el saldo manual'));
             }
         } catch (Throwable $e) {
             sqlsrv_rollback($cid);
             throw $e;
         }
 
-        return $idCarga;
+        return ['id' => $idCarga, 'reemplaza' => $reemplaza, 'interbanking' => false];
+    }
+
+    /**
+     * Quita el saldo manual de hoy de una cuenta: lo da de baja y no inserta
+     * nada. Vuelve a mandar la fuente automatica -Mercado Pago en vivo- o, en
+     * una cuenta sin fuente, el ultimo manual de un dia anterior.
+     *
+     * En Interbanking ('nro_banco') delega en quitarRespaldo(), que da de baja
+     * el manual vigente. En el catalogo ('id_cuenta' + 'id' de la carga) solo
+     * se quita una carga propia DE HOY y vigente de esa cuenta: lo controla el
+     * servidor, no el boton.
+     *
+     * @param array $datos ['id', 'id_cuenta' | 'nro_banco']
+     * @param string $usuario
+     * @param string|null $hoy
+     * @return bool
+     */
+    public function quitarSaldoManual($datos, $usuario, $hoy = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $datos = is_array($datos) ? $datos : [];
+
+        if (!isset($datos['id']) || intval($datos['id']) <= 0) {
+            throw new Exception('Falta el saldo manual a quitar.');
+        }
+
+        if (empty($datos['id_cuenta'])) {
+            return $this->interbanking()->quitarRespaldo(intval($datos['id']), $usuario);
+        }
+
+        if (!$this->edicionCreada()) {
+            throw new Exception('Todavía no se puede editar el saldo de esta cuenta: corré '
+                . self::SCRIPT_EDICION . ' contra la base central.');
+        }
+
+        $cuenta = $this->cuentaParaEditar(intval($datos['id_cuenta']));
+        self::validarEdicionCuenta($cuenta);
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+        }
+
+        try {
+            $id = intval($datos['id']);
+
+            if (!in_array($id, $this->cargasPropiasDeHoy($cid, $cuenta['ID'], $hoy), true)) {
+                throw new Exception('Ese saldo manual ya no está vigente o no es de hoy: alguien lo '
+                    . 'reemplazó o lo quitó. Actualizá la pantalla.');
+            }
+
+            $stmt = sqlsrv_query($cid,
+                "UPDATE RO_T_CASHFLOW_SALDOS_CARGA SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
+                 WHERE ID = ? AND ACTIVO = 1",
+                [$usuario, $usuario, $id]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al quitar el saldo manual'));
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        return true;
+    }
+
+    /**
+     * Una cuenta activa del catalogo, con lo que hace falta para decidir si se
+     * edita, o null.
+     *
+     * @param int $id
+     * @return array|null ['ID', 'NOMBRE', 'MONEDA', 'TIPO', 'CLASE']
+     */
+    private function cuentaParaEditar($id) {
+        $clase = $this->fondosCreados() ? 'CLASE' : "'" . Fondos::CLASE_DEFECTO . "' AS CLASE";
+
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT ID, NOMBRE, MONEDA, TIPO, " . $clase . "
+             FROM RO_T_CASHFLOW_SALDOS_CUENTA WHERE ID = ? AND ACTIVO = 1",
+            [intval($id)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer la cuenta'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if (!$row) {
+            return null;
+        }
+
+        $row['ID'] = intval($row['ID']);
+
+        return $row;
+    }
+
+    /**
+     * Las cargas propias, vigentes y de hoy de una cuenta: la que hay que dar
+     * de baja al reemplazar o al quitar. Bloqueadas hasta el final de la
+     * transaccion. Normalmente es una sola.
+     *
+     * @return int[]
+     */
+    private function cargasPropiasDeHoy($cid, $idCuenta, $hoy) {
+        $stmt = sqlsrv_query($cid,
+            "SELECT C.ID
+             FROM RO_T_CASHFLOW_SALDOS_CARGA C WITH (UPDLOCK, HOLDLOCK)
+             INNER JOIN RO_T_CASHFLOW_SALDOS_DETALLE D ON D.ID_CARGA = C.ID
+             WHERE C.TIPO = ? AND C.ORIGEN = ? AND C.ACTIVO = 1
+               AND D.ID_CUENTA = ? AND D.ORIGEN_DATO = ? AND D.FECHA_SALDO = ?",
+            [self::CARGA_SALDOS, self::ORIGEN_EDICION, intval($idCuenta), self::SALDO_MANUAL, $hoy]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el saldo manual vigente'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $v[] = intval($row['ID']);
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
     }
 
     /**
@@ -3665,18 +4192,30 @@ class Saldos {
        INFRAESTRUCTURA
        ==================================================================== */
 
-    /** Inserta la cabecera de una carga y devuelve su ID */
-    private function insertarCabecera($cid, $tipo, $origen, $observaciones, $usuario) {
-        $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CARGA
-                    (TIPO, FECHA_CARGA, ORIGEN, OBSERVACIONES, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
-                OUTPUT INSERTED.ID
-                VALUES (?, GETDATE(), ?, ?, 1, ?, ?)";
-
+    /**
+     * Inserta la cabecera de una carga y devuelve su ID. $reemplaza es la
+     * carga que esta da de baja (solo una edicion desde la fila: ver
+     * guardarSaldoManual()); la columna existe con SCRIPT_EDICION.
+     */
+    private function insertarCabecera($cid, $tipo, $origen, $observaciones, $usuario, $reemplaza = null) {
         $obs = trim((string) $observaciones);
+        $params = [$tipo, $origen, ($obs === '' ? null : mb_substr($obs, 0, 500)), $usuario, $usuario];
 
-        $stmt = sqlsrv_query($cid, $sql, [
-            $tipo, $origen, ($obs === '' ? null : substr($obs, 0, 500)), $usuario, $usuario
-        ]);
+        if ($reemplaza === null) {
+            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CARGA
+                        (TIPO, FECHA_CARGA, ORIGEN, OBSERVACIONES, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
+                    OUTPUT INSERTED.ID
+                    VALUES (?, GETDATE(), ?, ?, 1, ?, ?)";
+        } else {
+            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CARGA
+                        (TIPO, FECHA_CARGA, ORIGEN, OBSERVACIONES, ACTIVO, USUARIO_ALTA, USUARIO_MODIF,
+                         ID_REEMPLAZA)
+                    OUTPUT INSERTED.ID
+                    VALUES (?, GETDATE(), ?, ?, 1, ?, ?, ?)";
+            $params[] = intval($reemplaza);
+        }
+
+        $stmt = sqlsrv_query($cid, $sql, $params);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al crear la carga'));
@@ -3688,29 +4227,6 @@ class Saldos {
         return intval($row['ID']);
     }
 
-    /** Cuentas activas indexadas por ID, para validar lo que llega del cliente */
-    private function cuentasPorId() {
-        $cid = $this->conectar('central');
-
-        $sql = "SELECT ID, NOMBRE, MONEDA, TIPO, ORIGEN_DATO
-                FROM RO_T_CASHFLOW_SALDOS_CUENTA WHERE ACTIVO = 1";
-
-        $stmt = sqlsrv_query($cid, $sql);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al leer las cuentas'));
-        }
-
-        $v = [];
-
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $v[intval($row['ID'])] = $row;
-        }
-
-        sqlsrv_free_stmt($stmt);
-
-        return $v;
-    }
 
     /**
      * Prefijo de las tablas del servidor de locales.

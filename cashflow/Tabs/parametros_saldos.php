@@ -124,7 +124,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                     <h5 class="mb-0">Bancos sin Interbanking (carga manual)</h5>
                     <small class="text-muted">
                         Sólo para los bancos que <strong>no vienen por Interbanking</strong>: sus
-                        saldos se cargan en Saldos › Nueva carga. Un banco que ya viene por
+                        saldos se cargan desde su fila en Saldos › Saldos. Un banco que ya viene por
                         Interbanking no se da de alta acá: el disponible lo sumaría dos veces. Va
                         una fila por banco y moneda, y se <strong>inhabilitan</strong>, nunca se
                         borran.
