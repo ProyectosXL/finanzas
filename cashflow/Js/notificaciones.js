@@ -261,6 +261,49 @@ var Notificacion = (function() {
          */
         elegirOpciones: elegirOpciones,
 
+        /**
+         * Pide VARIOS CAMPOS en un diálogo: un formulario. Es `confirmar()` con
+         * campos tipados adentro, y opcionalmente una grilla de renglones.
+         *
+         * EXISTE PORQUE UNA LÍNEA CON SEPARADORES NO ES UN FORMULARIO. Los
+         * resúmenes de tarjeta se cargaban como "2026-10 | 450000 |  | 2026-10-12":
+         * un separador de más corre todos los campos y el error aparece recién en
+         * el servidor, sin decir cuál era.
+         *
+         * MISMO CONTRATO QUE LOS OTROS: null al cancelar, y al confirmar un objeto
+         * {nombre: valor}. Los importes vuelven como número (o null si quedaron
+         * vacíos): se tipean con el formato del módulo —1.234.567,89— y se
+         * convierten acá, una sola vez. Con grilla, los renglones vuelven en
+         * `renglones`, sin los que quedaron enteros en blanco.
+         *
+         * LA VALIDACIÓN QUE VALE ES LA DEL SERVIDOR. Esto marca el campo y no
+         * cierra el diálogo, para que se corrija donde se tipea.
+         *
+         * @param {Object} opciones Las de confirmar(), más:
+         * @param {Array} [opciones.campos] [{nombre, etiqueta, tipo, obligatorio,
+         *        valor, placeholder, ayuda, ancho, positivo, opciones, titular}].
+         *        tipo: 'mes', 'importe', 'fecha', 'texto', 'casillas'. Con
+         *        'casillas', `opciones` es [{valor, rotulo, nota, marcada}] y
+         *        `titular: true` agrega a cada una un botón para marcar cuál es
+         *        la principal: vuelve {elegidas: [...], titular: valor}.
+         * @param {Object} [opciones.renglones] {cantidad, campos, obligatorios}:
+         *        una grilla de `cantidad` renglones con esos campos. Con
+         *        `obligatorios`, tienen que venir todos.
+         * @param {Function} [opciones.validar] (valores) => null | 'mensaje':
+         *        lo que no se puede ver campo por campo (al menos un importe).
+         * @returns {Promise<Object|null>}
+         */
+        formulario: formulario,
+
+        /**
+         * Los importes tipeados con el formato del módulo: punto de miles y
+         * coma decimal. Puros y sin Intl, para poder probarlos con cscript.
+         */
+        importe: {
+            parsear: parsearImporte,
+            formatear: formatearImporte
+        },
+
         /** Cierra todo lo que haya en pantalla */
         limpiar: function() {
             if (contenedor) {
@@ -700,6 +743,328 @@ var Notificacion = (function() {
                 });
             }
         });
+    }
+
+    /* ================================================================
+       EL FORMULARIO
+       ================================================================ */
+
+    function formulario(opciones) {
+        opciones = opciones || {};
+
+        var base = 'cf-dlg-form-' + Math.random().toString(36).slice(2);
+        var campos = opciones.campos || [];
+        var grilla = opciones.renglones || null;
+
+        // Sin Bootstrap no hay dónde poner varios campos: se dice y no se carga.
+        if (!window.bootstrap || !bootstrap.Modal) {
+            mostrar('error', 'No se puede abrir el formulario: falta Bootstrap en la página.');
+
+            return Promise.resolve(null);
+        }
+
+        var cuerpo = '<div class="row g-2 mt-2">'
+            + campos.map(function(c) { return campoHtml(c, base, null); }).join('')
+            + '</div>';
+
+        if (grilla) {
+            cuerpo += '<div class="table-responsive mt-3"><table class="table table-sm mb-0 cf-dlg-grilla">'
+                + '<thead><tr><th style="width: 32px;"></th>'
+                + grilla.campos.map(function(c) {
+                    return '<th class="small">' + escapar(c.etiqueta) + '</th>';
+                }).join('')
+                + '</tr></thead><tbody>';
+
+            for (var i = 0; i < grilla.cantidad; i++) {
+                cuerpo += '<tr data-renglon="' + i + '"><td class="small text-muted align-middle">'
+                    + (i + 1) + '</td>'
+                    + grilla.campos.map(function(c) {
+                        return '<td>' + campoHtml(c, base, i) + '</td>';
+                    }).join('')
+                    + '</tr>';
+            }
+
+            cuerpo += '</tbody></table></div>';
+        }
+
+        cuerpo += '<small class="invalid-feedback d-block cf-dlg-error mt-2"></small>';
+
+        return abrirDialogo(opciones, {
+            cuerpo: cuerpo,
+            foco: '.cf-dlg-form-campo',
+
+            alConfirmar: function(modal) {
+                var error = modal.querySelector('.cf-dlg-error');
+                var valores = {};
+                var primero = null;
+
+                error.textContent = '';
+
+                var marcar = function(el, mensaje) {
+                    el.classList.add('is-invalid');
+
+                    if (!primero) {
+                        primero = el;
+                        error.textContent = mensaje;
+                    }
+                };
+
+                campos.forEach(function(c) {
+                    valores[c.nombre] = leerCampo(modal, c, base, null, marcar);
+                });
+
+                if (grilla) {
+                    valores.renglones = [];
+
+                    for (var i = 0; i < grilla.cantidad; i++) {
+                        var r = {};
+                        var vacio = true;
+
+                        grilla.campos.forEach(function(c) {
+                            var el = modal.querySelector('[data-campo="' + c.nombre + '"][data-renglon="' + i + '"]');
+
+                            if (el && String(el.value || '').trim() !== '') {
+                                vacio = false;
+                            }
+                        });
+
+                        /* UN RENGLÓN ENTERO EN BLANCO NO SE VALIDA, salvo que la
+                           grilla los pida todos: ahí el blanco es justamente lo
+                           que falta. */
+                        if (vacio && !grilla.obligatorios) {
+                            continue;
+                        }
+
+                        grilla.campos.forEach(function(c) {
+                            r[c.nombre] = leerCampo(modal, c, base, i, marcar);
+                        });
+
+                        valores.renglones.push(r);
+                    }
+                }
+
+                if (!primero && typeof opciones.validar === 'function') {
+                    var msg = opciones.validar(valores);
+
+                    if (msg) {
+                        error.textContent = msg;
+
+                        return undefined;
+                    }
+                }
+
+                if (primero) {
+                    primero.focus();
+
+                    return undefined;
+                }
+
+                return valores;
+            },
+
+            alCancelar: null,
+
+            alAbrir: function(modal) {
+                modal.querySelector('.modal-dialog').classList.add('modal-lg');
+
+                modal.querySelectorAll('.cf-dlg-form-campo').forEach(function(el) {
+                    el.addEventListener('input', function() {
+                        el.classList.remove('is-invalid');
+                    });
+                });
+
+                /* EL IMPORTE SE REESCRIBE CON EL FORMATO DEL MÓDULO AL SALIR del
+                   campo, así se ve el número que se va a guardar. Mientras se
+                   tipea no se toca: mover el cursor en el medio de una palabra
+                   es la peor forma de ayudar. */
+                modal.querySelectorAll('[data-tipo="importe"]').forEach(function(el) {
+                    el.addEventListener('blur', function() {
+                        var n = parsearImporte(el.value);
+
+                        if (n !== null && !isNaN(n)) {
+                            el.value = formatearImporte(n);
+                        }
+                    });
+                });
+            }
+        });
+    }
+
+    /** El HTML de un campo, suelto o en un renglón de la grilla */
+    function campoHtml(c, base, renglon) {
+        var id = base + '-' + c.nombre + (renglon === null ? '' : '-' + renglon);
+        var datos = ' data-campo="' + escapar(c.nombre) + '" data-tipo="' + escapar(c.tipo) + '"'
+            + (renglon === null ? '' : ' data-renglon="' + renglon + '"');
+        var valor = (c.valor === undefined || c.valor === null) ? '' : c.valor;
+        var etiqueta = renglon === null
+            ? '<label class="form-label form-label-sm mb-1" for="' + id + '">' + escapar(c.etiqueta)
+              + (c.obligatorio ? '' : ' <span class="text-muted">(opcional)</span>') + '</label>'
+            : '';
+        var ayuda = (renglon === null && c.ayuda)
+            ? '<div class="form-text">' + escapar(c.ayuda) + '</div>' : '';
+        var control;
+
+        if (c.tipo === 'casillas') {
+            control = '<div class="cf-dlg-casillas border rounded p-2" style="max-height: 220px; overflow-y: auto;"'
+                + datos + '>'
+                + (c.opciones || []).map(function(o, i) {
+                    return '<div class="d-flex align-items-center gap-2">'
+                        + '<input class="form-check-input cf-dlg-casilla" type="checkbox" id="' + id + i + '"'
+                        + ' data-indice="' + i + '"' + (o.marcada ? ' checked' : '') + '>'
+                        + '<label class="form-check-label flex-grow-1 small" for="' + id + i + '">'
+                        + escapar(o.rotulo)
+                        + (o.nota ? ' <span class="text-muted">' + escapar(o.nota) + '</span>' : '')
+                        + '</label>'
+                        + (c.titular
+                            ? '<label class="small text-nowrap"><input type="radio" class="form-check-input me-1 cf-dlg-titular" '
+                              + 'name="' + id + '-titular" data-indice="' + i + '"'
+                              + (o.titular ? ' checked' : '') + '>titular</label>'
+                            : '')
+                        + '</div>';
+                }).join('')
+                + '</div>';
+
+            return '<div class="col-12">' + etiqueta + control + ayuda + '</div>';
+        }
+
+        if (c.tipo === 'texto' && renglon === null && c.largo) {
+            control = '<textarea id="' + id + '" class="form-control form-control-sm cf-dlg-form-campo" rows="2"'
+                + datos + ' maxlength="' + c.largo + '" placeholder="' + escapar(c.placeholder || '') + '">'
+                + escapar(valor) + '</textarea>';
+        } else {
+            var tipo = {mes: 'month', fecha: 'date'}[c.tipo] || 'text';
+
+            control = '<input type="' + tipo + '" id="' + id + '" class="form-control form-control-sm cf-dlg-form-campo'
+                + (c.tipo === 'importe' ? ' text-end' : '') + '"' + datos
+                + (c.tipo === 'importe' ? ' inputmode="decimal" autocomplete="off"' : '')
+                + (c.tipo === 'mes' ? ' placeholder="aaaa-mm"' : '')
+                + (c.placeholder ? ' placeholder="' + escapar(c.placeholder) + '"' : '')
+                + ' value="' + escapar(c.tipo === 'importe' && valor !== '' ? formatearImporte(valor) : valor) + '">';
+        }
+
+        return renglon === null
+            ? '<div class="col-md-' + (c.ancho || 6) + '">' + etiqueta + control + ayuda + '</div>'
+            : control;
+    }
+
+    /**
+     * Lee y valida un campo. Marca el que está mal y devuelve el valor ya
+     * convertido: número para un importe, 'aaaa-mm' para un mes.
+     */
+    function leerCampo(modal, c, base, renglon, marcar) {
+        var sel = '[data-campo="' + c.nombre + '"]' + (renglon === null ? ':not([data-renglon])'
+            : '[data-renglon="' + renglon + '"]');
+        var el = modal.querySelector(sel);
+        var donde = (renglon === null) ? '' : ' (renglón ' + (renglon + 1) + ')';
+
+        if (!el) { return null; }
+
+        if (c.tipo === 'casillas') {
+            var elegidas = [];
+            var titular = null;
+            var opciones = c.opciones || [];
+
+            el.querySelectorAll('.cf-dlg-casilla').forEach(function(chk) {
+                if (chk.checked) { elegidas.push(opciones[parseInt(chk.dataset.indice, 10)].valor); }
+            });
+
+            el.querySelectorAll('.cf-dlg-titular').forEach(function(r) {
+                if (r.checked) { titular = opciones[parseInt(r.dataset.indice, 10)].valor; }
+            });
+
+            if (c.obligatorio && !elegidas.length) {
+                marcar(el, 'Elegí al menos una en «' + c.etiqueta + '».');
+            } else if (c.titular && elegidas.length > 1
+                       && (titular === null || elegidas.indexOf(titular) === -1)) {
+                marcar(el, 'Marcá cuál es la titular, entre las elegidas.');
+            }
+
+            return c.titular ? {elegidas: elegidas, titular: elegidas.length === 1 ? elegidas[0] : titular}
+                             : elegidas;
+        }
+
+        var v = String(el.value || '').trim();
+
+        if (v === '') {
+            if (c.obligatorio) {
+                marcar(el, 'Falta «' + c.etiqueta + '»' + donde + '.');
+            }
+
+            return null;
+        }
+
+        if (c.tipo === 'importe') {
+            var n = parsearImporte(v);
+
+            if (n === null || isNaN(n)) {
+                marcar(el, '«' + c.etiqueta + '»' + donde + ' no es un importe: escribilo como 1.234.567,89.');
+
+                return null;
+            }
+
+            if (c.positivo && n <= 0) {
+                marcar(el, '«' + c.etiqueta + '»' + donde + ' tiene que ser mayor a cero. Si no '
+                    + 'corresponde, dejalo vacío.');
+            }
+
+            return n;
+        }
+
+        if (c.tipo === 'mes' && !/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) {
+            marcar(el, '«' + c.etiqueta + '»' + donde + ' tiene que ser un mes, aaaa-mm.');
+        }
+
+        if (c.tipo === 'fecha' && !esFecha(v)) {
+            marcar(el, '«' + c.etiqueta + '»' + donde + ' no es una fecha válida.');
+        }
+
+        return v;
+    }
+
+    /**
+     * '1.234.567,89' => 1234567.89. null si está vacío, NaN si no es un número.
+     *
+     * LA COMA ES EL DECIMAL Y EL PUNTO EL MILES, que es como se lee todo el
+     * módulo. Sin coma, un punto seguido de uno o dos dígitos al final se toma
+     * como decimal ('320.50' en un importe en dólares), y grupos de tres como
+     * miles ('1.500' son mil quinientos): son las dos formas en que alguien lo
+     * tipea sin pensar.
+     */
+    function parsearImporte(texto) {
+        var t = String(texto === null || texto === undefined ? '' : texto)
+            .replace(/\$/g, '').replace(/U\$S/gi, '').replace(/\s/g, '');
+
+        if (t === '') { return null; }
+
+        if (t.indexOf(',') !== -1) {
+            t = t.replace(/\./g, '').replace(',', '.');
+        } else if (/^-?\d{1,3}(\.\d{3})+$/.test(t)) {
+            t = t.replace(/\./g, '');
+        }
+
+        if (!/^-?\d+(\.\d+)?$/.test(t)) { return NaN; }
+
+        return parseFloat(t);
+    }
+
+    /** 1234567.891 => '1.234.567,89'. '' para null */
+    function formatearImporte(n) {
+        if (n === null || n === undefined || n === '' || isNaN(Number(n))) { return ''; }
+
+        var centavos = Math.round(Math.abs(Number(n)) * 100);
+        var entero = String(Math.floor(centavos / 100));
+        var dec = String(centavos % 100);
+
+        if (dec.length < 2) { dec = '0' + dec; }
+
+        var miles = '';
+
+        while (entero.length > 3) {
+            miles = '.' + entero.substring(entero.length - 3) + miles;
+            entero = entero.substring(0, entero.length - 3);
+        }
+
+        return (Number(n) < 0 ? '-' : '') + entero + miles + ',' + dec;
     }
 
     /** 'aaaa-mm-dd' y que exista en el calendario */
