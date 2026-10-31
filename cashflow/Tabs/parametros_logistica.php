@@ -128,6 +128,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LOGISTICA');
                             <th class="text-end" style="width: 130px;">Horas/mes</th>
                             <th class="text-end" style="width: 160px;">Valor hora base</th>
                             <th class="text-center" style="width: 150px;">Mes base</th>
+                            <th class="text-center" style="width: 110px;" title="Habitual: se proyecta con horas × valor hora. No habitual: sólo sus pagos puntuales, que se cargan en Proveedores › Logística Local.">Habitual</th>
                             <th class="text-center" style="width: 110px;">Activo</th>
                             <th>Última edición</th>
                         </tr>

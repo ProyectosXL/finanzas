@@ -103,9 +103,13 @@ try {
             break;
 
         default:
-            throw new Exception('Acción no válida');
+            echo json_encode([
+                'success' => false,
+                'message' => 'Acción no válida. Acción recibida: ' . $action
+            ], JSON_UNESCAPED_UNICODE);
+            break;
     }
 } catch (Throwable $e) {
-    http_response_code(500);
-    echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()],
+        JSON_UNESCAPED_UNICODE);
 }

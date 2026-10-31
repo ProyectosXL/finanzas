@@ -64,3 +64,44 @@
 .tab-logistica_local #tablaLogistica a[data-detalle]:hover {
     text-decoration: underline !important;
 }
+
+/* EL IMPORTE DEL PROXIMO PAGO, CARGADO A MANO. Se ve como una fecha cargada a
+   mano en el resto del modulo (.fecha-editada de Comex): fondo ambar y borde
+   naranja a la izquierda. Lo editable sin editar lleva solo el lapiz. */
+.tab-logistica_local #tablaLogistica td.log-editado {
+    background-color: #fff8e1 !important;
+    border-left: 3px solid #ff9800 !important;
+}
+
+.tab-logistica_local #tablaLogistica .log-proximo {
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.tab-logistica_local #tablaLogistica .log-proximo .fa-pen {
+    opacity: 0.35;
+    font-size: 0.7rem;
+}
+
+.tab-logistica_local #tablaLogistica .log-proximo:hover .fa-pen {
+    opacity: 1;
+}
+
+/* Los pagos puntuales de un no habitual, debajo de su fila: mas chicos y con
+   sangria, para que se lean como parte del fletero y no como otro. */
+.tab-logistica_local #tablaLogistica tr.log-puntuales > td {
+    background: var(--bs-light, #f8f9fa);
+    font-size: 0.775rem;
+    padding-left: 2rem;
+}
+
+.tab-logistica_local #tablaLogistica .log-puntual {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.15rem 0.75rem 0.15rem 0;
+}
+
+.tab-logistica_local #tablaLogistica .log-puntual input {
+    max-width: 140px;
+}
