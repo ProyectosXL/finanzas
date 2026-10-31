@@ -375,3 +375,25 @@ chequear('el script de la fila la crea en Costos Indirectos, orden 47, como egre
     && strpos($sqlFila, "'GASTOS_LOCALES', 'PAGOS', 47, 1)") !== false);
 chequear('y es reejecutable', true,
     strpos($sqlFila, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_CONF_FILA WHERE CODIGO = 'GASTOS_LOCALES')") !== false);
+
+seccion('las cuentas excluidas se editan en Generales, con su permiso');
+
+require_once __DIR__ . '/../Class/AuthCashflow.php';
+
+chequear('la accion pide editar Parametros › Generales', [['parametros', 'GENERALES']],
+    AuthCashflow::ESCRITURAS['Parametros']['saveCuentasGastosLocales']);
+chequear('la pestana solo lee: sus dos acciones son lecturas', ['getPlanilla', 'getComprobantes'],
+    AuthCashflow::LECTURAS['GastosLocales']);
+chequear('y no tiene clave de edicion propia', false,
+    strpos(file_get_contents(__DIR__ . '/../sql/cashflow_permisos_edicion.sql'),
+        'cashflow.editar.gastos_locales') !== false);
+
+$fuentePar = file_get_contents(__DIR__ . '/../Class/Parametros.php');
+chequear('Generales dibuja la tarjeta de Gastos Locales', true,
+    strpos($fuentePar, "'cronograma', 'gastos_locales', 'cotizaciones'") !== false);
+chequear('y el guardado generico rechaza la lista: tiene su propia validacion', true,
+    strpos($fuentePar, "if (\$clave === 'gastos_locales_cuentas_excluidas') {") !== false);
+
+$tabPG = file_get_contents(__DIR__ . '/../Tabs/parametros_generales.php');
+chequear('el boton de guardar se esconde sin permiso', true,
+    preg_match('/<\?php if \(\$edita\): \?>\s*<div class="col-md-3">\s*<button class="btn btn-sm btn-primary" id="pgenGuardarCuentas">/', $tabPG) === 1);

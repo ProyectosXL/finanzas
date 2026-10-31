@@ -95,7 +95,7 @@ class Parametros {
                 . 'alícuota de IVA, los feriados de comercio, la inflación mensual esperada y '
                 . 'el cronograma de pagos. Acá también se ven, sin poder editarlas, la curva '
                 . 'de dólar futuro y la cotización del BCRA',
-            'secciones' => ['generales', 'inflacion', 'cronograma', 'cotizaciones']
+            'secciones' => ['generales', 'inflacion', 'cronograma', 'gastos_locales', 'cotizaciones']
         ],
         'VENTAS' => [
             'nombre' => 'Ventas',
@@ -648,6 +648,23 @@ class Parametros {
                                                'dia_max' => 31, 'pct_max' => 100];
                         $modulo['avisos'][] = 'No se pudieron leer las tarjetas: '
                             . $e->getMessage();
+                    }
+                } elseif ($seccion === 'gastos_locales') {
+                    /* La lista de cuentas que no entran en el promedio de Gastos
+                       Locales. La lee su propia clase, que sabe el defecto y el
+                       aviso si falta el script. */
+                    try {
+                        require_once __DIR__ . '/GastosLocales.php';
+
+                        $modulo['gastos_locales'] = (new GastosLocales())->cuentasExcluidas();
+
+                        if ($modulo['gastos_locales']['aviso'] !== null) {
+                            $modulo['avisos'][] = $modulo['gastos_locales']['aviso'];
+                        }
+                    } catch (Throwable $e) {
+                        $modulo['gastos_locales'] = null;
+                        $modulo['avisos'][] = 'No se pudieron leer las cuentas excluidas de Gastos '
+                            . 'Locales: ' . $e->getMessage();
                     }
                 } elseif ($seccion === 'cotizaciones') {
                     $modulo['cotizaciones'] = $this->cotizaciones($modulo['avisos']);
@@ -1306,6 +1323,14 @@ class Parametros {
 
         if (!$exists) {
             throw new Exception("El parametro '$clave' no existe");
+        }
+
+        /* LAS CUENTAS EXCLUIDAS DE GASTOS LOCALES, TAMBIEN: una lista mal escrita
+           dejaria entrar al promedio la cuenta que se quiso sacar. La regla vive
+           en GastosLocales::validarCuentas(). */
+        if ($clave === 'gastos_locales_cuentas_excluidas') {
+            throw new Exception('Las cuentas excluidas de Gastos Locales se guardan desde su '
+                . 'tarjeta en Parámetros › Generales, que valida que sean códigos de cuenta.');
         }
 
         /* EL PLAZO DEL DEPOSITO DE CHEQUES TIENE SU PROPIO CAMINO. Esta funcion

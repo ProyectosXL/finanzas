@@ -342,6 +342,26 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* Las cuentas que no entran en el promedio de Gastos Locales. La
+           validacion es la de la clase: el navegador manda un pedido. */
+        case 'saveCuentasGastosLocales':
+            $data = bodyJson();
+
+            require_once __DIR__ . '/../Class/GastosLocales.php';
+
+            $r = (new GastosLocales())->guardarCuentas(
+                isset($data['cuentas']) ? $data['cuentas'] : '', $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => empty($r['cuentas'])
+                    ? 'Listo: no se excluye ninguna cuenta. El promedio de Gastos Locales toma '
+                      . 'todas las cuentas 5.'
+                    : 'Listo: el promedio de Gastos Locales deja afuera ' . $r['texto'] . '.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'saveConfigCronograma':
             $data = bodyJson();
 

@@ -126,6 +126,7 @@
                 pintarGrid();
                 pintarInflacion();
                 pintarCronograma();
+                pintarGastosLocales(modulo.gastos_locales || null);
                 pintarCotizaciones(modulo.cotizaciones);
             })
             .catch(function(e) {
@@ -959,6 +960,45 @@
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    /* ================================================================
+       GASTOS LOCALES: LAS CUENTAS EXCLUIDAS
+       ================================================================ */
+
+    function pintarGastosLocales(gl) {
+        var input = document.getElementById('pgenCuentasExcluidas');
+        var audit = document.getElementById('pgenCuentasAuditoria');
+
+        if (!input) { return; }
+
+        input.value = gl ? (gl.texto || '') : '';
+
+        /* Sin el parámetro no hay dónde guardar: el campo muestra el defecto
+           que se está usando y no se edita. Sin permiso, tampoco. */
+        input.disabled = !gl || !gl.creado || !Permisos.puedeEditar(input);
+
+        if (audit) {
+            audit.innerHTML = gl && gl.creado
+                ? Auditoria.icono({ usuario: gl.usuario, fecha: gl.fecha_modif })
+                : (gl ? ' <span class="badge bg-warning text-dark" title="Falta correr ' +
+                    'sql/cashflow_gastos_locales.sql">por defecto</span>' : '');
+        }
+    }
+
+    function guardarCuentas() {
+        var input = document.getElementById('pgenCuentasExcluidas');
+
+        if (!input) { return; }
+
+        pedir(ENDPOINT + '?action=saveCuentasGastosLocales', { cuentas: input.value })
+            .then(function(d) {
+                Notificacion.exito(d.message || 'Guardado.');
+                cargar();
+            })
+            .catch(function(e) {
+                Notificacion.campoInvalido(input, e.message);
+            });
+    }
+
     function pedir(url, cuerpo) {
         var opciones = cuerpo
             ? {
@@ -987,6 +1027,7 @@
         enganchar('pgenBtnRefresh', 'click', cargar);
         enganchar('pgenModalidad', 'change', guardarModalidad);
         enganchar('pgenAplicarConstante', 'click', aplicarConstante);
+        enganchar('pgenGuardarCuentas', 'click', guardarCuentas);
 
         /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
            si es la primera que se ve. Ver Js/parametros-carga.js. */

@@ -166,6 +166,8 @@ class AuthCashflow {
                cambiar el dia de un concepto: como los preview, pide edicion. */
             'contarOverridesCronograma' => [['parametros', 'GENERALES']],
             'saveConfigCronograma' => [['parametros', 'GENERALES']],
+            // Gastos Locales es solo lectura: su lista de cuentas se edita en Generales.
+            'saveCuentasGastosLocales' => [['parametros', 'GENERALES']],
             /* El mix de cobro es un arbol (Class/MixCobro.php). La previsualizacion
                tambien pide edicion: la usa solo quien esta editando el arbol, como
                los preview del cronograma. */
