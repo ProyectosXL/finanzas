@@ -36,6 +36,7 @@ POWER_BI_CONTROL (app de compras)          central (Tango)
    estimación del mes = MAX(0, proyectado − cargado)
         │
         ├─ × dólar futuro ROFEX del mes de PAGO ──────► PAGOS_PROYECTADOS
+        │    (dólar BCRA si el pago es de los próximos días: ver la sección 6)
         │                                                (día D − X días)
         │
         └─ × % de nacionalización, y × ROFEX del mes ──► NACIONALIZACION_PROYECTADA
@@ -317,6 +318,8 @@ Módulo **`COMPRAS_PROY`** en *Parámetros*, sub-pestaña *Compras Exterior*.
 | `compras_proy_dias_nac` | 2 | Días entre la nacionalización y la recepción |
 | **% importado por rubro** | ver sección 7 | Qué parte de cada rubro del presupuesto se compra en el exterior y entra en la proyección: 100 % entra completo, 0 % queda excluido, 60 % proyecta el 60 % de su FOB. **No es una clave de `RO_T_CASHFLOW_PARAMETROS`**: es una tabla propia, `RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT`, con historial. Se edita en la sección *% importado por rubro* de esta misma sub-pestaña. De 0 a 100 con hasta dos decimales, validado en el servidor |
 | `comex_fecha_mov_desde` | 2025-01-01 | **De Comercio Exterior, no de esta proyección**: desde qué fecha de movimiento de la OC principal se consideran los contenedores de Proveedores Exterior, de Crono Nacionalización y de lo ya cargado que se descuenta acá. Lo siembra `sql/cashflow_comex_fecha_mov_desde.sql`; sin él vale el inicial y esta pantalla dice qué script falta. Una fecha, no futura, validada en el servidor. Ver `README-comex.md`, sección 12 |
+| `comex_dias_bcra` | 7 | **De Comercio Exterior, y vale también acá**: *Días con dólar BCRA*. Un mes cuyo pago —o nacionalización— cae dentro de estos días, o ya pasó, se valúa con el dólar oficial BCRA vendedor y no con la curva. Con 0, todo va con la curva. Lo siembra `sql/cashflow_comex_dolar_bcra.sql`; sin él vale el inicial. Entero de 0 a 60, validado en el servidor. Ver `README-comex.md`, sección 14 |
+| `comex_bcra_antiguedad_max` | 3 | *Antigüedad máxima del dólar BCRA*: si la última cotización tiene más de estos días corridos, se usa igual y se avisa. Entero de 0 a 30 |
 
 ### Los tres de días son del cashflow, y no leen la cadena de Comex
 
@@ -325,6 +328,12 @@ Arrancan con el valor que hoy da `RO_T_IMPORTACIONES_PARAM_CRONOGRAMA` —embarq
 Es a propósito. Los contenedores reales tienen sus fechas editadas a mano una por una, así que esa cadena es un valor por defecto y no una regla. Atar la proyección a ella haría que un ajuste operativo de la otra aplicación corra plata de mes en el tablero de finanzas sin aviso.
 
 La pantalla **dibuja la cadena** con los valores cargados, porque "día 15", "47 días" y "2 días" son tres números que no se leen sueltos — y esconden una trampa: **subir los días de pago corre el egreso hacia atrás en el eje**, no hacia adelante.
+
+### Con qué dólar se valúa cada mes
+
+**Con la misma regla que Proveedores Exterior y Crono Nacionalización**, porque todos los meses se valúan por `Comex::valuar()`: el FOB por su fecha de pago y la nacionalización por la suya. Si esa fecha cae dentro de los próximos *Días con dólar BCRA* —o ya pasó—, va a **dólar oficial BCRA vendedor**, la última cotización publicada; si no, a la curva ROFEX del mes, como antes. Sin cotización BCRA, ese mes queda sin valuar con un aviso crítico, nunca con la curva. La tabla de la pestaña marca con un ícono de banco la cotización BCRA, el tooltip dice de qué día es, y la línea de parámetros de arriba suma la regla. Los avisos de BCRA vieja y de curva ROFEX desactualizada son los mismos de las dos pestañas de Comex. Ver `README-comex.md`, sección 14.
+
+**Lo que puede ir a BCRA, en la práctica**, es el primer mes de la ventana: un pago de este mes con fecha ya pasada entra en la columna del mes en curso, y uno de los próximos días. Al 31/10/2026 ningún mes paga ni nacionaliza antes del 07/11, así que **la fila no se movió**.
 
 ### Los valores iniciales están escritos dos veces, a propósito
 
@@ -618,6 +627,7 @@ php cashflow/tests/run.php compras_proyectadas
 | `tests/test_compras_proyectadas_materializado.php` | Los scripts del job, la lectura de las tablas, los avisos de insumos faltantes o viejos, y —contra la base, con los SP corridos— que el SP de historia dé lo mismo que la lectura en vivo para 2023–2025 y que la pestaña tarde menos de 2 s |
 | `tests/test_compras_proyectadas_rubros.php` | El % importado: se aplica antes de sumar (0, 100 y 60 %), el rubro sin configurar entra al 100 % y avisa, la normalización de PHP y la del SP dan lo mismo, la baja y el alta van en una transacción con un solo vigente, el rango y el usuario se validan en el servidor, la semilla no pisa lo editado, y el aviso de lo excluido es la suma de los rubros. 118, todas sin escritura en la base |
 | | **606 en total** |
+| `tests/test_comex_dolar_bcra.php` | *(de Comercio Exterior, y alcanza a esta pestaña)* La regla del dólar BCRA para los pagos cercanos y la curva ROFEX desactualizada, y que el FOB y la nacionalización de cada mes se valúen por `Comex::valuar()` con la misma regla que las dos pestañas de Comex. Sin base |
 
 Lo que necesita SQL Server se saltea solo, y **es todo de lectura**: ninguna prueba da de alta ni de baja un ajuste contra la base real.
 

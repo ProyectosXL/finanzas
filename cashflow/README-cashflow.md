@@ -354,6 +354,16 @@ Se va *Nueva carga*. El saldo de cada cuenta, menos el efectivo de tesorería, s
 
 **El día que se publica, el tablero no cambia** mientras nadie edite un saldo: la lectura es la misma. El único cambio de regla es para hoy: un manual de hoy de Interbanking manda aunque Interbanking traiga un saldo de hoy (antes mandaba Interbanking).
 
+### Comex: dólar BCRA para los pagos de los próximos días (`feature/comex-dolar-bcra-proximos-pagos`)
+
+Proveedores Exterior, Crono Nacionalización y Compras Proyectadas pasan a pesos los pagos de los próximos N días —y los vencidos— con el dólar oficial BCRA vendedor, y los posteriores con la curva ROFEX, como antes. Y avisan cuando la curva no se actualizó el último día hábil. Ver `README-comex.md`, sección 14.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 45 | `sql/cashflow_comex_dolar_bcra.sql` | Siembra *Días con dólar BCRA* (7) y *Antigüedad máxima del dólar BCRA* (3) en Parámetros › Compras Exterior, sin pisar un valor cargado | La regla se aplica igual, con 7 y 3; no se pueden cambiar, y sólo Parámetros dice qué script falta |
+
+**No depende de ninguno.** El día que se publica el tablero se mueve sin correr nada —la regla rige con los valores iniciales—: al 31/10/2026, −$ 127.217 en Nacionalizaciones y nada en las otras filas.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -403,6 +413,7 @@ En este orden, contra `central`:
 -- 42. sql/cashflow_comex_nac_pago.sql               (Comex: pago parcial de la nacionalizacion y fecha del saldo)
 -- 43. sql/cashflow_saldos_mp_consulta.sql           (Saldos: Mercado Pago en vivo de MP_T_SALDO_DEMANDA)
 -- 44. sql/cashflow_saldos_edicion_fila.sql          (Saldos: el saldo se edita desde la fila)
+-- 45. sql/cashflow_comex_dolar_bcra.sql            (Comex: dolar BCRA para los pagos de los proximos dias)
 ```
 
 **El 39 va después del 38**: sin las alícuotas y el plazo, los depositados no tienen neto. **El 40 no depende de ninguno de los dos.** Los depósitos se leen de Tango; ninguno de los tres crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO`, que está en desuso. Ver `README-echeqs.md`.
