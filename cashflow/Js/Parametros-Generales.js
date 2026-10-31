@@ -455,7 +455,8 @@
                     '</option>';
             }).join('');
 
-            var optFrec = frecuencias.map(function(f) {
+            // Sólo las que el concepto admite: Gastos Locales es semanal fijo.
+            var optFrec = (c.frecuencias || frecuencias).map(function(f) {
                 return '<option value="' + esc(f) + '"' + (f === c.frecuencia ? ' selected' : '') +
                     '>' + esc(f === 'SEMANAL' ? 'Semanal' : 'Quincenal') + '</option>';
             }).join('');
@@ -584,6 +585,11 @@
         conceptos().forEach(function(c) {
             var datos = (cronograma.conceptos || {})[c.concepto] || {};
 
+            /* Un concepto cuyos pagos no se mueven a mano no va en esta tabla:
+               sus fechas se ven abajo, con las demás. Con una fila apagada se
+               leería como que falta correr un script. */
+            if (c.overrides === false) { return; }
+
             proximosDe(c.concepto).forEach(function(p) {
                 html += filaCrono(c, p, !!datos.editable);
             });
@@ -678,7 +684,8 @@
             var datos = (cronograma.conceptos || {})[c.concepto] || {};
 
             (datos.pagos || []).forEach(function(p) {
-                if (p.en_horizonte === false || proximos.indexOf(p) !== -1) { return; }
+                if (p.en_horizonte === false ||
+                    (c.overrides !== false && proximos.indexOf(p) !== -1)) { return; }
 
                 porMes[p.mes] = porMes[p.mes] || {};
                 (porMes[p.mes][c.concepto] = porMes[p.mes][c.concepto] || []).push(p);
@@ -688,20 +695,23 @@
         cuerpo.innerHTML = Object.keys(porMes).sort().map(function(mes) {
             return '<tr><td class="fw-semibold">' + esc(rotuloMes(mes)) + '</td>' +
                 conceptos().map(function(c) {
-                    return '<td>' + celdaResto(porMes[mes][c.concepto]) + '</td>';
+                    return '<td>' + celdaResto(porMes[mes][c.concepto], c) + '</td>';
                 }).join('') +
             '</tr>';
         }).join('');
     }
 
-    function celdaResto(pagos) {
+    function celdaResto(pagos, c) {
         if (!pagos || !pagos.length) { return '—'; }
+
+        var haciaDonde = (c && c.corrimiento === 'SIGUIENTE') ? 'siguiente' : 'anterior';
 
         return pagos.map(function(p) {
             return '<span class="text-nowrap" title="' + esc(p.nombre) + '">' +
                 esc(fecha(p.fecha)) +
                 (p.override ? ' <span class="badge bg-info text-dark">a mano</span>' : '') +
-                (p.corrida ? ' <span class="badge bg-warning text-dark">corrida</span>' : '') +
+                (p.corrida ? ' <span class="badge bg-warning text-dark" title="El día de pago ' +
+                    'no es hábil: se corrió al día hábil ' + haciaDonde + '">corrida</span>' : '') +
                 '</span>';
         }).join('<br>');
     }

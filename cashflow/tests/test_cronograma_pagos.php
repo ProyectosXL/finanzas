@@ -520,3 +520,80 @@ chequear('da de baja con auditoria, solo los vigentes desde el mes actual', true
     && strpos($cuerpoCD, 'CronogramaPagos::desdeMesBaja(') !== false);
 chequear('y solo los del concepto que cambio', true,
     strpos($cuerpoCD, '$this->filtroTipo($concepto)') !== false);
+
+/* ================================================================
+   GASTOS LOCALES: EL UNICO QUE SE CORRE HACIA ADELANTE
+   Es una decision del negocio para este concepto: el reintegro de la caja
+   de los locales sale el dia habil SIGUIENTE. Lo que tiene que quedar fijo
+   es que la direccion nueva no se filtre a los otros tres.
+   ================================================================ */
+seccion('Gastos Locales: lunes semanal, al habil SIGUIENTE, sin overrides');
+
+chequear('el defecto es lunes semanal', [1, 'SEMANAL'],
+    [CronogramaPagos::CONCEPTOS['GASTOS_LOCALES']['dia'],
+     CronogramaPagos::CONCEPTOS['GASTOS_LOCALES']['frecuencia']]);
+chequear('se corre al SIGUIENTE', 'SIGUIENTE', CronogramaPagos::corrimiento('GASTOS_LOCALES'));
+chequear('los otros tres siguen al ANTERIOR', ['ANTERIOR', 'ANTERIOR', 'ANTERIOR'],
+    [CronogramaPagos::corrimiento('PROV_LOCALES'), CronogramaPagos::corrimiento('LOGISTICA'),
+     CronogramaPagos::corrimiento('SUPERVISORAS')]);
+chequear('solo admite semanal', ['SEMANAL'], CronogramaPagos::frecuenciasDe('GASTOS_LOCALES'));
+chequear('los otros admiten las dos', CronogramaPagos::FRECUENCIAS,
+    CronogramaPagos::frecuenciasDe('LOGISTICA'));
+chequear('sus pagos no se mueven a mano', false, CronogramaPagos::admiteOverrides('GASTOS_LOCALES'));
+chequear('los de los otros si', true, CronogramaPagos::admiteOverrides('SUPERVISORAS'));
+
+chequearLanza('quincenal se rechaza en el guardado', function () {
+    CronogramaPagos::configDe('GASTOS_LOCALES', 1, 'QUINCENAL');
+});
+
+$glMalo = CronogramaPagos::configDesdeMapa(
+    ['cronograma_gastos_locales_dia' => '3', 'cronograma_gastos_locales_frecuencia' => 'QUINCENAL'],
+    'GASTOS_LOCALES');
+chequear('un QUINCENAL guardado a mano cae al defecto y avisa', [1, 'SEMANAL', true],
+    [$glMalo['dia'], $glMalo['frecuencia'], $glMalo['aviso'] !== null]);
+
+$glSin = CronogramaPagos::configDesdeMapa([], 'GASTOS_LOCALES');
+chequear('sin parametros el aviso nombra SU script', true,
+    strpos($glSin['aviso'], 'sql/cashflow_gastos_locales.sql') !== false);
+chequear('y la config lleva la direccion', 'SIGUIENTE', $glSin['corrimiento']);
+
+// Lunes 12/10/2026 feriado: Gastos Locales paga el martes 13; Supervisoras el viernes 9.
+$habGL = calendarioCP('2026-09-01', '2026-11-30', ['2026-10-12']);
+$glOct = CronogramaPagos::delMes('2026-10', $glSin, $habGL);
+chequear('el 2do lunes de octubre (12, feriado) se paga el martes 13', '2026-10-13',
+    $glOct[1]['fecha']);
+chequear('queda marcado corrido, con la teorica a la vista', [true, '2026-10-12'],
+    [$glOct[1]['corrida'], $glOct[1]['teorica']]);
+chequear('el mismo feriado en Supervisoras sigue yendo al viernes 9', '2026-10-09',
+    CronogramaPagos::delMes('2026-10', CronogramaPagos::configDesdeMapa([], 'SUPERVISORAS'),
+        $habGL)[1]['fecha']);
+
+// Feriado encadenado lunes y martes: miercoles.
+$glEnc = CronogramaPagos::delMes('2026-10', $glSin,
+    calendarioCP('2026-09-01', '2026-11-30', ['2026-10-12', '2026-10-13']));
+chequear('lunes y martes feriados: el miercoles', '2026-10-14', $glEnc[1]['fecha']);
+
+// El ultimo lunes de noviembre es el 30; si es feriado cruza al 1 de diciembre.
+$glCruce = CronogramaPagos::delMes('2026-11', $glSin,
+    calendarioCP('2026-10-01', '2026-12-31', ['2026-11-30']));
+chequear('el 30/11 feriado cruza al 01/12, y sigue siendo el pago de noviembre',
+    ['2026-12-01', '2026-11'],
+    [$glCruce[count($glCruce) - 1]['fecha'], $glCruce[count($glCruce) - 1]['mes']]);
+
+// Fuera del calendario: respaldo de lunes a viernes, y el mes queda para avisar.
+$glFuera = CronogramaPagos::delMes('2026-11', $glSin, []);
+chequear('sin calendario el lunes es habil y el mes queda en faltan', ['2026-11-02', ['2026-11']],
+    [$glFuera[0]['fecha'], $glFuera[0]['faltan']]);
+
+$hGL = new Horizonte(28, 12, [], '2026-10-31');
+chequear('el calendario de un concepto que va hacia adelante se lee una semana mas',
+    date('Y-m-d', strtotime($hGL->fin() . ' +7 day')),
+    CronogramaPagos::rangoCalendario($hGL, 0, CronogramaPagos::DIAS_CALENDARIO_SIGUIENTE)['hasta']);
+chequear('y el de los otros no cambia', $hGL->fin(), CronogramaPagos::rangoCalendario($hGL)['hasta']);
+
+$fuenteCD2 = file_get_contents(__DIR__ . '/../Class/CronogramaDatos.php');
+chequear('CronogramaDatos: editable() pregunta si el concepto admite overrides', true,
+    strpos($fuenteCD2, "return CronogramaPagos::admiteOverrides(\$concepto)\r\n            && \$this->tablaCreada()") !== false
+    || strpos($fuenteCD2, "return CronogramaPagos::admiteOverrides(\$concepto)\n            && \$this->tablaCreada()") !== false);
+chequear('y el guardado valida la frecuencia contra el concepto', true,
+    strpos($fuenteCD2, 'CronogramaPagos::configDe($concepto, $dia, $frecuencia)') !== false);

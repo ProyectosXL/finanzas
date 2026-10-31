@@ -130,8 +130,32 @@ class CronogramaPagos {
                         'usa' => 'Logística Local'],
         'SUPERVISORAS' => ['nombre' => 'Supervisoras', 'dia' => 1,
                            'frecuencia' => self::SEMANAL,
-                           'usa' => 'la parte en efectivo de Gastos Supervisoras']
+                           'usa' => 'la parte en efectivo de Gastos Supervisoras'],
+
+        /* EL UNICO QUE SE CORRE HACIA ADELANTE, y es una decision del negocio:
+           el reintegro de la caja de los locales se hace el dia habil siguiente,
+           no el anterior. Frecuencia FIJA en semanal -el importe es una semana
+           de gasto, asi que quincenal pagaria la mitad- y sin overrides: nadie
+           mueve a mano el dia de un promedio. Ver README-gastos-locales.md. */
+        'GASTOS_LOCALES' => ['nombre' => 'Gastos Locales', 'dia' => 1,
+                             'frecuencia' => self::SEMANAL,
+                             'usa' => 'Gastos Locales, en las semanas del tramo diario',
+                             'corrimiento' => self::SIGUIENTE,
+                             'frecuencias' => [self::SEMANAL],
+                             'overrides' => false,
+                             'script' => 'sql/cashflow_gastos_locales.sql']
     ];
+
+    /** Hacia donde se corre un dia no habil. El defecto de un concepto es ANTERIOR */
+    const ANTERIOR = 'ANTERIOR';
+    const SIGUIENTE = 'SIGUIENTE';
+
+    /**
+     * Cuantos dias despues del fin del eje se lee el calendario para un concepto
+     * que se corre hacia adelante: el ultimo pago del eje puede caer un feriado y
+     * correrse afuera. Una semana alcanza para cualquier fin de semana largo.
+     */
+    const DIAS_CALENDARIO_SIGUIENTE = 7;
 
     /** Tope defensivo: ningun feriado encadena mas de 30 dias no habiles */
     const MAX_CORRIMIENTO = 30;
@@ -155,6 +179,43 @@ class CronogramaPagos {
         }
 
         return $c;
+    }
+
+    /**
+     * Hacia donde se corre un dia no habil en un concepto: ANTERIOR salvo que el
+     * concepto diga otra cosa.
+     *
+     * @param string $concepto
+     * @return string ANTERIOR o SIGUIENTE
+     */
+    public static function corrimiento($concepto) {
+        $meta = self::CONCEPTOS[self::validarConcepto($concepto)];
+
+        return isset($meta['corrimiento']) ? $meta['corrimiento'] : self::ANTERIOR;
+    }
+
+    /**
+     * Las frecuencias que admite un concepto: las dos, salvo que diga otra cosa.
+     *
+     * @param string $concepto
+     * @return array
+     */
+    public static function frecuenciasDe($concepto) {
+        $meta = self::CONCEPTOS[self::validarConcepto($concepto)];
+
+        return isset($meta['frecuencias']) ? $meta['frecuencias'] : self::FRECUENCIAS;
+    }
+
+    /**
+     * Si los pagos de un concepto se pueden mover a mano.
+     *
+     * @param string $concepto
+     * @return bool
+     */
+    public static function admiteOverrides($concepto) {
+        $meta = self::CONCEPTOS[self::validarConcepto($concepto)];
+
+        return !isset($meta['overrides']) || $meta['overrides'];
     }
 
     /**
@@ -254,25 +315,50 @@ class CronogramaPagos {
 
         if (!isset($map[$claves['dia']]) || !isset($map[$claves['frecuencia']])) {
             return ['dia' => $defecto['dia'], 'frecuencia' => $defecto['frecuencia'],
-                    'defecto' => true,
+                    'corrimiento' => self::corrimiento($c), 'defecto' => true,
                     'aviso' => 'Falta configurar el cronograma de ' . $nombre . ': corré '
-                        . 'sql/cashflow_cronograma_conceptos.sql contra la base central. '
+                        . (isset($defecto['script']) ? $defecto['script']
+                            : 'sql/cashflow_cronograma_conceptos.sql') . ' contra la base central. '
                         . 'Mientras tanto se paga ' . self::describir($defecto) . ', que es el '
                         . 'valor por defecto.'];
         }
 
+        $corrimiento = self::corrimiento($c);
+
         try {
-            $cfg = self::config($map[$claves['dia']], $map[$claves['frecuencia']]);
+            $cfg = self::configDe($c, $map[$claves['dia']], $map[$claves['frecuencia']]);
         } catch (Exception $e) {
             return ['dia' => $defecto['dia'], 'frecuencia' => $defecto['frecuencia'],
-                    'defecto' => true,
+                    'corrimiento' => $corrimiento, 'defecto' => true,
                     'aviso' => 'El cronograma de ' . $nombre . ' tiene un valor que no se '
                         . 'entiende (' . $e->getMessage() . '). Se usa el valor por defecto, '
                         . self::describir($defecto) . '. Corregilo en Parámetros › Generales.'];
         }
 
         return ['dia' => $cfg['dia'], 'frecuencia' => $cfg['frecuencia'],
-                'defecto' => false, 'aviso' => null];
+                'corrimiento' => $corrimiento, 'defecto' => false, 'aviso' => null];
+    }
+
+    /**
+     * config() mas la regla del concepto: la frecuencia tiene que ser una de las
+     * que admite. Gastos Locales es SEMANAL fijo, y un QUINCENAL guardado a mano
+     * en la tabla pagaria media semana de gasto.
+     *
+     * @param string $concepto
+     * @param mixed $dia
+     * @param string $frecuencia
+     * @return array ['dia', 'frecuencia']
+     */
+    public static function configDe($concepto, $dia, $frecuencia) {
+        $cfg = self::config($dia, $frecuencia);
+        $admite = self::frecuenciasDe($concepto);
+
+        if (!in_array($cfg['frecuencia'], $admite, true)) {
+            throw new Exception('El cronograma de ' . self::CONCEPTOS[self::validarConcepto($concepto)]['nombre']
+                . ' sólo admite frecuencia ' . implode(' o ', $admite) . '.');
+        }
+
+        return $cfg;
     }
 
     /**
@@ -441,6 +527,36 @@ class CronogramaPagos {
             . '. Revisá RO_T_CALENDARIO.');
     }
 
+    /**
+     * Corre una fecha al habil que dice la configuracion: ANTERIOR por defecto,
+     * SIGUIENTE si la configuracion lo pide (Gastos Locales).
+     *
+     * HACIA ADELANTE NO SE REESCRIBE: es DiasHabiles::siguiente(), el mismo de
+     * Ventas, Tarjetas y Caja Locales. Lo unico que agrega aca es lanzar si no
+     * hay habil en el tope, que es lo que hace habilAnterior() en la otra
+     * direccion: una fecha del tope escondería un calendario roto.
+     *
+     * @param string $fecha 'Y-m-d'
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @param array $config Con 'corrimiento' opcional
+     * @return array ['fecha', 'corrida', 'faltan']
+     */
+    public static function correr($fecha, $habiles, $config) {
+        if (!isset($config['corrimiento']) || $config['corrimiento'] !== self::SIGUIENTE) {
+            return self::habilAnterior($fecha, $habiles);
+        }
+
+        require_once __DIR__ . '/DiasHabiles.php';
+
+        $r = DiasHabiles::siguiente($fecha, $habiles);
+
+        if ($r['sin_habil']) {
+            throw new Exception(DiasHabiles::avisoSinHabil($fecha));
+        }
+
+        return ['fecha' => $r['fecha'], 'corrida' => $r['corrida'], 'faltan' => $r['faltan']];
+    }
+
     /* ====================================================================
        LOS PAGOS RESUELTOS
        ==================================================================== */
@@ -476,7 +592,7 @@ class CronogramaPagos {
         $pagos = [];
 
         foreach ($teoricas as $nro => $teorica) {
-            $corrida = self::habilAnterior($teorica, $habiles);
+            $corrida = self::correr($teorica, $habiles, $config);
             $ov = isset($delMes[$nro]) ? $delMes[$nro] : null;
 
             /* EL OVERRIDE NO SE CORRE AL DIA HABIL. Lo cargo una persona que
@@ -666,7 +782,7 @@ class CronogramaPagos {
      * @param int $mesesExtra
      * @return array ['desde' => 'Y-m-d', 'hasta' => 'Y-m-d']
      */
-    public static function rangoCalendario($h, $mesesExtra = 0) {
+    public static function rangoCalendario($h, $mesesExtra = 0, $diasDespues = 0) {
         $meses = $h->meses();
         $primero = new DateTime($meses[0]['clave'] . '-01');
         $primero->modify('-1 month');
@@ -681,6 +797,12 @@ class CronogramaPagos {
             if ($fin->format('Y-m-d') > $hasta) {
                 $hasta = $fin->format('Y-m-d');
             }
+        }
+
+        /* Un concepto que se corre hacia ADELANTE necesita dias despues del fin:
+           su ultimo pago puede caer un feriado y correrse fuera del eje. */
+        if (intval($diasDespues) > 0) {
+            $hasta = date('Y-m-d', strtotime($hasta . ' +' . intval($diasDespues) . ' day'));
         }
 
         return ['desde' => $primero->format('Y-m-d'), 'hasta' => $hasta];

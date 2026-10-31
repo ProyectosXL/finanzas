@@ -150,7 +150,9 @@ class CronogramaDatos {
             $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $config['aviso']);
         }
 
-        $rango = CronogramaPagos::rangoCalendario($h, $mesesExtra);
+        $rango = CronogramaPagos::rangoCalendario($h, $mesesExtra,
+            ($config['corrimiento'] === CronogramaPagos::SIGUIENTE)
+                ? CronogramaPagos::DIAS_CALENDARIO_SIGUIENTE : 0);
         $habiles = $this->habilesEntre($rango['desde'], $rango['hasta']);
 
         $overrides = [];
@@ -170,7 +172,8 @@ class CronogramaDatos {
             $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $a);
         }
 
-        if (!$this->tablaCreada()) {
+        // Un concepto sin overrides no pierde nada sin la tabla: no se avisa.
+        if (!$this->tablaCreada() && CronogramaPagos::admiteOverrides($concepto)) {
             $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $this->avisoSinTabla());
         }
 
@@ -252,6 +255,11 @@ class CronogramaDatos {
                 'usa' => $meta['usa'],
                 'dia' => $cfg['dia'],
                 'frecuencia' => $cfg['frecuencia'],
+
+                // Lo que el concepto admite: la pantalla no ofrece lo que el guardado rechaza
+                'frecuencias' => CronogramaPagos::frecuenciasDe($concepto),
+                'corrimiento' => CronogramaPagos::corrimiento($concepto),
+                'overrides' => CronogramaPagos::admiteOverrides($concepto),
                 'descripcion' => $cfg['descripcion'],
                 'defecto' => $cfg['defecto'],
                 'editable' => $this->editable($concepto),
@@ -386,7 +394,7 @@ class CronogramaDatos {
     public function guardarConfig($concepto, $dia, $frecuencia, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $concepto = CronogramaPagos::validarConcepto($concepto);
-        $nueva = CronogramaPagos::config($dia, $frecuencia);
+        $nueva = CronogramaPagos::configDe($concepto, $dia, $frecuencia);
 
         if (!$this->parametrosCreados($concepto)) {
             throw new Exception('Todavía no existen los parámetros del cronograma de '
@@ -581,7 +589,8 @@ class CronogramaDatos {
      * @return bool
      */
     public function editable($concepto) {
-        return $this->tablaCreada()
+        return CronogramaPagos::admiteOverrides($concepto)
+            && $this->tablaCreada()
             && ($this->tieneTipo() || $concepto === self::TIPO_HISTORICO);
     }
 
