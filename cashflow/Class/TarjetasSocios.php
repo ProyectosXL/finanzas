@@ -485,6 +485,35 @@ class TarjetasSocios {
         return $celda;
     }
 
+    /**
+     * Cuanto proyecta en pesos una tarjeta en todo el horizonte, con la misma
+     * regla que la pestana: base, estimacion, conversion.
+     *
+     * PARA QUE EXISTE: desde feature/tarjetas-resumenes-seguros Socios va por
+     * banco, y las tarjetas de socio con nombre quedaron de baja. Mientras un
+     * banco no tenga su base historica, el aviso dice cuanto proyectaban sus
+     * tarjetas viejas: es la plata que el tablero deja de ver hasta que se cargue.
+     *
+     * Estatica y pura.
+     *
+     * @return float La suma de total_ars de los meses que proyectan
+     */
+    public static function totalProyectado($tarjeta, $resumenes, $meses, $inflacion, $habiles,
+                                           $curva, $bcra, $hoy) {
+        $base = self::base($resumenes, substr((string) $hoy, 0, 7));
+        $e = self::estimar($tarjeta, $base, $meses, $inflacion, $resumenes, $habiles, $curva,
+            $bcra, $hoy);
+        $total = 0.0;
+
+        foreach ($e['meses'] as $c) {
+            if ($c['proyecta'] && $c['total_ars'] !== null) {
+                $total += $c['total_ars'];
+            }
+        }
+
+        return $total;
+    }
+
     /* ====================================================================
        PARA LA PANTALLA
        ==================================================================== */

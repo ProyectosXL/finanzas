@@ -41,6 +41,12 @@
     var tarjetas = [];
     var tipos = {};
 
+    /** Los tipos que se pueden dar de alta: sin Socio con nombre, que es historial */
+    var tiposAlta = {};
+
+    /** Un banco de socios: sin usuario ni ultimos 4 */
+    var SOCIOS_BANCO = 'SOCIOS_BANCO';
+
     /* LISTAS ORDENADAS, NO MAPAS. El backend las manda como arrays de objetos
        porque un mapa se convierte en un objeto JSON y Object.keys() NO respeta el
        orden en que se escribió: pone primero las claves que son índices de array,
@@ -85,6 +91,7 @@
             .then(function(d) {
                 tarjetas = d.data.filas || [];
                 tipos = d.data.tipos || {};
+                tiposAlta = d.data.tipos_alta || tipos;
                 bancos = d.data.bancos || [];
                 usuarios = d.data.usuarios || [];
                 tablaCreada = !!d.data.tabla_creada;
@@ -100,6 +107,9 @@
 
                 return false;
             });
+
+        // Los proveedores que proyectan van aparte y no se esperan: ver cargarProveedores().
+        cargarProveedores();
 
         return Promise.all([descripcion, datos]).then(function(r) { return r[1]; });
     }
@@ -167,32 +177,46 @@
                 ? '<div><small class="text-muted" title="Se cruza por nombre contra ' +
                   'RO_T_SUPERVISORAS_COMERCIAL">se asocia por nombre</small></div>' : '';
 
+            /* LOS SOCIOS VAN POR BANCO: la fila de un banco no tiene usuario ni
+               últimos 4, y su tipo no se cambia. Las tarjetas de socio con nombre
+               quedaron como historial: se ven, de baja, sin controles. */
+            var esBanco = (t.TIPO === SOCIOS_BANCO);
+            var historial = (t.TIPO === 'SOCIO');
+
             return '<tr class="' + (t.ACTIVA ? '' : 'text-muted') + '">' +
-                '<td>' + celdaTipo(t) + notaTipo + '</td>' +
+                '<td>' + (esBanco || historial
+                    ? '<span class="fw-semibold">' + esc(tipos[t.TIPO] || t.TIPO) + '</span>'
+                      + (historial ? '<div><small class="text-muted">ya no proyecta: Socios va por '
+                        + 'banco</small></div>' : '')
+                    : celdaTipo(t) + notaTipo) + '</td>' +
                 '<td>' +
                     esc(t.DESC_BANCO || t.COD_BANCO) + bancoSinNombre +
                     '<div><small class="text-muted">' + esc(t.COD_BANCO) + '</small></div>' +
                 '</td>' +
-                '<td>' +
-                    '<span class="fw-semibold">' + esc(t.NOMBRE_USUARIO) + '</span>' +
-                    fueraDeVista +
+                '<td>' + (esBanco
+                    ? '<small class="text-muted">— por banco</small>'
+                    : '<span class="fw-semibold">' + esc(t.NOMBRE_USUARIO) + '</span>' + fueraDeVista) +
                 '</td>' +
-                '<td class="text-center">' +
-                    '<input type="text" maxlength="4" inputmode="numeric" ' +
+                '<td class="text-center">' + (esBanco || historial
+                    ? '<small class="text-muted">' + esc(t.ULTIMOS_4 || '—') + '</small>'
+                    : '<input type="text" maxlength="4" inputmode="numeric" ' +
                         'class="form-control form-control-sm text-center ptar-input" ' +
                         'data-id="' + esc(t.ID) + '" data-campo="ultimos_4" ' +
                         'placeholder="—" ' +
                         'value="' + esc(t.ULTIMOS_4 === null ? '' : t.ULTIMOS_4) + '"' +
-                        (tablaCreada ? '' : ' disabled') + '>' +
+                        (tablaCreada ? '' : ' disabled') + '>') +
                 '</td>' +
-                celdaNum(t, 'pct_cobertura', t.PCT_COBERTURA, '0.01', 0, 100) +
-                celdaNum(t, 'dia_vencimiento', t.DIA_VENCIMIENTO, '1', 1, 31) +
+                (historial
+                    ? '<td class="text-end"><small>' + esc(t.PCT_COBERTURA) + '</small></td>'
+                      + '<td class="text-center"><small>' + esc(t.DIA_VENCIMIENTO) + '</small></td>'
+                    : celdaNum(t, 'pct_cobertura', t.PCT_COBERTURA, '0.01', 0, 100) +
+                      celdaNum(t, 'dia_vencimiento', t.DIA_VENCIMIENTO, '1', 1, 31)) +
                 '<td class="text-center">' +
                     '<div class="form-check form-switch d-inline-block">' +
                         '<input class="form-check-input ptar-activa" type="checkbox" ' +
                             'data-id="' + esc(t.ID) + '"' +
                             (t.ACTIVA ? ' checked' : '') +
-                            (tablaCreada ? '' : ' disabled') + '>' +
+                            ((historial && !t.ACTIVA) || !tablaCreada ? ' disabled' : '') + '>' +
                     '</div>' +
                 '</td>' +
                 // Quién y cuándo, con el formato de Js/auditoria.js
@@ -343,7 +367,7 @@
     function llenarDesplegables() {
         /* El tipo sigue siendo un mapa de tres entradas: con tres, el orden es el
            que tiene y no hace falta nada más. */
-        opcionesMapa('ptarTipo', tipos, 'Elegí el tipo…');
+        opcionesMapa('ptarTipo', tiposAlta, 'Elegí el tipo…');
 
         /* Los usuarios son catorce, así que un desplegable alcanza; lo que hacía
            falta era que estuvieran ORDENADOS por nombre, y para eso el backend los
@@ -476,6 +500,25 @@
         if (caja) { caja.style.display = 'none'; }
     }
 
+    /**
+     * Un banco de socios no tiene usuario ni últimos 4: Socios va por banco y
+     * sin el nombre del socio. Los dos campos se apagan y se vacían, para que no
+     * viaje un usuario que el servidor rechazaría.
+     */
+    function segunTipo() {
+        var banco = texto('ptarTipo') === SOCIOS_BANCO;
+
+        ['ptarUsuario', 'ptarUltimos4'].forEach(function(id) {
+            var el = document.getElementById(id);
+
+            if (!el) { return; }
+
+            el.disabled = banco;
+
+            if (banco) { el.value = ''; }
+        });
+    }
+
     function mostrarForm(visible) {
         var form = document.getElementById('ptarFormNuevo');
 
@@ -494,6 +537,7 @@
         valor('ptarDia', '');
         marcarBancoElegido(null);
         ocultarSugerenciasBanco();
+        segunTipo();
     }
 
     function agregar() {
@@ -507,7 +551,8 @@
            fallar por un campo que en pantalla parecía completo. */
         if (!texto('ptarBancoCod')) { faltan.push('el banco (elegilo de la lista)'); }
 
-        if (!texto('ptarUsuario')) { faltan.push('el usuario'); }
+        /* UN BANCO DE SOCIOS NO TIENE USUARIO: va por banco, sin el nombre del socio. */
+        if (texto('ptarTipo') !== SOCIOS_BANCO && !texto('ptarUsuario')) { faltan.push('el usuario'); }
         if (!texto('ptarDia')) { faltan.push('el día de vencimiento'); }
 
         /* SE DICE TODO LO QUE FALTA DE UNA, no lo primero: cuatro intentos para
@@ -534,6 +579,163 @@
             .catch(function(e) {
                 Notificacion.error('No se pudo guardar la tarjeta: ' + e.message);
             });
+    }
+
+    /* ================================================================
+       PROVEEDORES QUE PROYECTAN
+       ================================================================ */
+
+    /** Los proveedores con facturas TARJETA CORP pendientes, para el buscador */
+    var provUniverso = [];
+
+    /**
+     * Se pide aparte de las tarjetas: lee las pendientes de Tango, que es la
+     * lectura lenta, y su falla no puede impedir ver el maestro.
+     */
+    function cargarProveedores() {
+        return pedir(ENDPOINT + '?action=getProveedoresProyectan')
+            .then(function(d) {
+                provUniverso = d.data.universo || [];
+                pintarProveedores(d.data.historial || [], d.data.tabla_creada);
+
+                if (d.data.aviso) {
+                    Notificacion.advertencia(d.data.aviso);
+                }
+            })
+            .catch(function(e) {
+                Notificacion.error('No se pudieron leer los proveedores que proyectan: ' + e.message);
+            });
+    }
+
+    /**
+     * Las marcas, vigentes primero, y las dadas de baja como historial. Sin
+     * permiso, sin el botón de baja.
+     */
+    function pintarProveedores(historial, tabla) {
+        var cuerpo = document.getElementById('ptarProvBody');
+        var buscar = document.getElementById('ptarProvBuscar');
+
+        if (buscar) {
+            buscar.disabled = !tabla;
+            buscar.title = tabla ? '' : 'Falta correr sql/cashflow_tarjetas_prov_proyecta.sql';
+        }
+
+        if (!cuerpo) { return; }
+
+        if (!historial.length) {
+            cuerpo.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">'
+                + (tabla ? 'Ningún proveedor proyecta todavía.'
+                         : 'Falta correr sql/cashflow_tarjetas_prov_proyecta.sql.')
+                + '</td></tr>';
+
+            return;
+        }
+
+        var lista = historial.slice().sort(function(a, b) {
+            return (a.VIGENTE === b.VIGENTE) ? 0 : (a.VIGENTE ? -1 : 1);
+        });
+
+        cuerpo.innerHTML = lista.map(function(p) {
+            return '<tr class="' + (p.VIGENTE ? '' : 'text-muted') + '">'
+                + '<td>' + esc(p.COD_PROVEE) + '</td>'
+                + '<td>' + esc(p.RAZON_SOC || '') + '</td>'
+                + '<td>' + (p.VIGENTE ? '<span class="badge bg-success">proyecta</span>'
+                                      : '<span class="badge bg-secondary">dado de baja</span>') + '</td>'
+                + '<td><small>' + esc(Auditoria.linea('alta', p.USUARIO_ALTA, p.FECHA_ALTA)) + '</small></td>'
+                + '<td><small>' + (p.VIGENTE ? '' : esc(Auditoria.linea('baja', p.USUARIO_BAJA, p.FECHA_BAJA)))
+                    + '</small></td>'
+                + '<td class="text-center">'
+                    + (p.VIGENTE && document.getElementById('ptarProvBuscar')
+                        ? '<button class="btn btn-sm btn-link text-danger p-0 ptar-prov-baja" '
+                          + 'data-cod="' + esc(p.COD_PROVEE) + '" data-nombre="' + esc(p.RAZON_SOC || '') + '" '
+                          + 'title="Dejar de proyectar"><i class="fas fa-xmark"></i></button>'
+                        : '')
+                + '</td>'
+            + '</tr>';
+        }).join('');
+
+        cuerpo.querySelectorAll('.ptar-prov-baja').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                Notificacion.confirmar({
+                    titulo: 'Dejar de proyectar',
+                    mensaje: '¿' + (btn.getAttribute('data-nombre') || btn.getAttribute('data-cod'))
+                        + ' deja de proyectar?',
+                    detalle: 'Sus facturas pendientes siguen en la grilla; lo que se va es la '
+                        + 'repetición en los meses siguientes. Queda en el historial.',
+                    confirmar: 'Dar de baja',
+                    peligro: true
+                }).then(function(si) {
+                    if (!si) { return; }
+
+                    escribirProveedor('desmarcarProveedorProyecta', btn.getAttribute('data-cod'));
+                });
+            });
+        });
+    }
+
+    function escribirProveedor(accion, cod) {
+        pedir(ENDPOINT + '?action=' + accion, { cod_provee: cod })
+            .then(function(d) {
+                Notificacion.exito(d.message || 'Listo.');
+                valor('ptarProvBuscar', '');
+                ocultar('ptarProvSugerencias');
+                cargarProveedores();
+            })
+            .catch(function(e) {
+                Notificacion.error('No se pudo guardar: ' + e.message);
+            });
+    }
+
+    /** Busca por razón social y por código, sobre lo que ya vino */
+    function buscarProveedor() {
+        var input = document.getElementById('ptarProvBuscar');
+        var caja = document.getElementById('ptarProvSugerencias');
+
+        if (!input || !caja) { return; }
+
+        var t = String(input.value || '').trim().toLowerCase();
+        var lista = provUniverso.filter(function(p) {
+            return t === '' || p.RAZON_SOC.toLowerCase().indexOf(t) !== -1
+                || p.COD_PROVEE.toLowerCase().indexOf(t) !== -1;
+        }).slice(0, MAX_SUGERENCIAS);
+
+        caja.innerHTML = lista.length
+            ? lista.map(function(p) {
+                return '<button type="button" class="list-group-item list-group-item-action py-1 '
+                    + 'ptar-prov-op" data-cod="' + esc(p.COD_PROVEE) + '" data-nombre="'
+                    + esc(p.RAZON_SOC) + '">'
+                    + '<span class="small">' + esc(p.RAZON_SOC) + '</span>'
+                    + ' <small class="text-muted">' + esc(p.COD_PROVEE) + ' · ' + p.facturas
+                    + ' factura(s)</small></button>';
+            }).join('')
+            : '<div class="list-group-item small text-muted">Ningún proveedor con facturas '
+              + 'TARJETA CORP pendientes coincide.</div>';
+        caja.style.display = '';
+
+        caja.querySelectorAll('.ptar-prov-op').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var cod = btn.getAttribute('data-cod');
+                var nombre = btn.getAttribute('data-nombre');
+
+                ocultar('ptarProvSugerencias');
+
+                Notificacion.confirmar({
+                    titulo: 'Proveedor que proyecta',
+                    mensaje: '¿' + nombre + ' proyecta?',
+                    detalle: 'Sus facturas vinculadas del último mes se van a repetir todos los meses '
+                        + 'siguientes, hasta el fin del horizonte, con el importe de su cuota.',
+                    confirmar: 'Marcar'
+                }).then(function(si) {
+                    if (si) { escribirProveedor('marcarProveedorProyecta', cod); }
+                });
+            });
+        });
+    }
+
+    function ocultar(id) {
+        var el = document.getElementById(id);
+
+        if (el) { el.style.display = 'none'; }
     }
 
     /* ================================================================
@@ -596,11 +798,14 @@
         enganchar('ptarBtnNuevo', 'click', function() { mostrarForm(true); });
         enganchar('ptarBtnCancelar', 'click', function() { mostrarForm(false); });
         enganchar('ptarBtnAgregar', 'click', agregar);
+        enganchar('ptarTipo', 'change', segunTipo);
 
         /* El buscador de bancos: se abre al escribir y también al hacer foco, para
            que se vea que hay una lista y no un campo libre. */
         enganchar('ptarBanco', 'input', buscarBanco);
         enganchar('ptarBanco', 'focus', buscarBanco);
+        enganchar('ptarProvBuscar', 'input', buscarProveedor);
+        enganchar('ptarProvBuscar', 'focus', buscarProveedor);
 
         /* Cerrar el desplegable al hacer clic afuera. Mismo criterio que el
            autocomplete del maestro de fleteros: un panel que queda abierto tapa la
@@ -611,6 +816,13 @@
 
             if (caja && input && !caja.contains(ev.target) && ev.target !== input) {
                 ocultarSugerenciasBanco();
+            }
+
+            var cajaP = document.getElementById('ptarProvSugerencias');
+            var inputP = document.getElementById('ptarProvBuscar');
+
+            if (cajaP && inputP && !cajaP.contains(ev.target) && ev.target !== inputP) {
+                ocultar('ptarProvSugerencias');
             }
         });
 

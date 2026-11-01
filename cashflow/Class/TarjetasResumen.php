@@ -66,11 +66,40 @@ require_once __DIR__ . '/AuthCashflow.php';
  * La pantalla acota lo que se puede tipear, pero lo que manda el navegador es un
  * pedido y no una autorizacion: el endpoint es alcanzable sin pasar por ella. Los
  * CHECK de la tabla son la tercera red.
+ *
+ * UN RESUMEN PARA VARIAS TARJETAS
+ * -------------------------------
+ * Las tarjetas adicionales de una misma cuenta -mismo banco, mismo dia de
+ * vencimiento- reciben UN resumen del banco. ID_TARJETA es la TITULAR, la que lo
+ * lleva al tablero en la serie de su tipo; las ADICIONALES viven en
+ * RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA (sql/cashflow_tarjetas_resumen_compartido.sql).
+ *
+ * vigentes() devuelve el mismo resumen en cada tarjeta que incluye, con
+ * ES_TITULAR. Asi PISA LA ESTIMACION DE TODAS -las facturas vinculadas, la
+ * cobertura, la parte tarjeta de la supervisora- y SUMA UNA SOLA VEZ: quien
+ * proyecta un resumen mira ES_TITULAR, y las otras tarjetas lo muestran como
+ * informativo. Es la unica forma de que un resumen compartido no se cuente una
+ * vez por tarjeta.
  */
 class TarjetasResumen {
 
     /** La tabla, en la base 'central' */
     const TABLA = 'RO_T_CASHFLOW_TARJETAS_RESUMEN';
+
+    /** Las tarjetas adicionales de un resumen compartido */
+    const TABLA_COMPARTIDO = 'RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA';
+
+    /** El script que la crea */
+    const SCRIPT_COMPARTIDO = 'sql/cashflow_tarjetas_resumen_compartido.sql';
+
+    /**
+     * Los tipos que pueden compartir un resumen, con la sub-pestana donde se
+     * proyecta. Los socios no: van por banco y tienen su propio circuito.
+     */
+    const TIPOS_COMPARTIBLES = [
+        'SUPERVISORA' => 'Gastos Supervisoras',
+        'CORPORATIVA' => 'Tarjetas Pagos Corporativos'
+    ];
 
     /** El resumen del periodo, cargado mes a mes */
     const CARGA = 'CARGA';
@@ -101,6 +130,9 @@ class TarjetasResumen {
 
     /** @var array|null Cache de vigentes() */
     private $vigentes = null;
+
+    /** @var bool|null Cache del chequeo de la tabla de compartidos */
+    private $tablaCompartido = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -262,6 +294,278 @@ class TarjetasResumen {
             . 'de ' . $mesFecha . ', cargalo con ese período.';
     }
 
+    /**
+     * La base historica, validada entera: exactamente RESUMENES_BASE renglones,
+     * cada uno con su mes, al menos un importe y su vencimiento, sin meses
+     * repetidos.
+     *
+     * EXACTAMENTE TRES, Y LO DICE EL SERVIDOR. Con dos la tarjeta estimaria un
+     * promedio distinto sin que nadie se entere; con cuatro, el cuarto pisaria
+     * uno de los tres sin que la base lo use. La grilla de la pantalla tiene tres
+     * renglones, pero el endpoint es alcanzable sin pasar por ella.
+     *
+     * Estatica y pura.
+     *
+     * @param array $resumenes Filas con mes, importe_ars, importe_usd,
+     *                         fecha_vencimiento, observacion
+     * @return array ['filas' => ['Y-m' => [...]], 'avisos' => [...]]
+     */
+    public static function validarBase($resumenes) {
+        $lista = is_array($resumenes) ? array_values($resumenes) : [];
+
+        if (count($lista) !== self::RESUMENES_BASE) {
+            throw new Exception('La base histórica son ' . self::RESUMENES_BASE . ' resúmenes, '
+                . 'uno por renglón, y llegaron ' . count($lista) . '. No se cargó ningún resumen.');
+        }
+
+        $filas = [];
+        $avisos = [];
+
+        foreach ($lista as $i => $r) {
+            $n = $i + 1;
+
+            try {
+                $m = self::validarMes(isset($r['mes']) ? $r['mes'] : null);
+                $importes = self::validarImportes(
+                    isset($r['importe_ars']) ? $r['importe_ars'] : null,
+                    isset($r['importe_usd']) ? $r['importe_usd'] : null);
+                $fecha = self::validarFecha(
+                    isset($r['fecha_vencimiento']) ? $r['fecha_vencimiento'] : null);
+            } catch (Throwable $e) {
+                throw new Exception('Renglón ' . $n . ': ' . $e->getMessage()
+                    . ' No se cargó ningún resumen.');
+            }
+
+            if (isset($filas[$m])) {
+                throw new Exception('El período ' . $m . ' viene dos veces. No se cargó ningún '
+                    . 'resumen.');
+            }
+
+            $aviso = self::avisoMesDistinto($m, $fecha);
+
+            if ($aviso !== '') {
+                $avisos[] = 'Renglón ' . $n . ': ' . $aviso;
+            }
+
+            $filas[$m] = [
+                'mes' => $m,
+                'ars' => $importes['ars'],
+                'usd' => $importes['usd'],
+                'fecha' => $fecha,
+                'obs' => isset($r['observacion']) && trim((string) $r['observacion']) !== ''
+                    ? mb_substr(trim((string) $r['observacion']), 0, self::LARGO_OBSERVACION)
+                    : null
+            ];
+        }
+
+        return ['filas' => $filas, 'avisos' => $avisos];
+    }
+
+    /**
+     * Las tarjetas de un resumen, validadas: cual es la titular y cuales las
+     * adicionales.
+     *
+     * CON UNA SOLA TARJETA ES EL RESUMEN DE SIEMPRE, de cualquier tipo, y esa
+     * tarjeta es la titular.
+     *
+     * CON VARIAS, SON ADICIONALES DE UNA MISMA CUENTA, y eso se verifica: MISMO
+     * BANCO y MISMO DIA DE VENCIMIENTO, porque el banco manda un resumen por
+     * cuenta y la cuenta vence un dia. Dos tarjetas de bancos distintos en un
+     * resumen serian un error de carga que pisaria la estimacion de una tarjeta
+     * con el importe de otra. Solo SUPERVISORA y CORPORATIVA, mezcladas: los
+     * socios van por banco. Y todas ACTIVAS: una de baja no proyecta, y un
+     * resumen titular de una tarjeta de baja no sumaria en ningun lado.
+     *
+     * Estatica y pura.
+     *
+     * @param array $ids Los ID de las tarjetas elegidas
+     * @param mixed $titular El ID de la titular; con una sola tarjeta puede venir vacio
+     * @param array $tarjetas Mapa ID => tarjeta, todas
+     * @return array ['titular' => int, 'adicionales' => [int]]
+     */
+    public static function validarTarjetas($ids, $titular, $tarjetas) {
+        $lista = [];
+
+        foreach (is_array($ids) ? $ids : [$ids] as $id) {
+            $i = intval($id);
+
+            if ($i > 0 && !in_array($i, $lista, true)) {
+                $lista[] = $i;
+            }
+        }
+
+        if (empty($lista)) {
+            throw new Exception('Elegí al menos una tarjeta para el resumen.');
+        }
+
+        foreach ($lista as $i) {
+            if (!isset($tarjetas[$i])) {
+                throw new Exception('La tarjeta ' . $i . ' no está cargada. Se da de alta en '
+                    . 'Parámetros › Tarjetas.');
+            }
+        }
+
+        if (count($lista) === 1) {
+            return ['titular' => $lista[0], 'adicionales' => []];
+        }
+
+        $t = intval($titular);
+
+        if (!in_array($t, $lista, true)) {
+            throw new Exception('Marcá cuál de las tarjetas elegidas es la titular: es la que '
+                . 'lleva el resumen al tablero, una sola vez.');
+        }
+
+        $primera = $tarjetas[$t];
+
+        foreach ($lista as $i) {
+            $x = $tarjetas[$i];
+
+            if (!isset(self::TIPOS_COMPARTIBLES[$x['TIPO']])) {
+                throw new Exception($x['ROTULO'] . ' es de tipo ' . $x['TIPO_NOMBRE'] . ': un resumen '
+                    . 'compartido sólo puede incluir tarjetas Supervisora y Corporativa.');
+            }
+
+            if (empty($x['ACTIVA'])) {
+                throw new Exception($x['ROTULO'] . ' está dada de baja: un resumen compartido sólo '
+                    . 'incluye tarjetas activas.');
+            }
+
+            if ((string) $x['COD_BANCO'] !== (string) $primera['COD_BANCO']) {
+                throw new Exception('Las tarjetas de un mismo resumen tienen que ser del mismo '
+                    . 'banco: ' . $x['ROTULO'] . ' es de otro banco que ' . $primera['ROTULO']
+                    . '. Un banco manda un resumen por cuenta.');
+            }
+
+            if (intval($x['DIA_VENCIMIENTO']) !== intval($primera['DIA_VENCIMIENTO'])) {
+                throw new Exception('Las tarjetas de un mismo resumen tienen que vencer el mismo '
+                    . 'día: ' . $x['ROTULO'] . ' vence el ' . intval($x['DIA_VENCIMIENTO'])
+                    . ' y ' . $primera['ROTULO'] . ' el ' . intval($primera['DIA_VENCIMIENTO'])
+                    . '. Si de verdad son de la misma cuenta, corregí el día en Parámetros › '
+                    . 'Tarjetas.');
+            }
+        }
+
+        return [
+            'titular' => $t,
+            'adicionales' => array_values(array_filter($lista, function ($i) use ($t) {
+                return $i !== $t;
+            }))
+        ];
+    }
+
+    /**
+     * Completa el mapa de resumenes vigentes con los compartidos: el mismo
+     * resumen aparece en cada tarjeta que incluye.
+     *
+     * CADA ENTRADA DICE SI ES LA TITULAR. Ver el encabezado de la clase: pisa la
+     * estimacion en todas, y suma solo en la titular.
+     *
+     * UNA ADICIONAL QUE YA TIENE SU PROPIO RESUMEN ESE MES NO SE PISA. No deberia
+     * pasar -guardar() lo rechaza- y si pasa, quedarse con el propio es lo que no
+     * esconde nada: el compartido sigue sumando en su titular.
+     *
+     * Estatica y pura.
+     *
+     * @param array $vigentes Mapa ID_TARJETA => ['Y-m' => fila], las titulares
+     * @param array $adicionales Mapa ID_RESUMEN => [ID_TARJETA]
+     * @return array El mismo mapa, con las adicionales y los campos ID_TITULAR,
+     *               ES_TITULAR, TARJETAS y COMPARTIDO en cada entrada
+     */
+    public static function conCompartidos($vigentes, $adicionales) {
+        $salida = [];
+
+        foreach ($vigentes as $idTarjeta => $porMes) {
+            foreach ($porMes as $mes => $r) {
+                $extra = isset($adicionales[$r['ID']]) ? array_values($adicionales[$r['ID']]) : [];
+
+                $r['ID_TITULAR'] = intval($idTarjeta);
+                $r['TARJETAS'] = array_merge([intval($idTarjeta)], array_map('intval', $extra));
+                $r['COMPARTIDO'] = !empty($extra);
+                $r['ES_TITULAR'] = true;
+
+                $salida[$idTarjeta][$mes] = $r;
+            }
+        }
+
+        foreach ($salida as $idTarjeta => $porMes) {
+            foreach ($porMes as $mes => $r) {
+                if (!$r['ES_TITULAR'] || !$r['COMPARTIDO']) {
+                    continue;
+                }
+
+                foreach (array_slice($r['TARJETAS'], 1) as $otra) {
+                    if (isset($salida[$otra][$mes])) {
+                        continue;
+                    }
+
+                    $copia = $r;
+                    $copia['ES_TITULAR'] = false;
+                    $salida[$otra][$mes] = $copia;
+                }
+            }
+        }
+
+        return $salida;
+    }
+
+    /**
+     * Los resumenes vigentes que ya ocupan alguna de estas tarjetas en un mes,
+     * como titular o como adicional.
+     *
+     * Estatica y pura.
+     *
+     * @param array $ids Las tarjetas
+     * @param string $mes 'Y-m'
+     * @param array $mapa Lo que devolvio conCompartidos()
+     * @return array Mapa ID_RESUMEN => [ID_TARJETA que lo tienen]
+     */
+    public static function ocupados($ids, $mes, $mapa) {
+        $v = [];
+
+        foreach ($ids as $id) {
+            if (isset($mapa[$id][$mes])) {
+                $v[$mapa[$id][$mes]['ID']][] = intval($id);
+            }
+        }
+
+        return $v;
+    }
+
+    /**
+     * Lo que dice la marca de un resumen compartido en la fila de una tarjeta:
+     * con quienes lo comparte y en que sub-pestana se proyecta.
+     *
+     * Estatica y pura.
+     *
+     * @param array $resumen Una entrada de conCompartidos()
+     * @param int $desde La tarjeta desde cuya fila se mira
+     * @param array $tarjetas Mapa ID => tarjeta
+     * @return string '' si no es compartido
+     */
+    public static function notaCompartido($resumen, $desde, $tarjetas) {
+        if (empty($resumen['COMPARTIDO'])) {
+            return '';
+        }
+
+        $otras = [];
+
+        foreach ($resumen['TARJETAS'] as $id) {
+            if (intval($id) !== intval($desde)) {
+                $otras[] = isset($tarjetas[$id]) ? $tarjetas[$id]['ROTULO'] : ('tarjeta ' . $id);
+            }
+        }
+
+        $titular = isset($tarjetas[$resumen['ID_TITULAR']]) ? $tarjetas[$resumen['ID_TITULAR']] : null;
+        $donde = ($titular !== null && isset(self::TIPOS_COMPARTIBLES[$titular['TIPO']]))
+            ? self::TIPOS_COMPARTIBLES[$titular['TIPO']] : 'la sub-pestaña de la titular';
+
+        return 'Resumen compartido con: ' . implode('; ', $otras) . '. Se proyecta una sola vez, '
+            . 'en ' . $donde . (intval($desde) === intval($resumen['ID_TITULAR'])
+                ? ', en esta tarjeta, que es la titular.'
+                : ($titular !== null ? ', en la titular (' . $titular['ROTULO'] . ').' : '.'));
+    }
+
     /* ====================================================================
        LECTURA
        ==================================================================== */
@@ -334,14 +638,96 @@ class TarjetasResumen {
             throw new Exception($this->errorSql('Error al leer los resúmenes'));
         }
 
+        $titulares = [];
+
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $f = self::fila($row);
-            $this->vigentes[$f['ID_TARJETA']][$f['MES']] = $f;
+            $titulares[$f['ID_TARJETA']][$f['MES']] = $f;
         }
 
         sqlsrv_free_stmt($stmt);
 
+        /* LAS ADICIONALES, recien con el statement cerrado: ver la nota del pool
+           de conexiones en Class/Tarjetas.php. */
+        $this->vigentes = self::conCompartidos($titulares, $this->adicionalesVigentes());
+
         return $this->vigentes;
+    }
+
+    /** @return bool Si ya se corrio sql/cashflow_tarjetas_resumen_compartido.sql */
+    public function tablaCompartidoCreada() {
+        if ($this->tablaCompartido !== null) {
+            return $this->tablaCompartido;
+        }
+
+        try {
+            $stmt = sqlsrv_query($this->conectar(),
+                "SELECT OBJECT_ID('dbo." . self::TABLA_COMPARTIDO . "', 'U') AS T");
+
+            if ($stmt === false) {
+                return $this->tablaCompartido = false;
+            }
+
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+
+            $this->tablaCompartido = ($row && $row['T'] !== null);
+        } catch (Throwable $e) {
+            $this->tablaCompartido = false;
+        }
+
+        return $this->tablaCompartido;
+    }
+
+    /**
+     * Las tarjetas adicionales vigentes de cada resumen vigente.
+     *
+     * VACIO SI FALTA EL SCRIPT, sin lanzar: todos los resumenes son de una sola
+     * tarjeta, que es lo cierto.
+     *
+     * @param array|null $idsResumen Solo estos resumenes, vigentes o no; null
+     *                               para los vigentes
+     * @return array Mapa ID_RESUMEN => [ID_TARJETA]
+     */
+    private function adicionalesVigentes($idsResumen = null) {
+        if (!$this->tablaCompartidoCreada()) {
+            return [];
+        }
+
+        if ($idsResumen !== null && empty($idsResumen)) {
+            return [];
+        }
+
+        /* PARA UN RESUMEN DADO DE BAJA se traen las adicionales que se bajaron
+           con el: son las que tenia, y el historial tiene que poder decirlo. */
+        $sql = ($idsResumen === null)
+            ? "SELECT a.ID_RESUMEN, a.ID_TARJETA
+               FROM dbo." . self::TABLA_COMPARTIDO . " a
+               JOIN dbo." . self::TABLA . " r ON r.ID = a.ID_RESUMEN AND r.ACTIVO = 1
+               WHERE a.VIGENTE = 1
+               ORDER BY a.ID_RESUMEN, a.ID"
+            : "SELECT a.ID_RESUMEN, a.ID_TARJETA
+               FROM dbo." . self::TABLA_COMPARTIDO . " a
+               JOIN dbo." . self::TABLA . " r ON r.ID = a.ID_RESUMEN
+               WHERE a.ID_RESUMEN IN (" . implode(',', array_map('intval', $idsResumen)) . ")
+                 AND (a.VIGENTE = 1 OR (r.ACTIVO = 0 AND a.FECHA_BAJA >= r.FECHA_BAJA))
+               ORDER BY a.ID_RESUMEN, a.ID";
+
+        $stmt = sqlsrv_query($this->conectar(), $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer las tarjetas de los resúmenes compartidos'));
+        }
+
+        $mapa = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $mapa[intval($row['ID_RESUMEN'])][] = intval($row['ID_TARJETA']);
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $mapa;
     }
 
     /**
@@ -359,7 +745,8 @@ class TarjetasResumen {
 
     /**
      * El historial completo de una tarjeta: los vigentes y los dados de baja, del
-     * mas nuevo al mas viejo.
+     * mas nuevo al mas viejo. INCLUYE LOS COMPARTIDOS en los que la tarjeta es
+     * adicional, con ID_TITULAR, ES_TITULAR y TARJETAS.
      *
      * @param mixed $idTarjeta
      * @return array Lista de filas
@@ -369,15 +756,22 @@ class TarjetasResumen {
             return [];
         }
 
+        $id = intval($idTarjeta);
+        $compartido = $this->tablaCompartidoCreada();
+
         $stmt = sqlsrv_query($this->conectar(),
             "SELECT ID, ID_TARJETA, MES, IMPORTE_ARS, IMPORTE_USD, FECHA_VENCIMIENTO,
                     PAGADO, FECHA_PAGADO, USUARIO_PAGADO, ORIGEN, OBSERVACION, ACTIVO,
                     USUARIO_ALTA, FECHA_ALTA, USUARIO_MODIF, FECHA_MODIF,
                     USUARIO_BAJA, FECHA_BAJA
              FROM dbo." . self::TABLA . "
-             WHERE ID_TARJETA = ?
+             WHERE ID_TARJETA = ?"
+            . ($compartido
+                ? " OR ID IN (SELECT ID_RESUMEN FROM dbo." . self::TABLA_COMPARTIDO
+                  . " WHERE ID_TARJETA = ?)"
+                : '') . "
              ORDER BY MES DESC, ID DESC",
-            [intval($idTarjeta)]);
+            $compartido ? [$id, $id] : [$id]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer el historial de resúmenes'));
@@ -394,6 +788,17 @@ class TarjetasResumen {
         }
 
         sqlsrv_free_stmt($stmt);
+
+        $adicionales = $this->adicionalesVigentes(array_column($filas, 'ID'));
+
+        foreach ($filas as $i => $f) {
+            $extra = isset($adicionales[$f['ID']]) ? $adicionales[$f['ID']] : [];
+
+            $filas[$i]['ID_TITULAR'] = $f['ID_TARJETA'];
+            $filas[$i]['TARJETAS'] = array_merge([$f['ID_TARJETA']], $extra);
+            $filas[$i]['COMPARTIDO'] = !empty($extra);
+            $filas[$i]['ES_TITULAR'] = ($f['ID_TARJETA'] === $id);
+        }
 
         return $filas;
     }
@@ -479,18 +884,29 @@ class TarjetasResumen {
      * una decision que haya que poder reconstruir, y dos filas por cada
      * correccion llenarian el historial de ruido que esconde las bajas de verdad.
      *
+     * VARIAS TARJETAS: con $datos['tarjetas'] (lista de ID) y $datos['titular'].
+     * Sin ellas es el resumen de una tarjeta, la $idTarjeta. Ver
+     * validarTarjetas(). ALTA O CORRECCION LO DECIDE EL RESUMEN QUE YA OCUPA
+     * ESAS TARJETAS EN EL MES: si es uno, se corrige -importes, titular y
+     * adicionales-; si son dos distintos, se rechaza, porque juntarlos seria
+     * decidir cual de los dos importes vale.
+     *
+     * TODO VA EN UNA TRANSACCION: el resumen y sus adicionales. Con el resumen
+     * escrito y una adicional rechazada por el indice, el mes de esa tarjeta
+     * quedaria proyectando su estimacion arriba del resumen que la incluye.
+     *
      * @param mixed $idTarjeta
      * @param string $mes 'Y-m'
      * @param array $datos importe_ars, importe_usd, fecha_vencimiento, origen,
-     *                     observacion
+     *                     observacion, tarjetas, titular
      * @param string $usuario
-     * @return array ['id', 'mes', 'nuevo' => bool, 'aviso' => string]
+     * @return array ['id', 'mes', 'nuevo' => bool, 'aviso' => string,
+     *                'titular' => int, 'adicionales' => [int]]
      */
     public function guardar($idTarjeta, $mes, $datos, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
-        $id = intval($idTarjeta);
         $m = self::validarMes($mes);
         $importes = self::validarImportes(
             isset($datos['importe_ars']) ? $datos['importe_ars'] : null,
@@ -502,63 +918,157 @@ class TarjetasResumen {
             ? mb_substr(trim((string) $datos['observacion']), 0, self::LARGO_OBSERVACION)
             : null;
 
-        $this->exigirTarjeta($id);
+        $ids = (isset($datos['tarjetas']) && is_array($datos['tarjetas']) && !empty($datos['tarjetas']))
+            ? $datos['tarjetas'] : [$idTarjeta];
+        $titular = isset($datos['titular']) && $datos['titular'] !== '' && $datos['titular'] !== null
+            ? $datos['titular'] : $idTarjeta;
+
+        $maestro = new Tarjetas();
+        $sel = self::validarTarjetas($ids, $titular, $maestro->porId(false));
+        $id = $sel['titular'];
+
+        if (!empty($sel['adicionales']) && !$this->tablaCompartidoCreada()) {
+            throw new Exception('Todavía no existe ' . self::TABLA_COMPARTIDO . ': corré '
+                . self::SCRIPT_COMPARTIDO . ' contra la base central. Hasta entonces un resumen '
+                . 'se carga en una sola tarjeta.');
+        }
+
+        /* QUE RESUMEN OCUPA YA ESAS TARJETAS ESE MES, leido de nuevo y no del
+           cache: es lo que decide si esto es un alta o una correccion. */
+        $this->vigentes = null;
+        $todas = array_merge([$id], $sel['adicionales']);
+        $ocupados = self::ocupados($todas, $m, $this->vigentes());
+
+        if (count($ocupados) > 1) {
+            throw new Exception('Las tarjetas elegidas ya tienen ' . count($ocupados) . ' resúmenes '
+                . 'distintos en ' . $m . '. Dalos de baja y cargá uno solo: juntarlos sería '
+                . 'decidir cuál de los importes vale.');
+        }
+
+        $actual = empty($ocupados) ? null : intval(key($ocupados));
 
         $cid = $this->conectar();
-        $actual = $this->vigenteDe($cid, $id, $m);
 
-        if ($actual === null) {
-            $stmt = sqlsrv_query($cid,
-                "INSERT INTO dbo." . self::TABLA . "
-                    (ID_TARJETA, MES, IMPORTE_ARS, IMPORTE_USD, FECHA_VENCIMIENTO,
-                     ORIGEN, OBSERVACION, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?);
-                 SELECT CAST(SCOPE_IDENTITY() AS INT) AS ID;",
-                [$id, $m, $importes['ars'], $importes['usd'], $fecha, $origen, $obs,
-                 $usuario, $usuario]);
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
 
-            if ($stmt === false) {
-                throw new Exception($this->errorSql('Error al cargar el resumen'));
+        try {
+            if ($actual === null) {
+                $stmt = sqlsrv_query($cid,
+                    "INSERT INTO dbo." . self::TABLA . "
+                        (ID_TARJETA, MES, IMPORTE_ARS, IMPORTE_USD, FECHA_VENCIMIENTO,
+                         ORIGEN, OBSERVACION, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?);
+                     SELECT CAST(SCOPE_IDENTITY() AS INT) AS ID;",
+                    [$id, $m, $importes['ars'], $importes['usd'], $fecha, $origen, $obs,
+                     $usuario, $usuario]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al cargar el resumen'));
+                }
+
+                sqlsrv_next_result($stmt);
+                $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+                sqlsrv_free_stmt($stmt);
+
+                $idResumen = ($row && $row['ID'] !== null) ? intval($row['ID']) : null;
+
+                if ($idResumen === null) {
+                    throw new Exception('No se pudo leer el número del resumen recién cargado.');
+                }
+            } else {
+                $idResumen = $actual;
+
+                /* LAS ADICIONALES QUE SALEN SE BAJAN ANTES de cambiar la titular:
+                   la nueva titular puede ser una que era adicional. */
+                $this->bajarAdicionales($cid, $idResumen, $sel['adicionales'], $usuario);
+
+                /* NO SE PISA EL TILDE DE PAGADO. Corregir el importe de un resumen
+                   ya pagado no lo despaga: son dos hechos distintos y el segundo lo
+                   decide una persona con su propia accion. */
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA . "
+                     SET ID_TARJETA = ?, IMPORTE_ARS = ?, IMPORTE_USD = ?, FECHA_VENCIMIENTO = ?,
+                         ORIGEN = ?, OBSERVACION = ?, USUARIO_MODIF = ?, FECHA_MODIF = GETDATE()
+                     WHERE ID = ?",
+                    [$id, $importes['ars'], $importes['usd'], $fecha, $origen, $obs, $usuario,
+                     $idResumen]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al corregir el resumen'));
+                }
+
+                sqlsrv_free_stmt($stmt);
             }
 
-            sqlsrv_next_result($stmt);
-            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
-            sqlsrv_free_stmt($stmt);
+            $this->altaAdicionales($cid, $idResumen, $m, $sel['adicionales'], $usuario);
 
-            $this->vigentes = null;
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar el resumen'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
 
-            return [
-                'id' => ($row && $row['ID'] !== null) ? intval($row['ID']) : null,
-                'mes' => $m,
-                'nuevo' => true,
-                'aviso' => self::avisoMesDistinto($m, $fecha)
-            ];
+            throw $e;
         }
 
-        /* NO SE PISA EL TILDE DE PAGADO. Corregir el importe de un resumen ya
-           pagado no lo despaga: son dos hechos distintos y el segundo lo decide
-           una persona con su propia accion. */
-        $stmt = sqlsrv_query($cid,
-            "UPDATE dbo." . self::TABLA . "
-             SET IMPORTE_ARS = ?, IMPORTE_USD = ?, FECHA_VENCIMIENTO = ?,
-                 ORIGEN = ?, OBSERVACION = ?, USUARIO_MODIF = ?, FECHA_MODIF = GETDATE()
-             WHERE ID = ?",
-            [$importes['ars'], $importes['usd'], $fecha, $origen, $obs, $usuario,
-             intval($actual['ID'])]);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al corregir el resumen'));
-        }
-
-        sqlsrv_free_stmt($stmt);
         $this->vigentes = null;
 
         return [
-            'id' => intval($actual['ID']),
+            'id' => $idResumen,
             'mes' => $m,
-            'nuevo' => false,
-            'aviso' => self::avisoMesDistinto($m, $fecha)
+            'nuevo' => ($actual === null),
+            'aviso' => self::avisoMesDistinto($m, $fecha),
+            'titular' => $id,
+            'adicionales' => $sel['adicionales']
         ];
+    }
+
+    /**
+     * Da de baja las adicionales vigentes de un resumen que no estan en la lista
+     * que queda. Con una lista vacia, todas.
+     */
+    private function bajarAdicionales($cid, $idResumen, $quedan, $usuario) {
+        if (!$this->tablaCompartidoCreada()) {
+            return;
+        }
+
+        $sql = "UPDATE dbo." . self::TABLA_COMPARTIDO . "
+                SET VIGENTE = 0, USUARIO_BAJA = ?, FECHA_BAJA = GETDATE(),
+                    USUARIO_MODIF = ?, FECHA_MODIF = GETDATE()
+                WHERE ID_RESUMEN = ? AND VIGENTE = 1"
+            . (empty($quedan) ? ''
+                : ' AND ID_TARJETA NOT IN (' . implode(',', array_map('intval', $quedan)) . ')');
+
+        $stmt = sqlsrv_query($cid, $sql, [$usuario, $usuario, intval($idResumen)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al sacar tarjetas del resumen'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /** Da de alta las adicionales que todavia no estan vigentes en el resumen */
+    private function altaAdicionales($cid, $idResumen, $mes, $adicionales, $usuario) {
+        foreach ($adicionales as $idTarjeta) {
+            $stmt = sqlsrv_query($cid,
+                "IF NOT EXISTS (SELECT 1 FROM dbo." . self::TABLA_COMPARTIDO . "
+                                WHERE ID_RESUMEN = ? AND ID_TARJETA = ? AND VIGENTE = 1)
+                 INSERT INTO dbo." . self::TABLA_COMPARTIDO . "
+                     (ID_RESUMEN, ID_TARJETA, MES, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
+                 VALUES (?, ?, ?, 1, ?, ?)",
+                [intval($idResumen), intval($idTarjeta), intval($idResumen), intval($idTarjeta),
+                 $mes, $usuario, $usuario]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al agregar la tarjeta ' . $idTarjeta
+                    . ' al resumen'));
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
     }
 
     /**
@@ -635,18 +1145,41 @@ class TarjetasResumen {
             throw new Exception('El resumen ' . $id . ' ya estaba dado de baja.');
         }
 
-        $stmt = sqlsrv_query($this->conectar(),
-            "UPDATE dbo." . self::TABLA . "
-             SET ACTIVO = 0, USUARIO_BAJA = ?, FECHA_BAJA = GETDATE(),
-                 USUARIO_MODIF = ?, FECHA_MODIF = GETDATE()
-             WHERE ID = ? AND ACTIVO = 1",
-            [$usuario, $usuario, intval($actual['ID'])]);
+        /* UN COMPARTIDO SE VA DE TODAS SUS TARJETAS A LA VEZ: el resumen y sus
+           adicionales en la misma transaccion. Las adicionales se bajan DESPUES,
+           asi su FECHA_BAJA no es anterior a la del resumen y el historial las
+           sigue mostrando como suyas. */
+        $cid = $this->conectar();
 
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al dar de baja el resumen'));
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
         }
 
-        sqlsrv_free_stmt($stmt);
+        try {
+            $stmt = sqlsrv_query($cid,
+                "UPDATE dbo." . self::TABLA . "
+                 SET ACTIVO = 0, USUARIO_BAJA = ?, FECHA_BAJA = GETDATE(),
+                     USUARIO_MODIF = ?, FECHA_MODIF = GETDATE()
+                 WHERE ID = ? AND ACTIVO = 1",
+                [$usuario, $usuario, intval($actual['ID'])]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al dar de baja el resumen'));
+            }
+
+            sqlsrv_free_stmt($stmt);
+
+            $this->bajarAdicionales($cid, $actual['ID'], [], $usuario);
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la baja'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
         $this->vigentes = null;
 
         return ['id' => intval($actual['ID']), 'mes' => $actual['MES'],
@@ -684,49 +1217,22 @@ class TarjetasResumen {
         $id = intval($idTarjeta);
         $this->exigirTarjeta($id);
 
-        // 1. Validar TODO antes de escribir nada.
-        $filas = [];
-        $avisos = [];
+        // 1. Validar TODO antes de escribir nada: los tres renglones, juntos.
+        $base = self::validarBase($resumenes);
+        $filas = $base['filas'];
+        $avisos = $base['avisos'];
 
-        foreach (is_array($resumenes) ? $resumenes : [] as $i => $r) {
-            $n = $i + 1;
+        /* UNA TARJETA ADICIONAL DE UN RESUMEN COMPARTIDO no recibe una base propia
+           en ese mes: su mes ya lo cubre el resumen de la titular, y un segundo
+           resumen lo pisaria dos veces. */
+        $this->vigentes = null;
+        $mapa = $this->vigentes();
 
-            try {
-                $m = self::validarMes(isset($r['mes']) ? $r['mes'] : null);
-                $importes = self::validarImportes(
-                    isset($r['importe_ars']) ? $r['importe_ars'] : null,
-                    isset($r['importe_usd']) ? $r['importe_usd'] : null);
-                $fecha = self::validarFecha(
-                    isset($r['fecha_vencimiento']) ? $r['fecha_vencimiento'] : null);
-            } catch (Throwable $e) {
-                throw new Exception('Renglón ' . $n . ': ' . $e->getMessage()
-                    . ' No se cargó ningún resumen.');
+        foreach ($filas as $m => $f) {
+            if (isset($mapa[$id][$m]) && empty($mapa[$id][$m]['ES_TITULAR'])) {
+                throw new Exception('En ' . $m . ' esta tarjeta ya está incluida en un resumen '
+                    . 'compartido. No se cargó ningún resumen.');
             }
-
-            if (isset($filas[$m])) {
-                throw new Exception('El período ' . $m . ' viene dos veces. No se cargó ningún '
-                    . 'resumen.');
-            }
-
-            $aviso = self::avisoMesDistinto($m, $fecha);
-
-            if ($aviso !== '') {
-                $avisos[] = 'Renglón ' . $n . ': ' . $aviso;
-            }
-
-            $filas[$m] = [
-                'mes' => $m,
-                'ars' => $importes['ars'],
-                'usd' => $importes['usd'],
-                'fecha' => $fecha,
-                'obs' => isset($r['observacion']) && trim((string) $r['observacion']) !== ''
-                    ? mb_substr(trim((string) $r['observacion']), 0, self::LARGO_OBSERVACION)
-                    : null
-            ];
-        }
-
-        if (empty($filas)) {
-            throw new Exception('No llegó ningún resumen para cargar como base histórica.');
         }
 
         // 2. Escribir, todo o nada.

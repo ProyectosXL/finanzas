@@ -206,6 +206,50 @@ class Inflacion {
     }
 
     /**
+     * La SUMA SIN COMPONER de la inflacion de N meses seguidos, desde un mes.
+     *
+     * Es acumulada() para un largo cualquiera: acumulada() suma SIEMPRE su mes y
+     * los dos anteriores, porque es el ajuste trimestral pactado con un fletero.
+     * Esta la usa la continuacion de una poliza de seguros en pesos: el ciclo
+     * siguiente es el total del anterior ajustado por la suma de la inflacion de
+     * los meses de la vigencia anterior -1, 3 o 12-, sumada y no compuesta, como
+     * se enuncia un ajuste.
+     *
+     * MISMA ESTRUCTURA Y MISMO CRITERIO que acumulada(): 'pct' en null si falta
+     * algun mes, y 'faltan' dice cuales.
+     *
+     * Estatica y pura.
+     *
+     * @param array $mapa Mapa 'Y-m' => float, en PUNTOS porcentuales
+     * @param string $desde El primer mes, 'Y-m'
+     * @param int $n Cuantos meses, 1 o mas
+     * @return array ['pct' => float|null, 'meses' => ['Y-m' => float|null], 'faltan' => ['Y-m']]
+     */
+    public static function sumada($mapa, $desde, $n) {
+        $detalle = [];
+        $faltan = [];
+        $suma = 0;
+
+        for ($i = 0; $i < max(1, intval($n)); $i++) {
+            $m = self::mesMas($desde, $i);
+
+            if (isset($mapa[$m]) && $mapa[$m] !== null) {
+                $detalle[$m] = floatval($mapa[$m]);
+                $suma += $detalle[$m];
+            } else {
+                $detalle[$m] = null;
+                $faltan[] = $m;
+            }
+        }
+
+        return [
+            'pct' => empty($faltan) ? $suma : null,
+            'meses' => $detalle,
+            'faltan' => $faltan
+        ];
+    }
+
+    /**
      * El factor de inflacion COMPUESTA entre el mes siguiente a un mes base y un
      * mes destino:
      *

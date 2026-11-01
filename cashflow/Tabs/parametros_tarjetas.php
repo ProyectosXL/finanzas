@@ -204,6 +204,69 @@ $edita = AuthCashflow::puedeEditar('parametros', 'TARJETAS');
             </small>
         </div>
     </div>
+
+    <!-- ================================================================
+         PROVEEDORES QUE PROYECTAN
+         Reemplaza a "marcar mensual" de la grilla de Pagos Corporativos: se
+         marca el PROVEEDOR, y sus facturas del último mes se repiten.
+         ================================================================ -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h5 class="mb-0">Proveedores que proyectan</h5>
+                <small class="text-muted">
+                    Las facturas vinculadas del <strong>último mes</strong> de un proveedor marcado
+                    —por su vencimiento de Tango— se repiten en Tarjetas Pagos Corporativos todos
+                    los meses siguientes, con el importe de su cuota y en el débito de su tarjeta.
+                    Cuando se carga la del mes siguiente, pasa a ser ésa la que se repite.
+                </small>
+            </div>
+        </div>
+
+        <?php if ($edita): ?>
+        <div class="card-body border-bottom">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-6 position-relative">
+                    <label class="form-label form-label-sm" for="ptarProvBuscar">Proveedor</label>
+                    <input type="text" id="ptarProvBuscar" class="form-control form-control-sm"
+                           placeholder="Razón social o código…" autocomplete="off">
+                    <div id="ptarProvSugerencias" class="list-group position-absolute w-100 shadow"
+                         style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;">
+                    </div>
+                    <div class="form-text">
+                        Los que tienen facturas pendientes con forma de pago TARJETA CORP.
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table id="ptarProvTabla" class="table table-sm table-hover mb-0" data-orden="no">
+                    <thead>
+                        <tr>
+                            <th style="width: 110px;">Código</th>
+                            <th>Proveedor</th>
+                            <th>Estado</th>
+                            <th>Alta</th>
+                            <th>Baja</th>
+                            <th style="width: 60px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ptarProvBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card-body py-2 border-top">
+            <small class="text-muted">
+                <strong>Dar de baja no borra</strong>: queda en el historial, con quién y cuándo,
+                y el proveedor deja de proyectar. Entre el pago de una factura y la carga de la
+                siguiente puede no haber proyección.
+            </small>
+        </div>
+    </div>
 </div>
 
 <script src="Js/Parametros-Tarjetas.js?v=<?php echo time(); ?>"></script>

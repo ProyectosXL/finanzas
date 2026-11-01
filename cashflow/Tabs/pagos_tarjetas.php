@@ -161,7 +161,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         </div>
                         <div class="kpi-card-value" id="supSinProyectar">0</div>
                         <div class="kpi-card-footer">
-                            <span class="text-muted">inactivas o fuera del maestro</span>
+                            <span class="text-muted">inactivas, fuera del maestro o sin histórico</span>
                         </div>
                     </div>
                 </div>
@@ -351,12 +351,14 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                     con su pendiente y su estado, pero no suma, esté vencida o no —sin tarjeta no
                     se sabe en qué débito sale—.
                     <br>
-                    Una vinculada entra por su vencimiento, o si ya venció, en el
-                    <strong>próximo pago de su tarjeta</strong>; <strong>genera cobertura</strong>
-                    y <strong>un resumen de esa tarjeta la puede reemplazar</strong>. El
-                    vencimiento se puede <strong>corregir</strong> en la columna VTO TANGO —sólo
-                    vale en esta pestaña— y una factura que se repite todos los meses se puede
-                    <strong>marcar como mensual</strong> para estimar los meses siguientes.
+                    Una vinculada sale en el <strong>débito de su tarjeta</strong>: el primero a
+                    partir de su vencimiento, así cada cuota va a su débito; si ese débito ya
+                    pasó, en el <strong>próximo pago de su tarjeta</strong>. <strong>Genera
+                    cobertura</strong> y <strong>un resumen de esa tarjeta la puede
+                    reemplazar</strong>. El vencimiento se puede <strong>corregir</strong> en la
+                    columna VTO. A CONSIDERAR —sólo vale en esta pestaña— para mandarla a otro
+                    débito. Las facturas de los <strong>proveedores que proyectan</strong>
+                    (<em>Parámetros › Tarjetas</em>) se repiten en los meses siguientes.
                 </small>
             </div>
 
@@ -474,9 +476,20 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                          el nombre del orden guardado sin
                                          cambiarlo. Es el del porDefecto del JS.
                                          Ver Js/tabla-orden.js. -->
-                                    <th rowspan="2" style="min-width: 165px;" data-orden-nombre="VTO TANGO"
-                                        title="El vencimiento de Tango, que se puede corregir: sólo vale en esta pestaña">
-                                        VTO TANGO
+                                    <th rowspan="2"
+                                        title="El vencimiento de la cuota tal como está cargado en Tango. Informativo.">
+                                        VTO. EN TANGO
+                                    </th>
+                                    <th rowspan="2" style="min-width: 165px;"
+                                        title="El vencimiento con el que se calcula el débito: el de Tango, o el corregido en esta pestaña. Corregirlo manda la cuota a otro débito; no cambia Tango.">
+                                        VTO. A CONSIDERAR
+                                    </th>
+                                    <!-- data-orden-nombre igual al rótulo: ancla
+                                         el nombre del orden guardado. Es el del
+                                         porDefecto del JS. Ver Js/tabla-orden.js. -->
+                                    <th rowspan="2" data-orden-nombre="DÉBITO TARJETA"
+                                        title="La fecha en que se paga: el débito de su tarjeta a partir del vencimiento a considerar, o el próximo pago si ese débito ya pasó. Sin tarjeta, el vencimiento.">
+                                        DÉBITO TARJETA
                                     </th>
                                     <th rowspan="2">TARJETA</th>
                                     <th rowspan="2" class="text-end">PENDIENTE</th>
@@ -514,7 +527,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                             <tbody id="bodyCorp"></tbody>
                             <tfoot>
                                 <tr id="totalesCorp">
-                                    <td colspan="9" class="fw-bold text-end">TOTALES</td>
+                                    <td colspan="11" class="fw-bold text-end">TOTALES</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -549,13 +562,15 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="card-header">
                     <h5 class="mb-0">Estimaciones mensuales</h5>
                     <small class="text-muted">
-                        Las facturas que se repiten todos los meses (abonos), marcadas con el
-                        ícono <i class="fas fa-repeat"></i> de la grilla. Se estima el
-                        <strong>importe de la cuota marcada</strong>, fijo y sin inflación, el día
-                        de su vencimiento, desde el mes siguiente. Un mes se apaga solo si aparece
-                        la <strong>factura real</strong> del proveedor, y queda cubierto si la
-                        tarjeta tiene <strong>resumen</strong> cargado. Generan cobertura como una
-                        factura vinculada.
+                        Las de los <strong>proveedores que proyectan</strong>, que se marcan en
+                        <em>Parámetros › Tarjetas</em>. Se repiten las facturas vinculadas del
+                        <strong>último mes</strong> del proveedor —por su vencimiento de Tango—,
+                        cada una con el <strong>importe de su cuota</strong>, fijo y sin
+                        inflación, en el débito de su tarjeta, desde el mes siguiente a su pago y
+                        hasta el fin del horizonte. Cuando se carga la factura del mes siguiente,
+                        pasa a ser ésa la que se repite; cuando se paga, deja de proyectar. Un mes
+                        queda cubierto si la tarjeta tiene <strong>resumen</strong> cargado, y
+                        generan cobertura como una factura vinculada.
                     </small>
                 </div>
                 <div class="card-body p-0">
@@ -564,7 +579,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                             <thead>
                                 <tr>
                                     <th rowspan="2" class="col-texto">PROVEEDOR</th>
-                                    <th rowspan="2">ORIGEN</th>
+                                    <th rowspan="2">FACTURA DE ORIGEN</th>
                                     <th rowspan="2">TARJETA</th>
                                     <th rowspan="2" class="text-end">IMPORTE</th>
                                     <th rowspan="2" class="text-center">DÍA</th>
@@ -590,6 +605,70 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                             </tfoot>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 SEGUROS
+                 Las pólizas de los proveedores de seguros (rubro SEGUROS y
+                 TARJETA CORP en el maestro). Sus facturas de Tango no suman: se
+                 proyectan sólo con las pólizas. Ver Class/TarjetasSeguros.php.
+                 ============================================================ -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center
+                            flex-wrap gap-2">
+                    <div>
+                        <h5 class="mb-0">Seguros</h5>
+                        <small class="text-muted">
+                            Se proyectan <strong>con las pólizas</strong>: la cuota es el total de la
+                            vigencia dividido por los meses que se pagan (vigencia menos gracia),
+                            uno por mes desde el primer pago, en el débito de su tarjeta. En dólares,
+                            con el dólar futuro de cada mes. Cuando la vigencia termina antes del fin
+                            del horizonte, el ciclo se repite —<em>estimado</em>— hasta que se cargue
+                            la póliza siguiente. Generan cobertura y los pisa el resumen, como una
+                            factura vinculada.
+                        </small>
+                    </div>
+                    <?php if ($edita): ?>
+                    <button id="btnNuevaPoliza" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-plus me-1"></i> Cargar póliza
+                    </button>
+                    <?php endif; ?>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-wrapper table-responsive tabla-temporal">
+                        <table id="tablaCorpSeg" class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" class="col-texto">PROVEEDOR</th>
+                                    <th rowspan="2">PÓLIZA</th>
+                                    <th rowspan="2">TARJETA</th>
+                                    <th rowspan="2" class="text-end">TOTAL VIGENCIA</th>
+                                    <th rowspan="2">VIGENCIA</th>
+                                    <th rowspan="2" class="text-end">CUOTA</th>
+                                    <!-- Acá terminan las descriptivas: el resto
+                                         lo pinta Js/eje-totales.js. -->
+                                </tr>
+                                <tr id="headerEjeSeg2">
+                                    <th class="text-end total-column"
+                                        title="Suma las columnas que se están viendo">
+                                        TOTAL PERÍODO
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="bodyCorpSeg"></tbody>
+                            <tfoot>
+                                <tr id="totalesCorpSeg">
+                                    <td colspan="6" class="fw-bold text-end">TOTALES</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+                <!-- La línea de las facturas de seguros: cuántas y por cuánto. NO
+                     SUMAN, y se dice siempre. -->
+                <div class="card-body py-2 border-top">
+                    <small class="text-muted" id="corpSegurosFacturas"></small>
                 </div>
             </div>
 
@@ -651,7 +730,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="col-md-6 col-lg-4">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
-                            <span class="kpi-card-title">Tarjetas de socios</span>
+                            <span class="kpi-card-title">Bancos de socios</span>
                             <div class="kpi-card-icon green"><i class="fas fa-credit-card"></i></div>
                         </div>
                         <div class="kpi-card-value" id="socCuantas">0</div>
@@ -689,9 +768,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="card-header d-flex justify-content-between align-items-center
                             flex-wrap gap-2">
                     <div>
-                        <h5 class="mb-0">Por tarjeta</h5>
+                        <h5 class="mb-0">Por banco</h5>
                         <small class="text-muted">
-                            Cada tarjeta se abre en cuatro filas: <strong>U$S</strong>
+                            Cada banco se abre en cuatro filas: <strong>U$S</strong>
                             (informativa, no suma en pesos), <strong>equivalente en $</strong>,
                             <strong>$</strong> y el <strong>total en pesos</strong>.
                         </small>
@@ -710,7 +789,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         <table id="tablaSoc" class="table table-hover mb-0">
                             <thead>
                                 <tr>
-                                    <th rowspan="2">TARJETA</th>
+                                    <th rowspan="2">BANCO</th>
                                     <th rowspan="2" class="text-end"
                                         title="Promedio de los últimos 3 resúmenes cargados">
                                         BASE
@@ -742,7 +821,11 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
 
                 <div class="card-body py-2 border-top">
                     <small class="text-muted">
-                        <strong>La base son los últimos 3 resúmenes</strong> de la tarjeta, de
+                        <strong>Va por banco</strong>, sin el nombre del socio: cada banco tiene su %
+                        de cobertura y su día de vencimiento en <em>Parámetros › Tarjetas</em>, y
+                        sus resúmenes son los del banco.
+                        <br>
+                        <strong>La base son los últimos 3 resúmenes</strong> del banco, de
                         cualquier origen, con período anterior al mes en curso. Al principio se
                         cargan de una con <em>Cargar base histórica</em>; después, los que se van
                         cargando mes a mes pasan a formar parte del histórico y la base se corre

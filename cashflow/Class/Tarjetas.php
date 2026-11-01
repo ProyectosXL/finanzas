@@ -101,8 +101,25 @@ class Tarjetas {
     const TIPOS = [
         'SUPERVISORA' => 'Supervisora',
         'CORPORATIVA' => 'Corporativa',
-        'SOCIO' => 'Socio'
+        'SOCIO' => 'Socio (historial)',
+        'SOCIOS_BANCO' => 'Socios (por banco)'
     ];
+
+    /**
+     * Tarjetas Socios es POR BANCO desde feature/tarjetas-resumenes-seguros: una
+     * fila sin usuario por banco, con su % y su dia. Ver
+     * sql/cashflow_tarjetas_socios_banco.sql.
+     */
+    const SOCIOS_BANCO = 'SOCIOS_BANCO';
+
+    /**
+     * Las tarjetas de socio con nombre quedaron de baja como historial: no se dan
+     * de alta ni se reactivan. Sus resumenes siguen colgando de ellas.
+     */
+    const SOCIO_HISTORIAL = 'SOCIO';
+
+    /** El script que habilita los bancos de socios */
+    const SCRIPT_SOCIOS_BANCO = 'sql/cashflow_tarjetas_socios_banco.sql';
 
     /** Tope del % de cobertura. Ver validarPct() */
     const PCT_MAX = 100;
@@ -260,11 +277,16 @@ class Tarjetas {
     public static function rotulo($t) {
         $partes = [];
 
-        $partes[] = empty($t['ULTIMOS_4']) ? '•••• (sin identificar)' : '•••• ' . $t['ULTIMOS_4'];
-
         $banco = isset($t['DESC_BANCO']) && trim((string) $t['DESC_BANCO']) !== ''
             ? trim((string) $t['DESC_BANCO'])
             : ('banco ' . (isset($t['COD_BANCO']) ? $t['COD_BANCO'] : '?'));
+
+        /* UN BANCO DE SOCIOS NO TIENE TARJETA NI SOCIO: se nombra por el banco. */
+        if (isset($t['TIPO']) && $t['TIPO'] === self::SOCIOS_BANCO) {
+            return 'Socios · ' . $banco;
+        }
+
+        $partes[] = empty($t['ULTIMOS_4']) ? '•••• (sin identificar)' : '•••• ' . $t['ULTIMOS_4'];
 
         $partes[] = $banco;
 
@@ -638,7 +660,8 @@ class Tarjetas {
      */
     private function fila($row, $bancos, $usuarios) {
         $cod = trim((string) $row['COD_BANCO']);
-        $idUsuario = intval($row['ID_USUARIO']);
+        $idUsuario = ($row['ID_USUARIO'] === null) ? null : intval($row['ID_USUARIO']);
+        $esBanco = (trim((string) $row['TIPO']) === self::SOCIOS_BANCO);
 
         $f = [
             'ID' => intval($row['ID']),
@@ -654,13 +677,15 @@ class Tarjetas {
                difieran no es un error: es que el usuario cambio de nombre, y eso
                se ve. */
             'NOMBRE_USUARIO' => trim((string) $row['NOMBRE_USUARIO']),
-            'NOMBRE_VISTA' => isset($usuarios[$idUsuario]) ? $usuarios[$idUsuario] : null,
+            'NOMBRE_VISTA' => ($idUsuario !== null && isset($usuarios[$idUsuario]))
+                ? $usuarios[$idUsuario] : null,
 
             /* EL USUARIO YA NO ESTA EN LA VISTA: se marca y NO se da de baja
                sola. Puede ser una supervisora que dejo de estar activa, y
                decidir que hacer con su tarjeta es de una persona. Mismo criterio
-               que un fletero cuyo codigo ya no esta en CPA01. */
-            'USUARIO_EN_VISTA' => isset($usuarios[$idUsuario]),
+               que un fletero cuyo codigo ya no esta en CPA01. Un banco de socios
+               no tiene usuario, asi que no puede faltar de la vista. */
+            'USUARIO_EN_VISTA' => $esBanco || ($idUsuario !== null && isset($usuarios[$idUsuario])),
 
             'ULTIMOS_4' => ($row['ULTIMOS_4'] === null) ? null : trim((string) $row['ULTIMOS_4']),
             'PCT_COBERTURA' => floatval($row['PCT_COBERTURA']),
@@ -721,6 +746,13 @@ class Tarjetas {
         $dia = TarjetasVencimiento::validarDia(
             isset($datos['dia_vencimiento']) ? $datos['dia_vencimiento'] : null);
 
+        $actualAntes = ($id === null || $id === '') ? null : $this->getTarjeta($id);
+        self::validarCambioDeTipo($tipo, $actualAntes);
+
+        if ($tipo === self::SOCIOS_BANCO) {
+            return $this->guardarBancoSocios($actualAntes, $banco, $pct, $dia, $usuario);
+        }
+
         $idUsuario = intval(isset($datos['id_usuario']) ? $datos['id_usuario'] : 0);
 
         if (!$this->vistaUsuariosCreada()) {
@@ -758,7 +790,7 @@ class Tarjetas {
         $this->exigirUltimos4($banco, $idUsuario, $ultimos, $id);
 
         $cid = $this->conectar();
-        $actual = ($id === null || $id === '') ? null : $this->getTarjeta($id);
+        $actual = $actualAntes;
 
         if ($actual === null) {
             $stmt = sqlsrv_query($cid,
@@ -824,6 +856,152 @@ class Tarjetas {
     }
 
     /**
+     * Que el tipo se pueda dar de alta, y que una fila no cambie de tarjeta a
+     * banco de socios ni al reves.
+     *
+     * SOCIO NO SE DA DE ALTA: las tarjetas de socio con nombre quedaron de baja
+     * como historial, y Socios es por banco.
+     *
+     * UNA TARJETA NO SE VUELVE BANCO, NI UN BANCO TARJETA: una tiene usuario y el
+     * otro no, y sus resumenes son de cosas distintas. Se da de alta la otra.
+     *
+     * Estatica y pura.
+     *
+     * @param string $tipo Ya validado contra TIPOS
+     * @param array|null $actual La fila que se esta corrigiendo, o null en un alta
+     */
+    public static function validarCambioDeTipo($tipo, $actual) {
+        $antes = ($actual === null) ? null : $actual['TIPO'];
+
+        if ($tipo === self::SOCIO_HISTORIAL && $antes !== self::SOCIO_HISTORIAL) {
+            throw new Exception('Las tarjetas de socio ahora van por banco: elegí el tipo '
+                . self::TIPOS[self::SOCIOS_BANCO] . ', sin usuario.');
+        }
+
+        if ($antes !== null && ($antes === self::SOCIOS_BANCO) !== ($tipo === self::SOCIOS_BANCO)) {
+            throw new Exception(($antes === self::SOCIOS_BANCO)
+                ? 'Un banco de socios no se convierte en una tarjeta: dala de alta aparte.'
+                : 'Una tarjeta no se convierte en un banco de socios: dalo de alta aparte.');
+        }
+
+        if ($antes === self::SOCIO_HISTORIAL) {
+            throw new Exception('Las tarjetas de socio con nombre quedaron como historial y no se '
+                . 'editan. Socios va por banco.');
+        }
+    }
+
+    /**
+     * Da de alta o corrige un banco de socios: banco, % de cobertura y dia de
+     * vencimiento. Sin usuario y sin ultimos 4.
+     *
+     * UNO POR BANCO, y se dice antes de que lo diga la base: el indice unico de
+     * la identidad trata los NULL como iguales, asi que dos filas del mismo banco
+     * sin usuario chocan, pero con un error que no explica nada.
+     *
+     * @return array ['id', 'rotulo', 'nuevo', 'reactivada']
+     */
+    private function guardarBancoSocios($actual, $banco, $pct, $dia, $usuario) {
+        if (!$this->bancosSociosHabilitados()) {
+            throw new Exception('Para dar de alta bancos de socios falta correr '
+                . self::SCRIPT_SOCIOS_BANCO . ' contra la base central.');
+        }
+
+        $bancos = $this->bancos();
+
+        if (empty($bancos)) {
+            throw new Exception('No se pudo leer el maestro de bancos de Tango, así que no hay '
+                . 'contra qué validar el banco. Probá de nuevo en un rato.');
+        }
+
+        if (!isset($bancos[$banco])) {
+            throw new Exception('El código de banco "' . $banco . '" no existe en el maestro de '
+                . 'bancos de Tango. Elegilo de la lista.');
+        }
+
+        foreach ($this->getTarjetas(false, self::SOCIOS_BANCO) as $t) {
+            if ($t['COD_BANCO'] === $banco && ($actual === null || $t['ID'] !== intval($actual['ID']))) {
+                throw new Exception($bancos[$banco] . ' ya está cargado como banco de socios'
+                    . ($t['ACTIVA'] ? '' : ', de baja: reactivalo') . '. Hay uno por banco.');
+            }
+        }
+
+        $rotulo = self::rotulo(['TIPO' => self::SOCIOS_BANCO, 'COD_BANCO' => $banco,
+                                'DESC_BANCO' => $bancos[$banco]]);
+        $cid = $this->conectar();
+
+        if ($actual === null) {
+            $stmt = sqlsrv_query($cid,
+                "INSERT INTO dbo." . self::TABLA . "
+                    (TIPO, COD_BANCO, ID_USUARIO, NOMBRE_USUARIO, ULTIMOS_4,
+                     PCT_COBERTURA, DIA_VENCIMIENTO, ACTIVA, USUARIO_ALTA, USUARIO_MODIF)
+                 VALUES (?, ?, NULL, NULL, NULL, ?, ?, 1, ?, ?);
+                 SELECT CAST(SCOPE_IDENTITY() AS INT) AS ID;",
+                [self::SOCIOS_BANCO, $banco, $pct, $dia, $usuario, $usuario]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al dar de alta el banco de socios'));
+            }
+
+            sqlsrv_next_result($stmt);
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+
+            return ['id' => ($row && $row['ID'] !== null) ? intval($row['ID']) : null,
+                    'rotulo' => $rotulo, 'nuevo' => true, 'reactivada' => false];
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo." . self::TABLA . "
+             SET COD_BANCO = ?, PCT_COBERTURA = ?, DIA_VENCIMIENTO = ?, ACTIVA = 1,
+                 USUARIO_BAJA = NULL, FECHA_BAJA = NULL, " . Auditoria::SET_MODIF . "
+             WHERE ID = ?",
+            [$banco, $pct, $dia, $usuario, intval($actual['ID'])]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar el banco de socios'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return ['id' => intval($actual['ID']), 'rotulo' => $rotulo, 'nuevo' => false,
+                'reactivada' => !$actual['ACTIVA']];
+    }
+
+    /** @var bool|null Cache de bancosSociosHabilitados() */
+    private $sociosBanco = null;
+
+    /**
+     * Si ya se corrio sql/cashflow_tarjetas_socios_banco.sql: el CHECK del tipo
+     * admite SOCIOS_BANCO. Sin el, un alta la rechazaria la base.
+     *
+     * @return bool
+     */
+    public function bancosSociosHabilitados() {
+        if ($this->sociosBanco !== null) {
+            return $this->sociosBanco;
+        }
+
+        try {
+            $stmt = sqlsrv_query($this->conectar(),
+                "SELECT COUNT(*) AS N FROM sys.check_constraints
+                 WHERE name = 'CK_RO_T_CF_TARJ_TIPO' AND definition LIKE '%SOCIOS_BANCO%'");
+
+            if ($stmt === false) {
+                return $this->sociosBanco = false;
+            }
+
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+
+            $this->sociosBanco = ($row && intval($row['N']) > 0);
+        } catch (Throwable $e) {
+            $this->sociosBanco = false;
+        }
+
+        return $this->sociosBanco;
+    }
+
+    /**
      * Da de baja o reactiva una tarjeta.
      *
      * NO BORRA NADA: una tarjeta inactiva deja de proyectar y conserva sus
@@ -843,6 +1021,13 @@ class Tarjetas {
 
         if ($actual === null) {
             throw new Exception('La tarjeta ' . $id . ' no está cargada.');
+        }
+
+        /* UNA TARJETA DE SOCIO CON NOMBRE NO SE REACTIVA: Socios va por banco, y
+           reactivarla la haria proyectar al lado del banco que la incluye. */
+        if ($activa && $actual['TIPO'] === self::SOCIO_HISTORIAL) {
+            throw new Exception('Las tarjetas de socio con nombre quedaron como historial: Socios va '
+                . 'por banco. Dá de alta el banco en esta misma pantalla.');
         }
 
         $stmt = sqlsrv_query($this->conectar(),

@@ -45,7 +45,7 @@
      * Asi que cada tabla tiene, en total, COLS_* + columnas del eje + 1.
      */
     var COLS_SUP = 4;
-    var COLS_CORP = 9;
+    var COLS_CORP = 11;
     var COLS_SOC = 3;
 
     var datos = null;
@@ -155,6 +155,7 @@
                     + '</button>'
                     + '<span class="fw-semibold">' + esc(f.nombre) + '</span>'
                     + marcaMotivo(f)
+                    + marcaHistorico(f)
                 + '</td>'
                 + '<td class="text-end">' + plataOGuion(f.promedio)
                     + (f.meses_con_datos < 3
@@ -214,6 +215,48 @@
         + '</tr>';
     }
 
+    /**
+     * De dónde sale el promedio de quien no carga gastos: el histórico manual, o
+     * que todavía no lo tiene. Con permiso, el botón para cargarlo.
+     */
+    function marcaHistorico(f) {
+        if (f.origen !== 'MANUAL' && f.origen !== 'SIN_HISTORICO') { return ''; }
+
+        var meses = f.historico ? Object.keys(f.historico).sort() : [];
+        var detalle = meses.map(function(m) {
+            return m + ': ' + plata(f.historico[m]);
+        }).join(' · ');
+
+        var marca = f.origen === 'MANUAL'
+            ? ' <span class="badge bg-info text-dark" title="' + esc('No carga gastos en la app de '
+                + 'supervisión: proyecta con el histórico manual. ' + detalle) + '">'
+                + 'histórico manual</span>'
+            : '';
+
+        var boton = (datos.supervisoras.historico_tabla && Permisos.puedeEditar('bodySup'))
+            ? ' <button class="btn btn-link btn-sm p-0 tarj-historico" data-nombre="' + esc(f.nombre)
+                + '" title="' + (f.origen === 'MANUAL' ? 'Corregir' : 'Cargar')
+                + ' el histórico manual de los últimos 3 meses">'
+                + '<i class="fas fa-clock-rotate-left"></i></button>'
+            : '';
+
+        return marca + boton;
+    }
+
+    /**
+     * Los resúmenes compartidos de esta tarjeta: una marca por mes, con quiénes
+     * lo comparten y dónde se proyecta.
+     */
+    function marcasCompartido(lista) {
+        return (lista || []).map(function(c) {
+            return ' <span class="badge ' + (c.es_titular ? 'bg-primary' : 'bg-secondary')
+                + '" title="' + esc(c.nota + ' Resumen de ' + c.mes + ': ' + plata(c.importe)
+                    + ', vence el ' + String(c.fecha).split('-').reverse().join('/') + '.') + '">'
+                + '<i class="fas fa-link me-1"></i>compartido ' + esc(c.mes)
+                + (c.es_titular ? '' : ' · no suma acá') + '</span>';
+        }).join('');
+    }
+
     /** La tarjeta asociada a una supervisora, o por qué no hay una */
     function celdaTarjeta(f) {
         if (f.tarjeta) {
@@ -224,7 +267,8 @@
                     : '')
                 + '<div><small class="text-muted">vence el '
                 + esc(f.tarjeta.DIA_VENCIMIENTO) + '</small></div>'
-                + botonResumenes(f.tarjeta);
+                + botonResumenes(f.tarjeta)
+                + marcasCompartido(f.compartidos);
         }
 
         if (f.tarjetas_activas > 1) {
@@ -242,7 +286,8 @@
         var textos = {
             SIN_SUPERVISORA: 'no está en el maestro de supervisoras',
             INACTIVA: 'inactiva en el maestro',
-            SIN_IMPORTE: 'sus gastos suman cero'
+            SIN_IMPORTE: 'sus gastos suman cero',
+            SIN_HISTORICO: 'no carga gastos: cargale el histórico'
         };
 
         return ' <span class="badge bg-secondary" title="No se proyecta">'
@@ -284,12 +329,18 @@
            detalle dice cuánto es estimación, porque no es deuda de Tango. */
         var estimado = vistas.total(c.eje_estimaciones.totales);
 
+        /* LOS SEGUROS SUMAN EN EL MISMO KPI —son parte de la serie
+           CORPORATIVAS— y el detalle dice cuánto es de seguros. */
+        var seguros = vistas.total(c.eje_polizas.totales);
+
         texto('corpTotal', plata(vistas.total(c.eje.totales)
             + vistas.total(c.eje_cobertura.totales) + vistas.total(c.eje_resumenes.totales)
-            + estimado));
-        texto('corpTotalDetalle', 'facturas + cobertura + resúmenes'
-            + (estimado ? ' · de esto, ' + plata(estimado) + ' es estimación mensual'
-                        : ' + estimaciones'));
+            + estimado + seguros));
+        texto('corpTotalDetalle', 'facturas + cobertura + resúmenes + estimaciones + seguros'
+            + (estimado || seguros
+                ? ' · de esto, ' + plata(estimado) + ' es estimación por proveedor y '
+                  + plata(seguros) + ' es de seguros'
+                : ''));
         texto('corpVencidas', plata(kpis.sinVincular));
         texto('corpVencidasDetalle', kpis.cuantasSinVincular
             + ' factura(s) que no entran al flujo: vinculalas a una tarjeta');
@@ -317,6 +368,7 @@
         dibujarExtras();
         dibujarVtosInertes();
         dibujarEstimaciones();
+        dibujarSeguros();
         engancharCorp(cuerpo);
         actualizarBarraSel();
     }
@@ -358,16 +410,45 @@
             + '<td class="col-texto">' + esc(f.RAZON_SOC) + '</td>'
             + '<td>' + esc(f.T_COMP) + '</td>'
             + '<td>' + esc(f.N_COMP) + '</td>'
+            // Informativa: el vencimiento tal como está en Tango
+            + '<td data-orden="' + esc(f.FECHA_VTO || '') + '"><small class="text-muted">'
+                + fecha(f.FECHA_VTO) + '</small></td>'
             + celdaVtoCorp(f)
+            + celdaDebito(f)
             + '<td>' + (f.TARJETA
                 ? '<small>' + esc(f.TARJETA.ROTULO) + '</small>'
                 : '<small class="text-muted">sin vincular</small>')
             + '</td>'
             + '<td class="currency">' + importe + '</td>'
-            + '<td class="text-nowrap">' + estadoCorp(f) + botonMensual(f) + '</td>'
+            + '<td class="text-nowrap">' + estadoCorp(f)
+                + (f.PROVEEDOR_PROYECTA
+                    ? ' <i class="fas fa-repeat text-primary" title="El proveedor proyecta: '
+                      + 'sus facturas del último mes se repiten en Estimaciones mensuales"></i>'
+                    : '')
+            + '</td>'
             + celdasEje(f, cols, true)
             + '<td class="currency fw-bold">' + plata(vistas.total(f)) + '</td>'
         + '</tr>';
+    }
+
+    /**
+     * La fecha en que se paga: el débito de su tarjeta a partir del vencimiento,
+     * o el próximo pago si ese débito ya pasó. Sin tarjeta es el vencimiento, y
+     * se ve atenuado porque no suma.
+     */
+    function celdaDebito(f) {
+        var titulo = f.EXPLICACION || '';
+
+        if (!f.FECHA) {
+            return '<td data-orden="9999-12-31" title="' + esc(titulo) + '">'
+                + '<small class="text-muted">fuera del horizonte</small></td>';
+        }
+
+        return '<td data-orden="' + esc(f.FECHA) + '" title="' + esc(titulo) + '">'
+            + (f.ID_TARJETA
+                ? '<span class="fw-semibold">' + fecha(f.FECHA) + '</span>'
+                : '<small class="text-muted">' + fecha(f.FECHA) + '</small>')
+            + '</td>';
     }
 
     /** El estado de una factura, en una marca */
@@ -421,10 +502,12 @@
             });
         });
 
+        /* UN RESUMEN COMPARTIDO SE VE EN CADA TARJETA QUE INCLUYE, y entra sólo en
+           la titular: en las otras dice dónde se proyecta. */
         c.resumenes.forEach(function(x) {
             filas.push({
-                concepto: 'Resumen cargado',
-                icono: 'fa-file-invoice-dollar',
+                concepto: x.compartido ? 'Resumen compartido' : 'Resumen cargado',
+                icono: x.compartido ? 'fa-link' : 'fa-file-invoice-dollar',
                 tarjeta: rotuloTarjeta(x.id_tarjeta),
                 mes: x.mes,
                 fecha: x.fecha,
@@ -432,8 +515,9 @@
                 importe: x.importe,
                 proyecta: x.proyecta,
                 motivo: x.motivo,
-                tooltip: 'Reemplaza a las facturas vinculadas de ' + x.mes + ' y a su cobertura.',
-                extra: x.pagado ? 'pagado' : ''
+                tooltip: (x.nota ? x.nota + ' ' : '') + 'Reemplaza a las facturas vinculadas de '
+                    + x.mes + ' y a su cobertura.',
+                extra: x.pagado ? 'pagado' : (x.compartido && x.es_titular ? 'titular' : '')
             });
         });
 
@@ -457,7 +541,10 @@
                 + '<td class="currency fw-bold">' + plata(x.importe) + '</td>'
                 + '<td>' + (x.proyecta
                     ? '<span class="badge bg-success">entra</span>'
-                    : '<span class="badge bg-secondary">no entra</span>') + '</td>'
+                    : (x.concepto === 'Resumen compartido' && x.motivo
+                        && x.motivo.indexOf('compartido') !== -1
+                        ? '<span class="badge bg-secondary">informativo</span>'
+                        : '<span class="badge bg-secondary">no entra</span>')) + '</td>'
                 + '<td><small class="text-muted">' + esc(x.extra || x.motivo || '')
                     + '</small></td>'
             + '</tr>';
@@ -534,8 +621,8 @@
             ? 'Vencimiento corregido en esta pestaña. En Tango vence el ' + fecha(f.FECHA_VTO) + '.'
               + (f.VTO_EDIT_MOTIVO ? '\nMotivo: ' + f.VTO_EDIT_MOTIVO : '')
               + '\n' + Auditoria.texto({ alta: { usuario: f.VTO_EDIT_USUARIO, fecha: f.VTO_EDIT_FECHA } })
-            : 'Vencimiento de Tango. Corregilo si la cuota se paga en otro resumen: sólo vale en '
-              + 'esta pestaña.';
+            : 'Vencimiento de Tango: con él se calcula el débito. Corregilo para mandar la cuota '
+              + 'a otro débito: sólo vale en esta pestaña.';
 
         if (!Permisos.puedeEditar('bodyCorp')) {
             return '<td data-orden="' + esc(vigente) + '" title="' + esc(titulo) + '"'
@@ -672,120 +759,30 @@
         });
     }
 
-    /* ---- la factura mensual ---- */
-
-    /**
-     * El ícono de "mensual" de la fila.
-     *
-     * VA EN LA FILA Y NO EN LA BARRA DE SELECCIÓN, y es a propósito: la barra
-     * actúa sobre VARIAS facturas a la vez, y marcar como mensual es de UNA —hay
-     * una sola estimación vigente por proveedor, así que marcar dos del mismo
-     * proveedor en un lote sería contradictorio—. Prendido (violeta) es que esta
-     * cuota originó la estimación; apretarlo de nuevo la desmarca.
-     *
-     * Apagado y con el motivo en el title cuando no se puede marcar: sin tarjeta
-     * vinculada, excluida, o sin el script.
-     */
-    function botonMensual(f) {
-        if (!Permisos.puedeEditar('bodyCorp')) {
-            return f.MENSUAL
-                ? ' <i class="fas fa-repeat tarj-mensual activo" title="Marcada como mensual"></i>'
-                : '';
-        }
-
-        var motivo = !datos.tablas.mensual
-            ? 'Para marcar facturas mensuales falta correr sql/cashflow_tarjetas_vto_mensual.sql'
-            : (f.MENSUAL ? ''
-                : (f.MOTIVO === 'EXCLUIDA' ? 'Está excluida: no se puede marcar como mensual'
-                    : (!f.ID_TARJETA ? 'Sólo se puede marcar como mensual una factura vinculada '
-                        + 'a una tarjeta' : '')));
-
-        return ' <button type="button" class="btn btn-sm btn-link tarj-mensual'
-            + (f.MENSUAL ? ' activo' : ' text-muted') + '" data-cuota="' + esc(f.CLAVE_CUOTA) + '"'
-            + ' title="' + esc(motivo || (f.MENSUAL
-                ? 'Marcada como mensual: genera una estimación de los meses siguientes. '
-                  + 'Apretá para desmarcarla.'
-                : 'Marcar como mensual (abono): estima los meses siguientes con el importe de '
-                  + 'esta cuota.')) + '"'
-            + (motivo ? ' disabled' : '') + '><i class="fas fa-repeat"></i></button>';
-    }
-
-    function filaPorCuota(clave) {
-        var filas = datos.corporativas.eje.filas;
-
-        for (var i = 0; i < filas.length; i++) {
-            if (filas[i].CLAVE_CUOTA === clave) { return filas[i]; }
-        }
-
-        return null;
-    }
-
-    /**
-     * Marcar o desmarcar. Marcar una factura de un proveedor que ya tiene una
-     * estimación la reemplaza, y eso se confirma diciendo cuál.
-     */
-    function alternarMensual(clave) {
-        var f = filaPorCuota(clave);
-
-        if (!f) { return; }
-
-        if (f.MENSUAL) {
-            Notificacion.confirmar({
-                titulo: 'Desmarcar como mensual',
-                mensaje: '¿Dejar de estimar los meses siguientes de ' + f.RAZON_SOC + '?',
-                detalle: 'La estimación se da de baja: no se borra, queda en el historial.',
-                confirmar: 'Desmarcar',
-                peligro: true
-            }).then(function(si) {
-                if (si) { guardar('desmarcarMensual', { id: f.MENSUAL_ID }); }
-            });
-
-            return;
-        }
-
-        var previa = (datos.corporativas.estimaciones || []).filter(function(e) {
-            return e.COD_PROVEE === f.COD_PROVEE;
-        })[0];
-
-        Notificacion.confirmar({
-            titulo: 'Marcar como mensual',
-            mensaje: '¿Estimar ' + plata(f.IMPORTE_VTO) + ' de ' + f.RAZON_SOC
-                + ' todos los meses, desde el mes siguiente a este vencimiento?',
-            detalle: (previa
-                ? 'Este proveedor ya tiene una estimación (' + previa.T_COMP + ' '
-                  + previa.N_COMP + ', ' + plata(previa.IMPORTE) + '): se da de baja y queda ésta. '
-                : '')
-                + 'Es el importe de la cuota, fijo y sin inflación, en el día de su vencimiento. '
-                + 'Se apaga sola el mes en que aparezca una factura real del proveedor.',
-            confirmar: previa ? 'Reemplazar' : 'Marcar',
-            peligro: !!previa
-        }).then(function(si) {
-            if (!si) { return; }
-
-            guardar('marcarMensual', {
-                cod_provee: f.COD_PROVEE, t_comp: f.T_COMP, n_comp: f.N_COMP,
-                fecha_vto_tango: f.FECHA_VTO
-            });
-        });
-    }
-
     /* ---- la sección Estimaciones mensuales ---- */
 
     /** Columnas descriptivas de la tabla de estimaciones, antes del eje */
     var COLS_EST = 6;
 
     /**
-     * Una fila por estimación, con sus meses en el eje y el estado de cada mes.
+     * Una fila por estimación —una factura de origen que se repite—, con sus
+     * meses en el eje y el estado de cada mes.
      *
      * VA APARTE DE LA GRILLA DE FACTURAS, por lo mismo que la cobertura y los
      * resúmenes: no son facturas, y mezclarlas haría que el total de PENDIENTE
-     * dejara de significar algo. Se desmarca desde acá también cuando la factura
-     * de origen ya se pagó y no está en la grilla.
+     * dejara de significar algo.
+     *
+     * NO SE DESMARCA DESDE ACÁ: lo que proyecta es el PROVEEDOR, y se marca y se
+     * desmarca en Parámetros › Tarjetas. El ícono de quién lo marcó es de esa
+     * marca.
      */
     function dibujarEstimaciones() {
         var c = datos.corporativas;
         var cols = vistas.columnas();
         var cuerpo = document.getElementById('bodyCorpEst');
+        var marcas = {};
+
+        (c.proveedores_proyectan || []).forEach(function(p) { marcas[p.COD_PROVEE] = p; });
 
         encabezadoEje('headerEjeEst2', cols);
 
@@ -794,27 +791,27 @@
         var lista = c.estimaciones || [];
 
         if (!lista.length) {
-            cuerpo.innerHTML = filaVacia(COLS_EST + cols.length + 1, datos.tablas.mensual
-                ? 'No hay facturas marcadas como mensuales. Se marcan con el ícono de '
-                  + 'repetir de la columna ESTADO, en una factura vinculada.'
-                : 'Para marcar facturas mensuales falta correr '
-                  + 'sql/cashflow_tarjetas_vto_mensual.sql.');
+            cuerpo.innerHTML = filaVacia(COLS_EST + cols.length + 1, !datos.tablas.prov_proyecta
+                ? 'Para marcar proveedores que proyectan falta correr '
+                  + 'sql/cashflow_tarjetas_prov_proyecta.sql.'
+                : ((c.proveedores_proyectan || []).length
+                    ? 'Los proveedores que proyectan no tienen facturas pendientes vinculadas a una '
+                      + 'tarjeta: hasta que se cargue la siguiente, no hay estimación.'
+                    : 'Ningún proveedor proyecta. Se marcan en Parámetros › Tarjetas.'));
         } else {
             cuerpo.innerHTML = lista.map(function(e) {
                 var eje = buscarFila(c.eje_estimaciones.filas, 'id_estimacion', e.ID) || {};
+                var m = marcas[e.COD_PROVEE] || {};
 
                 return '<tr class="' + (e.TARJETA_OK ? '' : 'tarj-sin-proyectar') + '">'
                     + '<td class="col-texto" title="' + esc(e.RAZON_SOC || '') + '">'
                         + esc(e.RAZON_SOC || e.COD_PROVEE)
-                        + Auditoria.icono({ alta: { usuario: e.USUARIO_ALTA, fecha: e.FECHA_ALTA } })
-                        + Permisos.siEdita('bodyCorp',
-                            ' <button type="button" class="btn btn-sm btn-link text-danger p-0 '
-                            + 'tarj-desmarcar" data-id="' + e.ID + '" title="Desmarcar">'
-                            + '<i class="fas fa-xmark"></i></button>')
+                        + Auditoria.icono({ alta: { usuario: m.USUARIO_ALTA, fecha: m.FECHA_ALTA } })
                     + '</td>'
-                    + '<td><small>' + esc(e.T_COMP + ' ' + e.N_COMP) + '<br>vto. '
-                        + fecha(e.FECHA_VTO_ORIGEN)
-                        + (e.ORIGEN_PENDIENTE ? '' : ' <span class="text-muted">(ya pagada)</span>')
+                    + '<td><small>' + esc(e.T_COMP + ' ' + e.N_COMP) + '<br>vto. Tango '
+                        + fecha(e.FECHA_VTO_TANGO)
+                        + (e.FECHA_VTO_ORIGEN && e.FECHA_VTO_ORIGEN !== e.FECHA_VTO_TANGO
+                            ? ' · a considerar ' + fecha(e.FECHA_VTO_ORIGEN) : '')
                     + '</small></td>'
                     + '<td><small>' + esc(e.TARJETA ? e.TARJETA.ROTULO : 'tarjeta inexistente')
                         + (e.TARJETA_OK ? '' : ' <span class="badge bg-secondary">no proyecta</span>')
@@ -829,19 +826,200 @@
         }
 
         pintarTotales('tablaCorpEst', 'totalesCorpEst', COLS_EST, c.eje_estimaciones.totales, cols);
+    }
 
-        cuerpo.querySelectorAll('.tarj-desmarcar').forEach(function(btn) {
+    /* ---- la sección Seguros ---- */
+
+    /** Columnas descriptivas de la tabla de seguros, antes del eje */
+    var COLS_SEG = 6;
+
+    /**
+     * Una fila por póliza, con sus pagos en el eje. Los de la continuación
+     * estimada se ven distintos —en itálica y atenuados— y lo dicen en el
+     * tooltip, igual que el resto de los estados de cada pago.
+     */
+    function dibujarSeguros() {
+        var c = datos.corporativas;
+        var seg = c.seguros || {polizas: [], proveedores: [], facturas: {cuantas: 0}};
+        var cols = vistas.columnas();
+        var cuerpo = document.getElementById('bodyCorpSeg');
+
+        encabezadoEje('headerEjeSeg2', cols);
+
+        var f = seg.facturas || {};
+
+        texto('corpSegurosFacturas', f.cuantas
+            ? 'Hay ' + f.cuantas + ' vencimiento(s) de seguros pendientes en Tango, de '
+              + f.comprobantes + ' factura(s), por ' + plata(f.importe) + '. No suman: los seguros '
+              + 'se proyectan con las pólizas.'
+            : 'No hay facturas de seguros pendientes en Tango.');
+
+        apagar('btnNuevaPoliza', !seg.tabla_creada,
+            'Para cargar pólizas falta correr sql/cashflow_tarjetas_polizas.sql');
+
+        if (!cuerpo) { return; }
+
+        if (!seg.polizas.length) {
+            cuerpo.innerHTML = filaVacia(COLS_SEG + cols.length + 1, !seg.tabla_creada
+                ? 'Para cargar pólizas falta correr sql/cashflow_tarjetas_polizas.sql.'
+                : (seg.proveedores.length
+                    ? 'No hay pólizas cargadas. Los proveedores de seguros no proyectan nada hasta '
+                      + 'que se cargue su póliza.'
+                    : 'No hay proveedores de seguros: en el maestro de Proveedores Locales tienen que '
+                      + 'tener rubro SEGUROS y forma de pago TARJETA CORP.'));
+        } else {
+            cuerpo.innerHTML = seg.polizas.map(function(p) {
+                var eje = buscarFila(c.eje_polizas.filas, 'id_poliza', p.ID) || {};
+                var continua = (p.resueltos.pagos || []).some(function(x) { return x.continuacion; });
+                var moneda = p.MONEDA === 'USD' ? 'U$S ' : '$ ';
+                var importe = function(n) {
+                    return moneda + Number(n || 0).toLocaleString('es-AR',
+                        {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                };
+
+                return '<tr>'
+                    + '<td class="col-texto">' + esc(p.RAZON_SOC || p.COD_PROVEE)
+                        + Auditoria.icono({ alta: { usuario: p.USUARIO_ALTA, fecha: p.FECHA_ALTA },
+                                            modif: { usuario: p.USUARIO_MODIF, fecha: p.FECHA_MODIF } })
+                        + Permisos.siEdita('bodyCorpSeg',
+                            ' <button type="button" class="btn btn-sm btn-link p-0 tarj-pol-editar" '
+                            + 'data-id="' + esc(p.ID) + '" title="Corregir la póliza">'
+                            + '<i class="fas fa-pen"></i></button>'
+                            + ' <button type="button" class="btn btn-sm btn-link text-danger p-0 '
+                            + 'tarj-pol-baja" data-id="' + esc(p.ID) + '" title="Dar de baja">'
+                            + '<i class="fas fa-xmark"></i></button>')
+                    + '</td>'
+                    + '<td><small>' + esc(p.POLIZA)
+                        + (p.OBSERVACION ? '<br><span class="text-muted">' + esc(p.OBSERVACION) + '</span>' : '')
+                    + '</small></td>'
+                    + '<td><small>' + esc(p.TARJETA ? p.TARJETA.ROTULO : 'tarjeta inexistente') + '</small></td>'
+                    + '<td class="currency">' + importe(p.IMPORTE_TOTAL) + '</td>'
+                    + '<td><small>' + fecha(p.FECHA_INICIO) + ' al ' + fecha(p.FIN_VIGENCIA)
+                        + '<br>' + p.VIGENCIA_MESES + ' mes(es), ' + p.GRACIA_MESES + ' de gracia · '
+                        + '1er pago ' + esc(p.MES_PRIMER_PAGO)
+                        + (continua && !p.SIGUIENTE
+                            ? ' <span class="badge bg-light text-dark" title="La vigencia termina antes '
+                              + 'del fin del horizonte: el ciclo se repite hasta que se cargue la póliza '
+                              + 'siguiente">se continúa</span>'
+                            : '')
+                        + (p.SIGUIENTE ? ' <span class="badge bg-light text-dark">sigue la del '
+                            + fecha(p.SIGUIENTE) + '</span>' : '')
+                    + '</small></td>'
+                    + '<td class="currency">' + importe(p.CUOTA) + '</td>'
+                    + celdasEjeSeguro(eje, cols, p)
+                    + '<td class="currency fw-bold">' + plata(vistas.total(eje)) + '</td>'
+                + '</tr>';
+            }).join('');
+        }
+
+        pintarTotales('tablaCorpSeg', 'totalesCorpSeg', COLS_SEG, c.eje_polizas.totales, cols);
+
+        cuerpo.querySelectorAll('.tarj-pol-editar').forEach(function(btn) {
+            btn.addEventListener('click', function() { formularioPoliza(btn.getAttribute('data-id')); });
+        });
+
+        cuerpo.querySelectorAll('.tarj-pol-baja').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 Notificacion.confirmar({
-                    titulo: 'Desmarcar como mensual',
-                    mensaje: '¿Dejar de estimar esta factura todos los meses?',
-                    detalle: 'La estimación se da de baja: no se borra, queda en el historial.',
-                    confirmar: 'Desmarcar',
+                    titulo: 'Dar de baja la póliza',
+                    mensaje: '¿Dar de baja esta póliza?',
+                    detalle: 'No se borra: queda en el historial. Deja de proyectar, y si es la del '
+                        + 'proveedor, el seguro no proyecta nada hasta que se cargue otra.',
+                    confirmar: 'Dar de baja',
                     peligro: true
                 }).then(function(si) {
-                    if (si) { guardar('desmarcarMensual', { id: Number(btn.getAttribute('data-id')) }); }
+                    if (si) { guardar('bajaPoliza', {id: Number(btn.getAttribute('data-id'))}); }
                 });
             });
+        });
+    }
+
+    /**
+     * Las celdas de una póliza. El importe viene del eje; el pago de cada mes da
+     * el tooltip y la marca de la continuación estimada.
+     */
+    function celdasEjeSeguro(eje, cols, p) {
+        var porMes = {};
+
+        (p.resueltos.pagos || []).forEach(function(x) { porMes[x.mes] = x; });
+
+        return cols.map(function(col) {
+            var v = vistas.valor(eje, col);
+            var meta = vistas.meta(col);
+            var mes = vistas.esMes(col) ? String(col).substring(4) : (meta ? meta.mes_clave : null);
+            var pago = mes ? porMes[mes] : null;
+            var hay = !(v === 0 || v === null);
+
+            return '<td class="currency ' + vistas.marca(col).clase
+                + (pago && pago.continuacion && hay ? ' tarj-continuacion' : '') + '"'
+                + (pago && hay ? ' title="' + esc(pago.tooltip) + '"' : '') + '>'
+                + (hay ? plataCorta(v) : '')
+            + '</td>';
+        }).join('');
+    }
+
+    /**
+     * Alta o corrección de una póliza: el formulario con todos los campos. La
+     * validación que vale es la del servidor (TarjetasSeguros::validar()).
+     */
+    function formularioPoliza(id) {
+        var seg = datos.corporativas.seguros || {proveedores: [], polizas: []};
+        var p = null;
+
+        (seg.polizas || []).forEach(function(x) { if (String(x.ID) === String(id)) { p = x; } });
+
+        var corporativas = datos.tarjetas.filter(function(t) {
+            return t.TIPO === 'CORPORATIVA' && t.ACTIVA;
+        });
+
+        Notificacion.formulario({
+            titulo: p ? 'Corregir la póliza ' + p.POLIZA : 'Cargar póliza',
+            mensaje: 'Se paga en ' + 'cuotas iguales: el total dividido por la vigencia menos la gracia, '
+                + 'una por mes desde el primer pago, en el débito de la tarjeta.',
+            campos: [
+                {nombre: 'proveedor', etiqueta: 'Proveedor', tipo: 'lista', obligatorio: true, ancho: 6,
+                 valor: p ? p.COD_PROVEE : '',
+                 opciones: seg.proveedores.map(function(s) {
+                     return {valor: s.COD_PROVEE, rotulo: s.RAZON_SOC + ' (' + s.COD_PROVEE + ')'};
+                 })},
+                {nombre: 'poliza', etiqueta: 'Número o descripción de la póliza', tipo: 'texto',
+                 obligatorio: true, ancho: 6, valor: p ? p.POLIZA : '',
+                 ayuda: 'Con el proveedor identifica la póliza siguiente: usá el mismo al renovar.'},
+                {nombre: 'id_tarjeta', etiqueta: 'Tarjeta', tipo: 'lista', obligatorio: true, ancho: 6,
+                 valor: p ? p.ID_TARJETA : '',
+                 opciones: corporativas.map(function(t) {
+                     return {valor: t.ID, rotulo: t.ROTULO + ' · vence el ' + t.DIA_VENCIMIENTO};
+                 }),
+                 ayuda: 'De ella salen el día del débito y el % de cobertura.'},
+                {nombre: 'moneda', etiqueta: 'Moneda', tipo: 'lista', obligatorio: true, ancho: 2,
+                 valor: p ? p.MONEDA : 'ARS',
+                 opciones: [{valor: 'ARS', rotulo: '$'}, {valor: 'USD', rotulo: 'U$S'}]},
+                {nombre: 'importe_total', etiqueta: 'Importe total de la vigencia', tipo: 'importe',
+                 obligatorio: true, positivo: true, ancho: 4, valor: p ? p.IMPORTE_TOTAL : ''},
+                {nombre: 'fecha_inicio', etiqueta: 'Inicio de la vigencia', tipo: 'fecha', obligatorio: true,
+                 ancho: 4, valor: p ? p.FECHA_INICIO : ''},
+                {nombre: 'vigencia_meses', etiqueta: 'Vigencia (meses)', tipo: 'numero', obligatorio: true,
+                 min: 1, max: 120, ancho: 2, valor: p ? p.VIGENCIA_MESES : 12},
+                {nombre: 'gracia_meses', etiqueta: 'Gracia (meses)', tipo: 'numero', obligatorio: true,
+                 min: 0, max: 119, ancho: 2, valor: p ? p.GRACIA_MESES : 0,
+                 ayuda: 'Los meses del final en que no se paga.'},
+                {nombre: 'mes_primer_pago', etiqueta: 'Mes del primer pago', tipo: 'mes', obligatorio: true,
+                 ancho: 4, valor: p ? p.MES_PRIMER_PAGO : ''},
+                {nombre: 'observacion', etiqueta: 'Observación', tipo: 'texto', largo: 500, ancho: 8,
+                 valor: p ? (p.OBSERVACION || '') : ''}
+            ],
+            validar: function(v) {
+                return (v.gracia_meses !== null && v.vigencia_meses !== null
+                        && v.gracia_meses >= v.vigencia_meses)
+                    ? 'La gracia tiene que ser menor que la vigencia: si no, no queda ningún pago.'
+                    : null;
+            },
+            confirmar: p ? 'Guardar' : 'Cargar póliza'
+        }).then(function(v) {
+            if (v === null) { return; }
+
+            v.id = p ? p.ID : null;
+            guardar('guardarPoliza', v);
         });
     }
 
@@ -849,7 +1027,6 @@
     function estadosEstimacion(e) {
         var marcas = {
             PROYECTA: ['bg-success', 'entra'],
-            REEMPLAZADA: ['bg-info text-dark', 'reemplazada'],
             CUBIERTA: ['bg-info text-dark', 'cubierta por resumen'],
             PASADA: ['bg-secondary', 'ya pasó'],
             SIN_TARJETA: ['bg-secondary', 'sin tarjeta activa']
@@ -861,7 +1038,7 @@
 
         return e.meses.map(function(m) {
             var mk = marcas[m.estado] || ['bg-secondary', m.estado];
-            var texto = m.estado === 'REEMPLAZADA' ? 'reemplazada por ' + m.por : mk[1];
+            var texto = mk[1];
 
             return '<span class="badge ' + mk[0] + ' me-1" title="' + esc(fecha(m.fecha)) + '">'
                 + esc(m.mes.substring(5) + '/' + m.mes.substring(2, 4)) + ' · ' + esc(texto)
@@ -872,12 +1049,6 @@
     /* ---- selección y acciones masivas ---- */
 
     function engancharCorp(cuerpo) {
-        cuerpo.querySelectorAll('.tarj-mensual[data-cuota]').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                alternarMensual(btn.getAttribute('data-cuota'));
-            });
-        });
-
         cuerpo.querySelectorAll('.tarj-vto').forEach(function(input) {
             input.addEventListener('change', function() { editarVto(input); });
         });
@@ -1244,7 +1415,16 @@
                                      : '<small class="text-muted">no</small>')
                         : '<small class="text-muted">—</small>')
                 + '</td>'
-                + '<td><small>' + esc(r.OBSERVACION || '') + '</small></td>'
+                + '<td>'
+                    + (r.COMPARTIDO
+                        ? '<span class="badge ' + (r.ES_TITULAR ? 'bg-primary' : 'bg-secondary')
+                          + ' me-1" title="' + esc('Incluye: ' + r.TARJETAS.map(rotuloTarjeta).join('; ')
+                            + '. Titular: ' + rotuloTarjeta(r.ID_TITULAR) + '. Se proyecta una sola '
+                            + 'vez, en la titular; darlo de baja lo saca de todas.') + '">'
+                          + '<i class="fas fa-link me-1"></i>compartido · '
+                          + (r.ES_TITULAR ? 'titular' : 'no suma acá') + '</span>'
+                        : '')
+                    + '<small>' + esc(r.OBSERVACION || '') + '</small></td>'
                 // Quién y cuándo, con el formato de Js/auditoria.js
                 + '<td><small class="text-muted">'
                     + esc(Auditoria.linea('modif', r.USUARIO_MODIF, r.FECHA_MODIF))
@@ -1284,89 +1464,189 @@
         });
     }
 
+    /** Al menos uno de los dos importes: lo que no se ve campo por campo */
+    function algunImporte(v) {
+        return (v.importe_ars === null && v.importe_usd === null)
+            ? 'Cargá al menos uno de los dos importes, en $ o en U$S. Pueden ir los dos.'
+            : null;
+    }
+
     /**
-     * Carga un resumen suelto.
+     * Las tarjetas que pueden compartir el resumen con la de esta fila: las
+     * Supervisora y Corporativa activas. La de la fila viene elegida y marcada
+     * como titular.
      *
-     * SE PIDEN LOS CUATRO DATOS EN UN DIÁLOGO y no con celdas editables en la
-     * grilla: un resumen es un alta con cuatro campos de los que dos son
-     * obligatorios entre sí —al menos un importe—, y eso en una grilla se descubre
-     * recién al guardar.
+     * SE OFRECEN TODAS Y NO SOLO LAS DEL MISMO BANCO: que sean del mismo banco y
+     * del mismo día lo valida el servidor y lo dice con nombre. La nota de cada
+     * una muestra banco y día para que se vea antes de elegir.
+     */
+    function opcionesTarjetasResumen(t, actual) {
+        var elegidas = (actual && actual.TARJETAS) ? actual.TARJETAS.map(String) : [String(t.ID)];
+        var titular = (actual && actual.ID_TITULAR) ? String(actual.ID_TITULAR) : String(t.ID);
+
+        return datos.tarjetas
+            .filter(function(x) {
+                return x.ACTIVA && (x.TIPO === 'SUPERVISORA' || x.TIPO === 'CORPORATIVA');
+            })
+            .map(function(x) {
+                return {
+                    valor: String(x.ID),
+                    rotulo: x.ROTULO,
+                    nota: x.TIPO_NOMBRE + ' · vence el ' + x.DIA_VENCIMIENTO,
+                    marcada: elegidas.indexOf(String(x.ID)) !== -1,
+                    titular: String(x.ID) === titular
+                };
+            });
+    }
+
+    /**
+     * Carga un resumen: un formulario con los campos separados.
+     *
+     * DESDE LA FILA DE UNA TARJETA viene con esa tarjeta elegida. En una
+     * Supervisora o Corporativa se pueden sumar las adicionales de la misma
+     * cuenta: el resumen es uno, se ve en todas y suma una sola vez, en la
+     * titular. Un socio no comparte resumen.
+     *
+     * Hasta acá se cargaba como una línea con separadores, y un «|» de más corría
+     * todos los campos.
      */
     function nuevoResumen() {
         if (!resumenDe) { return; }
 
-        Notificacion.pedirTexto({
+        var compartible = (resumenDe.TIPO === 'SUPERVISORA' || resumenDe.TIPO === 'CORPORATIVA')
+            && datos.tablas.resumen_compartido;
+        var campos = [];
+
+        if (compartible) {
+            campos.push({
+                nombre: 'tarjetas', etiqueta: 'Tarjeta(s) del resumen', tipo: 'casillas',
+                obligatorio: true, titular: true, opciones: opcionesTarjetasResumen(resumenDe),
+                ayuda: 'Si el banco manda un solo resumen para varias tarjetas de la misma cuenta, '
+                    + 'elegilas todas y marcá la titular: pisa la estimación de todas y suma una '
+                    + 'sola vez, en la titular. Tienen que ser del mismo banco y vencer el mismo día.'
+            });
+        }
+
+        campos.push(
+            {nombre: 'mes', etiqueta: 'Período', tipo: 'mes', obligatorio: true, ancho: 4,
+             ayuda: 'El mes del vencimiento: es la estimación que pisa.'},
+            {nombre: 'importe_ars', etiqueta: 'Importe en $', tipo: 'importe', positivo: true, ancho: 4},
+            {nombre: 'importe_usd', etiqueta: 'Importe en U$S', tipo: 'importe', positivo: true, ancho: 4},
+            {nombre: 'fecha_vencimiento', etiqueta: 'Vencimiento', tipo: 'fecha', obligatorio: true,
+             ancho: 4},
+            {nombre: 'observacion', etiqueta: 'Observación', tipo: 'texto', largo: 500, ancho: 8}
+        );
+
+        Notificacion.formulario({
             titulo: 'Cargar resumen de ' + resumenDe.ROTULO,
-            mensaje: 'Formato: período, importe en $, importe en U$S, vencimiento. Dejá vacío el '
-                + 'importe que no corresponda.',
-            detalle: 'Ejemplo: 2026-10 | 450000 | 320.50 | 2026-10-12 — Pisa la estimación de '
-                + 'ese período, con su importe y su fecha.',
-            etiqueta: 'período | $ | U$S | vencimiento',
-            placeholder: '2026-10 | 450000 |  | 2026-10-12',
-            invalido: 'Completá al menos el período, un importe y el vencimiento.',
+            mensaje: 'Pisa la estimación de ese período, con su importe y su fecha.',
+            campos: campos,
+            validar: algunImporte,
             confirmar: 'Cargar'
         }).then(function(v) {
             if (v === null) { return; }
 
-            var p = v.split('|').map(function(x) { return x.trim(); });
-
-            if (p.length < 4) {
-                Notificacion.error('Faltan datos. Se esperaban cuatro separados por «|»: '
-                    + 'período, importe en $, importe en U$S y vencimiento.');
-
-                return;
-            }
-
             guardar('saveResumen', {
                 id_tarjeta: resumenDe.ID,
-                mes: p[0],
-                importe_ars: p[1],
-                importe_usd: p[2],
-                fecha_vencimiento: p[3]
+                tarjetas: compartible ? v.tarjetas.elegidas : [resumenDe.ID],
+                titular: compartible ? v.tarjetas.titular : resumenDe.ID,
+                mes: v.mes,
+                importe_ars: v.importe_ars,
+                importe_usd: v.importe_usd,
+                fecha_vencimiento: v.fecha_vencimiento,
+                observacion: v.observacion
             });
         });
     }
 
     /**
-     * La base histórica: los últimos 3 resúmenes de una.
+     * La base histórica: los últimos 3 resúmenes de una, en una grilla de tres
+     * renglones.
      *
      * VA EN UNA SOLA TRANSACCIÓN del lado del backend, así que o entran los tres o
      * ninguno: con dos, la tarjeta estimaría un promedio distinto sin que nadie se
-     * entere.
+     * entere. El servidor exige los tres.
      */
     function baseHistorica() {
         if (!resumenDe) { return; }
 
-        Notificacion.pedirTexto({
+        Notificacion.formulario({
             titulo: 'Cargar base histórica de ' + resumenDe.ROTULO,
-            mensaje: 'Los últimos 3 resúmenes, uno por línea: período | $ | U$S | vencimiento.',
+            mensaje: 'Los últimos 3 resúmenes. En cada uno, al menos un importe.',
             detalle: 'Entran como ya pagados, así que no suman al horizonte: son la base con la '
                 + 'que se estima. O entran los tres o ninguno.',
-            etiqueta: 'Un resumen por línea',
-            placeholder: '2026-06 | 300000 | 1000 | 2026-06-15\n'
-                + '2026-07 | 330000 | 1200 | 2026-07-15\n'
-                + '2026-08 | 270000 | 800 | 2026-08-17',
-            /* El diálogo del módulo ya usa un <textarea>, así que las tres líneas
-               entran sin ninguna opción extra. maxlargo se sube porque el default
-               son 200 caracteres y tres resúmenes no entran. */
-            maxlargo: 600,
-            invalido: 'Cargá al menos un resumen.',
+            renglones: {
+                cantidad: 3,
+                obligatorios: true,
+                campos: [
+                    {nombre: 'mes', etiqueta: 'Período', tipo: 'mes', obligatorio: true},
+                    {nombre: 'importe_ars', etiqueta: 'Importe en $', tipo: 'importe', positivo: true},
+                    {nombre: 'importe_usd', etiqueta: 'Importe en U$S', tipo: 'importe', positivo: true},
+                    {nombre: 'fecha_vencimiento', etiqueta: 'Vencimiento', tipo: 'fecha',
+                     obligatorio: true}
+                ]
+            },
+            validar: function(v) {
+                for (var i = 0; i < v.renglones.length; i++) {
+                    if (algunImporte(v.renglones[i])) {
+                        return 'Renglón ' + (i + 1) + ': cargá al menos uno de los dos importes.';
+                    }
+                }
+
+                return null;
+            },
             confirmar: 'Cargar base'
         }).then(function(v) {
             if (v === null) { return; }
 
-            var resumenes = v.split('\n').map(function(l) { return l.trim(); })
-                .filter(function(l) { return l !== ''; })
-                .map(function(l) {
-                    var p = l.split('|').map(function(x) { return x.trim(); });
+            guardar('cargarBase', {id_tarjeta: resumenDe.ID, resumenes: v.renglones});
+        });
+    }
 
-                    return {mes: p[0], importe_ars: p[1], importe_usd: p[2],
-                            fecha_vencimiento: p[3]};
-                });
+    /**
+     * El histórico manual de quien tiene tarjeta Supervisora y no carga gastos:
+     * tres renglones de mes e importe, todo con tarjeta.
+     *
+     * VIENE CON LOS TRES MESES DE LA VENTANA, que son los que se promedian para
+     * las supervisoras. Se pueden cambiar; el servidor exige tres meses cerrados.
+     */
+    function historicoManual(nombre) {
+        var f = buscarFila(datos.supervisoras.filas, 'nombre', nombre);
 
-            if (!resumenes.length) { return; }
+        if (!f || !f.id_usuario) { return; }
 
-            guardar('cargarBase', {id_tarjeta: resumenDe.ID, resumenes: resumenes});
+        var meses = datos.supervisoras.ventana.meses;
+        var previo = f.historico || {};
+        var claves = Object.keys(previo).sort();
+        var valores = [0, 1, 2].map(function(i) {
+            var mes = claves[i] || meses[i];
+
+            return {mes: mes, importe: previo[mes] !== undefined ? previo[mes] : ''};
+        });
+
+        Notificacion.formulario({
+            titulo: 'Histórico manual de ' + f.nombre,
+            mensaje: 'El gasto con tarjeta de los últimos 3 meses. Se proyecta el promedio, '
+                + 'ajustado por inflación, en el vencimiento de su tarjeta.',
+            detalle: 'Un mes sin gastos va en 0: igual se divide por 3. Si la persona empieza a '
+                + 'cargar gastos en la app de supervisión, mandan los gastos y este histórico '
+                + 'deja de usarse.',
+            renglones: {
+                cantidad: 3,
+                obligatorios: true,
+                /* Arranca con los meses de la ventana, o con lo que ya estaba
+                   cargado si se está corrigiendo. */
+                valores: valores,
+                campos: [
+                    {nombre: 'mes', etiqueta: 'Mes', tipo: 'mes', obligatorio: true},
+                    {nombre: 'importe', etiqueta: 'Importe en $', tipo: 'importe', obligatorio: true}
+                ]
+            },
+            confirmar: 'Cargar histórico'
+        }).then(function(v) {
+            if (v === null) { return; }
+
+            guardar('cargarHistoricoManual', {id_usuario: f.id_usuario, meses: v.renglones});
         });
     }
 
@@ -1547,6 +1827,12 @@
         cuerpo.querySelectorAll('.tarj-resumenes').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 abrirResumenes(btn.getAttribute('data-id'));
+            });
+        });
+
+        cuerpo.querySelectorAll('.tarj-historico').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                historicoManual(btn.getAttribute('data-nombre'));
             });
         });
     }
@@ -1742,6 +2028,7 @@
         });
 
         enganchar('btnNuevoResumen', 'click', nuevoResumen);
+        enganchar('btnNuevaPoliza', 'click', function() { formularioPoliza(null); });
         enganchar('btnBaseHistorica', 'click', baseHistorica);
         enganchar('btnCerrarResumenes', 'click', function() {
             resumenDe = null;
@@ -1770,7 +2057,7 @@
            id de la tabla, la misma del descubrimiento automático. Ver
            Js/tabla-orden.js. */
         if (typeof crearOrdenTabla === 'function') {
-            crearOrdenTabla({tabla: 'tablaCorp', porDefecto: {columna: 'VTO TANGO', dir: 'asc'}});
+            crearOrdenTabla({tabla: 'tablaCorp', porDefecto: {columna: 'DÉBITO TARJETA', dir: 'asc'}});
         }
 
         cargar();

@@ -406,7 +406,7 @@ $ordenesPorDefecto = [
     ['exportaciones_tasky.php', 'Ingresos-Exportaciones_tasky.js', 'tablaExportacionesTasky', 'Fecha cobro estimada'],
     ['echeqs.php', 'Ingresos-Echeqs.js', 'tablaEcheqs', 'Fecha de pago'],
     ['proveedores_locales.php', 'Proveedores-Proveedores_locales.js', 'tablaProveedores', 'Fecha de pago'],
-    ['pagos_tarjetas.php', 'Financiero-Pagos_tarjetas.js', 'tablaCorp', 'VTO TANGO']
+    ['pagos_tarjetas.php', 'Financiero-Pagos_tarjetas.js', 'tablaCorp', 'DÉBITO TARJETA']
 ];
 
 foreach ($ordenesPorDefecto as $o) {
@@ -792,12 +792,13 @@ $ejeTotales = [
     'logistica_local.php' => ['Logistica-Local.js', [
         'tablaLogistica' => "pintarEjeTotales('tablaLogistica'"
     ]],
-    // Las cuatro pasan por pintarTotales(), que llama al componente con el id
+    // Las cinco pasan por pintarTotales(), que llama al componente con el id
     // de la tabla que recibe: lo que se verifica es que cada una se lo pase.
     'pagos_tarjetas.php' => ['Financiero-Pagos_tarjetas.js', [
         'tablaSup' => "pintarTotales('tablaSup', 'totalesSup'",
         'tablaCorp' => "pintarTotales('tablaCorp', 'totalesCorp'",
         'tablaCorpEst' => "pintarTotales('tablaCorpEst', 'totalesCorpEst'",
+        'tablaCorpSeg' => "pintarTotales('tablaCorpSeg', 'totalesCorpSeg'",
         'tablaSoc' => "pintarTotales('tablaSoc', 'totalesSoc'"
     ]],
 ];

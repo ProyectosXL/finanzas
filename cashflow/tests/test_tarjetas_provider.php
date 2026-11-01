@@ -425,7 +425,7 @@ chequear('la fila va en cero', 0.0, totalTP($s['TOTAL']));
 chequear('y se dice que falta de las tres partes', true,
     strpos($avisos, 'no hay supervisoras con gastos') !== false
     && strpos($avisos, 'TARJETA CORP') !== false
-    && strpos($avisos, 'tarjetas de socios activas') !== false);
+    && strpos($avisos, 'bancos de socios activos') !== false);
 
 seccion('con importes, no se avisa el cero');
 

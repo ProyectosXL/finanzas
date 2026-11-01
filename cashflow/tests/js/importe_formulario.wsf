@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<!--
+    Notificacion.importe de Js/notificaciones.js, verificada sin navegador.
+
+    parsearImporte() y formatearImporte() estan escritas en ES3 y sin Intl para
+    poder correrlas con cscript, el JScript que trae Windows. Son las que
+    convierten lo que se tipea en el formulario de resumenes -1.234.567,89- en
+    el numero que viaja al servidor.
+
+        cscript //nologo cashflow\tests\js\importe_formulario.wsf
+
+    La corre test_tarjetas_formulario.php cuando cscript esta disponible, y
+    espera "FALLAS: 0" en la ultima linea.
+-->
+<job>
+<script language="JScript">
+<![CDATA[
+var window = {}, document = { getElementById: function() { return null; } };
+]]>
+</script>
+<script language="JScript" src="../../Js/notificaciones.js"/>
+<script language="JScript">
+<![CDATA[
+var ok = 0, mal = 0;
+
+function igual(nombre, esperado, obtenido) {
+    if (esperado === obtenido || (esperado !== esperado && obtenido !== obtenido)) {
+        ok++;
+        WScript.Echo('OK    ' + nombre);
+    } else {
+        mal++;
+        WScript.Echo('MAL   ' + nombre + ': se esperaba ' + esperado + ' y vino ' + obtenido);
+    }
+}
+
+var p = Notificacion.importe.parsear;
+var f = Notificacion.importe.formatear;
+
+igual('vacio es null, no cero', null, p(''));
+igual('espacios son null', null, p('   '));
+igual('entero suelto', 450000, p('450000'));
+igual('con miles y decimales', 1234567.89, p('1.234.567,89'));
+igual('coma decimal sin miles', 320.5, p('320,50'));
+igual('miles sin decimales', 1500, p('1.500'));
+igual('punto con dos decimales es decimal', 320.5, p('320.50'));
+igual('con signo pesos', 1000, p('$ 1.000'));
+igual('texto no es un importe', true, isNaN(p('mil pesos')));
+igual('dos comas no es un importe', true, isNaN(p('1,2,3')));
+
+igual('formato con miles', '1.234.567,89', f(1234567.89));
+igual('formato redondea a centavos', '0,10', f(0.1));
+igual('formato de un entero', '450.000,00', f(450000));
+igual('formato de menos de mil', '999,99', f(999.99));
+igual('null es vacio', '', f(null));
+igual('ida y vuelta', 98765.43, p(f(98765.43)));
+
+WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
+]]>
+</script>
+</job>

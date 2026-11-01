@@ -12,6 +12,10 @@ require_once __DIR__ . '/TarjetasSupervisoras.php';
 require_once __DIR__ . '/TarjetasCorporativas.php';
 require_once __DIR__ . '/TarjetasSocios.php';
 require_once __DIR__ . '/GastosSupervision.php';
+require_once __DIR__ . '/TarjetasHistManual.php';
+require_once __DIR__ . '/TarjetasProvProyecta.php';
+require_once __DIR__ . '/TarjetasSeguros.php';
+require_once __DIR__ . '/TarjetasPoliza.php';
 require_once __DIR__ . '/CronogramaDatos.php';
 require_once __DIR__ . '/Inflacion.php';
 require_once __DIR__ . '/DolarFuturo.php';
@@ -75,6 +79,15 @@ class PagosTarjetas {
     /** @var GastosSupervision */
     private $gastos;
 
+    /** @var TarjetasProvProyecta Los proveedores que proyectan */
+    private $provProyecta;
+
+    /** @var TarjetasPoliza Las polizas de seguros */
+    private $poliza;
+
+    /** @var TarjetasHistManual El historico de quien no carga gastos */
+    private $histManual;
+
     /** @var CronogramaDatos */
     private $cronograma;
 
@@ -92,6 +105,9 @@ class PagosTarjetas {
         $this->vtoEdit = new TarjetasFacturaVto();
         $this->mensual = new TarjetasMensual();
         $this->gastos = new GastosSupervision();
+        $this->histManual = new TarjetasHistManual();
+        $this->provProyecta = new TarjetasProvProyecta();
+        $this->poliza = new TarjetasPoliza();
         $this->cronograma = new CronogramaDatos();
         $this->inflacion = new Inflacion();
     }
@@ -125,17 +141,21 @@ class PagosTarjetas {
             'tablas' => [
                 'tarjetas' => $this->tarjetas->tablaCreada(),
                 'resumen' => $this->resumen->tablaCreada(),
+                'resumen_compartido' => $this->resumen->tablaCompartidoCreada(),
                 'factura' => $this->vinculo->tablaCreada(),
                 'exclusion' => $this->exclusion->tablaCreada(),
                 'factura_vto' => $this->vtoEdit->tablaCreada(),
                 'mensual' => $this->mensual->tablaCreada(),
+                'prov_proyecta' => $this->provProyecta->tablaCreada(),
+                'polizas' => $this->poliza->tablaCreada(),
                 'gastos' => $this->gastos->tablaCreada(),
+                'historico_manual' => $this->histManual->tablaCreada(),
                 'vista_usuarios' => $this->tarjetas->vistaUsuariosCreada()
             ],
             'tarjetas' => $tarjetas,
             'supervisoras' => $this->supervisoras($h, $tarjetas, $resumenes, $habiles,
                                                   $inflacion),
-            'corporativas' => $this->corporativas($h, $tarjetas, $resumenes, $habiles),
+            'corporativas' => $this->corporativas($h, $tarjetas, $resumenes, $habiles, $inflacion),
             'socios' => $this->socios($h, $tarjetas, $resumenes, $habiles, $inflacion)
         ];
 
@@ -227,14 +247,29 @@ class PagosTarjetas {
         $salida['disponible'] = true;
 
         $promedios = TarjetasSupervisoras::promedios($base['gastos'], $ventana);
-        $estimado = TarjetasSupervisoras::estimar($promedios, $meses, $inflacion, $ventana,
-            $base['estados']);
 
         /* LAS TARJETAS DE TIPO SUPERVISORA SE ASOCIAN POR EL NOMBRE DEL USUARIO.
            Ver TarjetasSupervisoras y el README: es el unico tipo que cruza contra
            algo, y lo hace por nombre porque RO_T_GASTOS_SUPERVISION guarda el
            nombre y no un ID. */
         $porSupervisora = $this->tarjetasPorSupervisora($tarjetas);
+
+        /* QUIEN TIENE TARJETA Y NO CARGA GASTOS: su fila, con el historico
+           manual si lo tiene. Mandan los gastos: un historico de alguien que
+           ya tiene gastos en la ventana deja de usarse y se avisa. */
+        $historicos = $this->leer(function () { return $this->histManual->vigentes(); },
+            'el histórico manual de Gastos Supervisoras', $salida['avisos'], []);
+        $manual = TarjetasSupervisoras::universoManual($porSupervisora, $promedios, $historicos);
+        $promedios = $promedios + $manual['promedios'];
+        ksort($promedios);
+
+        $salida['historico_tabla'] = $this->histManual->tablaCreada();
+        $salida['en_desuso'] = $manual['en_desuso'];
+
+        $estados = TarjetasSupervisoras::estadosConTarjeta($base['estados'],
+            array_keys($promedios), $porSupervisora);
+        $estimado = TarjetasSupervisoras::estimar($promedios, $meses, $inflacion, $ventana,
+            $estados);
 
         /* EL CRONOGRAMA SUPERVISORAS de Parametros -> Generales, con sus
            overrides: por defecto todos los lunes del mes. Hasta
@@ -273,6 +308,7 @@ class PagosTarjetas {
             $fila['tarjetas_activas'] = count($tarjetasDe);
             $fila['motivo_tarjeta'] = $motivoTarjeta;
             $fila['celdas'] = [];
+            $fila['compartidos'] = [];
 
             foreach ($meses as $mes) {
                 $celda = $fila['meses'][$mes];
@@ -301,6 +337,21 @@ class PagosTarjetas {
 
                 $tar = TarjetasSupervisoras::tarjetaDelMes($celda['tarjeta'], $tarjeta, $vto,
                     $resumenMes, $hoy);
+
+                /* UN RESUMEN COMPARTIDO SE MARCA EN LA FILA, sume o no aca: es lo
+                   que explica por que la parte tarjeta de este mes no es la
+                   estimacion. */
+                if ($resumenMes !== null && !empty($resumenMes['COMPARTIDO'])) {
+                    $tar['nota_compartido'] = TarjetasResumen::notaCompartido($resumenMes,
+                        $tarjeta['ID'], $tarjetas);
+                    $fila['compartidos'][] = [
+                        'mes' => $mes,
+                        'importe' => $resumenMes['IMPORTE_ARS'],
+                        'fecha' => $resumenMes['FECHA_VENCIMIENTO'],
+                        'es_titular' => !empty($resumenMes['ES_TITULAR']),
+                        'nota' => $tar['nota_compartido']
+                    ];
+                }
 
                 $celda['pagos_efectivo'] = $pagosEfectivo;
                 $celda['tarjeta_pago'] = $tar;
@@ -388,10 +439,31 @@ class PagosTarjetas {
         ];
 
         foreach ($porMotivo as $motivo => $nombres) {
+            /* SIN HISTORICO VA APARTE: no tiene gastos que se vean en la grilla,
+               y lo que hay que hacer es cargar algo, no revisar el maestro. */
+            if ($motivo === TarjetasSupervisoras::SIN_HISTORICO) {
+                $avisos[] = count($nombres) . ' persona(s) tienen tarjeta Supervisora y no cargan '
+                    . 'gastos en la app de supervisión, así que no proyectan nada: '
+                    . implode('; ', array_map(function ($n) {
+                        return preg_replace('/ \(—\/mes\)$/', '', $n);
+                    }, $nombres))
+                    . '. Cargales el histórico manual de los últimos 3 meses desde su fila.';
+                continue;
+            }
+
             $avisos[] = count($nombres) . ' supervisora(s) '
                 . (isset($textos[$motivo]) ? $textos[$motivo] : 'no se proyectan')
                 . ', así que no se proyectan: ' . implode('; ', $nombres) . '. Sus gastos se ven '
                 . 'en la grilla; lo que no entra al tablero es su proyección.';
+        }
+
+        /* EL HISTORICO MANUAL QUE DEJO DE USARSE: la persona empezo a cargar
+           gastos, y mandan los gastos. Informativo: es el criterio funcionando,
+           y el historico queda como historia. */
+        if (!empty($salida['en_desuso'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, implode(', ', $salida['en_desuso'])
+                . ' ya tiene(n) gastos autorizados en la ventana, así que su histórico manual '
+                . 'dejó de usarse: mandan los gastos. El histórico queda cargado como historia.');
         }
 
         /* 2. LA PARTE TARJETA SIN TARJETA. No es plata que falte del universo: es
@@ -435,6 +507,18 @@ class PagosTarjetas {
         try {
             $sinGastos = $this->gastos->activasSinGastos($base['gastos'],
                 $this->gastos->maestro());
+
+            /* QUIEN YA TIENE FILA -por su tarjeta- no es "alguien que no aparece
+               en la grilla": su fila dice que hacer. */
+            $conFila = [];
+
+            foreach ($salida['filas'] as $f) {
+                $conFila[GastosSupervision::clave($f['nombre'])] = true;
+            }
+
+            $sinGastos = array_values(array_filter($sinGastos, function ($n) use ($conFila) {
+                return !isset($conFila[GastosSupervision::clave($n)]);
+            }));
 
             if (!empty($sinGastos)) {
                 // Informativo: explica el criterio de no inventar un promedio, y
@@ -511,7 +595,7 @@ class PagosTarjetas {
      *
      * @return array
      */
-    private function corporativas($h, $tarjetas, $resumenes, $habiles) {
+    private function corporativas($h, $tarjetas, $resumenes, $habiles, $inflacion = []) {
         $hoy = $h->hoy();
         $meses = array_column($h->meses(), 'clave');
 
@@ -523,6 +607,8 @@ class PagosTarjetas {
             'pagos_excluidos' => [],
             'vtos_inertes' => [],
             'estimaciones' => [],
+            'seguros' => ['proveedores' => [], 'polizas' => [], 'tabla_creada' => false,
+                          'facturas' => TarjetasSeguros::resumenFacturas([])],
             'avisos' => [],
             'disponible' => false
         ];
@@ -552,6 +638,25 @@ class PagosTarjetas {
 
         $salida['disponible'] = true;
         $facturas = TarjetasCorporativas::universo($pendientes);
+
+        /* LAS FACTURAS DE LOS SEGUROS QUEDAN AFUERA: de la grilla, del total y de
+           la serie. Un seguro se proyecta SOLO CON SUS POLIZAS; sus facturas en
+           cuotas y la poliza describirian el mismo pago dos veces. Ver
+           TarjetasSeguros. */
+        $seguros = $this->leer(function () { return $this->segurosDelMaestro(); },
+            'los proveedores de seguros del maestro', $salida['avisos'], []);
+        $deSeguros = [];
+        $sinSeguros = [];
+
+        foreach ($facturas as $f) {
+            if (isset($seguros[trim((string) $f['COD_PROVEE'])])) {
+                $deSeguros[] = $f;
+            } else {
+                $sinSeguros[] = $f;
+            }
+        }
+
+        $facturas = $sinSeguros;
 
         $vinculos = $this->leer(function () { return $this->vinculo->vigentes(); },
             'los vínculos factura-tarjeta', $salida['avisos']);
@@ -589,29 +694,42 @@ class PagosTarjetas {
             $r['filas'][$i]['EXCLUSION_FECHA'] = isset($excluidas[$c]) ? $excluidas[$c]['FECHA_ALTA'] : null;
         }
 
-        /* LAS ESTIMACIONES MENSUALES: las facturas marcadas como abono, mes por
-           mes desde el siguiente al de su vencimiento. Se comportan como una
-           factura vinculada -cobertura y resumen- y se apagan solas en el mes en
-           que aparece la factura real del proveedor. Ver
-           TarjetasCorporativas::estimaciones(). */
-        $mensuales = $this->leer(function () { return $this->mensual->vigentes(); },
-            'las estimaciones mensuales', $salida['avisos'], []);
-        $porCuota = [];
+        /* LAS ESTIMACIONES POR PROVEEDOR: las facturas del ultimo mes de cada
+           proveedor que proyecta se repiten hasta el fin del horizonte. Se
+           comportan como una factura vinculada -cobertura y resumen-. Desde
+           feature/tarjetas-resumenes-seguros reemplazan a las marcas mensuales,
+           que quedan como historial. Ver
+           TarjetasCorporativas::estimacionesPorProveedor(). */
+        $marcados = $this->leer(function () { return $this->proveedoresQueProyectan(); },
+            'los proveedores que proyectan', $salida['avisos'], []);
 
-        foreach ($mensuales as $m) {
-            $porCuota[TarjetasCorporativas::claveCuota($m)] = $m;
-        }
+        // Un seguro no proyecta por proveedor: se proyecta por poliza.
+        $marcados = array_diff_key($marcados, $seguros);
 
         foreach ($r['filas'] as $i => $f) {
-            $m = isset($porCuota[$f['CLAVE_CUOTA']]) ? $porCuota[$f['CLAVE_CUOTA']] : null;
-            $r['filas'][$i]['MENSUAL'] = ($m !== null);
-            $r['filas'][$i]['MENSUAL_ID'] = ($m === null) ? null : $m['ID'];
+            $r['filas'][$i]['PROVEEDOR_PROYECTA'] = isset($marcados[$f['COD_PROVEE']]);
         }
 
-        $salida['estimaciones'] = TarjetasCorporativas::estimaciones($mensuales, $r['filas'],
-            $tarjetas, $resumenes, $meses, $hoy);
+        $ep = TarjetasCorporativas::estimacionesPorProveedor($marcados, $r['filas'], $tarjetas,
+            $resumenes, $habiles, $meses, $hoy);
+        $salida['estimaciones'] = $ep['estimaciones'];
+        $salida['proveedores_proyectan'] = array_values($marcados);
+
+        foreach ($ep['faltan_calendario'] as $m) {
+            if (!in_array($m, $r['faltan_calendario'], true)) {
+                $r['faltan_calendario'][] = $m;
+            }
+        }
 
         foreach (TarjetasCorporativas::avisosEstimaciones($salida['estimaciones']) as $a) {
+            $salida['avisos'][] = $a;
+        }
+
+        foreach (TarjetasCorporativas::avisosPorProveedor($marcados, $r['filas']) as $a) {
+            $salida['avisos'][] = $a;
+        }
+
+        foreach (TarjetasCorporativas::avisosLeyendaRepetida($marcados, $r['filas']) as $a) {
             $salida['avisos'][] = $a;
         }
 
@@ -621,14 +739,26 @@ class PagosTarjetas {
             $salida['avisos'][] = $a;
         }
 
-        /* La cobertura se calcula sobre las facturas Y las estimaciones que
-           proyectan: una estimacion es una factura vinculada mas. */
+        /* LOS SEGUROS: las polizas y sus pagos, la linea informativa de sus
+           facturas y los avisos. */
+        $salida['seguros'] = $this->seguros($h, $seguros, $deSeguros, $tarjetas, $resumenes,
+            $habiles, $inflacion, $vinculos, $excluidas, $vtos, $corporativas, $salida['avisos']);
+
+        /* La cobertura se calcula sobre las facturas, las estimaciones y los pagos
+           de las polizas que proyectan: los tres se comportan como una factura
+           vinculada. */
         $salida['cobertura'] = TarjetasCorporativas::cobertura(array_merge($r['filas'],
-            TarjetasCorporativas::estimacionesComoFilas($salida['estimaciones'])), $corporativas,
+            TarjetasCorporativas::estimacionesComoFilas($salida['estimaciones']),
+            TarjetasSeguros::comoFilas($salida['seguros']['polizas'])), $corporativas,
             $resumenes, $habiles, $meses, $hoy);
 
         $salida['resumenes'] = TarjetasCorporativas::resumenesAProyectar($corporativas,
             $resumenes, $meses, $hoy);
+
+        foreach ($salida['resumenes'] as $i => $res) {
+            $salida['resumenes'][$i]['nota'] = TarjetasResumen::notaCompartido(
+                $resumenes[$res['id_tarjeta']][$res['mes']], $res['id_tarjeta'], $tarjetas);
+        }
 
         /* LO QUE VA AL EJE: las facturas que proyectan, la cobertura y los
            resumenes. Las excluidas van aparte, a su serie informativa. */
@@ -652,6 +782,19 @@ class PagosTarjetas {
                                           'importe' => $m['importe'], 'id_estimacion' => $e['ID'],
                                           'id_tarjeta' => intval($e['ID_TARJETA']), 'mes' => $m['mes'],
                                           'proveedor' => ($e['RAZON_SOC'] ?: $e['COD_PROVEE'])];
+                }
+            }
+        }
+
+        foreach ($salida['seguros']['polizas'] as $p) {
+            foreach ($p['resueltos']['pagos'] as $pago) {
+                if ($pago['proyecta']) {
+                    $salida['pagos'][] = ['tipo' => 'SEGURO', 'fecha' => $pago['fecha'],
+                                          'importe' => $pago['importe'], 'id_poliza' => $p['ID'],
+                                          'id_tarjeta' => intval($p['ID_TARJETA']),
+                                          'mes' => $pago['mes'], 'poliza' => $p['POLIZA'],
+                                          'proveedor' => ($p['RAZON_SOC'] ?: $p['COD_PROVEE']),
+                                          'continuacion' => $pago['continuacion']];
                 }
             }
         }
@@ -681,29 +824,170 @@ class PagosTarjetas {
     }
 
     /**
-     * La fila resuelta de una cuota de Corporativas, o null si no esta en la
-     * pestana.
+     * Los proveedores que proyectan: Mapa COD_PROVEE => fila.
      *
-     * LA USA EL ENDPOINT DE MARCAR MENSUAL: lo que se guarda sale de la fila tal
-     * como la ve la pantalla -vinculada o no, excluida o no, con el vencimiento
-     * corregido-, y resolverla aca es la unica forma de que la validacion y la
-     * grilla miren lo mismo.
+     * Es una costura, como TarjetasProvider::modulo(): lo que este metodo
+     * devuelve decide cuanto se estima, y medir el tablero con otra lista -por
+     * ejemplo, con los proveedores de las marcas mensuales viejas- no tiene que
+     * pasar por escribir en la base.
      *
-     * @param Horizonte $h
-     * @param string $claveCuota
-     * @return array|null
+     * @return array
      */
-    public function filaCorporativa($h, $claveCuota) {
-        $c = $this->corporativas($h, $this->leerTarjetas(), $this->leerResumenes(),
-            $this->leerHabiles($h));
+    protected function proveedoresQueProyectan() {
+        return $this->provProyecta->vigentes();
+    }
 
-        foreach ($c['filas'] as $f) {
-            if ($f['CLAVE_CUOTA'] === $claveCuota) {
-                return $f;
+    /**
+     * Los proveedores de seguros: RUBRO = SEGUROS y TARJETA CORP en el maestro
+     * de Proveedores Locales. Mapa COD_PROVEE => ['COD_PROVEE', 'RAZON_SOC'].
+     *
+     * Costura, como proveedoresQueProyectan(): medir el tablero con el maestro
+     * corregido no tiene que pasar por escribirlo.
+     *
+     * @return array
+     */
+    protected function segurosDelMaestro() {
+        require_once __DIR__ . '/ProveedoresCategorias.php';
+
+        return TarjetasSeguros::proveedores((new ProveedoresCategorias())->mapa());
+    }
+
+    /**
+     * La seccion Seguros de Corporativas.
+     *
+     * @param array $avisos Por referencia: los avisos van a Corporativas
+     * @return array ['proveedores', 'polizas', 'facturas', 'tabla_creada']
+     */
+    private function seguros($h, $seguros, $deSeguros, $tarjetas, $resumenes, $habiles,
+                             $inflacion, $vinculos, $excluidas, $vtos, $corporativas, &$avisos) {
+        $hoy = $h->hoy();
+        $meses = array_column($h->meses(), 'clave');
+
+        $salida = [
+            'proveedores' => array_values($seguros),
+            'polizas' => [],
+            'facturas' => TarjetasSeguros::resumenFacturas($deSeguros),
+            'tabla_creada' => $this->poliza->tablaCreada()
+        ];
+
+        $polizas = $this->leer(function () { return $this->poliza->vigentes(); },
+            'las pólizas de seguros', $avisos, []);
+
+        $curva = $this->leer(function () { return (new DolarFuturo())->curva(); },
+            'la curva de dólar futuro', $avisos, []);
+        $siguientes = TarjetasSeguros::siguientes($polizas);
+        $faltanInf = [];
+        $faltanCot = [];
+        $faltanCal = [];
+        $sinTarjeta = [];
+        $conPoliza = [];
+
+        foreach ($polizas as $p) {
+            $id = intval($p['ID_TARJETA']);
+            $t = isset($tarjetas[$id]) ? $tarjetas[$id] : null;
+
+            try {
+                $p['resueltos'] = TarjetasSeguros::pagos($p, $t, isset($resumenes[$id]) ? $resumenes[$id] : [],
+                    $habiles, $meses, $hoy, $inflacion, $curva, $siguientes[$p['ID']]);
+            } catch (Throwable $e) {
+                $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron calcular los pagos de la póliza '
+                    . $p['POLIZA'] . ': ' . $e->getMessage());
+                $p['resueltos'] = ['pagos' => [], 'faltan_inflacion' => [], 'faltan_cotizacion' => [],
+                                   'faltan_calendario' => [], 'ciclos' => 0];
             }
+
+            $p['TARJETA'] = $t;
+            $p['FIN_VIGENCIA'] = TarjetasSeguros::finVigencia($p['FECHA_INICIO'], $p['VIGENCIA_MESES']);
+            $p['CUOTA'] = TarjetasSeguros::cuota($p['IMPORTE_TOTAL'], $p['VIGENCIA_MESES'], $p['GRACIA_MESES']);
+            $p['SIGUIENTE'] = $siguientes[$p['ID']];
+            $p['ES_SEGURO'] = isset($seguros[$p['COD_PROVEE']]);
+            $conPoliza[$p['COD_PROVEE']] = true;
+
+            foreach (['faltan_inflacion' => &$faltanInf, 'faltan_cotizacion' => &$faltanCot,
+                      'faltan_calendario' => &$faltanCal] as $k => &$lista) {
+                foreach ($p['resueltos'][$k] as $m) {
+                    if (!in_array($m, $lista, true)) {
+                        $lista[] = $m;
+                    }
+                }
+            }
+
+            unset($lista);
+
+            if ($t === null || empty($t['ACTIVA']) || $t['TIPO'] !== 'CORPORATIVA') {
+                $sinTarjeta[] = $p['POLIZA'] . ' de ' . ($p['RAZON_SOC'] ?: $p['COD_PROVEE']);
+            }
+
+            $salida['polizas'][] = $p;
         }
 
-        return null;
+        if (!empty($faltanInf)) {
+            sort($faltanInf);
+            $avisos[] = 'Seguros: la continuación de una póliza en pesos necesita la inflación de los '
+                . 'meses de la vigencia anterior, y falta la de ' . implode(', ', $faltanInf)
+                . '. Esos pagos quedan en blanco y NO en cero.';
+        }
+
+        if (!empty($faltanCot)) {
+            $avisos[] = 'Seguros: no hay dólar futuro para ' . implode(', ', $faltanCot)
+                . ', así que los pagos en dólares de esos meses quedan en blanco y NO en cero.';
+        }
+
+        if (!empty($sinTarjeta)) {
+            $avisos[] = count($sinTarjeta) . ' póliza(s) tienen una tarjeta inactiva o que ya no es '
+                . 'corporativa, así que no proyectan: ' . implode('; ', $sinTarjeta)
+                . '. Corregí la tarjeta de la póliza.';
+        }
+
+        foreach (TarjetasVencimiento::avisosCalendario($faltanCal) as $a) {
+            $avisos[] = $a;
+        }
+
+        /* UN SEGURO SIN POLIZA: sus facturas ya no suman, y la poliza que las
+           reemplaza no esta. El aviso dice cuanto proyectaban, con la misma regla
+           que la grilla: es la plata que el tablero deja de ver. */
+        $porProv = [];
+
+        foreach ($deSeguros as $f) {
+            $porProv[trim((string) $f['COD_PROVEE'])][] = $f;
+        }
+
+        foreach ($seguros as $cod => $s) {
+            if (isset($conPoliza[$cod])) {
+                continue;
+            }
+
+            $proyectaban = 0.0;
+
+            if (isset($porProv[$cod])) {
+                $rs = TarjetasCorporativas::resolver($porProv[$cod], $vinculos, $excluidas,
+                    $corporativas, $resumenes, $habiles, $meses, $hoy, $vtos);
+
+                foreach ($rs['filas'] as $f) {
+                    if ($f['PROYECTA']) {
+                        $proyectaban += $f['IMPORTE'];
+                    }
+                }
+            }
+
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Seguros · ' . $s['RAZON_SOC'] . ' no tiene póliza '
+                . 'cargada, así que no proyecta nada'
+                . ($proyectaban > 0
+                    ? ': sus facturas proyectaban ' . self::plata($proyectaban) . ' en el horizonte, y '
+                      . 'ya no suman'
+                    : '')
+                . '. Cargá su póliza en la sección Seguros.');
+        }
+
+        if ($salida['facturas']['cuantas'] > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'Hay ' . $salida['facturas']['cuantas']
+                . ' vencimiento(s) de seguros pendientes en Tango, de '
+                . $salida['facturas']['comprobantes'] . ' factura(s), por '
+                . self::plata($salida['facturas']['importe']) . '. No suman: los seguros se '
+                . 'proyectan con las pólizas.');
+        }
+
+        return $salida;
     }
 
     /* ====================================================================
@@ -729,11 +1013,19 @@ class PagosTarjetas {
             'curva' => []
         ];
 
+        /* POR BANCO desde feature/tarjetas-resumenes-seguros: una fila por banco
+           de socios activo. Las tarjetas de socio con nombre quedaron de baja y
+           NO proyectan; se leen solo para decir cuanto proyectaban mientras su
+           banco no tenga base historica. */
         $socios = [];
+        $viejas = [];
 
         foreach ($tarjetas as $id => $t) {
-            if ($t['TIPO'] === 'SOCIO' && $t['ACTIVA']) {
+            if ($t['TIPO'] === Tarjetas::SOCIOS_BANCO && $t['ACTIVA']) {
                 $socios[$id] = $t;
+            } elseif ($t['TIPO'] === Tarjetas::SOCIO_HISTORIAL
+                      && ($t['ACTIVA'] || $t['USUARIO_BAJA'] === 'MIGRACION')) {
+                $viejas[$t['COD_BANCO']][$id] = $t;
             }
         }
 
@@ -795,6 +1087,16 @@ class PagosTarjetas {
 
             $avisoBase = TarjetasSocios::avisoBase($base, $t['ROTULO']);
 
+            /* SIN BASE, EL AVISO DICE CUANTO PROYECTABAN SUS TARJETAS VIEJAS: es
+               la plata que el tablero no ve hasta que se cargue la base del
+               banco. */
+            if ($base['motivo'] === TarjetasSocios::SIN_BASE && isset($viejas[$t['COD_BANCO']])) {
+                $avisoBase .= ' Sus tarjetas de socio proyectaban '
+                    . self::plata($this->proyeccionViejas($viejas[$t['COD_BANCO']], $resumenes,
+                        $meses, $inflacion, $habiles, $curva, $bcra, $hoy))
+                    . ' en el horizonte, y eso hoy no está en el tablero.';
+            }
+
             /* Sin base no hay estimacion y se arregla cargandola: atencion. La
                base incompleta solo explica que el promedio es menos firme:
                informativo. */
@@ -828,6 +1130,33 @@ class PagosTarjetas {
             $salida['filas'][] = $fila;
         }
 
+        /* UN BANCO CON TARJETAS DE SOCIO VIEJAS QUE TODAVIA NO ESTA DADO DE ALTA
+           COMO BANCO DE SOCIOS: no tiene fila, asi que el aviso de base no lo
+           alcanza. Sin esto, su plata desaparece del tablero sin que nada lo
+           diga. */
+        $conBanco = [];
+
+        foreach ($socios as $t) {
+            $conBanco[$t['COD_BANCO']] = true;
+        }
+
+        foreach ($viejas as $cod => $suyas) {
+            if (isset($conBanco[$cod])) {
+                continue;
+            }
+
+            $una = reset($suyas);
+            $nombre = $una['DESC_BANCO'] ?: ('banco ' . $cod);
+
+            $salida['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'Socios · ' . $nombre . ': sus '
+                . count($suyas) . ' tarjeta(s) de socio proyectaban '
+                . self::plata($this->proyeccionViejas($suyas, $resumenes, $meses, $inflacion,
+                    $habiles, $curva, $bcra, $hoy))
+                . ' en el horizonte y ya no proyectan: Socios va por banco. Dá de alta el banco en '
+                . 'Parámetros › Tarjetas y cargale la base histórica. Hasta entonces eso no está en '
+                . 'el tablero.');
+        }
+
         sort($faltanInflacion);
         $avisoInf = Inflacion::avisoFaltan($faltanInflacion, $hoy);
 
@@ -841,6 +1170,28 @@ class PagosTarjetas {
         }
 
         return $salida;
+    }
+
+    /**
+     * Cuanto proyectaban, sumadas, unas tarjetas de socio con nombre: como si
+     * siguieran activas, con su base y su regla. Solo para el aviso.
+     *
+     * @return float
+     */
+    private function proyeccionViejas($tarjetas, $resumenes, $meses, $inflacion, $habiles,
+                                      $curva, $bcra, $hoy) {
+        $total = 0.0;
+
+        foreach ($tarjetas as $id => $t) {
+            try {
+                $total += TarjetasSocios::totalProyectado($t, isset($resumenes[$id]) ? $resumenes[$id] : [],
+                    $meses, $inflacion, $habiles, $curva, $bcra, $hoy);
+            } catch (Throwable $e) {
+                // Un calendario roto ya avisa por su lado: el aviso dice lo que se pudo sumar.
+            }
+        }
+
+        return $total;
     }
 
     /* ====================================================================

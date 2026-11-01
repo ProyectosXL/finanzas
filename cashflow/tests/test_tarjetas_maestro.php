@@ -44,8 +44,10 @@ require_once __DIR__ . '/../Class/Parametros.php';
    ================================================================ */
 seccion('el tipo de tarjeta');
 
-chequear('son tres', 3, count(Tarjetas::TIPOS));
-chequear('y son estos', ['SUPERVISORA', 'CORPORATIVA', 'SOCIO'],
+/* CUATRO DESDE feature/tarjetas-resumenes-seguros: SOCIO queda como historial y
+   Socios va por banco (SOCIOS_BANCO). */
+chequear('son cuatro', 4, count(Tarjetas::TIPOS));
+chequear('y son estos', ['SUPERVISORA', 'CORPORATIVA', 'SOCIO', 'SOCIOS_BANCO'],
     array_keys(Tarjetas::TIPOS));
 
 chequear('se normaliza a mayusculas', 'SOCIO', Tarjetas::validarTipo('socio'));
@@ -64,10 +66,12 @@ chequearLanza('un tipo vacio se rechaza', function () {
    la base y no en el PHP no lo puede cargar nadie. Se compara contra el script,
    que es la unica forma de que no se separen. */
 $sqlTarjetas = file_get_contents(__DIR__ . '/../sql/cashflow_tarjetas.sql');
+$sqlSociosBanco = file_get_contents(__DIR__ . '/../sql/cashflow_tarjetas_socios_banco.sql');
 
+/* El CHECK vigente es el del script de socios por banco, que lo reemplaza. */
 foreach (array_keys(Tarjetas::TIPOS) as $tipo) {
     chequear("el CHECK de la tabla incluye $tipo", true,
-        strpos($sqlTarjetas, "'" . $tipo . "'") !== false);
+        strpos($sqlSociosBanco, "'" . $tipo . "'") !== false);
 }
 
 /* ================================================================

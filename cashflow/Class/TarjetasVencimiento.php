@@ -349,6 +349,77 @@ class TarjetasVencimiento {
         return $mejor;
     }
 
+    /**
+     * El debito de una tarjeta en el que se paga una cuota: el PRIMER
+     * vencimiento de la tarjeta en una fecha igual o posterior al vencimiento de
+     * esa cuota.
+     *
+     * POR QUE SE CUENTA DESDE EL VENCIMIENTO Y NO DESDE HOY
+     * -----------------------------------------------------
+     * Una factura en cuotas tiene un vencimiento por cuota, y cada cuota va al
+     * debito que le toca: la de octubre al de octubre (o noviembre, si vence
+     * despues del dia de la tarjeta), la de noviembre al de noviembre. Contar
+     * desde hoy las juntaria todas en el proximo debito. Y deja de depender de que
+     * en Tango carguen como vencimiento el del resumen: basta con el de la
+     * factura.
+     *
+     * CADA MES ES SU RESUMEN SI LO HAY, SI NO LA ESTIMACION: un resumen cargado
+     * fija el debito de ese mes, con su fecha. Si ese debito cae antes del
+     * vencimiento de la cuota, la cuota va al mes siguiente.
+     *
+     * "IGUAL O POSTERIOR": una cuota que vence el mismo dia que la tarjeta se
+     * paga en ese debito.
+     *
+     * NO APLICA LA REGLA DE LAS VENCIDAS: si el debito que devuelve ya paso, quien
+     * llama lo reubica en el proximo pago posterior a hoy (proximoPago()). Son dos
+     * preguntas distintas y cada una vive en su funcion.
+     *
+     * DEVUELVE null SI NINGUN DEBITO DEL HORIZONTE ALCANZA: la cuota vence despues
+     * del ultimo, y eso es lo que hay que informar.
+     *
+     * Estatica y pura.
+     *
+     * @param int $dia Dia de vencimiento de la tarjeta
+     * @param string $vto 'Y-m-d', el vencimiento vigente de la cuota
+     * @param array $resumenes Mapa 'Y-m' => resumen vigente de esa tarjeta
+     * @param array $meses Lista de 'Y-m' EN ORDEN CRONOLOGICO
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @return array|null ['mes', 'fecha', 'origen' => 'RESUMEN'|'ESTIMACION',
+     *                     'vencimiento' => (lo de delMes()) | null]
+     */
+    public static function pagoDesde($dia, $vto, $resumenes, $meses, $habiles) {
+        $vtoStr = substr((string) $vto, 0, 10);
+
+        if ($vtoStr === '') {
+            return null;
+        }
+
+        $mesVto = substr($vtoStr, 0, 7);
+
+        foreach (is_array($meses) ? $meses : [] as $mes) {
+            if ($mes < $mesVto) {
+                continue;
+            }
+
+            if (isset($resumenes[$mes])) {
+                $fecha = $resumenes[$mes]['FECHA_VENCIMIENTO'];
+                $origen = 'RESUMEN';
+                $vencimiento = null;
+            } else {
+                $vencimiento = self::delMes($dia, $mes, $habiles);
+                $fecha = $vencimiento['fecha'];
+                $origen = 'ESTIMACION';
+            }
+
+            if ($fecha !== null && $fecha >= $vtoStr) {
+                return ['mes' => $mes, 'fecha' => $fecha, 'origen' => $origen,
+                        'vencimiento' => $vencimiento];
+            }
+        }
+
+        return null;
+    }
+
     /* ====================================================================
        PARA LA PANTALLA
        ==================================================================== */

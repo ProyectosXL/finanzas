@@ -261,14 +261,18 @@ class AuthCashflow {
             'incluirFacturas' => [['pagos_tarjetas', null]],
             'editarVtoFactura' => [['pagos_tarjetas', null]],
             'deshacerVtoFactura' => [['pagos_tarjetas', null]],
-            'marcarMensual' => [['pagos_tarjetas', null]],
-            'desmarcarMensual' => [['pagos_tarjetas', null]],
             'saveResumen' => [['pagos_tarjetas', null]],
             'pagarResumen' => [['pagos_tarjetas', null]],
             'bajaResumen' => [['pagos_tarjetas', null]],
             'cargarBase' => [['pagos_tarjetas', null]],
+            'cargarHistoricoManual' => [['pagos_tarjetas', null]],
+            'guardarPoliza' => [['pagos_tarjetas', null]],
+            'bajaPoliza' => [['pagos_tarjetas', null]],
+            'bajaHistoricoManual' => [['pagos_tarjetas', null]],
             'saveTarjeta' => [['parametros', 'TARJETAS']],
-            'activarTarjeta' => [['parametros', 'TARJETAS']]
+            'activarTarjeta' => [['parametros', 'TARJETAS']],
+            'marcarProveedorProyecta' => [['parametros', 'TARJETAS']],
+            'desmarcarProveedorProyecta' => [['parametros', 'TARJETAS']]
         ],
         'Ventas' => [
             'saveParticipacion' => [['ventas', null]],
@@ -295,7 +299,8 @@ class AuthCashflow {
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],
-        'Tarjetas' => ['getDatos', 'getHistorialFactura', 'getTarjetas', 'getResumenes'],
+        'Tarjetas' => ['getDatos', 'getHistorialFactura', 'getTarjetas', 'getResumenes',
+            'getProveedoresProyectan'],
         'Ventas' => ['getProyeccionVentas', 'getProyeccionCobranzas', 'getAnalisisVentas',
             'getVentaAcumulada', 'getVentaBalance', 'getParametros']
     ];
