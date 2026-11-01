@@ -266,6 +266,8 @@ class AuthCashflow {
             'bajaResumen' => [['pagos_tarjetas', null]],
             'cargarBase' => [['pagos_tarjetas', null]],
             'cargarHistoricoManual' => [['pagos_tarjetas', null]],
+            'guardarPoliza' => [['pagos_tarjetas', null]],
+            'bajaPoliza' => [['pagos_tarjetas', null]],
             'bajaHistoricoManual' => [['pagos_tarjetas', null]],
             'saveTarjeta' => [['parametros', 'TARJETAS']],
             'activarTarjeta' => [['parametros', 'TARJETAS']],

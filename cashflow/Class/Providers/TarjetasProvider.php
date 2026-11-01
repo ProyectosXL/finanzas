@@ -301,6 +301,23 @@ class TarjetasProvider extends CashflowProvider {
                 . '. Es una estimación: el proveedor proyecta y todavía no hay factura de ese mes.');
         }
 
+        /* LOS SEGUROS: los pagos de las polizas. Suman en CORPORATIVAS como una
+           factura vinculada, sin fila propia, y la celda dice que salen de una
+           poliza y si son de la continuacion estimada. */
+        foreach ($datos['corporativas']['pagos'] as $p) {
+            if (!isset($p['tipo']) || $p['tipo'] !== 'SEGURO') {
+                continue;
+            }
+
+            self::anotar($detalle, $h->columna($p['fecha']), $p['importe'],
+                'Seguro ' . $p['proveedor'] . ', póliza ' . $p['poliza'] . ' (' . $p['mes'] . '): $ '
+                . number_format($p['importe'], 2, ',', '.') . ', el ' . self::corto($p['fecha'])
+                . (!empty($p['continuacion'])
+                    ? '. Estimado: la vigencia cargada terminó y se repite el ciclo hasta que se '
+                      . 'cargue la póliza siguiente.'
+                    : '. Sale de la póliza cargada.'));
+        }
+
         // La parte tarjeta de las supervisoras que salio de un resumen.
         foreach ($datos['supervisoras']['pagos'] as $p) {
             if ($p['parte'] !== 'TARJETA' || !isset($p['origen']) || $p['origen'] !== 'RESUMEN') {

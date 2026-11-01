@@ -184,9 +184,15 @@ function celdasDe($filas, $campo) {
  */
 function proveedoresTarjetaCorp() {
     require_once __DIR__ . '/../Class/Proveedores.php';
+    require_once __DIR__ . '/../Class/ProveedoresCategorias.php';
+    require_once __DIR__ . '/../Class/TarjetasSeguros.php';
 
-    return TarjetasCorporativas::proveedoresDelUniverso(
-        TarjetasCorporativas::universo((new Proveedores())->getPendientes(date('Y-m-d'))));
+    /* LOS SEGUROS NO SE OFRECEN: se proyectan por poliza, no por proveedor. */
+    $seguros = TarjetasSeguros::proveedores((new ProveedoresCategorias())->mapa());
+
+    return array_values(array_filter(TarjetasCorporativas::proveedoresDelUniverso(
+        TarjetasCorporativas::universo((new Proveedores())->getPendientes(date('Y-m-d')))),
+        function ($p) use ($seguros) { return !isset($seguros[$p['COD_PROVEE']]); }));
 }
 
 try {
@@ -290,6 +296,12 @@ try {
                         'estimaciones' => $corp['estimaciones'],
                         'proveedores_proyectan' => isset($corp['proveedores_proyectan'])
                             ? $corp['proveedores_proyectan'] : [],
+
+                        /* LOS SEGUROS: las polizas con sus pagos, una fila por
+                           poliza en el eje, y la linea de sus facturas. */
+                        'seguros' => $corp['seguros'],
+                        'eje_polizas' => EjeVista::armarAgrupado($h,
+                            soloTipo($corp['pagos'], 'SEGURO'), 'id_poliza', 'fecha', 'importe'),
 
                         /* UNA FILA POR ESTIMACION, con sus meses en el eje: la
                            seccion Estimaciones mensuales tiene las mismas
@@ -481,6 +493,54 @@ try {
            PENDIENTES, el mismo universo de la pestana, y el alta lo vuelve a
            verificar: que el buscador lo haya ofrecido no autoriza nada.
            ================================================================ */
+        /* ================================================================
+           LAS POLIZAS DE SEGUROS
+           Se cargan en la seccion Seguros de Tarjetas Pagos Corporativos. La
+           validacion es TarjetasSeguros::validar(), contra el maestro de
+           Proveedores Locales, las tarjetas y las otras polizas.
+           ================================================================ */
+        case 'guardarPoliza':
+            require_once __DIR__ . '/../Class/TarjetasPoliza.php';
+            require_once __DIR__ . '/../Class/ProveedoresCategorias.php';
+
+            $data = bodyJson();
+            $r = (new TarjetasPoliza())->guardar(isset($data['id']) ? $data['id'] : null, $data,
+                TarjetasSeguros::proveedores((new ProveedoresCategorias())->mapa()),
+                $tarjetas->porId(false), $usuario);
+            $p = $r['poliza'];
+            $pagos = $p['VIGENCIA_MESES'] - $p['GRACIA_MESES'];
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['nuevo'] ? 'Póliza cargada' : 'Póliza corregida') . ': '
+                    . $p['POLIZA'] . ' de ' . $p['RAZON_SOC'] . '. Son ' . $pagos . ' pago(s) de '
+                    . TarjetasSeguros::MONEDAS[$p['MONEDA']] . ' '
+                    . number_format(TarjetasSeguros::cuota($p['IMPORTE_TOTAL'], $p['VIGENCIA_MESES'],
+                        $p['GRACIA_MESES']), 2, ',', '.')
+                    . ' desde ' . $p['MES_PRIMER_PAGO'] . ', en el débito de su tarjeta.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaPoliza':
+            require_once __DIR__ . '/../Class/TarjetasPoliza.php';
+
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta la póliza');
+            }
+
+            $r = (new TarjetasPoliza())->darDeBaja($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Póliza dada de baja. No se borra: queda en el historial, y deja de '
+                    . 'proyectar.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'getProveedoresProyectan':
             require_once __DIR__ . '/../Class/TarjetasProvProyecta.php';
 
@@ -518,6 +578,14 @@ try {
                 if ($p['COD_PROVEE'] === $cod) {
                     $prov = $p;
                 }
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresCategorias.php';
+
+            if ($prov === null && isset(TarjetasSeguros::proveedores(
+                    (new ProveedoresCategorias())->mapa())[$cod])) {
+                throw new Exception('El proveedor ' . $cod . ' es un seguro: no proyecta por '
+                    . 'proveedor, se proyecta con sus pólizas.');
             }
 
             if ($prov === null) {
