@@ -85,3 +85,47 @@ BEGIN
     PRINT 'Creado UX_RO_T_CF_TARJPP_VIGENTE (uno vigente por proveedor).';
 END
 GO
+
+/* ============================================================================
+   2. LA MIGRACION DE LAS MARCAS MENSUALES
+
+   Los proveedores con una marca mensual vigente (RO_T_CASHFLOW_TARJETAS_MENSUAL,
+   VIGENTE = 1) pasan a "proyectan", con USUARIO_ALTA = 'MIGRACION'. La tabla de
+   marcas NO SE TOCA: queda como historial.
+
+   'MIGRACION' COMO USUARIO es lo que hace el paso reejecutable y lo deja
+   reconocible, como en sql/cashflow_comex_fecha_maestra.sql: un proveedor que ya
+   tiene una fila de la migracion -vigente o dada de baja- no se vuelve a migrar.
+   Asi, si alguien lo desmarca despues, una segunda corrida no lo revive.
+
+   Al 31/10/2026 son 17 marcas de 16 proveedores (G4S tiene dos), y con la
+   regla nueva suman la estimacion que dice README-pagos-tarjetas.md.
+   ============================================================================ */
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA', 'U') IS NOT NULL
+   AND OBJECT_ID('dbo.RO_T_CASHFLOW_TARJETAS_MENSUAL', 'U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA
+        (COD_PROVEE, RAZON_SOC, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
+    SELECT m.COD_PROVEE, MAX(m.RAZON_SOC), 1, 'MIGRACION', 'MIGRACION'
+    FROM dbo.RO_T_CASHFLOW_TARJETAS_MENSUAL m
+    WHERE m.VIGENTE = 1
+      AND NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA p
+                      WHERE p.COD_PROVEE = m.COD_PROVEE
+                        AND (p.VIGENTE = 1 OR p.USUARIO_ALTA = 'MIGRACION'))
+    GROUP BY m.COD_PROVEE;
+
+    PRINT 'Proveedores migrados de las marcas mensuales: ' + CAST(@@ROWCOUNT AS VARCHAR(10)) + '.';
+END
+ELSE IF OBJECT_ID('dbo.RO_T_CASHFLOW_TARJETAS_MENSUAL', 'U') IS NULL
+    PRINT 'No existe RO_T_CASHFLOW_TARJETAS_MENSUAL: no hay marcas que migrar.';
+GO
+
+/* 3. Control: no inserta ni modifica nada. */
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA', 'U') IS NOT NULL
+BEGIN
+    SELECT COD_PROVEE, RAZON_SOC, USUARIO_ALTA, FECHA_ALTA
+    FROM dbo.RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA
+    WHERE VIGENTE = 1
+    ORDER BY COD_PROVEE;
+END
+GO

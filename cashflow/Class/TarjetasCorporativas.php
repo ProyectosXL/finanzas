@@ -999,11 +999,18 @@ class TarjetasCorporativas {
      * --------
      * Para cada proveedor marcado:
      *
-     *   1. SU ULTIMO MES es el mes del vencimiento vigente -el corregido si lo
-     *      hay- mas tardio entre sus facturas pendientes VINCULADAS a una
-     *      tarjeta, excluidas incluidas. Una sin vincular no cuenta: no suma, asi
-     *      que no duplica nada, y se avisa aparte. Una excluida si cuenta: corta
-     *      la repeticion de las anteriores, aunque ella no se repita.
+     *   1. SU ULTIMO MES es el mes del vencimiento ORIGINAL DE TANGO mas tardio
+     *      entre sus facturas pendientes VINCULADAS a una tarjeta, excluidas
+     *      incluidas. Una sin vincular no cuenta: no suma, asi que no duplica
+     *      nada, y se avisa aparte. Una excluida si cuenta: corta la repeticion
+     *      de las anteriores, aunque ella no se repita.
+     *
+     *      EL DE TANGO Y NO EL CORREGIDO. La correccion vale para la fecha de
+     *      pago (resolver()), pero casi todas llevaban la factura al debito del
+     *      resumen y juntan facturas de meses distintos en uno: las boletas de
+     *      luz del 28/09 al 21/10 quedaban todas en noviembre y se repetian
+     *      todas. Que facturas forman "el mes" lo dice cuando vencen, no en que
+     *      debito se pagan.
      *
      *   2. SE REPITEN LAS FACTURAS DE ESE MES, vinculadas y no excluidas: cada una
      *      con su importe de cuota (IMPORTE_VTO, sin inflacion) y su tarjeta,
@@ -1056,17 +1063,18 @@ class TarjetasCorporativas {
             $ultimo = null;
 
             foreach ($suyas as $f) {
-                $vto = self::vtoVigente($f);
+                $tango = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
 
-                if ($vto !== null && ($ultimo === null || substr($vto, 0, 7) > $ultimo)) {
-                    $ultimo = substr($vto, 0, 7);
+                if ($tango !== null && ($ultimo === null || substr($tango, 0, 7) > $ultimo)) {
+                    $ultimo = substr($tango, 0, 7);
                 }
             }
 
             foreach ($suyas as $f) {
                 $vto = self::vtoVigente($f);
+                $tango = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
 
-                if ($vto === null || substr($vto, 0, 7) !== $ultimo
+                if ($tango === null || substr($tango, 0, 7) !== $ultimo
                     || !empty($f['EXCLUIDA_TARJETAS']) || empty($f['MES_PAGO'])) {
                     continue;
                 }

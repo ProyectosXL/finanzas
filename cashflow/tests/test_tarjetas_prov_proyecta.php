@@ -114,6 +114,32 @@ chequear('se repite solo la de noviembre', ['B1'], array_column($r['est'], 'N_CO
 chequear('desde diciembre, por su importe: el abono no se duplica',
     ['2026-12' => 120000.0, '2027-01' => 120000.0, '2027-02' => 120000.0], porMesPP($r['est']));
 
+seccion('el ultimo mes es el del vencimiento ORIGINAL de Tango, no el corregido');
+
+/* Dos boletas: una vence el 28/09 y otra el 21/10. Las dos tienen el vencimiento
+   corregido al debito del resumen, el 02/11. Con el corregido, las dos serian de
+   noviembre y se repetirian las dos; con el de Tango, el ultimo mes es octubre y
+   se repite solo la del 21/10. La correccion sigue moviendo su fecha de pago. */
+$bSep = fpTC('L1', '2026-09-28', 1000000);
+$bOct = fpTC('L2', '2026-10-21', 400000);
+$corrPP = [];
+
+foreach ([$bSep, $bOct] as $b) {
+    $corrPP[TarjetasCorporativas::claveCuota($b)] = ['FECHA_VTO' => '2026-11-02', 'MOTIVO' => null,
+        'USUARIO_ALTA' => 'u', 'FECHA_ALTA' => '2026-10-01 10:00'];
+}
+
+$rc = TarjetasCorporativas::resolver([$bSep, $bOct],
+    [TarjetasCorporativas::clave($bSep) => 7, TarjetasCorporativas::clave($bOct) => 7], [], $TP, [],
+    $HABP, $MP, $HP, $corrPP);
+$estC = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rc['filas'], $TP, [], $HABP, $MP,
+    $HP)['estimaciones'];
+
+chequear('se repite solo la del ultimo mes de Tango', ['L2'], array_column($estC, 'N_COMP'));
+chequear('la correccion sigue valiendo para su fecha de pago: el debito de noviembre',
+    ['2026-11-10', '2026-11'], [$rc['filas'][1]['FECHA'], $rc['filas'][1]['MES_PAGO']]);
+chequear('y se repite desde el mes siguiente a ese pago', '2026-12', $estC[0]['MES_DESDE']);
+
 seccion('una factura cancelada deja de proyectar');
 
 /* SE PAGO: sale de pendientes, y con ella sus estimaciones. Hasta que se cargue la
@@ -216,3 +242,13 @@ foreach (['DROP TABLE', 'DELETE FROM', 'TRUNCATE'] as $prohibido) {
 foreach (['USUARIO_ALTA', 'FECHA_ALTA', 'USUARIO_MODIF', 'FECHA_MODIF', 'USUARIO_BAJA', 'FECHA_BAJA'] as $c) {
     chequear("lleva $c", true, strpos($sqlPP, $c) !== false);
 }
+
+seccion('la migracion de las marcas mensuales');
+
+chequear('migra las marcas vigentes con usuario MIGRACION', true,
+    strpos($sqlPP, "SELECT m.COD_PROVEE, MAX(m.RAZON_SOC), 1, 'MIGRACION', 'MIGRACION'") !== false
+    && strpos($sqlPP, 'WHERE m.VIGENTE = 1') !== false);
+chequear('una por proveedor, aunque tenga dos marcas', true,
+    strpos($sqlPP, 'GROUP BY m.COD_PROVEE') !== false);
+chequear('reejecutable: no revive un proveedor que alguien desmarco', true,
+    strpos($sqlPP, "(p.VIGENTE = 1 OR p.USUARIO_ALTA = 'MIGRACION')") !== false);
