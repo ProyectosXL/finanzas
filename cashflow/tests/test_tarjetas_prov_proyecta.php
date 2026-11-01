@@ -154,6 +154,30 @@ chequear('una sola estimacion, la de la ultima cuota', ['2026-12-05'],
 chequear('las cuotas pendientes cuentan en su mes, como facturas, y la ultima se repite',
     ['2027-01' => 30000.0, '2027-02' => 30000.0], porMesPP($r['est']));
 
+/* SIN SUPERPONERSE: la repeticion arranca el mes siguiente al pago de la ultima
+   cuota, y ninguna cuota pendiente se paga en un mes repetido. */
+$mesesCuotas = array_column(array_filter($r['filas'], function ($f) { return $f['PROYECTA']; }),
+    'MES_PAGO');
+
+chequear('la repeticion arranca el mes siguiente a la ultima cuota', '2027-01', $r['est'][0]['MES_DESDE']);
+chequear('y ningun mes repetido es el pago de una cuota pendiente', [],
+    array_values(array_intersect(array_keys(porMesPP($r['est'])), $mesesCuotas)));
+
+/* UNA CUOTA ANTERIOR CORREGIDA HACIA ADELANTE: la de octubre se corrige al
+   05/01/2027, despues de la ultima (diciembre). La repeticion arranca despues de
+   ESE pago, no del de la ultima cuota, para no caer en el mismo mes. */
+$cOct = fpTC('C2', '2026-10-05', 30000);
+$cDic = fpTC('C2', '2026-12-05', 30000);
+$rC = TarjetasCorporativas::resolver([$cOct, $cDic], [TarjetasCorporativas::clave($cOct) => 7], [],
+    $TP, [], $HABP, $MP, $HP, [TarjetasCorporativas::claveCuota($cOct) => ['FECHA_VTO' => '2027-01-05',
+        'MOTIVO' => null, 'USUARIO_ALTA' => 'u', 'FECHA_ALTA' => '2026-09-26 10:00']]);
+$estC2 = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rC['filas'], $TP, [], $HABP, $MP,
+    $HP)['estimaciones'];
+
+chequear('la cuota corregida se paga en enero', '2027-01', $rC['filas'][0]['MES_PAGO']);
+chequear('la repeticion de la ultima arranca en febrero, no en enero', ['2027-02' => 30000.0],
+    porMesPP($estC2));
+
 seccion('una factura cancelada deja de proyectar');
 
 /* SE PAGO: sale de pendientes, y con ella sus estimaciones. Hasta que se cargue la

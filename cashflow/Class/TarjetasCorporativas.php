@@ -874,12 +874,23 @@ class TarjetasCorporativas {
                Tango. Ver el punto 2 del encabezado. */
             $ultimaCuota = [];
 
+            /* Y EL ULTIMO MES DE PAGO DE CUALQUIERA DE SUS CUOTAS: la repeticion
+               arranca despues de ese, asi no se superpone con una cuota que
+               todavia esta pendiente. Casi siempre es el de la ultima cuota, pero
+               no si a una anterior le corrigieron el vencimiento hacia adelante. */
+            $ultimoPago = [];
+
             foreach ($suyas as $f) {
                 $clave = self::clave($f);
                 $tango = isset($f['FECHA_VTO']) ? (string) $f['FECHA_VTO'] : '';
 
                 if (!isset($ultimaCuota[$clave]) || $tango > $ultimaCuota[$clave]) {
                     $ultimaCuota[$clave] = $tango;
+                }
+
+                if (!empty($f['MES_PAGO'])
+                    && (!isset($ultimoPago[$clave]) || $f['MES_PAGO'] > $ultimoPago[$clave])) {
+                    $ultimoPago[$clave] = $f['MES_PAGO'];
                 }
             }
 
@@ -896,6 +907,7 @@ class TarjetasCorporativas {
                 $t = isset($tarjetas[$id]) ? $tarjetas[$id] : null;
                 $tarjetaOk = ($t !== null && !empty($t['ACTIVA']) && $t['TIPO'] === 'CORPORATIVA');
                 $importe = round(floatval(isset($f['IMPORTE_VTO']) ? $f['IMPORTE_VTO'] : 0), 2);
+                $hasta = $ultimoPago[self::clave($f)];
 
                 $est = [
                     'ID' => 'P|' . self::claveCuota($f),
@@ -912,13 +924,13 @@ class TarjetasCorporativas {
                     'TARJETA_OK' => $tarjetaOk,
                     'IMPORTE' => $importe,
                     'DIA' => ($t !== null) ? intval($t['DIA_VENCIMIENTO']) : null,
-                    'MES_DESDE' => Inflacion::mesMas($f['MES_PAGO'], 1),
+                    'MES_DESDE' => Inflacion::mesMas($hasta, 1),
                     'ORIGEN_PENDIENTE' => true,
                     'meses' => []
                 ];
 
                 foreach ($meses as $mes) {
-                    if ($mes <= $f['MES_PAGO']) {
+                    if ($mes <= $hasta) {
                         continue;
                     }
 
