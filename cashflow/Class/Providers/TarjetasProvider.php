@@ -379,7 +379,7 @@ class TarjetasProvider extends CashflowProvider {
         }
 
         if (empty($datos['socios']['filas'])) {
-            $partes[] = 'no hay tarjetas de socios activas';
+            $partes[] = 'no hay bancos de socios activos';
         }
 
         // Atencion: el cero sale de que falta cargar algo, no de un error.

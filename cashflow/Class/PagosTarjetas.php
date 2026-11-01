@@ -809,11 +809,19 @@ class PagosTarjetas {
             'curva' => []
         ];
 
+        /* POR BANCO desde feature/tarjetas-resumenes-seguros: una fila por banco
+           de socios activo. Las tarjetas de socio con nombre quedaron de baja y
+           NO proyectan; se leen solo para decir cuanto proyectaban mientras su
+           banco no tenga base historica. */
         $socios = [];
+        $viejas = [];
 
         foreach ($tarjetas as $id => $t) {
-            if ($t['TIPO'] === 'SOCIO' && $t['ACTIVA']) {
+            if ($t['TIPO'] === Tarjetas::SOCIOS_BANCO && $t['ACTIVA']) {
                 $socios[$id] = $t;
+            } elseif ($t['TIPO'] === Tarjetas::SOCIO_HISTORIAL
+                      && ($t['ACTIVA'] || $t['USUARIO_BAJA'] === 'MIGRACION')) {
+                $viejas[$t['COD_BANCO']][$id] = $t;
             }
         }
 
@@ -875,6 +883,16 @@ class PagosTarjetas {
 
             $avisoBase = TarjetasSocios::avisoBase($base, $t['ROTULO']);
 
+            /* SIN BASE, EL AVISO DICE CUANTO PROYECTABAN SUS TARJETAS VIEJAS: es
+               la plata que el tablero no ve hasta que se cargue la base del
+               banco. */
+            if ($base['motivo'] === TarjetasSocios::SIN_BASE && isset($viejas[$t['COD_BANCO']])) {
+                $avisoBase .= ' Sus tarjetas de socio proyectaban '
+                    . self::plata($this->proyeccionViejas($viejas[$t['COD_BANCO']], $resumenes,
+                        $meses, $inflacion, $habiles, $curva, $bcra, $hoy))
+                    . ' en el horizonte, y eso hoy no está en el tablero.';
+            }
+
             /* Sin base no hay estimacion y se arregla cargandola: atencion. La
                base incompleta solo explica que el promedio es menos firme:
                informativo. */
@@ -908,6 +926,33 @@ class PagosTarjetas {
             $salida['filas'][] = $fila;
         }
 
+        /* UN BANCO CON TARJETAS DE SOCIO VIEJAS QUE TODAVIA NO ESTA DADO DE ALTA
+           COMO BANCO DE SOCIOS: no tiene fila, asi que el aviso de base no lo
+           alcanza. Sin esto, su plata desaparece del tablero sin que nada lo
+           diga. */
+        $conBanco = [];
+
+        foreach ($socios as $t) {
+            $conBanco[$t['COD_BANCO']] = true;
+        }
+
+        foreach ($viejas as $cod => $suyas) {
+            if (isset($conBanco[$cod])) {
+                continue;
+            }
+
+            $una = reset($suyas);
+            $nombre = $una['DESC_BANCO'] ?: ('banco ' . $cod);
+
+            $salida['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'Socios · ' . $nombre . ': sus '
+                . count($suyas) . ' tarjeta(s) de socio proyectaban '
+                . self::plata($this->proyeccionViejas($suyas, $resumenes, $meses, $inflacion,
+                    $habiles, $curva, $bcra, $hoy))
+                . ' en el horizonte y ya no proyectan: Socios va por banco. Dá de alta el banco en '
+                . 'Parámetros › Tarjetas y cargale la base histórica. Hasta entonces eso no está en '
+                . 'el tablero.');
+        }
+
         sort($faltanInflacion);
         $avisoInf = Inflacion::avisoFaltan($faltanInflacion, $hoy);
 
@@ -921,6 +966,28 @@ class PagosTarjetas {
         }
 
         return $salida;
+    }
+
+    /**
+     * Cuanto proyectaban, sumadas, unas tarjetas de socio con nombre: como si
+     * siguieran activas, con su base y su regla. Solo para el aviso.
+     *
+     * @return float
+     */
+    private function proyeccionViejas($tarjetas, $resumenes, $meses, $inflacion, $habiles,
+                                      $curva, $bcra, $hoy) {
+        $total = 0.0;
+
+        foreach ($tarjetas as $id => $t) {
+            try {
+                $total += TarjetasSocios::totalProyectado($t, isset($resumenes[$id]) ? $resumenes[$id] : [],
+                    $meses, $inflacion, $habiles, $curva, $bcra, $hoy);
+            } catch (Throwable $e) {
+                // Un calendario roto ya avisa por su lado: el aviso dice lo que se pudo sumar.
+            }
+        }
+
+        return $total;
     }
 
     /* ====================================================================

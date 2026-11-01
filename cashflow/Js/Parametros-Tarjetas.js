@@ -41,6 +41,12 @@
     var tarjetas = [];
     var tipos = {};
 
+    /** Los tipos que se pueden dar de alta: sin Socio con nombre, que es historial */
+    var tiposAlta = {};
+
+    /** Un banco de socios: sin usuario ni ultimos 4 */
+    var SOCIOS_BANCO = 'SOCIOS_BANCO';
+
     /* LISTAS ORDENADAS, NO MAPAS. El backend las manda como arrays de objetos
        porque un mapa se convierte en un objeto JSON y Object.keys() NO respeta el
        orden en que se escribió: pone primero las claves que son índices de array,
@@ -85,6 +91,7 @@
             .then(function(d) {
                 tarjetas = d.data.filas || [];
                 tipos = d.data.tipos || {};
+                tiposAlta = d.data.tipos_alta || tipos;
                 bancos = d.data.bancos || [];
                 usuarios = d.data.usuarios || [];
                 tablaCreada = !!d.data.tabla_creada;
@@ -170,32 +177,46 @@
                 ? '<div><small class="text-muted" title="Se cruza por nombre contra ' +
                   'RO_T_SUPERVISORAS_COMERCIAL">se asocia por nombre</small></div>' : '';
 
+            /* LOS SOCIOS VAN POR BANCO: la fila de un banco no tiene usuario ni
+               últimos 4, y su tipo no se cambia. Las tarjetas de socio con nombre
+               quedaron como historial: se ven, de baja, sin controles. */
+            var esBanco = (t.TIPO === SOCIOS_BANCO);
+            var historial = (t.TIPO === 'SOCIO');
+
             return '<tr class="' + (t.ACTIVA ? '' : 'text-muted') + '">' +
-                '<td>' + celdaTipo(t) + notaTipo + '</td>' +
+                '<td>' + (esBanco || historial
+                    ? '<span class="fw-semibold">' + esc(tipos[t.TIPO] || t.TIPO) + '</span>'
+                      + (historial ? '<div><small class="text-muted">ya no proyecta: Socios va por '
+                        + 'banco</small></div>' : '')
+                    : celdaTipo(t) + notaTipo) + '</td>' +
                 '<td>' +
                     esc(t.DESC_BANCO || t.COD_BANCO) + bancoSinNombre +
                     '<div><small class="text-muted">' + esc(t.COD_BANCO) + '</small></div>' +
                 '</td>' +
-                '<td>' +
-                    '<span class="fw-semibold">' + esc(t.NOMBRE_USUARIO) + '</span>' +
-                    fueraDeVista +
+                '<td>' + (esBanco
+                    ? '<small class="text-muted">— por banco</small>'
+                    : '<span class="fw-semibold">' + esc(t.NOMBRE_USUARIO) + '</span>' + fueraDeVista) +
                 '</td>' +
-                '<td class="text-center">' +
-                    '<input type="text" maxlength="4" inputmode="numeric" ' +
+                '<td class="text-center">' + (esBanco || historial
+                    ? '<small class="text-muted">' + esc(t.ULTIMOS_4 || '—') + '</small>'
+                    : '<input type="text" maxlength="4" inputmode="numeric" ' +
                         'class="form-control form-control-sm text-center ptar-input" ' +
                         'data-id="' + esc(t.ID) + '" data-campo="ultimos_4" ' +
                         'placeholder="—" ' +
                         'value="' + esc(t.ULTIMOS_4 === null ? '' : t.ULTIMOS_4) + '"' +
-                        (tablaCreada ? '' : ' disabled') + '>' +
+                        (tablaCreada ? '' : ' disabled') + '>') +
                 '</td>' +
-                celdaNum(t, 'pct_cobertura', t.PCT_COBERTURA, '0.01', 0, 100) +
-                celdaNum(t, 'dia_vencimiento', t.DIA_VENCIMIENTO, '1', 1, 31) +
+                (historial
+                    ? '<td class="text-end"><small>' + esc(t.PCT_COBERTURA) + '</small></td>'
+                      + '<td class="text-center"><small>' + esc(t.DIA_VENCIMIENTO) + '</small></td>'
+                    : celdaNum(t, 'pct_cobertura', t.PCT_COBERTURA, '0.01', 0, 100) +
+                      celdaNum(t, 'dia_vencimiento', t.DIA_VENCIMIENTO, '1', 1, 31)) +
                 '<td class="text-center">' +
                     '<div class="form-check form-switch d-inline-block">' +
                         '<input class="form-check-input ptar-activa" type="checkbox" ' +
                             'data-id="' + esc(t.ID) + '"' +
                             (t.ACTIVA ? ' checked' : '') +
-                            (tablaCreada ? '' : ' disabled') + '>' +
+                            ((historial && !t.ACTIVA) || !tablaCreada ? ' disabled' : '') + '>' +
                     '</div>' +
                 '</td>' +
                 // Quién y cuándo, con el formato de Js/auditoria.js
@@ -346,7 +367,7 @@
     function llenarDesplegables() {
         /* El tipo sigue siendo un mapa de tres entradas: con tres, el orden es el
            que tiene y no hace falta nada más. */
-        opcionesMapa('ptarTipo', tipos, 'Elegí el tipo…');
+        opcionesMapa('ptarTipo', tiposAlta, 'Elegí el tipo…');
 
         /* Los usuarios son catorce, así que un desplegable alcanza; lo que hacía
            falta era que estuvieran ORDENADOS por nombre, y para eso el backend los
@@ -479,6 +500,25 @@
         if (caja) { caja.style.display = 'none'; }
     }
 
+    /**
+     * Un banco de socios no tiene usuario ni últimos 4: Socios va por banco y
+     * sin el nombre del socio. Los dos campos se apagan y se vacían, para que no
+     * viaje un usuario que el servidor rechazaría.
+     */
+    function segunTipo() {
+        var banco = texto('ptarTipo') === SOCIOS_BANCO;
+
+        ['ptarUsuario', 'ptarUltimos4'].forEach(function(id) {
+            var el = document.getElementById(id);
+
+            if (!el) { return; }
+
+            el.disabled = banco;
+
+            if (banco) { el.value = ''; }
+        });
+    }
+
     function mostrarForm(visible) {
         var form = document.getElementById('ptarFormNuevo');
 
@@ -497,6 +537,7 @@
         valor('ptarDia', '');
         marcarBancoElegido(null);
         ocultarSugerenciasBanco();
+        segunTipo();
     }
 
     function agregar() {
@@ -510,7 +551,8 @@
            fallar por un campo que en pantalla parecía completo. */
         if (!texto('ptarBancoCod')) { faltan.push('el banco (elegilo de la lista)'); }
 
-        if (!texto('ptarUsuario')) { faltan.push('el usuario'); }
+        /* UN BANCO DE SOCIOS NO TIENE USUARIO: va por banco, sin el nombre del socio. */
+        if (texto('ptarTipo') !== SOCIOS_BANCO && !texto('ptarUsuario')) { faltan.push('el usuario'); }
         if (!texto('ptarDia')) { faltan.push('el día de vencimiento'); }
 
         /* SE DICE TODO LO QUE FALTA DE UNA, no lo primero: cuatro intentos para
@@ -756,6 +798,7 @@
         enganchar('ptarBtnNuevo', 'click', function() { mostrarForm(true); });
         enganchar('ptarBtnCancelar', 'click', function() { mostrarForm(false); });
         enganchar('ptarBtnAgregar', 'click', agregar);
+        enganchar('ptarTipo', 'change', segunTipo);
 
         /* El buscador de bancos: se abre al escribir y también al hacer foco, para
            que se vea que hay una lista y no un campo libre. */

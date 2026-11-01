@@ -666,7 +666,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="col-md-6 col-lg-4">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
-                            <span class="kpi-card-title">Tarjetas de socios</span>
+                            <span class="kpi-card-title">Bancos de socios</span>
                             <div class="kpi-card-icon green"><i class="fas fa-credit-card"></i></div>
                         </div>
                         <div class="kpi-card-value" id="socCuantas">0</div>
@@ -704,9 +704,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="card-header d-flex justify-content-between align-items-center
                             flex-wrap gap-2">
                     <div>
-                        <h5 class="mb-0">Por tarjeta</h5>
+                        <h5 class="mb-0">Por banco</h5>
                         <small class="text-muted">
-                            Cada tarjeta se abre en cuatro filas: <strong>U$S</strong>
+                            Cada banco se abre en cuatro filas: <strong>U$S</strong>
                             (informativa, no suma en pesos), <strong>equivalente en $</strong>,
                             <strong>$</strong> y el <strong>total en pesos</strong>.
                         </small>
@@ -725,7 +725,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         <table id="tablaSoc" class="table table-hover mb-0">
                             <thead>
                                 <tr>
-                                    <th rowspan="2">TARJETA</th>
+                                    <th rowspan="2">BANCO</th>
                                     <th rowspan="2" class="text-end"
                                         title="Promedio de los últimos 3 resúmenes cargados">
                                         BASE
@@ -757,7 +757,11 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
 
                 <div class="card-body py-2 border-top">
                     <small class="text-muted">
-                        <strong>La base son los últimos 3 resúmenes</strong> de la tarjeta, de
+                        <strong>Va por banco</strong>, sin el nombre del socio: cada banco tiene su %
+                        de cobertura y su día de vencimiento en <em>Parámetros › Tarjetas</em>, y
+                        sus resúmenes son los del banco.
+                        <br>
+                        <strong>La base son los últimos 3 resúmenes</strong> del banco, de
                         cualquier origen, con período anterior al mes en curso. Al principio se
                         cargan de una con <em>Cargar base histórica</em>; después, los que se van
                         cargando mes a mes pasan a formar parte del histórico y la base se corre

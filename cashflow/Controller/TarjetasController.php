@@ -639,6 +639,12 @@ try {
                     'filas' => $tarjetas->getTarjetas(false, $tipo),
                     'tipos' => Tarjetas::TIPOS,
 
+                    /* LOS QUE SE PUEDEN DAR DE ALTA: Socio con nombre quedo como
+                       historial, y el banco de socios espera a su script. */
+                    'tipos_alta' => array_diff_key(Tarjetas::TIPOS,
+                        array_flip(array_merge([Tarjetas::SOCIO_HISTORIAL],
+                            $tarjetas->bancosSociosHabilitados() ? [] : [Tarjetas::SOCIOS_BANCO]))),
+
                     /* LISTAS ORDENADAS Y NO MAPAS: un mapa se convierte en un
                        objeto JSON y Object.keys() no respeta el orden en que se
                        escribio. Ver Tarjetas::comoLista(). */

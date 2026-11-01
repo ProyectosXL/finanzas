@@ -52,9 +52,10 @@ Todos contra `central`, reejecutables, y ninguno borra nada.
 | 3 | `sql/cashflow_tarjetas_fila.sql` | Crea la fila `TARJETAS_PAGOS` en *Costos Indirectos*, orden 45, apuntada a `TARJETAS` / `TOTAL` | **El tablero queda exactamente como hoy** y no falta nada, porque hasta hoy esta plata no estaba en el cuadro. La pestaña funciona igual y avisa que lo que muestra todavía no llega al tablero |
 | 5 | `sql/cashflow_tarjetas_resumen_compartido.sql` | Crea `RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA`: las tarjetas **adicionales** de un resumen compartido. **No migra nada**: los resúmenes que ya están son de una tarjeta, que es su titular | Todo funciona igual, con resúmenes de una sola tarjeta. En el formulario no aparece la lista de tarjetas, y el servidor rechaza un resumen de varias nombrando el script |
 | 7 | `sql/cashflow_tarjetas_prov_proyecta.sql` | Crea `RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA` (los proveedores que proyectan) y **migra** a ella, con usuario `MIGRACION`, los proveedores de las marcas mensuales vigentes. La tabla de marcas no se toca | **Ningún proveedor proyecta y la fila baja** lo que daban las marcas mensuales ($ 80,5 M al 31/10/2026): las marcas viejas ya no se leen. La sección de Parámetros se dibuja apagada nombrando el script |
+| 8 | `sql/cashflow_tarjetas_socios_banco.sql` | Habilita los **bancos de socios** en el maestro (columnas de usuario `NULL`-ables, el tipo `SOCIOS_BANCO` y su CHECK) y da de **baja** las tarjetas de tipo Socio, con usuario `MIGRACION`. No toca los resúmenes | No se pueden dar de alta bancos de socios y **Socios va en cero**: el código nuevo ya no proyecta las tarjetas con nombre. El aviso de cada banco dice cuánto proyectaban |
 | 6 | `sql/cashflow_tarjetas_historico_manual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_HIST_MANUAL`: el histórico de 3 meses de quien tiene tarjeta Supervisora y no carga gastos | Esas personas aparecen en Gastos Supervisoras sin proyección, y no hay botón para cargarles el histórico. El tablero no cambia |
 
-El **2, el 4 y el 5 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero. **El 5, el 6 y el 7 son de `feature/tarjetas-resumenes-seguros`** y se corren después de los anteriores, en cualquier orden entre ellos. **El 7 hay que correrlo el mismo día que se sube el código**: el código nuevo deja de leer las marcas mensuales, y sin el 7 esa estimación desaparece de la fila.
+El **2, el 4 y el 5 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero. **El 5, el 6, el 7 y el 8 son de `feature/tarjetas-resumenes-seguros`** y se corren después de los anteriores, en cualquier orden entre ellos. **El 7 hay que correrlo el mismo día que se sube el código**: el código nuevo deja de leer las marcas mensuales, y sin el 7 esa estimación desaparece de la fila.
 
 **La vista `RO_V_CASHFLOW_USUARIOS_TARJETAS` no la crea ningún script de este repo.** Ya existe y se mantiene aparte. El script 1 sólo verifica que esté con `OBJECT_ID` y avisa si falta; la pantalla hace lo mismo y se dibuja apagada en vez de fallar.
 
@@ -78,7 +79,7 @@ Lo que falte cargar **no rompe nada**, pero deja plata fuera del tablero. Cada f
 | **Las pólizas de OGRSA, OGZURI, OGLCAJ y OGMESE** | Tarjetas Pagos Corporativos › Seguros | Las facturas de seguros salen de la grilla y del tablero, y sin póliza vigente ese proveedor no proyecta nada. El aviso dice cuánto proyectaban sus facturas |
 | **Revisar los 77 vencimientos corregidos** (ver la sección 4) | La columna VTO. A CONSIDERAR | Nada se rompe: las correcciones siguen moviendo la fecha de pago. La mayoría ya no hace falta |
 
-> La sección de **Tarjetas Socios por banco** se completa en su etapa.
+| **Los bancos de socios y su base histórica**: dar de alta Galicia (007), Francés (017) y Provincia (014) con su % y su día, y cargar los últimos 3 resúmenes de cada uno | *Parámetros › Tarjetas*, y el botón de resúmenes de la fila del banco en Tarjetas Socios | **Socios va en cero**. Al 31/10/2026 eso son **$ 101.666.292,59**: Galicia $ 95,8 M, Francés $ 5,3 M y Provincia $ 0,6 M. El aviso de cada banco dice cuánto |
 
 ---
 
@@ -473,6 +474,27 @@ Un comprobante con varias cuotas queda vinculado entero y cada cuota genera su c
 
 ## 5. Tarjetas Socios
 
+### Va por banco, sin el nombre del socio
+
+> Desde `feature/tarjetas-resumenes-seguros`. Script: `sql/cashflow_tarjetas_socios_banco.sql`.
+
+**Todo es por banco.** En *Parámetros › Tarjetas*, cada banco de socios es **una fila del maestro de tipo `SOCIOS_BANCO`, sin usuario y sin últimos 4**, con su **% de cobertura** y su **día de vencimiento**. Los resúmenes se cargan por banco, con el mismo formulario, y la estimación es la de siempre sobre los resúmenes del banco (la base, la inflación sólo en pesos, BCRA para el próximo y futuro para los siguientes, la cobertura): `TarjetasSocios` no cambió.
+
+**Por qué una fila del maestro y no una tabla propia:** reusa la tabla de resúmenes con su FK, el historial, la carga de la base histórica, el formulario y el próximo pago, sin una segunda tabla de resúmenes que mantener igual.
+
+| | Cómo es |
+| --- | --- |
+| **El script** | Pone `ID_USUARIO` y `NOMBRE_USUARIO` en `NULL`-ables (baja y vuelve a crear iguales los dos índices que las usan, en una transacción), suma `SOCIOS_BANCO` al CHECK del tipo y agrega `CK_RO_T_CF_TARJ_USUARIO_TIPO`: un banco no tiene usuario ni últimos 4, una tarjeta sí tiene usuario |
+| **Uno por banco** | Sin índice nuevo: la identidad `(COD_BANCO, ID_USUARIO, ULTIMOS_4)` trata los `NULL` como iguales, así que dos bancos de socios del mismo banco chocan. El backend lo dice antes, con un mensaje que se entiende |
+| **Las tarjetas de socio con nombre** | El script las da de **baja lógica** con usuario `MIGRACION`. **Sus resúmenes no se migran**: quedan colgando de ellas como historial, y la base histórica se vuelve a cargar por banco. Dejan de proyectar, no se editan y no se reactivan (`Tarjetas::validarCambioDeTipo()`, `activarTarjeta()`) |
+| **Una tarjeta no se vuelve banco** | Ni al revés: una tiene usuario y el otro no. Se da de alta la otra |
+| **La grilla** | Una fila por banco, con los mismos cuatro renglones (total en pesos, consumos en $, U$S equivalente en $, U$S). Se nombra *"Socios · <banco>"* |
+
+**Mientras un banco no tenga base histórica, el aviso dice cuánto proyectaban sus tarjetas viejas** —es la plata que el tablero deja de ver—, calculado con la misma regla (`TarjetasSocios::totalProyectado()`). Y un banco con tarjetas de socio que **todavía no está dado de alta** avisa igual: *"Socios · <banco>: sus N tarjeta(s) de socio proyectaban $ X en el horizonte y ya no proyectan…"*. Los dos son de atención, en la pestaña y en el tablero.
+
+> Medido el 31/10/2026: **SOCIOS pasa de $ 101.666.292,59 a $ 0** hasta que se den de alta los bancos y se cargue su base. Los avisos lo reparten: **Galicia (007) $ 95.796.286,09** en 6 tarjetas, **Francés (017) $ 5.314.669,91** en 3, **Provincia (014) $ 555.336,60** en 1.
+
+
 ### La base son los últimos tres resúmenes, de cualquier origen
 
 Al principio se cargan tres de una con **Cargar base histórica** (`ORIGEN = 'HISTORICO'`, ya pagados). Después, los que se van cargando mes a mes (`ORIGEN = 'CARGA'`) pasan a formar parte del histórico y **la base se corre sola**.
@@ -645,7 +667,7 @@ Los avisos son la mitad de lo que esta pestaña hace: al 26/09/2026, con las tab
 | Estimaciones mensuales cuya **tarjeta está inactiva** o ya no existe | — |
 | Meses **sin inflación** cargada, diciendo si están fuera de la ventana editable | — |
 | Meses **sin cotización** para valuar el componente en dólares | — |
-| Tarjetas de socio **sin base histórica** | — |
+| Bancos de socios **sin base histórica**, con lo que proyectaban sus tarjetas viejas; y bancos con tarjetas de socio **sin dar de alta** | Al 31/10/2026: los tres bancos, $ 101,7 M |
 
 **Cada aviso describe un hecho distinto y va aparte.** Juntarlos haría que el importe total no se pudiera atribuir a ninguna causa, que es justamente lo que un aviso tiene que permitir.
 
@@ -698,6 +720,7 @@ php cashflow/tests/run.php tarjetas      los cinco archivos del módulo
 | `tests/test_tarjetas_hist_manual.php` | Los **3 meses cerrados** validados en el servidor; el promedio **sobre 3**, todo tarjeta, con el mes base en el último cargado; la **inflación compuesta** desde ahí y el mes sin inflación en `null`; el **débito en su tarjeta** con su cobertura, y el resumen que lo pisa; quién entra a la grilla —con histórico, sin histórico— y que **manden los gastos**; que una **tarjeta Supervisora activa** cuente como activa a quien no está en el maestro, pero no a una inactiva del maestro; y el script |
 | `tests/test_tarjetas_fecha_debito.php` | El **débito a partir del vencimiento**: cuota antes y después del día de la tarjeta, el mismo día, el día corrido al hábil, fuera del horizonte; una factura en cuotas con **cada cuota en su débito**; la vencida al próximo pago; la **corregida** al débito siguiente; la no vinculada en su vencimiento de Tango; el resumen que fija el débito de su mes; y las tres columnas de la grilla |
 | `tests/test_tarjetas_prov_proyecta.php` | Que se repita **cada factura pendiente**, vinculada y no excluida —dos del mismo mes, de dos meses, la boleta que vence a fin del mes anterior—; que de una factura **en cuotas** se repita sólo la última; la **cancelada** deja de proyectar; la **excluida** y la **sin vincular** no se repiten, y la segunda se avisa; el aviso de **leyenda repetida**, por comprobante y sin cambiar el cálculo; sólo los marcados; y que la estimación **se comporte como una vinculada** —cobertura, resumen, fecha pasada, tarjeta inactiva—. Además el buscador, los endpoints con sus permisos, que se fue *marcar mensual*, el script y su **migración reejecutable** |
+| `tests/test_tarjetas_socios_banco.php` | El rótulo por banco; que no se dé de alta una tarjeta de socio con nombre, que una tarjeta no se vuelva banco ni al revés, que la vieja no se edite; la **estimación por banco con 0, 1, 2 y 3 resúmenes**, dividida por los que hay, con la inflación sólo en pesos y las dos reglas del dólar; `totalProyectado()` para el aviso; que la pestaña proyecte los bancos y las viejas sólo avisen; y el script —columnas, índices iguales, CHECK, baja con `MIGRACION`, resúmenes sin tocar— |
 | `tests/test_tarjetas_provider.php` | **`TOTAL = SUPERVISORAS + CORPORATIVAS + SOCIOS` columna por columna**, también con **estimaciones mensuales** adentro y su celda anotada, que las excluidas no entren al total, los importes en positivo, que el eje ubique cada pago, el `detalle` de las celdas con resumen —y que **sobreviva a `normalizar()`**—, que dos resúmenes en la misma columna **junten sus notas**, los casos de fila en cero **con su aviso**, y que un módulo que lanza **no tumbe el tablero** |
 | `tests/test_menu.php` | Que `pagos_tarjetas` **dejó de ser un placeholder**, que el menú la declara con datos, que las otras dos de Financiero siguen pendientes y que la categoría pasa a **1 de 3** |
 | `tests/test_providers.php` | **19 módulos** con datos reales (eran 18), que `FINANCIERO` **no se tocó** y que el total declara sus tres componentes |
@@ -757,6 +780,7 @@ sql/
   cashflow_tarjetas_resumen_compartido.sql
   cashflow_tarjetas_historico_manual.sql
   cashflow_tarjetas_prov_proyecta.sql
+  cashflow_tarjetas_socios_banco.sql
 
 tests/
   js/importe_formulario.wsf
@@ -765,6 +789,7 @@ tests/
   test_tarjetas_hist_manual.php
   test_tarjetas_fecha_debito.php
   test_tarjetas_prov_proyecta.php
+  test_tarjetas_socios_banco.php
   test_tarjetas_vencimiento.php
   test_tarjetas_maestro.php
   test_tarjetas_supervisoras.php
