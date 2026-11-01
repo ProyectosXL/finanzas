@@ -813,25 +813,21 @@ class TarjetasCorporativas {
      * --------
      * Para cada proveedor marcado:
      *
-     *   1. SU ULTIMO MES es el mes del vencimiento ORIGINAL DE TANGO mas tardio
-     *      entre sus facturas pendientes VINCULADAS a una tarjeta, excluidas
-     *      incluidas. Una sin vincular no cuenta: no suma, asi que no duplica
-     *      nada, y se avisa aparte. Una excluida si cuenta: corta la repeticion
-     *      de las anteriores, aunque ella no se repita.
+     *   1. SE REPITE CADA FACTURA PENDIENTE, VINCULADA Y NO EXCLUIDA, con su
+     *      importe de cuota (IMPORTE_VTO, sin inflacion) y su tarjeta, todos los
+     *      meses DESPUES DE SU MES DE PAGO y hasta el fin del horizonte, en el
+     *      debito de su tarjeta. Una sin vincular no se repite -no suma- y se
+     *      avisa; una excluida tampoco.
      *
-     *      EL DE TANGO Y NO EL CORREGIDO. La correccion vale para la fecha de
-     *      pago (resolver()), pero casi todas llevaban la factura al debito del
-     *      resumen y juntan facturas de meses distintos en uno: las boletas de
-     *      luz del 28/09 al 21/10 quedaban todas en noviembre y se repetian
-     *      todas. Que facturas forman "el mes" lo dice cuando vencen, no en que
-     *      debito se pagan.
+     *      HASTA feature/tarjetas-resumenes-seguros SE REPETIAN SOLO LAS DEL
+     *      ULTIMO MES, y eso dejaba afuera a un local cuya ultima boleta vence a
+     *      fin del mes anterior (Edenor L79 Arcos, que vence el 28). El riesgo
+     *      contrario -que dos boletas del mismo servicio se repitan las dos- lo
+     *      avisa avisosLeyendaRepetida(), sin cambiar el calculo.
      *
-     *   2. SE REPITEN LAS FACTURAS DE ESE MES, vinculadas y no excluidas: cada una
-     *      con su importe de cuota (IMPORTE_VTO, sin inflacion) y su tarjeta,
-     *      todos los meses DESPUES DE SU MES DE PAGO y hasta el fin del
-     *      horizonte, en el vencimiento de su tarjeta. Las de meses anteriores
-     *      cuentan solo en su mes: por eso cuando se carga la factura de
-     *      noviembre deja de repetirse la de octubre, y el abono no se duplica.
+     *   2. DE UNA FACTURA EN CUOTAS SE REPITE SOLO SU ULTIMA CUOTA PENDIENTE (por
+     *      vencimiento de Tango). Cada cuota pendiente es una fila, y repetirlas
+     *      todas multiplicaria el abono por la cantidad de cuotas.
      *
      *   3. UNA FACTURA QUE SE CANCELA SALE DE PENDIENTES, y con ella sus
      *      estimaciones. Entre el pago de una y la carga de la siguiente puede no
@@ -874,21 +870,24 @@ class TarjetasCorporativas {
         $v = [];
 
         foreach ($porProveedor as $cod => $suyas) {
-            $ultimo = null;
+            /* LA ULTIMA CUOTA PENDIENTE DE CADA COMPROBANTE, por vencimiento de
+               Tango. Ver el punto 2 del encabezado. */
+            $ultimaCuota = [];
 
             foreach ($suyas as $f) {
-                $tango = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
+                $clave = self::clave($f);
+                $tango = isset($f['FECHA_VTO']) ? (string) $f['FECHA_VTO'] : '';
 
-                if ($tango !== null && ($ultimo === null || substr($tango, 0, 7) > $ultimo)) {
-                    $ultimo = substr($tango, 0, 7);
+                if (!isset($ultimaCuota[$clave]) || $tango > $ultimaCuota[$clave]) {
+                    $ultimaCuota[$clave] = $tango;
                 }
             }
 
             foreach ($suyas as $f) {
                 $vto = self::vtoVigente($f);
-                $tango = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
+                $tango = isset($f['FECHA_VTO']) ? (string) $f['FECHA_VTO'] : '';
 
-                if ($tango === null || substr($tango, 0, 7) !== $ultimo
+                if ($tango !== $ultimaCuota[self::clave($f)]
                     || !empty($f['EXCLUIDA_TARJETAS']) || empty($f['MES_PAGO'])) {
                     continue;
                 }
@@ -1000,9 +999,8 @@ class TarjetasCorporativas {
 
     /**
      * Los avisos de los proveedores que proyectan: el que tiene una factura sin
-     * vincular. No suma ni corta la repeticion -sin tarjeta no se sabe en que
-     * debito sale-, asi que la proyeccion sigue con la factura anterior hasta que
-     * se la vincule.
+     * vincular. No suma ni se repite -sin tarjeta no se sabe en que debito sale-,
+     * asi que hasta que se la vincule no esta en la proyeccion.
      *
      * Estatica y pura.
      *
@@ -1026,8 +1024,66 @@ class TarjetasCorporativas {
         $avisos = [];
 
         foreach ($sin as $nombre) {
-            $avisos[] = $nombre . ' tiene una factura sin vincular; vinculala para que reemplace '
-                . 'la proyección.';
+            $avisos[] = $nombre . ' tiene una factura sin vincular; vinculala para que entre al '
+                . 'flujo y se proyecte.';
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * El riesgo de proyectar dos veces el mismo servicio: un proveedor que
+     * proyecta con dos o mas facturas pendientes, vinculadas y no excluidas, con
+     * la MISMA LEYENDA. Como se repite cada una, si son dos boletas del mismo
+     * local -la de septiembre todavia sin pagar y la de octubre- el servicio
+     * se proyecta dos veces.
+     *
+     * NO CAMBIA EL CALCULO: dos facturas con la misma leyenda pueden ser dos
+     * servicios distintos, y decidirlo es mirar las facturas. Se cuenta por
+     * comprobante, no por cuota. Una leyenda vacia no se compara.
+     *
+     * Estatica y pura.
+     *
+     * @param array $proveedores Mapa COD_PROVEE => [...]
+     * @param array $filas Lo que devolvio resolver()['filas']
+     * @return array Lista de avisos de atencion
+     */
+    public static function avisosLeyendaRepetida($proveedores, $filas) {
+        $grupos = [];
+
+        foreach ($filas as $f) {
+            $cod = $f['COD_PROVEE'];
+            $leyenda = isset($f['LEYENDA']) ? trim(preg_replace('/\s+/', ' ', (string) $f['LEYENDA'])) : '';
+
+            if (!isset($proveedores[$cod]) || empty($f['ID_TARJETA'])
+                || !empty($f['EXCLUIDA_TARJETAS']) || $leyenda === '') {
+                continue;
+            }
+
+            $k = mb_strtoupper($leyenda, 'UTF-8');
+
+            // Se nombra como vino en la primera: es la que se lee en la grilla.
+            if (!isset($grupos[$cod][$k])) {
+                $grupos[$cod][$k] = ['leyenda' => $leyenda, 'comprobantes' => []];
+            }
+
+            $grupos[$cod][$k]['comprobantes'][self::clave($f)] = true;
+        }
+
+        $avisos = [];
+
+        foreach ($grupos as $cod => $porLeyenda) {
+            $nombre = !empty($proveedores[$cod]['RAZON_SOC']) ? $proveedores[$cod]['RAZON_SOC'] : $cod;
+
+            foreach ($porLeyenda as $g) {
+                $n = count($g['comprobantes']);
+
+                if ($n >= 2) {
+                    $avisos[] = Aviso::nuevo(Aviso::WARNING, $nombre . ': hay ' . $n . ' facturas '
+                        . 'pendientes de ' . $g['leyenda'] . '; si son del mismo servicio, se '
+                        . 'proyectan dos veces.');
+                }
+            }
         }
 
         return $avisos;

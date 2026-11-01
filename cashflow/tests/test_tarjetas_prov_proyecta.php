@@ -4,12 +4,12 @@
  *
  * QUE SE ROMPE EN SILENCIO SI ESTO NO SE PRUEBA
  *
- *   1. SE REPITEN FACTURAS DE DOS MESES. La de octubre todavia no se pago y ya se
- *      cargo la de noviembre: si las dos se repiten, el abono se cuenta dos veces
- *      todos los meses del horizonte.
+ *   1. UNA FACTURA PENDIENTE QUEDA AFUERA. Con la regla del ultimo mes, la boleta
+ *      de un local que vence a fin del mes anterior no se repetia: ahora se repite
+ *      cada factura pendiente, vinculada y no excluida.
  *
- *   2. UNA SIN VINCULAR CORTA LA REPETICION. No suma, asi que cortar dejaria el
- *      mes sin nada: no corta, y se avisa para que la vinculen.
+ *   2. EL MISMO SERVICIO DOS VECES SIN QUE NADIE LO VEA. Dos boletas pendientes
+ *      del mismo local se repiten las dos: el calculo no lo decide, pero lo avisa.
  *
  *   3. LA ESTIMACION NO SE COMPORTA COMO UNA FACTURA VINCULADA. Sin cobertura, o
  *      sumando arriba del resumen cargado, el mes se cuenta mal.
@@ -105,21 +105,25 @@ chequear('desde noviembre se repiten las dos: 150.000 por mes',
 chequear('en el vencimiento de su tarjeta', '2026-11-10', $r['est'][0]['meses'][0]['fecha']);
 chequear('con el importe de la cuota, sin inflacion', 100000.0, $r['est'][0]['meses'][3]['importe']);
 
-seccion('facturas de dos meses pendientes: cada una cuenta en su mes, se repite la ultima');
+seccion('cada factura pendiente se repite, no solo las del ultimo mes');
 
+/* La de octubre todavia no se pago y ya se cargo la de noviembre: las dos se
+   repiten. Es la regla desde que la del ultimo mes dejaba afuera a un local cuya
+   boleta vence a fin del mes anterior. El riesgo de que sean del mismo servicio
+   lo avisa avisosLeyendaRepetida(). */
 $r = estimarPP([fpTC('A1', '2026-10-05', 100000), fpTC('B1', '2026-11-05', 120000)],
     ['A1' => 7, 'B1' => 7]);
 
-chequear('se repite solo la de noviembre', ['B1'], array_column($r['est'], 'N_COMP'));
-chequear('desde diciembre, por su importe: el abono no se duplica',
-    ['2026-12' => 120000.0, '2027-01' => 120000.0, '2027-02' => 120000.0], porMesPP($r['est']));
+chequear('se repiten las dos', ['A1', 'B1'], array_column($r['est'], 'N_COMP'));
+chequear('cada una desde el mes siguiente a su pago',
+    ['2026-11' => 100000.0, '2026-12' => 220000.0, '2027-01' => 220000.0, '2027-02' => 220000.0],
+    porMesPP($r['est']));
 
-seccion('el ultimo mes es el del vencimiento ORIGINAL de Tango, no el corregido');
+seccion('la boleta que vence a fin del mes anterior tambien se repite');
 
-/* Dos boletas: una vence el 28/09 y otra el 21/10. Las dos tienen el vencimiento
-   corregido al debito del resumen, el 02/11. Con el corregido, las dos serian de
-   noviembre y se repetirian las dos; con el de Tango, el ultimo mes es octubre y
-   se repite solo la del 21/10. La correccion sigue moviendo su fecha de pago. */
+/* Dos boletas de dos locales: una vence el 28/09 y otra el 21/10, las dos con el
+   vencimiento corregido al debito del resumen. Las dos se repiten, cada una desde
+   el mes siguiente a su pago, y la correccion sigue moviendo su fecha de pago. */
 $bSep = fpTC('L1', '2026-09-28', 1000000);
 $bOct = fpTC('L2', '2026-10-21', 400000);
 $corrPP = [];
@@ -135,10 +139,20 @@ $rc = TarjetasCorporativas::resolver([$bSep, $bOct],
 $estC = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rc['filas'], $TP, [], $HABP, $MP,
     $HP)['estimaciones'];
 
-chequear('se repite solo la del ultimo mes de Tango', ['L2'], array_column($estC, 'N_COMP'));
+chequear('la del 28/09 se repite, no queda afuera', ['L1', 'L2'], array_column($estC, 'N_COMP'));
 chequear('la correccion sigue valiendo para su fecha de pago: el debito de noviembre',
     ['2026-11-10', '2026-11'], [$rc['filas'][1]['FECHA'], $rc['filas'][1]['MES_PAGO']]);
-chequear('y se repite desde el mes siguiente a ese pago', '2026-12', $estC[0]['MES_DESDE']);
+chequear('y se repite desde el mes siguiente a ese pago', '2026-12', $estC[1]['MES_DESDE']);
+
+seccion('de una factura en cuotas se repite solo la ultima cuota');
+
+$r = estimarPP([fpTC('C1', '2026-10-05', 30000), fpTC('C1', '2026-11-05', 30000),
+                fpTC('C1', '2026-12-05', 30000)], ['C1' => 7]);
+
+chequear('una sola estimacion, la de la ultima cuota', ['2026-12-05'],
+    array_column($r['est'], 'FECHA_VTO_TANGO'));
+chequear('las cuotas pendientes cuentan en su mes, como facturas, y la ultima se repite',
+    ['2027-01' => 30000.0, '2027-02' => 30000.0], porMesPP($r['est']));
 
 seccion('una factura cancelada deja de proyectar');
 
@@ -147,32 +161,51 @@ seccion('una factura cancelada deja de proyectar');
 chequear('sin pendientes no hay estimaciones', [],
     estimarPP([], [])['est']);
 
-seccion('una excluida corta la repeticion pero no se repite');
+seccion('una excluida no se repite');
 
 $r = estimarPP([fpTC('A1', '2026-10-05', 100000), fpTC('B1', '2026-11-05', 120000)],
     ['A1' => 7, 'B1' => 7], ['B1']);
 
-chequear('la de noviembre excluida: no se repite nada', [], $r['est']);
+chequear('la excluida no se repite, la otra si', ['A1'], array_column($r['est'], 'N_COMP'));
 
-$r = estimarPP([fpTC('A1', '2026-10-05', 100000), fpTC('A2', '2026-10-06', 50000)],
-    ['A1' => 7, 'A2' => 7], ['A2']);
-
-chequear('en el mismo mes, solo se repite la que no esta excluida', ['A1'],
-    array_column($r['est'], 'N_COMP'));
-
-seccion('una sin vincular no corta la repeticion, y se avisa');
+seccion('una sin vincular no se repite, y se avisa');
 
 $r = estimarPP([fpTC('A1', '2026-10-05', 100000), fpTC('B1', '2026-11-05', 120000)],
     ['A1' => 7]);
 
-chequear('la de noviembre sin vincular no corta: sigue la de octubre', ['A1'],
-    array_column($r['est'], 'N_COMP'));
-chequear('y no suma, asi que no duplica nada', false, $r['filas'][1]['PROYECTA']);
+chequear('se repite solo la vinculada', ['A1'], array_column($r['est'], 'N_COMP'));
+chequear('la sin vincular no suma', false, $r['filas'][1]['PROYECTA']);
 chequear('el aviso dice que hacer',
-    ['ABONO SA tiene una factura sin vincular; vinculala para que reemplace la proyección.'],
+    ['ABONO SA tiene una factura sin vincular; vinculala para que entre al flujo y se proyecte.'],
     TarjetasCorporativas::avisosPorProveedor($PROV, $r['filas']));
 chequear('una no vinculada no se repite nunca', [],
     estimarPP([fpTC('A1', '2026-10-05', 100000)], [])['est']);
+
+seccion('dos facturas pendientes con la misma leyenda: aviso de atencion');
+
+$ley = function ($f, $l) { $f['LEYENDA'] = $l; return $f; };
+$r = estimarPP([$ley(fpTC('E1', '2026-09-28', 1), 'EDENOR L79 ARCOS'),
+                $ley(fpTC('E2', '2026-10-26', 1), 'Edenor  L79 Arcos'),
+                $ley(fpTC('E3', '2026-10-20', 1), 'EDENOR L80 SAN JUSTO'),
+                $ley(fpTC('E4', '2026-10-21', 1), 'EDENOR L80 SAN JUSTO'),
+                $ley(fpTC('E5', '2026-10-22', 1), '')],
+    ['E1' => 7, 'E2' => 7, 'E3' => 7, 'E5' => 7]);
+$avL = TarjetasCorporativas::avisosLeyendaRepetida($PROV, $r['filas']);
+
+chequear('uno por leyenda repetida, sin distinguir mayusculas ni espacios', 1, count($avL));
+chequear('de atencion, con el texto pedido', ['warning',
+    'ABONO SA: hay 2 facturas pendientes de EDENOR L79 ARCOS; si son del mismo servicio, se proyectan dos veces.'],
+    [$avL[0]['nivel'], $avL[0]['texto']]);
+chequear('una sin vincular no cuenta: L80 tiene una sola vinculada', false,
+    strpos(json_encode($avL, JSON_UNESCAPED_UNICODE), 'L80') !== false);
+chequear('no cambia el calculo: las dos de L79 se repiten', 2,
+    count(array_filter($r['est'], function ($e) { return in_array($e['N_COMP'], ['E1', 'E2'], true); })));
+chequear('las cuotas del mismo comprobante no cuentan como dos facturas', [],
+    TarjetasCorporativas::avisosLeyendaRepetida($PROV, estimarPP(
+        [$ley(fpTC('C1', '2026-10-05', 1), 'SEGURO'), $ley(fpTC('C1', '2026-11-05', 1), 'SEGURO')],
+        ['C1' => 7])['filas']));
+chequear('un proveedor sin marcar no avisa', [],
+    TarjetasCorporativas::avisosLeyendaRepetida([], $r['filas']));
 
 seccion('solo los proveedores marcados');
 

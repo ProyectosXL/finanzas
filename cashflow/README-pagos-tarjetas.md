@@ -402,12 +402,13 @@ Desde que la fecha sale del débito de la tarjeta, corregir el vencimiento sirve
 
 Antes se marcaba **una factura** como mensual y se guardaba una copia; había una sola estimación por proveedor y se apagaba por mes cuando aparecía la factura real. Ahora se marca el **proveedor**, en *Parámetros › Tarjetas › Proveedores que proyectan*, y la regla mira sus facturas pendientes (`TarjetasCorporativas::estimacionesPorProveedor()`, pura):
 
-1. **Su último mes** es el del **vencimiento original de Tango** más tardío entre sus facturas pendientes **vinculadas** a una tarjeta, **excluidas incluidas**.
-   - **El de Tango y no el corregido.** La corrección vale para la fecha de pago, pero casi todas llevaban la factura al débito del resumen y juntaban meses distintos: las boletas de Edenor del 28/09 al 21/10 quedaban todas en noviembre y se repetían todas. Qué facturas forman *"el mes"* lo dice cuándo vencen, no en qué débito se pagan.
-   - **Una sin vincular no cuenta**: no suma, así que no duplica nada. Genera el aviso *"<proveedor> tiene una factura sin vincular; vinculala para que reemplace la proyección"*.
-   - **Una excluida sí cuenta**: corta la repetición de las anteriores, aunque ella no se repita.
-2. **Se repiten las facturas de ese mes**, vinculadas y no excluidas: cada una con el **importe de su cuota** (`IMPORTE_VTO`, sin inflación), su tarjeta y la fecha del débito de esa tarjeta, **todos los meses después de su mes de pago y hasta el fin del horizonte**. Las de meses anteriores cuentan sólo en su mes: cuando se carga la de noviembre deja de repetirse la de octubre, y el abono no se duplica.
+1. **Se repite cada factura pendiente, vinculada y no excluida**, con el **importe de su cuota** (`IMPORTE_VTO`, sin inflación), su tarjeta y la fecha del débito de esa tarjeta, **todos los meses después de su mes de pago y hasta el fin del horizonte**, hasta que se cancele.
+   - **Por qué todas y no sólo las del último mes.** Una primera versión repetía sólo las del último mes, y dejaba afuera a un local cuya última boleta vence a fin del mes anterior: Edenor L79 Arcos vence el 28, ~$ 1,07 M por mes.
+   - **Una sin vincular no se repite** —no suma— y genera el aviso *"<proveedor> tiene una factura sin vincular; vinculala para que entre al flujo y se proyecte"*. **Una excluida tampoco.**
+2. **De una factura en cuotas se repite sólo su última cuota pendiente** (por vencimiento de Tango). Cada cuota pendiente es una fila, y repetirlas todas multiplicaría el abono por la cantidad de cuotas. Las cuotas anteriores cuentan en su mes, como cualquier factura.
 3. **Una factura que se cancela sale de pendientes, y con ella sus estimaciones.** Entre el pago de una y la carga de la siguiente puede no haber proyección: es lo esperado.
+
+**El riesgo de proyectar dos veces el mismo servicio se avisa y no se calcula.** Si un proveedor que proyecta tiene dos o más facturas pendientes y vinculadas con **la misma leyenda** —contadas por comprobante, sin distinguir mayúsculas ni espacios—, sale un aviso de atención: *"<proveedor>: hay N facturas pendientes de <leyenda>; si son del mismo servicio, se proyectan dos veces"* (`TarjetasCorporativas::avisosLeyendaRepetida()`). Pueden ser dos servicios distintos, y decidirlo es mirar las facturas; si son el mismo, la vieja se paga o se excluye.
 
 **Cada mes estimado se comporta como una factura vinculada**: genera cobertura con el % de su tarjeta (`estimacionesComoFilas()`), queda **cubierto** si la tarjeta tiene resumen ese mes, **no se proyecta** si la fecha es hoy o antes, y **no proyecta y se avisa** si la tarjeta está inactiva o dejó de ser corporativa.
 
@@ -426,15 +427,17 @@ Medido contra la base el 31/10/2026 (horizonte hasta el 30/09/2027):
 | | develop | Con la migración |
 | --- | --- | --- |
 | Facturas | $ 92.999.453,05 | $ 92.999.453,05 |
-| Estimaciones | $ 80.533.930,09 (marcas mensuales) | $ 138.696.117,35 (por proveedor) |
-| **CORPORATIVAS** | $ 173.533.383,14 | **$ 231.695.570,40** |
-| **TOTAL de la fila** | $ 325.291.967,45 | **$ 383.454.154,71 (+$ 58.162.187,26)** |
+| Estimaciones | $ 80.533.930,09 (marcas mensuales) | $ 152.364.771,15 (por proveedor) |
+| **CORPORATIVAS** | $ 173.533.383,14 | **$ 245.364.224,20** |
+| **TOTAL de la fila** | $ 325.291.967,45 | **$ 397.122.808,51 (+$ 71.830.841,06)** |
 
-**La diferencia es de la regla, no de un error**: la marca vieja repetía **una** factura por proveedor, y la regla nueva repite **todas** las del último mes. Pesan dos proveedores con un comprobante por local:
-- **Edenor (SPEDEN)**: 6 boletas de octubre (L80 San Justo, L10 Solar, Uruguay 4415, L84 Terrazas de Mayo, L11 TOM, L78 Arcos), $ 5,7 M por mes → $ 57,1 M en el horizonte. Antes se repetía una de $ 1,07 M.
-- **Telecom (SPTELE)**: 8 líneas de octubre, $ 1,28 M por mes → $ 12,8 M.
+**La diferencia es de la regla, no de un error**: la marca vieja repetía **una** factura por proveedor, y la regla nueva repite **todas** las pendientes. Pesan dos proveedores con un comprobante por local:
+- **Edenor (SPEDEN)**: 7 boletas vinculadas (L79 Arcos, L80 San Justo, L10 Solar, Uruguay 4415, L84 Terrazas de Mayo, L11 TOM, L78 Arcos), $ 6,8 M por mes → $ 67,8 M en el horizonte. Antes se repetía una de $ 1,07 M. La de L02 Unicenter no está vinculada y se avisa.
+- **Telecom (SPTELE)**: 8 líneas, $ 1,28 M por mes → $ 12,8 M.
 
 Sin migrar, la fila habría bajado $ 80,5 M hasta que alguien marcara los proveedores.
+
+Al 31/10/2026 el aviso de **leyenda repetida** aparece **una vez**: C.P.S. Comunicaciones, 2 facturas pendientes de *METROTEL L79 P.BROWN*.
 
 ### La exclusión saca de la serie, no del universo
 
@@ -694,7 +697,7 @@ php cashflow/tests/run.php tarjetas      los cinco archivos del módulo
 | `tests/test_tarjetas_compartido.php` | Que las tarjetas de **distinto banco o distinto día** se rechacen, también un socio, una de baja o sin titular; que el resumen aparezca en **todas** las tarjetas que incluye y sea titular en una; que **pise la estimación** de la supervisora adicional y cubra las facturas de la corporativa adicional, sin cobertura aparte; que **sume una sola vez**, en la serie de la titular, con el **invariante** adentro; y el script |
 | `tests/test_tarjetas_hist_manual.php` | Los **3 meses cerrados** validados en el servidor; el promedio **sobre 3**, todo tarjeta, con el mes base en el último cargado; la **inflación compuesta** desde ahí y el mes sin inflación en `null`; el **débito en su tarjeta** con su cobertura, y el resumen que lo pisa; quién entra a la grilla —con histórico, sin histórico— y que **manden los gastos**; que una **tarjeta Supervisora activa** cuente como activa a quien no está en el maestro, pero no a una inactiva del maestro; y el script |
 | `tests/test_tarjetas_fecha_debito.php` | El **débito a partir del vencimiento**: cuota antes y después del día de la tarjeta, el mismo día, el día corrido al hábil, fuera del horizonte; una factura en cuotas con **cada cuota en su débito**; la vencida al próximo pago; la **corregida** al débito siguiente; la no vinculada en su vencimiento de Tango; el resumen que fija el débito de su mes; y las tres columnas de la grilla |
-| `tests/test_tarjetas_prov_proyecta.php` | Los ejemplos de la especificación: **dos facturas del mismo mes** se repiten las dos; con **facturas de dos meses** se repite la última y el abono no se duplica; el **último mes por el vencimiento de Tango** y no el corregido; la **cancelada** deja de proyectar; la **excluida** corta pero no se repite; la **sin vincular** no corta y se avisa; sólo los marcados; y que la estimación **se comporte como una vinculada** —cobertura, resumen, fecha pasada, tarjeta inactiva—. Además el buscador, los endpoints con sus permisos, que se fue *marcar mensual*, el script y su **migración reejecutable** |
+| `tests/test_tarjetas_prov_proyecta.php` | Que se repita **cada factura pendiente**, vinculada y no excluida —dos del mismo mes, de dos meses, la boleta que vence a fin del mes anterior—; que de una factura **en cuotas** se repita sólo la última; la **cancelada** deja de proyectar; la **excluida** y la **sin vincular** no se repiten, y la segunda se avisa; el aviso de **leyenda repetida**, por comprobante y sin cambiar el cálculo; sólo los marcados; y que la estimación **se comporte como una vinculada** —cobertura, resumen, fecha pasada, tarjeta inactiva—. Además el buscador, los endpoints con sus permisos, que se fue *marcar mensual*, el script y su **migración reejecutable** |
 | `tests/test_tarjetas_provider.php` | **`TOTAL = SUPERVISORAS + CORPORATIVAS + SOCIOS` columna por columna**, también con **estimaciones mensuales** adentro y su celda anotada, que las excluidas no entren al total, los importes en positivo, que el eje ubique cada pago, el `detalle` de las celdas con resumen —y que **sobreviva a `normalizar()`**—, que dos resúmenes en la misma columna **junten sus notas**, los casos de fila en cero **con su aviso**, y que un módulo que lanza **no tumbe el tablero** |
 | `tests/test_menu.php` | Que `pagos_tarjetas` **dejó de ser un placeholder**, que el menú la declara con datos, que las otras dos de Financiero siguen pendientes y que la categoría pasa a **1 de 3** |
 | `tests/test_providers.php` | **19 módulos** con datos reales (eran 18), que `FINANCIERO` **no se tocó** y que el total declara sus tres componentes |

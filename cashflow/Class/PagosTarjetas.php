@@ -698,6 +698,10 @@ class PagosTarjetas {
             $salida['avisos'][] = $a;
         }
 
+        foreach (TarjetasCorporativas::avisosLeyendaRepetida($marcados, $r['filas']) as $a) {
+            $salida['avisos'][] = $a;
+        }
+
         $salida['filas'] = $r['filas'];
 
         foreach (TarjetasVencimiento::avisosCalendario($r['faltan_calendario']) as $a) {
