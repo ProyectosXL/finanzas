@@ -176,6 +176,19 @@ function celdasDe($filas, $campo) {
     return $v;
 }
 
+/**
+ * Los proveedores con facturas pendientes TARJETA CORP: lo que ofrece el
+ * buscador de Proveedores que proyectan, y contra lo que se valida el alta.
+ *
+ * @return array Lista de ['COD_PROVEE', 'RAZON_SOC', 'facturas', 'importe']
+ */
+function proveedoresTarjetaCorp() {
+    require_once __DIR__ . '/../Class/Proveedores.php';
+
+    return TarjetasCorporativas::proveedoresDelUniverso(
+        TarjetasCorporativas::universo((new Proveedores())->getPendientes(date('Y-m-d'))));
+}
+
 try {
     require_once __DIR__ . '/../Class/Tarjetas.php';
     require_once __DIR__ . '/../Class/TarjetasMensual.php';
@@ -275,6 +288,8 @@ try {
                         'resumenes' => $corp['resumenes'],
                         'vtos_inertes' => $corp['vtos_inertes'],
                         'estimaciones' => $corp['estimaciones'],
+                        'proveedores_proyectan' => isset($corp['proveedores_proyectan'])
+                            ? $corp['proveedores_proyectan'] : [],
 
                         /* UNA FILA POR ESTIMACION, con sus meses en el eje: la
                            seccion Estimaciones mensuales tiene las mismas
@@ -458,68 +473,81 @@ try {
             break;
 
         /* ================================================================
-           LA FACTURA MENSUAL (ABONOS)
+           LOS PROVEEDORES QUE PROYECTAN
+           Se marcan en Parametros -> Tarjetas. Reemplazan a "marcar mensual":
+           las marcas viejas quedan como historial y sus endpoints se fueron.
 
-           Marcarla guarda una copia y estima los meses siguientes. Lo que se
-           guarda sale de la fila tal como la ve la pantalla, resuelta por
-           PagosTarjetas, y lo valida TarjetasCorporativas::datosMarcaMensual():
-           solo una vinculada y no excluida.
+           EL BUSCADOR OFRECE LOS PROVEEDORES CON FACTURAS TARJETA CORP
+           PENDIENTES, el mismo universo de la pestana, y el alta lo vuelve a
+           verificar: que el buscador lo haya ofrecido no autoriza nada.
            ================================================================ */
-        case 'marcarMensual':
-            require_once __DIR__ . '/../Class/PagosTarjetas.php';
-            require_once __DIR__ . '/../Class/Parametros.php';
-            require_once __DIR__ . '/../Class/Horizonte.php';
+        case 'getProveedoresProyectan':
+            require_once __DIR__ . '/../Class/TarjetasProvProyecta.php';
 
-            $data = bodyJson();
+            $pp = new TarjetasProvProyecta();
+            $universo = [];
+            $avisoUniverso = '';
 
-            foreach (['cod_provee', 't_comp', 'n_comp', 'fecha_vto_tango'] as $campo) {
-                if (!isset($data[$campo])) {
-                    throw new Exception('Faltan datos de la factura');
-                }
+            try {
+                $universo = proveedoresTarjetaCorp();
+            } catch (Throwable $e) {
+                $avisoUniverso = 'No se pudieron leer las facturas pendientes de Tango ('
+                    . $e->getMessage() . '): el buscador no tiene qué ofrecer.';
             }
-
-            $h = Horizonte::desdeParametros(new Parametros());
-            $fila = (new PagosTarjetas())->filaCorporativa($h, TarjetasCorporativas::claveCuota([
-                'COD_PROVEE' => trim((string) $data['cod_provee']),
-                'T_COMP' => trim((string) $data['t_comp']),
-                'N_COMP' => trim((string) $data['n_comp']),
-                'FECHA_VTO_TANGO' => $data['fecha_vto_tango']]));
-
-            if ($fila === null) {
-                throw new Exception('Esa factura no está entre las pendientes de '
-                    . TarjetasCorporativas::FORMA . '. Actualizá la pantalla.');
-            }
-
-            $r = (new TarjetasMensual())->marcar(TarjetasCorporativas::datosMarcaMensual($fila),
-                $usuario);
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Marcada como mensual: se estiman $ '
-                    . number_format($r['datos']['IMPORTE'], 2, ',', '.') . ' el día '
-                    . $r['datos']['DIA'] . ' de cada mes desde ' . $r['datos']['MES_DESDE'] . '.'
-                    . ($r['reemplazo'] > 0
-                        ? ' La estimación anterior de este proveedor se dio de baja: queda en el '
-                          . 'historial.'
-                        : ''),
+                'data' => [
+                    'vigentes' => array_values($pp->vigentes()),
+                    'historial' => $pp->historial(),
+                    'universo' => $universo,
+                    'tabla_creada' => $pp->tablaCreada(),
+                    'aviso' => $pp->avisoSinTabla() ?: $avisoUniverso
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'marcarProveedorProyecta':
+            require_once __DIR__ . '/../Class/TarjetasProvProyecta.php';
+
+            $data = bodyJson();
+            $cod = TarjetasProvProyecta::validarCodigo(isset($data['cod_provee']) ? $data['cod_provee'] : '');
+            $prov = null;
+
+            foreach (proveedoresTarjetaCorp() as $p) {
+                if ($p['COD_PROVEE'] === $cod) {
+                    $prov = $p;
+                }
+            }
+
+            if ($prov === null) {
+                throw new Exception('El proveedor ' . $cod . ' no tiene facturas pendientes con forma '
+                    . 'de pago ' . TarjetasCorporativas::FORMA . ': no hay nada que proyectar.');
+            }
+
+            $r = (new TarjetasProvProyecta())->marcar($cod, $prov['RAZON_SOC'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['nuevo']
+                    ? ($prov['RAZON_SOC'] . ' proyecta: las facturas vinculadas de su último mes se '
+                       . 'repiten hasta el fin del horizonte.')
+                    : ($prov['RAZON_SOC'] . ' ya proyectaba.'),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'desmarcarMensual':
+        case 'desmarcarProveedorProyecta':
+            require_once __DIR__ . '/../Class/TarjetasProvProyecta.php';
+
             $data = bodyJson();
-
-            if (!isset($data['id'])) {
-                throw new Exception('Falta la estimación');
-            }
-
-            $r = (new TarjetasMensual())->desmarcar($data['id'], $usuario);
+            $r = (new TarjetasProvProyecta())->desmarcar(
+                isset($data['cod_provee']) ? $data['cod_provee'] : '', $usuario);
 
             echo json_encode([
                 'success' => true,
-                'message' => $r['habia']
-                    ? 'Estimación desmarcada: deja de proyectarse. Queda en el historial.'
-                    : 'Esa estimación ya estaba desmarcada.',
+                'message' => 'El proveedor ' . $r['cod'] . ' deja de proyectar. No se borra: queda '
+                    . 'en el historial.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

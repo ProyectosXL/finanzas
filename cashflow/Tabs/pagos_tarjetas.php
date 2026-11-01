@@ -351,12 +351,14 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                     con su pendiente y su estado, pero no suma, esté vencida o no —sin tarjeta no
                     se sabe en qué débito sale—.
                     <br>
-                    Una vinculada entra por su vencimiento, o si ya venció, en el
-                    <strong>próximo pago de su tarjeta</strong>; <strong>genera cobertura</strong>
-                    y <strong>un resumen de esa tarjeta la puede reemplazar</strong>. El
-                    vencimiento se puede <strong>corregir</strong> en la columna VTO TANGO —sólo
-                    vale en esta pestaña— y una factura que se repite todos los meses se puede
-                    <strong>marcar como mensual</strong> para estimar los meses siguientes.
+                    Una vinculada sale en el <strong>débito de su tarjeta</strong>: el primero a
+                    partir de su vencimiento, así cada cuota va a su débito; si ese débito ya
+                    pasó, en el <strong>próximo pago de su tarjeta</strong>. <strong>Genera
+                    cobertura</strong> y <strong>un resumen de esa tarjeta la puede
+                    reemplazar</strong>. El vencimiento se puede <strong>corregir</strong> en la
+                    columna VTO. A CONSIDERAR —sólo vale en esta pestaña— para mandarla a otro
+                    débito. Las facturas de los <strong>proveedores que proyectan</strong>
+                    (<em>Parámetros › Tarjetas</em>) se repiten en los meses siguientes.
                 </small>
             </div>
 
@@ -474,9 +476,20 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                          el nombre del orden guardado sin
                                          cambiarlo. Es el del porDefecto del JS.
                                          Ver Js/tabla-orden.js. -->
-                                    <th rowspan="2" style="min-width: 165px;" data-orden-nombre="VTO TANGO"
-                                        title="El vencimiento de Tango, que se puede corregir: sólo vale en esta pestaña">
-                                        VTO TANGO
+                                    <th rowspan="2"
+                                        title="El vencimiento de la cuota tal como está cargado en Tango. Informativo.">
+                                        VTO. EN TANGO
+                                    </th>
+                                    <th rowspan="2" style="min-width: 165px;"
+                                        title="El vencimiento con el que se calcula el débito: el de Tango, o el corregido en esta pestaña. Corregirlo manda la cuota a otro débito; no cambia Tango.">
+                                        VTO. A CONSIDERAR
+                                    </th>
+                                    <!-- data-orden-nombre igual al rótulo: ancla
+                                         el nombre del orden guardado. Es el del
+                                         porDefecto del JS. Ver Js/tabla-orden.js. -->
+                                    <th rowspan="2" data-orden-nombre="DÉBITO TARJETA"
+                                        title="La fecha en que se paga: el débito de su tarjeta a partir del vencimiento a considerar, o el próximo pago si ese débito ya pasó. Sin tarjeta, el vencimiento.">
+                                        DÉBITO TARJETA
                                     </th>
                                     <th rowspan="2">TARJETA</th>
                                     <th rowspan="2" class="text-end">PENDIENTE</th>
@@ -514,7 +527,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                             <tbody id="bodyCorp"></tbody>
                             <tfoot>
                                 <tr id="totalesCorp">
-                                    <td colspan="9" class="fw-bold text-end">TOTALES</td>
+                                    <td colspan="11" class="fw-bold text-end">TOTALES</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -549,13 +562,15 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="card-header">
                     <h5 class="mb-0">Estimaciones mensuales</h5>
                     <small class="text-muted">
-                        Las facturas que se repiten todos los meses (abonos), marcadas con el
-                        ícono <i class="fas fa-repeat"></i> de la grilla. Se estima el
-                        <strong>importe de la cuota marcada</strong>, fijo y sin inflación, el día
-                        de su vencimiento, desde el mes siguiente. Un mes se apaga solo si aparece
-                        la <strong>factura real</strong> del proveedor, y queda cubierto si la
-                        tarjeta tiene <strong>resumen</strong> cargado. Generan cobertura como una
-                        factura vinculada.
+                        Las de los <strong>proveedores que proyectan</strong>, que se marcan en
+                        <em>Parámetros › Tarjetas</em>. Se repiten las facturas vinculadas del
+                        <strong>último mes</strong> del proveedor —por su vencimiento de Tango—,
+                        cada una con el <strong>importe de su cuota</strong>, fijo y sin
+                        inflación, en el débito de su tarjeta, desde el mes siguiente a su pago y
+                        hasta el fin del horizonte. Cuando se carga la factura del mes siguiente,
+                        pasa a ser ésa la que se repite; cuando se paga, deja de proyectar. Un mes
+                        queda cubierto si la tarjeta tiene <strong>resumen</strong> cargado, y
+                        generan cobertura como una factura vinculada.
                     </small>
                 </div>
                 <div class="card-body p-0">
@@ -564,7 +579,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                             <thead>
                                 <tr>
                                     <th rowspan="2" class="col-texto">PROVEEDOR</th>
-                                    <th rowspan="2">ORIGEN</th>
+                                    <th rowspan="2">FACTURA DE ORIGEN</th>
                                     <th rowspan="2">TARJETA</th>
                                     <th rowspan="2" class="text-end">IMPORTE</th>
                                     <th rowspan="2" class="text-center">DÍA</th>

@@ -140,3 +140,21 @@ chequear('cuota despues del resumen de su mes: al debito de noviembre, no cubier
     ['2026-11-10', TarjetasCorporativas::OK],
     [filaFD(fdTC('A9', '2026-10-09'), true, $resOct)['FECHA'],
      filaFD(fdTC('A9', '2026-10-09'), true, $resOct)['MOTIVO']]);
+
+/* ================================================================
+   LAS COLUMNAS DE LA GRILLA
+   ================================================================ */
+seccion('la grilla muestra el vencimiento de Tango, el que se considera y el debito');
+
+$tabFD = file_get_contents(__DIR__ . '/../Tabs/pagos_tarjetas.php');
+$jsFD = file_get_contents(__DIR__ . '/../Js/Financiero-Pagos_tarjetas.js');
+
+foreach (['VTO. EN TANGO', 'VTO. A CONSIDERAR', 'DÉBITO TARJETA'] as $rotulo) {
+    chequear('la columna ' . $rotulo . ' esta en el encabezado', true, strpos($tabFD, $rotulo) !== false);
+}
+
+chequear('la fila dibuja el debito', true, strpos($jsFD, '+ celdaDebito(f)') !== false);
+chequear('y el vencimiento de Tango, informativo', true,
+    strpos($jsFD, "'<td data-orden=\"' + esc(f.FECHA_VTO || '') + '\"><small class=\"text-muted\">'") !== false);
+chequear('la grilla abre ordenada por el debito', true,
+    strpos($jsFD, "porDefecto: {columna: 'DÉBITO TARJETA', dir: 'asc'}") !== false);

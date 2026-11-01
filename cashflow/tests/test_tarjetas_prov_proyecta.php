@@ -252,3 +252,47 @@ chequear('una por proveedor, aunque tenga dos marcas', true,
     strpos($sqlPP, 'GROUP BY m.COD_PROVEE') !== false);
 chequear('reejecutable: no revive un proveedor que alguien desmarco', true,
     strpos($sqlPP, "(p.VIGENTE = 1 OR p.USUARIO_ALTA = 'MIGRACION')") !== false);
+
+/* ================================================================
+   EL BUSCADOR, LOS ENDPOINTS Y LA PANTALLA
+   ================================================================ */
+seccion('el buscador ofrece los proveedores del universo, uno por codigo');
+
+$uni = TarjetasCorporativas::proveedoresDelUniverso([
+    fpTC('A1', '2026-10-05', 100, 'OGZZZ'), fpTC('A2', '2026-10-06', 50, 'OGZZZ'),
+    array_merge(fpTC('B1', '2026-10-07', 10, 'OGAAA'), ['RAZON_SOC' => 'ALFA SA'])]);
+
+chequear('uno por codigo, ordenados por razon social (ABONO antes que ALFA)', ['OGZZZ', 'OGAAA'],
+    array_column($uni, 'COD_PROVEE'));
+chequear('con cuantas facturas y por cuanto', [2, 150.0], [$uni[0]['facturas'], $uni[0]['importe']]);
+
+seccion('marcar mensual se fue: el proveedor se marca en Parametros');
+
+$ctrlPP = file_get_contents(__DIR__ . '/../Controller/TarjetasController.php');
+$jsPT = file_get_contents(__DIR__ . '/../Js/Financiero-Pagos_tarjetas.js');
+$jsPar = file_get_contents(__DIR__ . '/../Js/Parametros-Tarjetas.js');
+
+chequear('el controller ya no marca facturas mensuales', [false, false],
+    [strpos($ctrlPP, "case 'marcarMensual':") !== false, strpos($ctrlPP, "case 'desmarcarMensual':") !== false]);
+chequear('ni los permisos las declaran', false,
+    isset(AuthCashflow::ESCRITURAS['Tarjetas']['marcarMensual']));
+chequear('la grilla ya no dibuja el icono de marcar mensual', false,
+    strpos($jsPT, 'tarj-mensual') !== false);
+
+foreach (['marcarProveedorProyecta', 'desmarcarProveedorProyecta'] as $accion) {
+    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1],
+        [strpos($jsPar, "'" . $accion . "'") !== false, substr_count($ctrlPP, "case '" . $accion . "':")]);
+    chequear($accion . ' pide editar Parametros > Tarjetas', [['parametros', 'TARJETAS']],
+        AuthCashflow::ESCRITURAS['Tarjetas'][$accion]);
+}
+
+chequear('el listado es una lectura', true,
+    in_array('getProveedoresProyectan', AuthCashflow::LECTURAS['Tarjetas'], true));
+chequear('el alta se valida contra el universo, en el servidor', true,
+    strpos($ctrlPP, "foreach (proveedoresTarjetaCorp() as \$p)") !== false);
+
+$tabPar = file_get_contents(__DIR__ . '/../Tabs/parametros_tarjetas.php');
+$antesBuscar = substr($tabPar, 0, strpos($tabPar, 'id="ptarProvBuscar"'));
+
+chequear('el buscador se dibuja solo con permiso de edicion', true,
+    strrpos($antesBuscar, '<?php if ($edita): ?>') > strrpos($antesBuscar, '<?php endif; ?>'));

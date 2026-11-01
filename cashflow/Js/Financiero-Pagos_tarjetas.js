@@ -45,7 +45,7 @@
      * Asi que cada tabla tiene, en total, COLS_* + columnas del eje + 1.
      */
     var COLS_SUP = 4;
-    var COLS_CORP = 9;
+    var COLS_CORP = 11;
     var COLS_SOC = 3;
 
     var datos = null;
@@ -333,7 +333,7 @@
             + vistas.total(c.eje_cobertura.totales) + vistas.total(c.eje_resumenes.totales)
             + estimado));
         texto('corpTotalDetalle', 'facturas + cobertura + resúmenes'
-            + (estimado ? ' · de esto, ' + plata(estimado) + ' es estimación mensual'
+            + (estimado ? ' · de esto, ' + plata(estimado) + ' es estimación por proveedor'
                         : ' + estimaciones'));
         texto('corpVencidas', plata(kpis.sinVincular));
         texto('corpVencidasDetalle', kpis.cuantasSinVincular
@@ -403,16 +403,45 @@
             + '<td class="col-texto">' + esc(f.RAZON_SOC) + '</td>'
             + '<td>' + esc(f.T_COMP) + '</td>'
             + '<td>' + esc(f.N_COMP) + '</td>'
+            // Informativa: el vencimiento tal como está en Tango
+            + '<td data-orden="' + esc(f.FECHA_VTO || '') + '"><small class="text-muted">'
+                + fecha(f.FECHA_VTO) + '</small></td>'
             + celdaVtoCorp(f)
+            + celdaDebito(f)
             + '<td>' + (f.TARJETA
                 ? '<small>' + esc(f.TARJETA.ROTULO) + '</small>'
                 : '<small class="text-muted">sin vincular</small>')
             + '</td>'
             + '<td class="currency">' + importe + '</td>'
-            + '<td class="text-nowrap">' + estadoCorp(f) + botonMensual(f) + '</td>'
+            + '<td class="text-nowrap">' + estadoCorp(f)
+                + (f.PROVEEDOR_PROYECTA
+                    ? ' <i class="fas fa-repeat text-primary" title="El proveedor proyecta: '
+                      + 'sus facturas del último mes se repiten en Estimaciones mensuales"></i>'
+                    : '')
+            + '</td>'
             + celdasEje(f, cols, true)
             + '<td class="currency fw-bold">' + plata(vistas.total(f)) + '</td>'
         + '</tr>';
+    }
+
+    /**
+     * La fecha en que se paga: el débito de su tarjeta a partir del vencimiento,
+     * o el próximo pago si ese débito ya pasó. Sin tarjeta es el vencimiento, y
+     * se ve atenuado porque no suma.
+     */
+    function celdaDebito(f) {
+        var titulo = f.EXPLICACION || '';
+
+        if (!f.FECHA) {
+            return '<td data-orden="9999-12-31" title="' + esc(titulo) + '">'
+                + '<small class="text-muted">fuera del horizonte</small></td>';
+        }
+
+        return '<td data-orden="' + esc(f.FECHA) + '" title="' + esc(titulo) + '">'
+            + (f.ID_TARJETA
+                ? '<span class="fw-semibold">' + fecha(f.FECHA) + '</span>'
+                : '<small class="text-muted">' + fecha(f.FECHA) + '</small>')
+            + '</td>';
     }
 
     /** El estado de una factura, en una marca */
@@ -585,8 +614,8 @@
             ? 'Vencimiento corregido en esta pestaña. En Tango vence el ' + fecha(f.FECHA_VTO) + '.'
               + (f.VTO_EDIT_MOTIVO ? '\nMotivo: ' + f.VTO_EDIT_MOTIVO : '')
               + '\n' + Auditoria.texto({ alta: { usuario: f.VTO_EDIT_USUARIO, fecha: f.VTO_EDIT_FECHA } })
-            : 'Vencimiento de Tango. Corregilo si la cuota se paga en otro resumen: sólo vale en '
-              + 'esta pestaña.';
+            : 'Vencimiento de Tango: con él se calcula el débito. Corregilo para mandar la cuota '
+              + 'a otro débito: sólo vale en esta pestaña.';
 
         if (!Permisos.puedeEditar('bodyCorp')) {
             return '<td data-orden="' + esc(vigente) + '" title="' + esc(titulo) + '"'
@@ -723,120 +752,30 @@
         });
     }
 
-    /* ---- la factura mensual ---- */
-
-    /**
-     * El ícono de "mensual" de la fila.
-     *
-     * VA EN LA FILA Y NO EN LA BARRA DE SELECCIÓN, y es a propósito: la barra
-     * actúa sobre VARIAS facturas a la vez, y marcar como mensual es de UNA —hay
-     * una sola estimación vigente por proveedor, así que marcar dos del mismo
-     * proveedor en un lote sería contradictorio—. Prendido (violeta) es que esta
-     * cuota originó la estimación; apretarlo de nuevo la desmarca.
-     *
-     * Apagado y con el motivo en el title cuando no se puede marcar: sin tarjeta
-     * vinculada, excluida, o sin el script.
-     */
-    function botonMensual(f) {
-        if (!Permisos.puedeEditar('bodyCorp')) {
-            return f.MENSUAL
-                ? ' <i class="fas fa-repeat tarj-mensual activo" title="Marcada como mensual"></i>'
-                : '';
-        }
-
-        var motivo = !datos.tablas.mensual
-            ? 'Para marcar facturas mensuales falta correr sql/cashflow_tarjetas_vto_mensual.sql'
-            : (f.MENSUAL ? ''
-                : (f.MOTIVO === 'EXCLUIDA' ? 'Está excluida: no se puede marcar como mensual'
-                    : (!f.ID_TARJETA ? 'Sólo se puede marcar como mensual una factura vinculada '
-                        + 'a una tarjeta' : '')));
-
-        return ' <button type="button" class="btn btn-sm btn-link tarj-mensual'
-            + (f.MENSUAL ? ' activo' : ' text-muted') + '" data-cuota="' + esc(f.CLAVE_CUOTA) + '"'
-            + ' title="' + esc(motivo || (f.MENSUAL
-                ? 'Marcada como mensual: genera una estimación de los meses siguientes. '
-                  + 'Apretá para desmarcarla.'
-                : 'Marcar como mensual (abono): estima los meses siguientes con el importe de '
-                  + 'esta cuota.')) + '"'
-            + (motivo ? ' disabled' : '') + '><i class="fas fa-repeat"></i></button>';
-    }
-
-    function filaPorCuota(clave) {
-        var filas = datos.corporativas.eje.filas;
-
-        for (var i = 0; i < filas.length; i++) {
-            if (filas[i].CLAVE_CUOTA === clave) { return filas[i]; }
-        }
-
-        return null;
-    }
-
-    /**
-     * Marcar o desmarcar. Marcar una factura de un proveedor que ya tiene una
-     * estimación la reemplaza, y eso se confirma diciendo cuál.
-     */
-    function alternarMensual(clave) {
-        var f = filaPorCuota(clave);
-
-        if (!f) { return; }
-
-        if (f.MENSUAL) {
-            Notificacion.confirmar({
-                titulo: 'Desmarcar como mensual',
-                mensaje: '¿Dejar de estimar los meses siguientes de ' + f.RAZON_SOC + '?',
-                detalle: 'La estimación se da de baja: no se borra, queda en el historial.',
-                confirmar: 'Desmarcar',
-                peligro: true
-            }).then(function(si) {
-                if (si) { guardar('desmarcarMensual', { id: f.MENSUAL_ID }); }
-            });
-
-            return;
-        }
-
-        var previa = (datos.corporativas.estimaciones || []).filter(function(e) {
-            return e.COD_PROVEE === f.COD_PROVEE;
-        })[0];
-
-        Notificacion.confirmar({
-            titulo: 'Marcar como mensual',
-            mensaje: '¿Estimar ' + plata(f.IMPORTE_VTO) + ' de ' + f.RAZON_SOC
-                + ' todos los meses, desde el mes siguiente a este vencimiento?',
-            detalle: (previa
-                ? 'Este proveedor ya tiene una estimación (' + previa.T_COMP + ' '
-                  + previa.N_COMP + ', ' + plata(previa.IMPORTE) + '): se da de baja y queda ésta. '
-                : '')
-                + 'Es el importe de la cuota, fijo y sin inflación, en el día de su vencimiento. '
-                + 'Se apaga sola el mes en que aparezca una factura real del proveedor.',
-            confirmar: previa ? 'Reemplazar' : 'Marcar',
-            peligro: !!previa
-        }).then(function(si) {
-            if (!si) { return; }
-
-            guardar('marcarMensual', {
-                cod_provee: f.COD_PROVEE, t_comp: f.T_COMP, n_comp: f.N_COMP,
-                fecha_vto_tango: f.FECHA_VTO
-            });
-        });
-    }
-
     /* ---- la sección Estimaciones mensuales ---- */
 
     /** Columnas descriptivas de la tabla de estimaciones, antes del eje */
     var COLS_EST = 6;
 
     /**
-     * Una fila por estimación, con sus meses en el eje y el estado de cada mes.
+     * Una fila por estimación —una factura de origen que se repite—, con sus
+     * meses en el eje y el estado de cada mes.
      *
      * VA APARTE DE LA GRILLA DE FACTURAS, por lo mismo que la cobertura y los
      * resúmenes: no son facturas, y mezclarlas haría que el total de PENDIENTE
-     * dejara de significar algo. Se desmarca desde acá también cuando la factura
-     * de origen ya se pagó y no está en la grilla.
+     * dejara de significar algo.
+     *
+     * NO SE DESMARCA DESDE ACÁ: lo que proyecta es el PROVEEDOR, y se marca y se
+     * desmarca en Parámetros › Tarjetas. El ícono de quién lo marcó es de esa
+     * marca.
      */
     function dibujarEstimaciones() {
         var c = datos.corporativas;
         var cols = vistas.columnas();
         var cuerpo = document.getElementById('bodyCorpEst');
+        var marcas = {};
+
+        (c.proveedores_proyectan || []).forEach(function(p) { marcas[p.COD_PROVEE] = p; });
 
         encabezadoEje('headerEjeEst2', cols);
 
@@ -845,27 +784,27 @@
         var lista = c.estimaciones || [];
 
         if (!lista.length) {
-            cuerpo.innerHTML = filaVacia(COLS_EST + cols.length + 1, datos.tablas.mensual
-                ? 'No hay facturas marcadas como mensuales. Se marcan con el ícono de '
-                  + 'repetir de la columna ESTADO, en una factura vinculada.'
-                : 'Para marcar facturas mensuales falta correr '
-                  + 'sql/cashflow_tarjetas_vto_mensual.sql.');
+            cuerpo.innerHTML = filaVacia(COLS_EST + cols.length + 1, !datos.tablas.prov_proyecta
+                ? 'Para marcar proveedores que proyectan falta correr '
+                  + 'sql/cashflow_tarjetas_prov_proyecta.sql.'
+                : ((c.proveedores_proyectan || []).length
+                    ? 'Los proveedores que proyectan no tienen facturas pendientes vinculadas a una '
+                      + 'tarjeta: hasta que se cargue la siguiente, no hay estimación.'
+                    : 'Ningún proveedor proyecta. Se marcan en Parámetros › Tarjetas.'));
         } else {
             cuerpo.innerHTML = lista.map(function(e) {
                 var eje = buscarFila(c.eje_estimaciones.filas, 'id_estimacion', e.ID) || {};
+                var m = marcas[e.COD_PROVEE] || {};
 
                 return '<tr class="' + (e.TARJETA_OK ? '' : 'tarj-sin-proyectar') + '">'
                     + '<td class="col-texto" title="' + esc(e.RAZON_SOC || '') + '">'
                         + esc(e.RAZON_SOC || e.COD_PROVEE)
-                        + Auditoria.icono({ alta: { usuario: e.USUARIO_ALTA, fecha: e.FECHA_ALTA } })
-                        + Permisos.siEdita('bodyCorp',
-                            ' <button type="button" class="btn btn-sm btn-link text-danger p-0 '
-                            + 'tarj-desmarcar" data-id="' + e.ID + '" title="Desmarcar">'
-                            + '<i class="fas fa-xmark"></i></button>')
+                        + Auditoria.icono({ alta: { usuario: m.USUARIO_ALTA, fecha: m.FECHA_ALTA } })
                     + '</td>'
-                    + '<td><small>' + esc(e.T_COMP + ' ' + e.N_COMP) + '<br>vto. '
-                        + fecha(e.FECHA_VTO_ORIGEN)
-                        + (e.ORIGEN_PENDIENTE ? '' : ' <span class="text-muted">(ya pagada)</span>')
+                    + '<td><small>' + esc(e.T_COMP + ' ' + e.N_COMP) + '<br>vto. Tango '
+                        + fecha(e.FECHA_VTO_TANGO)
+                        + (e.FECHA_VTO_ORIGEN && e.FECHA_VTO_ORIGEN !== e.FECHA_VTO_TANGO
+                            ? ' · a considerar ' + fecha(e.FECHA_VTO_ORIGEN) : '')
                     + '</small></td>'
                     + '<td><small>' + esc(e.TARJETA ? e.TARJETA.ROTULO : 'tarjeta inexistente')
                         + (e.TARJETA_OK ? '' : ' <span class="badge bg-secondary">no proyecta</span>')
@@ -880,27 +819,12 @@
         }
 
         pintarTotales('tablaCorpEst', 'totalesCorpEst', COLS_EST, c.eje_estimaciones.totales, cols);
-
-        cuerpo.querySelectorAll('.tarj-desmarcar').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                Notificacion.confirmar({
-                    titulo: 'Desmarcar como mensual',
-                    mensaje: '¿Dejar de estimar esta factura todos los meses?',
-                    detalle: 'La estimación se da de baja: no se borra, queda en el historial.',
-                    confirmar: 'Desmarcar',
-                    peligro: true
-                }).then(function(si) {
-                    if (si) { guardar('desmarcarMensual', { id: Number(btn.getAttribute('data-id')) }); }
-                });
-            });
-        });
     }
 
     /** El estado de cada mes de una estimación, en marcas cortas */
     function estadosEstimacion(e) {
         var marcas = {
             PROYECTA: ['bg-success', 'entra'],
-            REEMPLAZADA: ['bg-info text-dark', 'reemplazada'],
             CUBIERTA: ['bg-info text-dark', 'cubierta por resumen'],
             PASADA: ['bg-secondary', 'ya pasó'],
             SIN_TARJETA: ['bg-secondary', 'sin tarjeta activa']
@@ -912,7 +836,7 @@
 
         return e.meses.map(function(m) {
             var mk = marcas[m.estado] || ['bg-secondary', m.estado];
-            var texto = m.estado === 'REEMPLAZADA' ? 'reemplazada por ' + m.por : mk[1];
+            var texto = mk[1];
 
             return '<span class="badge ' + mk[0] + ' me-1" title="' + esc(fecha(m.fecha)) + '">'
                 + esc(m.mes.substring(5) + '/' + m.mes.substring(2, 4)) + ' · ' + esc(texto)
@@ -923,12 +847,6 @@
     /* ---- selección y acciones masivas ---- */
 
     function engancharCorp(cuerpo) {
-        cuerpo.querySelectorAll('.tarj-mensual[data-cuota]').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                alternarMensual(btn.getAttribute('data-cuota'));
-            });
-        });
-
         cuerpo.querySelectorAll('.tarj-vto').forEach(function(input) {
             input.addEventListener('change', function() { editarVto(input); });
         });
@@ -1936,7 +1854,7 @@
            id de la tabla, la misma del descubrimiento automático. Ver
            Js/tabla-orden.js. */
         if (typeof crearOrdenTabla === 'function') {
-            crearOrdenTabla({tabla: 'tablaCorp', porDefecto: {columna: 'VTO TANGO', dir: 'asc'}});
+            crearOrdenTabla({tabla: 'tablaCorp', porDefecto: {columna: 'DÉBITO TARJETA', dir: 'asc'}});
         }
 
         cargar();

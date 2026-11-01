@@ -791,206 +791,20 @@ class TarjetasCorporativas {
     }
 
     /* ====================================================================
-       LAS ESTIMACIONES MENSUALES
-
-       Para las facturas que se repiten todos los meses (abonos): marcar una
-       genera una estimacion de los meses siguientes. Se guarda una COPIA de la
-       factura (RO_T_CASHFLOW_TARJETAS_MENSUAL) porque la factura sale de
-       pendientes cuando se paga, y la estimacion tiene que seguir viva.
-       ==================================================================== */
-
-    /** Por que un mes de una estimacion no proyecta, o PROYECTA */
-    const EST_PROYECTA = 'PROYECTA';
-    const EST_REEMPLAZADA = 'REEMPLAZADA';
-    const EST_CUBIERTA = 'CUBIERTA';
-    const EST_PASADA = 'PASADA';
-    const EST_SIN_TARJETA = 'SIN_TARJETA';
-
-    /**
-     * Lo que se guarda al marcar una factura como mensual, a partir de su fila ya
-     * resuelta.
-     *
-     * SOLO UNA VINCULADA Y NO EXCLUIDA: la estimacion se comporta como una factura
-     * vinculada -cobertura, resumen, fecha de debito- y sin tarjeta no hay nada de
-     * eso; una excluida es una que se decidio que no entra, y estimar sus meses
-     * siguientes contradiria esa decision. Lo valida aca el backend, no la
-     * pantalla.
-     *
-     * EL IMPORTE ES EL DE LA CUOTA MARCADA, ANTES DE IMPUTACIONES (IMPORTE_VTO),
-     * NO EL PENDIENTE: el pendiente puede estar parcialmente pagado, y lo que se
-     * repite es lo que se debita por mes. En una factura de una sola cuota
-     * coincide con el total; en una en cuotas, el total multiplicaria el importe
-     * por la cantidad de cuotas.
-     *
-     * EL DIA ES EL DEL VENCIMIENTO VIGENTE -el corregido si lo hay- y el primer
-     * mes, el siguiente al de ese vencimiento.
-     *
-     * Estatica y pura.
-     *
-     * @param array $fila Una fila de resolver()
-     * @return array Los campos de RO_T_CASHFLOW_TARJETAS_MENSUAL
-     */
-    public static function datosMarcaMensual($fila) {
-        if (!empty($fila['EXCLUIDA_TARJETAS'])) {
-            throw new Exception('Esta factura está excluida de la pestaña: no se puede marcar como '
-                . 'mensual. Volvé a incluirla primero.');
-        }
-
-        if (empty($fila['ID_TARJETA'])) {
-            throw new Exception('Sólo se puede marcar como mensual una factura vinculada a una '
-                . 'tarjeta: la estimación sale en el débito de esa tarjeta.');
-        }
-
-        $importe = isset($fila['IMPORTE_VTO']) ? floatval($fila['IMPORTE_VTO']) : 0.0;
-
-        if ($importe <= 0) {
-            throw new Exception('La cuota no tiene importe en Tango (IMPORTE_VTO): no hay nada que '
-                . 'repetir.');
-        }
-
-        $vto = self::vtoVigente($fila);
-
-        if (empty($vto)) {
-            throw new Exception('La factura no tiene vencimiento: no se sabe qué día del mes se '
-                . 'debita.');
-        }
-
-        $desde = new DateTime(substr($vto, 0, 7) . '-01');
-        $desde->modify('+1 month');
-
-        return [
-            'COD_PROVEE' => $fila['COD_PROVEE'],
-            'RAZON_SOC' => isset($fila['RAZON_SOC']) ? mb_substr((string) $fila['RAZON_SOC'], 0, 100) : null,
-            'T_COMP' => $fila['T_COMP'],
-            'N_COMP' => $fila['N_COMP'],
-            'FECHA_VTO_TANGO' => $fila['FECHA_VTO'],
-            'FECHA_VTO_ORIGEN' => $vto,
-            'ID_TARJETA' => intval($fila['ID_TARJETA']),
-            'IMPORTE' => round($importe, 2),
-            'DIA' => intval(substr($vto, 8, 2)),
-            'MES_DESDE' => $desde->format('Y-m')
-        ];
-    }
-
-    /**
-     * La fecha de la estimacion en un mes: el dia guardado, acotado al ultimo dia
-     * si el mes no lo tiene.
-     *
-     * NO SE CORRE AL HABIL: ese dia ya es el vencimiento del resumen que cargan en
-     * Tango, no un dia que haya que ajustar.
-     *
-     * @param int $dia 1..31
-     * @param string $mes 'Y-m'
-     * @return string 'Y-m-d'
-     */
-    public static function fechaEstimacion($dia, $mes) {
-        $ultimo = intval((new DateTime($mes . '-01'))->format('t'));
-
-        return $mes . '-' . sprintf('%02d', min(max(1, intval($dia)), $ultimo));
-    }
-
-    /**
-     * Las estimaciones, mes por mes, con su estado.
-     *
-     * DESDE MES_DESDE HASTA EL FIN DEL HORIZONTE, sin fecha de fin: se corta
-     * desmarcando. IMPORTE FIJO, sin inflacion: es un abono pactado.
-     *
-     * POR MES, EN ESTE ORDEN:
-     *
-     *   1. REEMPLAZADA: hay en el universo de la pestana una factura REAL del mismo
-     *      proveedor con vencimiento vigente en ese mes. Cualquiera, este vinculada,
-     *      excluida o cubierta: la factura real existe, y si no suma es por otra
-     *      decision que se ve en la grilla. Se dice cual.
-     *   2. SIN_TARJETA: la tarjeta de la estimacion esta inactiva o ya no existe.
-     *   3. PASADA: la fecha es anterior o igual a hoy. Esa plata ya salio.
-     *   4. CUBIERTA: la tarjeta tiene resumen cargado en ese mes; el resumen ya la
-     *      incluye, igual que a una factura vinculada.
-     *   5. PROYECTA.
-     *
-     * Estatica y pura.
-     *
-     * @param array $mensuales Las vigentes de RO_T_CASHFLOW_TARJETAS_MENSUAL
-     * @param array $filas Lo que devolvio resolver()['filas']: el universo
-     * @param array $tarjetas Mapa ID => tarjeta, TODAS (tambien las inactivas)
-     * @param array $resumenes Mapa ID_TARJETA => ['Y-m' => resumen]
-     * @param array $meses Los meses del horizonte
-     * @param string $hoy 'Y-m-d'
-     * @return array Lista de estimaciones, cada una con 'meses' => [...]
-     */
-    public static function estimaciones($mensuales, $filas, $tarjetas, $resumenes, $meses, $hoy) {
-        $hoyStr = substr((string) $hoy, 0, 10);
-
-        /* Las facturas reales por proveedor y mes de vencimiento vigente. */
-        $reales = [];
-        $origenes = [];
-
-        foreach ($filas as $f) {
-            $vto = self::vtoVigente($f);
-
-            if ($vto !== null && !isset($reales[$f['COD_PROVEE']][substr($vto, 0, 7)])) {
-                $reales[$f['COD_PROVEE']][substr($vto, 0, 7)] = trim($f['T_COMP'] . ' ' . $f['N_COMP']);
-            }
-
-            $origenes[self::claveCuota($f)] = true;
-        }
-
-        $v = [];
-
-        foreach ($mensuales as $m) {
-            $id = intval($m['ID_TARJETA']);
-            $t = isset($tarjetas[$id]) ? $tarjetas[$id] : null;
-            $tarjetaOk = ($t !== null && !empty($t['ACTIVA']) && $t['TIPO'] === 'CORPORATIVA');
-
-            $est = $m;
-            $est['TARJETA'] = $t;
-            $est['TARJETA_OK'] = $tarjetaOk;
-            $est['ORIGEN_PENDIENTE'] = isset($origenes[self::claveCuota($m)]);
-            $est['meses'] = [];
-
-            foreach ($meses as $mes) {
-                if ($mes < $m['MES_DESDE']) {
-                    continue;
-                }
-
-                $fecha = self::fechaEstimacion($m['DIA'], $mes);
-                $por = isset($reales[$m['COD_PROVEE']][$mes]) ? $reales[$m['COD_PROVEE']][$mes] : null;
-
-                if ($por !== null) {
-                    $estado = self::EST_REEMPLAZADA;
-                } elseif (!$tarjetaOk) {
-                    $estado = self::EST_SIN_TARJETA;
-                } elseif ($fecha <= $hoyStr) {
-                    $estado = self::EST_PASADA;
-                } elseif (isset($resumenes[$id][$mes])) {
-                    $estado = self::EST_CUBIERTA;
-                } else {
-                    $estado = self::EST_PROYECTA;
-                }
-
-                $est['meses'][] = [
-                    'mes' => $mes,
-                    'fecha' => $fecha,
-                    'importe' => floatval($m['IMPORTE']),
-                    'estado' => $estado,
-                    'por' => $por,
-                    'proyecta' => ($estado === self::EST_PROYECTA)
-                ];
-            }
-
-            $v[] = $est;
-        }
-
-        return $v;
-    }
-
-    /* ====================================================================
        LA PROYECCION POR PROVEEDOR
 
        Desde feature/tarjetas-resumenes-seguros reemplaza a "marcar mensual":
        en Parametros -> Tarjetas se marcan PROVEEDORES, y sus facturas se repiten
        hacia adelante. RO_T_CASHFLOW_TARJETAS_MENSUAL queda como historial y deja
-       de leerse.
+       de leerse; la regla vieja -una factura marcada, una copia, apagada por mes
+       por la factura real del proveedor- se fue con ella.
        ==================================================================== */
+
+    /** Por que un mes de una estimacion no proyecta, o PROYECTA */
+    const EST_PROYECTA = 'PROYECTA';
+    const EST_CUBIERTA = 'CUBIERTA';
+    const EST_PASADA = 'PASADA';
+    const EST_SIN_TARJETA = 'SIN_TARJETA';
 
     /**
      * Las estimaciones de los proveedores que proyectan.
@@ -1027,8 +841,8 @@ class TarjetasCorporativas {
      * tarjeta tiene resumen ese mes, PASADA si la fecha es hoy o antes, y
      * SIN_TARJETA si la tarjeta esta inactiva o dejo de ser corporativa.
      *
-     * DEVUELVE LA MISMA FORMA QUE estimaciones(), asi la grilla, la cobertura y
-     * el tablero las tratan igual.
+     * DEVUELVE LA FORMA QUE LEEN LA GRILLA, LA COBERTURA (estimacionesComoFilas())
+     * Y EL TABLERO.
      *
      * Estatica y pura.
      *
@@ -1153,6 +967,38 @@ class TarjetasCorporativas {
     }
 
     /**
+     * Los proveedores del universo, uno por codigo, ordenados por razon social:
+     * lo que ofrece el buscador de Proveedores que proyectan.
+     *
+     * Estatica y pura.
+     *
+     * @param array $facturas Lo que devolvio universo()
+     * @return array Lista de ['COD_PROVEE', 'RAZON_SOC', 'facturas', 'importe']
+     */
+    public static function proveedoresDelUniverso($facturas) {
+        $v = [];
+
+        foreach ($facturas as $f) {
+            $cod = trim((string) $f['COD_PROVEE']);
+
+            if (!isset($v[$cod])) {
+                $v[$cod] = ['COD_PROVEE' => $cod,
+                            'RAZON_SOC' => isset($f['RAZON_SOC']) ? trim((string) $f['RAZON_SOC']) : $cod,
+                            'facturas' => 0, 'importe' => 0.0];
+            }
+
+            $v[$cod]['facturas']++;
+            $v[$cod]['importe'] += floatval(isset($f['IMPORTE_PENDIENTE']) ? $f['IMPORTE_PENDIENTE'] : 0);
+        }
+
+        $lista = array_values($v);
+
+        usort($lista, function ($a, $b) { return strnatcasecmp($a['RAZON_SOC'], $b['RAZON_SOC']); });
+
+        return $lista;
+    }
+
+    /**
      * Los avisos de los proveedores que proyectan: el que tiene una factura sin
      * vincular. No suma ni corta la repeticion -sin tarjeta no se sabe en que
      * debito sale-, asi que la proyeccion sigue con la factura anterior hasta que
@@ -1191,7 +1037,7 @@ class TarjetasCorporativas {
      * Los meses que proyectan, como filas que cobertura() entiende: se comportan
      * como una factura vinculada de su tarjeta y su mes.
      *
-     * @param array $estimaciones Lo que devolvio estimaciones()
+     * @param array $estimaciones Lo que devolvio estimacionesPorProveedor()
      * @return array
      */
     public static function estimacionesComoFilas($estimaciones) {

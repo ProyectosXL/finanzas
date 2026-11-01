@@ -769,32 +769,6 @@ class PagosTarjetas {
     }
 
     /**
-     * La fila resuelta de una cuota de Corporativas, o null si no esta en la
-     * pestana.
-     *
-     * LA USA EL ENDPOINT DE MARCAR MENSUAL: lo que se guarda sale de la fila tal
-     * como la ve la pantalla -vinculada o no, excluida o no, con el vencimiento
-     * corregido-, y resolverla aca es la unica forma de que la validacion y la
-     * grilla miren lo mismo.
-     *
-     * @param Horizonte $h
-     * @param string $claveCuota
-     * @return array|null
-     */
-    public function filaCorporativa($h, $claveCuota) {
-        $c = $this->corporativas($h, $this->leerTarjetas(), $this->leerResumenes(),
-            $this->leerHabiles($h));
-
-        foreach ($c['filas'] as $f) {
-            if ($f['CLAVE_CUOTA'] === $claveCuota) {
-                return $f;
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * Los proveedores que proyectan: Mapa COD_PROVEE => fila.
      *
      * Es una costura, como TarjetasProvider::modulo(): lo que este metodo

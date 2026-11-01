@@ -50,16 +50,6 @@
     font-weight: 600;
 }
 
-/* LA ESTIMACIÓN MENSUAL: el ícono de la fila que la originó, prendido o no. */
-.tab-pagos_tarjetas .tarj-mensual {
-    padding: 0 .25rem;
-    line-height: 1;
-}
-
-.tab-pagos_tarjetas .tarj-mensual.activo {
-    color: #6f42c1;
-}
-
 /* ----------------------------------------------------------------------------
    LAS SUBFILAS
 
