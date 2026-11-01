@@ -53,9 +53,10 @@ Todos contra `central`, reejecutables, y ninguno borra nada.
 | 5 | `sql/cashflow_tarjetas_resumen_compartido.sql` | Crea `RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA`: las tarjetas **adicionales** de un resumen compartido. **No migra nada**: los resúmenes que ya están son de una tarjeta, que es su titular | Todo funciona igual, con resúmenes de una sola tarjeta. En el formulario no aparece la lista de tarjetas, y el servidor rechaza un resumen de varias nombrando el script |
 | 7 | `sql/cashflow_tarjetas_prov_proyecta.sql` | Crea `RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA` (los proveedores que proyectan) y **migra** a ella, con usuario `MIGRACION`, los proveedores de las marcas mensuales vigentes. La tabla de marcas no se toca | **Ningún proveedor proyecta y la fila baja** lo que daban las marcas mensuales ($ 80,5 M al 31/10/2026): las marcas viejas ya no se leen. La sección de Parámetros se dibuja apagada nombrando el script |
 | 8 | `sql/cashflow_tarjetas_socios_banco.sql` | Habilita los **bancos de socios** en el maestro (columnas de usuario `NULL`-ables, el tipo `SOCIOS_BANCO` y su CHECK) y da de **baja** las tarjetas de tipo Socio, con usuario `MIGRACION`. No toca los resúmenes | No se pueden dar de alta bancos de socios y **Socios va en cero**: el código nuevo ya no proyecta las tarjetas con nombre. El aviso de cada banco dice cuánto proyectaban |
+| 9 | `sql/cashflow_tarjetas_polizas.sql` | Crea `RO_T_CASHFLOW_TARJETAS_POLIZA`, las pólizas de seguros. **Corta si falta el 1** (FK contra el maestro) | No se pueden cargar pólizas. **Las facturas de seguros salen del tablero igual** —el código ya no las suma— y los seguros no proyectan nada: el aviso de cada uno dice cuánto proyectaban |
 | 6 | `sql/cashflow_tarjetas_historico_manual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_HIST_MANUAL`: el histórico de 3 meses de quien tiene tarjeta Supervisora y no carga gastos | Esas personas aparecen en Gastos Supervisoras sin proyección, y no hay botón para cargarles el histórico. El tablero no cambia |
 
-El **2, el 4 y el 5 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero. **El 5, el 6, el 7 y el 8 son de `feature/tarjetas-resumenes-seguros`** y se corren después de los anteriores, en cualquier orden entre ellos. **El 7 hay que correrlo el mismo día que se sube el código**: el código nuevo deja de leer las marcas mensuales, y sin el 7 esa estimación desaparece de la fila.
+El **2, el 4 y el 5 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero. **Del 5 al 9 son de `feature/tarjetas-resumenes-seguros`** y se corren después de los anteriores, en cualquier orden entre ellos. **El 7 hay que correrlo el mismo día que se sube el código**: el código nuevo deja de leer las marcas mensuales, y sin el 7 esa estimación desaparece de la fila.
 
 **La vista `RO_V_CASHFLOW_USUARIOS_TARJETAS` no la crea ningún script de este repo.** Ya existe y se mantiene aparte. El script 1 sólo verifica que esté con `OBJECT_ID` y avisa si falta; la pantalla hace lo mismo y se dibuja apagada en vez de fallar.
 
@@ -75,11 +76,12 @@ Lo que falte cargar **no rompe nada**, pero deja plata fuera del tablero. Cada f
 | **La tarjeta Supervisora de quien no carga gastos** (Johanna) y su **histórico manual** de 3 meses | *Parámetros › Tarjetas* y el botón ↺ de su fila en Gastos Supervisoras | Aparece en la grilla sin proyección (`SIN_HISTORICO`) y un aviso la nombra. Su gasto no entra al tablero |
 | **Los resúmenes compartidos**: volver a cargar como uno solo los de las tarjetas adicionales de una misma cuenta (hoy las 6 supervisoras y las corporativas 7 y 8 son del banco 025 y vencen el 5) | El formulario de resumen, eligiendo todas y la titular | Cada resumen cargado por separado sigue valiendo en su tarjeta, como hasta hoy. Si el banco manda uno solo y está cargado entero en cada tarjeta, se cuenta una vez por tarjeta |
 
-| **El maestro de Proveedores Locales de los seguros**: forma de pago `TARJETA CORP` en **OGRSA** y **OGZURI** (hoy en blanco), y rubro `SEGUROS` en **OGMESE** (La Meridional, hoy en `LOCALES`; ya tiene `TARJETA CORP`) | *Cuentas a Pagar Locales › Proveedores* | Un proveedor que no cumple *rubro `SEGUROS` + `TARJETA CORP` en el maestro* no se trata como seguro: sus facturas siguen en la grilla y no se le puede cargar póliza |
-| **Las pólizas de OGRSA, OGZURI, OGLCAJ y OGMESE** | Tarjetas Pagos Corporativos › Seguros | Las facturas de seguros salen de la grilla y del tablero, y sin póliza vigente ese proveedor no proyecta nada. El aviso dice cuánto proyectaban sus facturas |
+| **El maestro de Proveedores Locales de los seguros**: rubro `SEGUROS` en **OGMESE** (La Meridional, hoy en `LOCALES`; ya tiene `TARJETA CORP`). OGRSA y OGZURI ya tienen `TARJETA CORP` al 31/10/2026. **Revisar OGALLI** (Allianz): hoy cumple la regla y aparece como seguro | *Cuentas a Pagar Locales › Proveedores* | Un proveedor que no cumple *rubro `SEGUROS` + `TARJETA CORP` en el maestro* no se trata como seguro: sus facturas siguen en la grilla y no se le puede cargar póliza |
+| **Las pólizas de OGRSA, OGZURI, OGLCAJ y OGMESE** (y de OGALLI si es un seguro) | Tarjetas Pagos Corporativos › Seguros | Las facturas de seguros salen de la grilla y del tablero, y sin póliza ese proveedor no proyecta nada. Al 31/10/2026 eso son **$ 75.119.889,45**: OGRSA $ 72,6 M, OGLCAJ $ 1,9 M, OGZURI $ 0,6 M. El aviso de cada uno dice cuánto |
 | **Revisar los 77 vencimientos corregidos** (ver la sección 4) | La columna VTO. A CONSIDERAR | Nada se rompe: las correcciones siguen moviendo la fecha de pago. La mayoría ya no hace falta |
-
 | **Los bancos de socios y su base histórica**: dar de alta Galicia (007), Francés (017) y Provincia (014) con su % y su día, y cargar los últimos 3 resúmenes de cada uno | *Parámetros › Tarjetas*, y el botón de resúmenes de la fila del banco en Tarjetas Socios | **Socios va en cero**. Al 31/10/2026 eso son **$ 101.666.292,59**: Galicia $ 95,8 M, Francés $ 5,3 M y Provincia $ 0,6 M. El aviso de cada banco dice cuánto |
+
+**Si el día del pase no se carga nada**, la fila *Pagos con Tarjetas y Otros* pasa de **$ 325.291.967,45 a $ 220.336.626,47** (medido el 31/10/2026, con el script 7 migrando las marcas): +$ 71,8 M de las estimaciones por proveedor, −$ 101,7 M de Socios sin base por banco y −$ 75,1 M de las facturas de seguros sin póliza. Cada faltante tiene su aviso de atención con el importe, en la pestaña y en el tablero.
 
 ---
 
@@ -440,6 +442,51 @@ Sin migrar, la fila habría bajado $ 80,5 M hasta que alguien marcara los provee
 
 Al 31/10/2026 el aviso de **leyenda repetida** aparece **una vez**: C.P.S. Comunicaciones, 2 facturas pendientes de *METROTEL L79 P.BROWN*.
 
+### Los seguros: se proyectan por póliza
+
+> Desde `feature/tarjetas-resumenes-seguros`. Script: `sql/cashflow_tarjetas_polizas.sql`. Regla: `Class/TarjetasSeguros.php` (pura). Lectura y escritura: `Class/TarjetasPoliza.php`.
+
+**Un seguro es el proveedor con rubro `SEGUROS` y forma de pago `TARJETA CORP` en el maestro de Proveedores Locales** (`TarjetasSeguros::esSeguro()`). Las dos cosas en el **maestro**, y no la forma vigente de alguna factura: el proveedor tiene que seguir siendo un seguro cuando no le queda ninguna factura pendiente, porque sus pólizas siguen.
+
+> Al 31/10/2026, con el maestro como está, cumplen **OGRSA, OGZURI, OGLCAJ y OGALLI** (Allianz, sin facturas pendientes). **OGMESE** (La Meridional) entra cuando se le cambie el rubro a `SEGUROS`.
+
+**Sus facturas de Tango no se usan**: salen de la grilla de facturas, de su total y de la serie del tablero. Las facturas de un seguro en cuotas y la póliza describirían el mismo pago dos veces. Una línea debajo de la sección dice cuántas hay pendientes y por cuánto, **sin sumar**. Un seguro **no se puede marcar como proveedor que proyecta**: se proyecta por póliza.
+
+#### La póliza
+
+Proveedor de seguros, número o descripción, tarjeta corporativa activa (de ella salen el día del débito y el % de cobertura), importe total de la vigencia, moneda, inicio, vigencia en meses, gracia en meses y mes del primer pago. **Lo valida el servidor** (`TarjetasSeguros::validar()`):
+
+- La gracia es de 0 a vigencia − 1, y el primer pago no es anterior al mes de inicio.
+- **El último pago no puede quedar después del fin de la vigencia.** Se compara el débito **teórico** —el día de la tarjeta acotado al mes, sin correr al hábil—, que no depende de tener calendario más allá del horizonte. El mensaje dice cuántos pagos son, en qué mes cae el último y cuándo termina la vigencia.
+- **Las vigencias no se pisan**: dos pólizas del mismo proveedor y el mismo número (sin distinguir mayúsculas ni espacios) con vigencias superpuestas se rechazan. La vigencia termina el día anterior al aniversario: una de 12 meses desde el 01/11/2026 termina el 31/10/2027, y la siguiente puede empezar el 01/11/2027.
+
+#### Cómo se proyecta (`TarjetasSeguros::pagos()`)
+
+| | Regla |
+| --- | --- |
+| **Cuota** | Total ÷ (vigencia − gracia). 12 meses con 2 de gracia → total ÷ 10 |
+| **Pagos** | Vigencia − gracia, uno por mes, **consecutivos desde el mes del primer pago**. La gracia son los meses del final |
+| **Fecha** | El débito de la tarjeta de la póliza en ese mes: el resumen cargado si lo hay, si no `TarjetasVencimiento::delMes()`. El mes del primer pago sólo fija el mes |
+| **En dólares** | Cada pago con la curva ROFEX del mes de su fecha (`DolarFuturo::resolver()`, con su mes aproximado, que el tooltip dice). Sin curva: `null`, `SIN_COTIZACION` y aviso |
+| **Como una factura vinculada** | Genera cobertura con el % de su tarjeta, lo pisa el resumen cargado de su mes (`CUBIERTA`), no se proyecta si su fecha es hoy o antes (`PASADA`) ni si la tarjeta está inactiva (`SIN_TARJETA`) |
+
+**Cuando la vigencia termina antes del fin del horizonte, se repite el ciclo** —misma vigencia, misma gracia, el primer pago a la misma distancia del inicio— hasta el fin del horizonte o hasta la póliza siguiente:
+
+- **En dólares**, el mismo importe en U$S cada ciclo, con la curva de cada mes.
+- **En pesos**, cada ciclo es el total del anterior × (1 + **la suma** de la inflación de los meses de la vigencia anterior ÷ 100), sumada y no compuesta, como el ajuste del valor hora de Logística (`Inflacion::sumada()`, la variante de N meses de `acumulada()`). Una vigencia de 1 mes sube cada mes la inflación del mes anterior; una de 3, la suma de los 3; una de 12, la de los 12.
+- **Si falta la inflación de algún mes**, ese ciclo y los siguientes quedan en `null` (`SIN_INFLACION`) con aviso. **Ojo**: la inflación cargada arranca en 2026-07, así que una póliza en pesos que haya empezado antes no se puede continuar.
+- **La póliza siguiente** —mismo proveedor y número, con inicio igual o posterior al fin de esta— **corta la continuación desde su inicio** (`TarjetasSeguros::siguientes()`).
+- Los pagos de la continuación **se ven distintos** (en itálica y atenuados) y el tooltip dice que son estimados y cómo se ajustaron.
+
+#### En pantalla y en el tablero
+
+- **Sección *Seguros*** en Tarjetas Pagos Corporativos: una fila por póliza, con proveedor, póliza, tarjeta, total, vigencia y cuota, las columnas del eje con las tres vistas y su pie. **Alta, corrección y baja lógica** con el formulario, y quién y cuándo. Sin permiso no hay botones.
+- **En el tablero no hay fila nueva**: los pagos suman en *Pagos con Tarjetas y Otros*, dentro de la serie `CORPORATIVAS`, con la celda anotada (*"Seguro <proveedor>, póliza <número>…"*, y si es continuación, que es estimado). El invariante sigue valiendo y la prueba lo fija con seguros adentro.
+- **El KPI de Corporativas** suma los seguros y dice cuánto es de seguros.
+- **Un seguro sin póliza cargada avisa de atención**, en la pestaña y en el tablero, con lo que proyectaban sus facturas.
+
+> Medido el 31/10/2026, con el maestro como está y sin pólizas: **CORPORATIVAS baja $ 75.119.889,45** —las facturas de seguros que salen—. Los avisos lo reparten: **OGRSA $ 72.625.859,49**, **OGLCAJ $ 1.878.283,30**, **OGZURI $ 615.746,66**; OGALLI y OGMESE no tienen facturas pendientes.
+
 ### La exclusión saca de la serie, no del universo
 
 Mismo patrón que Proveedores Locales: selección múltiple, **un motivo obligatorio** validado en el backend, y **una sola transacción**. Tabla propia con historial (`VIGENTE`, `FECHA_BAJA`, `USUARIO_BAJA`), **sin bajas físicas**.
@@ -609,7 +656,7 @@ El día del mes que tiene cargado la tarjeta, **acotado al último día si el me
 | --- | --- |
 | `TOTAL` | La suma de las tres partes. **Es la que usa la fila** |
 | `SUPERVISORAS` | Efectivo + tarjeta de los gastos de supervisión |
-| `CORPORATIVAS` | Facturas **vinculadas** no excluidas + estimaciones mensuales + cobertura, o el resumen donde lo haya |
+| `CORPORATIVAS` | Facturas **vinculadas** no excluidas (sin las de seguros) + estimaciones por proveedor + pagos de las pólizas de seguros + cobertura, o el resumen donde lo haya |
 | `SOCIOS` | En pesos, con el componente `U$S` ya convertido |
 | `CORPORATIVAS_EXCLUIDAS` | Sólo informativa, **fuera del total** |
 
@@ -667,6 +714,7 @@ Los avisos son la mitad de lo que esta pestaña hace: al 26/09/2026, con las tab
 | Estimaciones mensuales cuya **tarjeta está inactiva** o ya no existe | — |
 | Meses **sin inflación** cargada, diciendo si están fuera de la ventana editable | — |
 | Meses **sin cotización** para valuar el componente en dólares | — |
+| Seguros **sin póliza**, con lo que proyectaban sus facturas; la línea informativa de las **facturas de seguros** pendientes, que no suman; pólizas con **tarjeta inactiva**, sin inflación para la continuación o sin dólar futuro | Al 31/10/2026: cuatro seguros sin póliza, $ 75,1 M |
 | Bancos de socios **sin base histórica**, con lo que proyectaban sus tarjetas viejas; y bancos con tarjetas de socio **sin dar de alta** | Al 31/10/2026: los tres bancos, $ 101,7 M |
 
 **Cada aviso describe un hecho distinto y va aparte.** Juntarlos haría que el importe total no se pudiera atribuir a ninguna causa, que es justamente lo que un aviso tiene que permitir.
@@ -721,6 +769,7 @@ php cashflow/tests/run.php tarjetas      los cinco archivos del módulo
 | `tests/test_tarjetas_fecha_debito.php` | El **débito a partir del vencimiento**: cuota antes y después del día de la tarjeta, el mismo día, el día corrido al hábil, fuera del horizonte; una factura en cuotas con **cada cuota en su débito**; la vencida al próximo pago; la **corregida** al débito siguiente; la no vinculada en su vencimiento de Tango; el resumen que fija el débito de su mes; y las tres columnas de la grilla |
 | `tests/test_tarjetas_prov_proyecta.php` | Que se repita **cada factura pendiente**, vinculada y no excluida —dos del mismo mes, de dos meses, la boleta que vence a fin del mes anterior—; que de una factura **en cuotas** se repita sólo la última; la **cancelada** deja de proyectar; la **excluida** y la **sin vincular** no se repiten, y la segunda se avisa; el aviso de **leyenda repetida**, por comprobante y sin cambiar el cálculo; sólo los marcados; y que la estimación **se comporte como una vinculada** —cobertura, resumen, fecha pasada, tarjeta inactiva—. Además el buscador, los endpoints con sus permisos, que se fue *marcar mensual*, el script y su **migración reejecutable** |
 | `tests/test_tarjetas_socios_banco.php` | El rótulo por banco; que no se dé de alta una tarjeta de socio con nombre, que una tarjeta no se vuelva banco ni al revés, que la vieja no se edite; la **estimación por banco con 0, 1, 2 y 3 resúmenes**, dividida por los que hay, con la inflación sólo en pesos y las dos reglas del dólar; `totalProyectado()` para el aviso; que la pestaña proyecte los bancos y las viejas sólo avisen; y el script —columnas, índices iguales, CHECK, baja con `MIGRACION`, resúmenes sin tocar— |
+| `tests/test_tarjetas_seguros.php` | Quién es un seguro; la **cuota con gracia** y los 10 pagos de una póliza de 12 con 2 de gracia y el **primer pago dos meses después del inicio**, en el débito de cada mes; la validación —**último pago después de la vigencia rechazado**, proveedor que no es seguro, tarjeta no corporativa, gracia, importe, moneda, número, **superposición rechazada**—; la **continuación en pesos con 1, 3 y 12 meses** e inflación **sumada**, con la **inflación faltante** en `null`; la **póliza siguiente que corta la continuación**; **dólares con curva**, aproximado y sin curva; **cobertura y resumen**, fecha pasada y tarjeta inactiva; `Inflacion::sumada()`; las **facturas de seguros fuera del total**; el **invariante con seguros adentro** y su celda anotada; la pantalla, los endpoints y sus permisos; y el script |
 | `tests/test_tarjetas_provider.php` | **`TOTAL = SUPERVISORAS + CORPORATIVAS + SOCIOS` columna por columna**, también con **estimaciones mensuales** adentro y su celda anotada, que las excluidas no entren al total, los importes en positivo, que el eje ubique cada pago, el `detalle` de las celdas con resumen —y que **sobreviva a `normalizar()`**—, que dos resúmenes en la misma columna **junten sus notas**, los casos de fila en cero **con su aviso**, y que un módulo que lanza **no tumbe el tablero** |
 | `tests/test_menu.php` | Que `pagos_tarjetas` **dejó de ser un placeholder**, que el menú la declara con datos, que las otras dos de Financiero siguen pendientes y que la categoría pasa a **1 de 3** |
 | `tests/test_providers.php` | **19 módulos** con datos reales (eran 18), que `FINANCIERO` **no se tocó** y que el total declara sus tres componentes |
@@ -749,6 +798,8 @@ Class/
   TarjetasFacturaVto.php       el vencimiento corregido de una cuota
   TarjetasMensual.php          las marcas mensuales viejas: historial, sólo lectura
   TarjetasProvProyecta.php     los proveedores que proyectan
+  TarjetasSeguros.php          quién es un seguro, la póliza y sus pagos. PURO
+  TarjetasPoliza.php           las pólizas
   TarjetasHistManual.php       el histórico manual de quien no carga gastos
   GastosSupervision.php        los gastos autorizados y el maestro de supervisoras
   PagosTarjetas.php            el armador: lee una vez y arma las tres sub-pestañas
@@ -781,6 +832,7 @@ sql/
   cashflow_tarjetas_historico_manual.sql
   cashflow_tarjetas_prov_proyecta.sql
   cashflow_tarjetas_socios_banco.sql
+  cashflow_tarjetas_polizas.sql
 
 tests/
   js/importe_formulario.wsf
@@ -790,6 +842,7 @@ tests/
   test_tarjetas_fecha_debito.php
   test_tarjetas_prov_proyecta.php
   test_tarjetas_socios_banco.php
+  test_tarjetas_seguros.php
   test_tarjetas_vencimiento.php
   test_tarjetas_maestro.php
   test_tarjetas_supervisoras.php
