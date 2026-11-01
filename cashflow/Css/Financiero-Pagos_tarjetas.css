@@ -103,3 +103,10 @@
 .tab-pagos_tarjetas .tarj-abrir i {
     width: .8em;
 }
+
+/* EL PAGO DE LA CONTINUACION DE UNA POLIZA: estimado, no cargado. Se ve distinto
+   del de la poliza vigente, y el tooltip dice por que. */
+.tab-pagos_tarjetas td.tarj-continuacion {
+    font-style: italic;
+    color: #6c757d;
+}

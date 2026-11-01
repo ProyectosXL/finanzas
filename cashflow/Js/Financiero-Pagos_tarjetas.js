@@ -329,12 +329,18 @@
            detalle dice cuánto es estimación, porque no es deuda de Tango. */
         var estimado = vistas.total(c.eje_estimaciones.totales);
 
+        /* LOS SEGUROS SUMAN EN EL MISMO KPI —son parte de la serie
+           CORPORATIVAS— y el detalle dice cuánto es de seguros. */
+        var seguros = vistas.total(c.eje_polizas.totales);
+
         texto('corpTotal', plata(vistas.total(c.eje.totales)
             + vistas.total(c.eje_cobertura.totales) + vistas.total(c.eje_resumenes.totales)
-            + estimado));
-        texto('corpTotalDetalle', 'facturas + cobertura + resúmenes'
-            + (estimado ? ' · de esto, ' + plata(estimado) + ' es estimación por proveedor'
-                        : ' + estimaciones'));
+            + estimado + seguros));
+        texto('corpTotalDetalle', 'facturas + cobertura + resúmenes + estimaciones + seguros'
+            + (estimado || seguros
+                ? ' · de esto, ' + plata(estimado) + ' es estimación por proveedor y '
+                  + plata(seguros) + ' es de seguros'
+                : ''));
         texto('corpVencidas', plata(kpis.sinVincular));
         texto('corpVencidasDetalle', kpis.cuantasSinVincular
             + ' factura(s) que no entran al flujo: vinculalas a una tarjeta');
@@ -362,6 +368,7 @@
         dibujarExtras();
         dibujarVtosInertes();
         dibujarEstimaciones();
+        dibujarSeguros();
         engancharCorp(cuerpo);
         actualizarBarraSel();
     }
@@ -819,6 +826,201 @@
         }
 
         pintarTotales('tablaCorpEst', 'totalesCorpEst', COLS_EST, c.eje_estimaciones.totales, cols);
+    }
+
+    /* ---- la sección Seguros ---- */
+
+    /** Columnas descriptivas de la tabla de seguros, antes del eje */
+    var COLS_SEG = 6;
+
+    /**
+     * Una fila por póliza, con sus pagos en el eje. Los de la continuación
+     * estimada se ven distintos —en itálica y atenuados— y lo dicen en el
+     * tooltip, igual que el resto de los estados de cada pago.
+     */
+    function dibujarSeguros() {
+        var c = datos.corporativas;
+        var seg = c.seguros || {polizas: [], proveedores: [], facturas: {cuantas: 0}};
+        var cols = vistas.columnas();
+        var cuerpo = document.getElementById('bodyCorpSeg');
+
+        encabezadoEje('headerEjeSeg2', cols);
+
+        var f = seg.facturas || {};
+
+        texto('corpSegurosFacturas', f.cuantas
+            ? 'Hay ' + f.cuantas + ' vencimiento(s) de seguros pendientes en Tango, de '
+              + f.comprobantes + ' factura(s), por ' + plata(f.importe) + '. No suman: los seguros '
+              + 'se proyectan con las pólizas.'
+            : 'No hay facturas de seguros pendientes en Tango.');
+
+        apagar('btnNuevaPoliza', !seg.tabla_creada,
+            'Para cargar pólizas falta correr sql/cashflow_tarjetas_polizas.sql');
+
+        if (!cuerpo) { return; }
+
+        if (!seg.polizas.length) {
+            cuerpo.innerHTML = filaVacia(COLS_SEG + cols.length + 1, !seg.tabla_creada
+                ? 'Para cargar pólizas falta correr sql/cashflow_tarjetas_polizas.sql.'
+                : (seg.proveedores.length
+                    ? 'No hay pólizas cargadas. Los proveedores de seguros no proyectan nada hasta '
+                      + 'que se cargue su póliza.'
+                    : 'No hay proveedores de seguros: en el maestro de Proveedores Locales tienen que '
+                      + 'tener rubro SEGUROS y forma de pago TARJETA CORP.'));
+        } else {
+            cuerpo.innerHTML = seg.polizas.map(function(p) {
+                var eje = buscarFila(c.eje_polizas.filas, 'id_poliza', p.ID) || {};
+                var continua = (p.resueltos.pagos || []).some(function(x) { return x.continuacion; });
+                var moneda = p.MONEDA === 'USD' ? 'U$S ' : '$ ';
+                var importe = function(n) {
+                    return moneda + Number(n || 0).toLocaleString('es-AR',
+                        {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                };
+
+                return '<tr>'
+                    + '<td class="col-texto">' + esc(p.RAZON_SOC || p.COD_PROVEE)
+                        + Auditoria.icono({ alta: { usuario: p.USUARIO_ALTA, fecha: p.FECHA_ALTA },
+                                            modif: { usuario: p.USUARIO_MODIF, fecha: p.FECHA_MODIF } })
+                        + Permisos.siEdita('bodyCorpSeg',
+                            ' <button type="button" class="btn btn-sm btn-link p-0 tarj-pol-editar" '
+                            + 'data-id="' + esc(p.ID) + '" title="Corregir la póliza">'
+                            + '<i class="fas fa-pen"></i></button>'
+                            + ' <button type="button" class="btn btn-sm btn-link text-danger p-0 '
+                            + 'tarj-pol-baja" data-id="' + esc(p.ID) + '" title="Dar de baja">'
+                            + '<i class="fas fa-xmark"></i></button>')
+                    + '</td>'
+                    + '<td><small>' + esc(p.POLIZA)
+                        + (p.OBSERVACION ? '<br><span class="text-muted">' + esc(p.OBSERVACION) + '</span>' : '')
+                    + '</small></td>'
+                    + '<td><small>' + esc(p.TARJETA ? p.TARJETA.ROTULO : 'tarjeta inexistente') + '</small></td>'
+                    + '<td class="currency">' + importe(p.IMPORTE_TOTAL) + '</td>'
+                    + '<td><small>' + fecha(p.FECHA_INICIO) + ' al ' + fecha(p.FIN_VIGENCIA)
+                        + '<br>' + p.VIGENCIA_MESES + ' mes(es), ' + p.GRACIA_MESES + ' de gracia · '
+                        + '1er pago ' + esc(p.MES_PRIMER_PAGO)
+                        + (continua && !p.SIGUIENTE
+                            ? ' <span class="badge bg-light text-dark" title="La vigencia termina antes '
+                              + 'del fin del horizonte: el ciclo se repite hasta que se cargue la póliza '
+                              + 'siguiente">se continúa</span>'
+                            : '')
+                        + (p.SIGUIENTE ? ' <span class="badge bg-light text-dark">sigue la del '
+                            + fecha(p.SIGUIENTE) + '</span>' : '')
+                    + '</small></td>'
+                    + '<td class="currency">' + importe(p.CUOTA) + '</td>'
+                    + celdasEjeSeguro(eje, cols, p)
+                    + '<td class="currency fw-bold">' + plata(vistas.total(eje)) + '</td>'
+                + '</tr>';
+            }).join('');
+        }
+
+        pintarTotales('tablaCorpSeg', 'totalesCorpSeg', COLS_SEG, c.eje_polizas.totales, cols);
+
+        cuerpo.querySelectorAll('.tarj-pol-editar').forEach(function(btn) {
+            btn.addEventListener('click', function() { formularioPoliza(btn.getAttribute('data-id')); });
+        });
+
+        cuerpo.querySelectorAll('.tarj-pol-baja').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                Notificacion.confirmar({
+                    titulo: 'Dar de baja la póliza',
+                    mensaje: '¿Dar de baja esta póliza?',
+                    detalle: 'No se borra: queda en el historial. Deja de proyectar, y si es la del '
+                        + 'proveedor, el seguro no proyecta nada hasta que se cargue otra.',
+                    confirmar: 'Dar de baja',
+                    peligro: true
+                }).then(function(si) {
+                    if (si) { guardar('bajaPoliza', {id: Number(btn.getAttribute('data-id'))}); }
+                });
+            });
+        });
+    }
+
+    /**
+     * Las celdas de una póliza. El importe viene del eje; el pago de cada mes da
+     * el tooltip y la marca de la continuación estimada.
+     */
+    function celdasEjeSeguro(eje, cols, p) {
+        var porMes = {};
+
+        (p.resueltos.pagos || []).forEach(function(x) { porMes[x.mes] = x; });
+
+        return cols.map(function(col) {
+            var v = vistas.valor(eje, col);
+            var meta = vistas.meta(col);
+            var mes = vistas.esMes(col) ? String(col).substring(4) : (meta ? meta.mes_clave : null);
+            var pago = mes ? porMes[mes] : null;
+            var hay = !(v === 0 || v === null);
+
+            return '<td class="currency ' + vistas.marca(col).clase
+                + (pago && pago.continuacion && hay ? ' tarj-continuacion' : '') + '"'
+                + (pago && hay ? ' title="' + esc(pago.tooltip) + '"' : '') + '>'
+                + (hay ? plataCorta(v) : '')
+            + '</td>';
+        }).join('');
+    }
+
+    /**
+     * Alta o corrección de una póliza: el formulario con todos los campos. La
+     * validación que vale es la del servidor (TarjetasSeguros::validar()).
+     */
+    function formularioPoliza(id) {
+        var seg = datos.corporativas.seguros || {proveedores: [], polizas: []};
+        var p = null;
+
+        (seg.polizas || []).forEach(function(x) { if (String(x.ID) === String(id)) { p = x; } });
+
+        var corporativas = datos.tarjetas.filter(function(t) {
+            return t.TIPO === 'CORPORATIVA' && t.ACTIVA;
+        });
+
+        Notificacion.formulario({
+            titulo: p ? 'Corregir la póliza ' + p.POLIZA : 'Cargar póliza',
+            mensaje: 'Se paga en ' + 'cuotas iguales: el total dividido por la vigencia menos la gracia, '
+                + 'una por mes desde el primer pago, en el débito de la tarjeta.',
+            campos: [
+                {nombre: 'proveedor', etiqueta: 'Proveedor', tipo: 'lista', obligatorio: true, ancho: 6,
+                 valor: p ? p.COD_PROVEE : '',
+                 opciones: seg.proveedores.map(function(s) {
+                     return {valor: s.COD_PROVEE, rotulo: s.RAZON_SOC + ' (' + s.COD_PROVEE + ')'};
+                 })},
+                {nombre: 'poliza', etiqueta: 'Número o descripción de la póliza', tipo: 'texto',
+                 obligatorio: true, ancho: 6, valor: p ? p.POLIZA : '',
+                 ayuda: 'Con el proveedor identifica la póliza siguiente: usá el mismo al renovar.'},
+                {nombre: 'id_tarjeta', etiqueta: 'Tarjeta', tipo: 'lista', obligatorio: true, ancho: 6,
+                 valor: p ? p.ID_TARJETA : '',
+                 opciones: corporativas.map(function(t) {
+                     return {valor: t.ID, rotulo: t.ROTULO + ' · vence el ' + t.DIA_VENCIMIENTO};
+                 }),
+                 ayuda: 'De ella salen el día del débito y el % de cobertura.'},
+                {nombre: 'moneda', etiqueta: 'Moneda', tipo: 'lista', obligatorio: true, ancho: 2,
+                 valor: p ? p.MONEDA : 'ARS',
+                 opciones: [{valor: 'ARS', rotulo: '$'}, {valor: 'USD', rotulo: 'U$S'}]},
+                {nombre: 'importe_total', etiqueta: 'Importe total de la vigencia', tipo: 'importe',
+                 obligatorio: true, positivo: true, ancho: 4, valor: p ? p.IMPORTE_TOTAL : ''},
+                {nombre: 'fecha_inicio', etiqueta: 'Inicio de la vigencia', tipo: 'fecha', obligatorio: true,
+                 ancho: 4, valor: p ? p.FECHA_INICIO : ''},
+                {nombre: 'vigencia_meses', etiqueta: 'Vigencia (meses)', tipo: 'numero', obligatorio: true,
+                 min: 1, max: 120, ancho: 2, valor: p ? p.VIGENCIA_MESES : 12},
+                {nombre: 'gracia_meses', etiqueta: 'Gracia (meses)', tipo: 'numero', obligatorio: true,
+                 min: 0, max: 119, ancho: 2, valor: p ? p.GRACIA_MESES : 0,
+                 ayuda: 'Los meses del final en que no se paga.'},
+                {nombre: 'mes_primer_pago', etiqueta: 'Mes del primer pago', tipo: 'mes', obligatorio: true,
+                 ancho: 4, valor: p ? p.MES_PRIMER_PAGO : ''},
+                {nombre: 'observacion', etiqueta: 'Observación', tipo: 'texto', largo: 500, ancho: 8,
+                 valor: p ? (p.OBSERVACION || '') : ''}
+            ],
+            validar: function(v) {
+                return (v.gracia_meses !== null && v.vigencia_meses !== null
+                        && v.gracia_meses >= v.vigencia_meses)
+                    ? 'La gracia tiene que ser menor que la vigencia: si no, no queda ningún pago.'
+                    : null;
+            },
+            confirmar: p ? 'Guardar' : 'Cargar póliza'
+        }).then(function(v) {
+            if (v === null) { return; }
+
+            v.id = p ? p.ID : null;
+            guardar('guardarPoliza', v);
+        });
     }
 
     /** El estado de cada mes de una estimación, en marcas cortas */
@@ -1826,6 +2028,7 @@
         });
 
         enganchar('btnNuevoResumen', 'click', nuevoResumen);
+        enganchar('btnNuevaPoliza', 'click', function() { formularioPoliza(null); });
         enganchar('btnBaseHistorica', 'click', baseHistorica);
         enganchar('btnCerrarResumenes', 'click', function() {
             resumenDe = null;

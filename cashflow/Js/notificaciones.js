@@ -282,7 +282,9 @@ var Notificacion = (function() {
          * @param {Object} opciones Las de confirmar(), más:
          * @param {Array} [opciones.campos] [{nombre, etiqueta, tipo, obligatorio,
          *        valor, placeholder, ayuda, ancho, positivo, opciones, titular}].
-         *        tipo: 'mes', 'importe', 'fecha', 'texto', 'casillas'. Con
+         *        tipo: 'mes', 'importe', 'fecha', 'texto', 'numero' (entero, con
+         *        min y max), 'lista' (un desplegable, con `opciones`
+         *        [{valor, rotulo}]), 'casillas'. Con
          *        'casillas', `opciones` es [{valor, rotulo, nota, marcada}] y
          *        `titular: true` agrega a cada una un botón para marcar cuál es
          *        la principal: vuelve {elegidas: [...], titular: valor}.
@@ -936,12 +938,21 @@ var Notificacion = (function() {
             return '<div class="col-12">' + etiqueta + control + ayuda + '</div>';
         }
 
-        if (c.tipo === 'texto' && renglon === null && c.largo) {
+        if (c.tipo === 'lista') {
+            control = '<select id="' + id + '" class="form-select form-select-sm cf-dlg-form-campo"' + datos + '>'
+                + '<option value="">' + escapar(c.placeholder || 'Elegí…') + '</option>'
+                + (c.opciones || []).map(function(o) {
+                    return '<option value="' + escapar(o.valor) + '"'
+                        + (String(o.valor) === String(valor) ? ' selected' : '') + '>'
+                        + escapar(o.rotulo) + '</option>';
+                }).join('')
+                + '</select>';
+        } else if (c.tipo === 'texto' && renglon === null && c.largo) {
             control = '<textarea id="' + id + '" class="form-control form-control-sm cf-dlg-form-campo" rows="2"'
                 + datos + ' maxlength="' + c.largo + '" placeholder="' + escapar(c.placeholder || '') + '">'
                 + escapar(valor) + '</textarea>';
         } else {
-            var tipo = {mes: 'month', fecha: 'date'}[c.tipo] || 'text';
+            var tipo = {mes: 'month', fecha: 'date', numero: 'number'}[c.tipo] || 'text';
 
             control = '<input type="' + tipo + '" id="' + id + '" class="form-control form-control-sm cf-dlg-form-campo'
                 + (c.tipo === 'importe' ? ' text-end' : '') + '"' + datos
@@ -1017,6 +1028,21 @@ var Notificacion = (function() {
             }
 
             return n;
+        }
+
+        if (c.tipo === 'numero') {
+            var entero = Number(v);
+
+            if (!/^-?\d+$/.test(v)
+                || (c.min !== undefined && entero < c.min) || (c.max !== undefined && entero > c.max)) {
+                marcar(el, '«' + c.etiqueta + '»' + donde + ' tiene que ser un número entero'
+                    + (c.min !== undefined ? ' de ' + c.min : '')
+                    + (c.max !== undefined ? ' a ' + c.max : '') + '.');
+
+                return null;
+            }
+
+            return entero;
         }
 
         if (c.tipo === 'mes' && !/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) {

@@ -608,6 +608,70 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 </div>
             </div>
 
+            <!-- ============================================================
+                 SEGUROS
+                 Las pólizas de los proveedores de seguros (rubro SEGUROS y
+                 TARJETA CORP en el maestro). Sus facturas de Tango no suman: se
+                 proyectan sólo con las pólizas. Ver Class/TarjetasSeguros.php.
+                 ============================================================ -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center
+                            flex-wrap gap-2">
+                    <div>
+                        <h5 class="mb-0">Seguros</h5>
+                        <small class="text-muted">
+                            Se proyectan <strong>con las pólizas</strong>: la cuota es el total de la
+                            vigencia dividido por los meses que se pagan (vigencia menos gracia),
+                            uno por mes desde el primer pago, en el débito de su tarjeta. En dólares,
+                            con el dólar futuro de cada mes. Cuando la vigencia termina antes del fin
+                            del horizonte, el ciclo se repite —<em>estimado</em>— hasta que se cargue
+                            la póliza siguiente. Generan cobertura y los pisa el resumen, como una
+                            factura vinculada.
+                        </small>
+                    </div>
+                    <?php if ($edita): ?>
+                    <button id="btnNuevaPoliza" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-plus me-1"></i> Cargar póliza
+                    </button>
+                    <?php endif; ?>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-wrapper table-responsive tabla-temporal">
+                        <table id="tablaCorpSeg" class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" class="col-texto">PROVEEDOR</th>
+                                    <th rowspan="2">PÓLIZA</th>
+                                    <th rowspan="2">TARJETA</th>
+                                    <th rowspan="2" class="text-end">TOTAL VIGENCIA</th>
+                                    <th rowspan="2">VIGENCIA</th>
+                                    <th rowspan="2" class="text-end">CUOTA</th>
+                                    <!-- Acá terminan las descriptivas: el resto
+                                         lo pinta Js/eje-totales.js. -->
+                                </tr>
+                                <tr id="headerEjeSeg2">
+                                    <th class="text-end total-column"
+                                        title="Suma las columnas que se están viendo">
+                                        TOTAL PERÍODO
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="bodyCorpSeg"></tbody>
+                            <tfoot>
+                                <tr id="totalesCorpSeg">
+                                    <td colspan="6" class="fw-bold text-end">TOTALES</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+                <!-- La línea de las facturas de seguros: cuántas y por cuánto. NO
+                     SUMAN, y se dice siempre. -->
+                <div class="card-body py-2 border-top">
+                    <small class="text-muted" id="corpSegurosFacturas"></small>
+                </div>
+            </div>
+
             <!-- La cobertura y los resúmenes, aparte de la grilla de facturas:
                  no son facturas y ponerlos como filas más de la misma tabla haría
                  que el total de la columna PENDIENTE dejara de significar algo. -->

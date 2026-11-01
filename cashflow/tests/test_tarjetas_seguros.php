@@ -399,3 +399,37 @@ foreach (['DROP TABLE', 'DELETE FROM', 'TRUNCATE'] as $prohibido) {
 foreach (['USUARIO_ALTA', 'FECHA_ALTA', 'USUARIO_MODIF', 'FECHA_MODIF', 'USUARIO_BAJA', 'FECHA_BAJA'] as $c) {
     chequear("lleva $c", true, strpos($sqlSG, $c) !== false);
 }
+
+/* ================================================================
+   LA PANTALLA Y LOS ENDPOINTS
+   ================================================================ */
+seccion('la seccion Seguros, sus endpoints y sus permisos');
+
+$ctrlSG = file_get_contents(__DIR__ . '/../Controller/TarjetasController.php');
+$jsSG = file_get_contents(__DIR__ . '/../Js/Financiero-Pagos_tarjetas.js');
+$tabSG = file_get_contents(__DIR__ . '/../Tabs/pagos_tarjetas.php');
+
+foreach (['guardarPoliza', 'bajaPoliza'] as $accion) {
+    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1],
+        [strpos($jsSG, "'" . $accion . "'") !== false, substr_count($ctrlSG, "case '" . $accion . "':")]);
+    chequear($accion . ' pide editar la pestana', [['pagos_tarjetas', null]],
+        AuthCashflow::ESCRITURAS['Tarjetas'][$accion]);
+}
+
+chequear('el alta se valida contra el maestro y las tarjetas, en el servidor', true,
+    strpos($ctrlSG, 'TarjetasSeguros::proveedores((new ProveedoresCategorias())->mapa())') !== false);
+chequear('el buscador de proveedores que proyectan no ofrece seguros', true,
+    strpos($ctrlSG, 'return !isset($seguros[$p[\'COD_PROVEE\']]);') !== false);
+chequear('la poliza se carga con el formulario', true,
+    strpos($jsSG, "titulo: p ? 'Corregir la póliza ' + p.POLIZA : 'Cargar póliza'") !== false);
+chequear('la continuacion se ve distinta, y con su tooltip', true,
+    strpos($jsSG, "' tarj-continuacion'") !== false && strpos($jsSG, "title=\"' + esc(pago.tooltip)") !== false);
+chequear('el KPI dice cuanto es de seguros', true,
+    strpos($jsSG, "' es de seguros'") !== false);
+
+$antesBoton = substr($tabSG, 0, strpos($tabSG, 'id="btnNuevaPoliza"'));
+
+chequear('el boton de cargar poliza se dibuja solo con permiso', true,
+    strrpos($antesBoton, '<?php if ($edita): ?>') > strrpos($antesBoton, '<?php endif; ?>'));
+chequear('y la linea de las facturas de seguros esta en la seccion', true,
+    strpos($tabSG, 'id="corpSegurosFacturas"') !== false);
