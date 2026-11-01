@@ -51,9 +51,10 @@ Todos contra `central`, reejecutables, y ninguno borra nada.
 | 4 | `sql/cashflow_tarjetas_vto_mensual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_FACTURA_VTO` (el vencimiento corregido de una cuota) y `RO_T_CASHFLOW_TARJETAS_MENSUAL` (las facturas marcadas como mensuales). **Corta si falta el 1**: la segunda tiene una FK contra el maestro | Pagos Corporativos se lee igual: los controles de **corregir el vencimiento** y **marcar mensual** se dibujan apagados nombrando el archivo, todas las cuotas usan el vencimiento de Tango y no hay estimaciones. El tablero no cambia |
 | 3 | `sql/cashflow_tarjetas_fila.sql` | Crea la fila `TARJETAS_PAGOS` en *Costos Indirectos*, orden 45, apuntada a `TARJETAS` / `TOTAL` | **El tablero queda exactamente como hoy** y no falta nada, porque hasta hoy esta plata no estaba en el cuadro. La pestaña funciona igual y avisa que lo que muestra todavía no llega al tablero |
 | 5 | `sql/cashflow_tarjetas_resumen_compartido.sql` | Crea `RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA`: las tarjetas **adicionales** de un resumen compartido. **No migra nada**: los resúmenes que ya están son de una tarjeta, que es su titular | Todo funciona igual, con resúmenes de una sola tarjeta. En el formulario no aparece la lista de tarjetas, y el servidor rechaza un resumen de varias nombrando el script |
+| 7 | `sql/cashflow_tarjetas_prov_proyecta.sql` | Crea `RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA` (los proveedores que proyectan) y **migra** a ella, con usuario `MIGRACION`, los proveedores de las marcas mensuales vigentes. La tabla de marcas no se toca | **Ningún proveedor proyecta y la fila baja** lo que daban las marcas mensuales ($ 80,5 M al 31/10/2026): las marcas viejas ya no se leen. La sección de Parámetros se dibuja apagada nombrando el script |
 | 6 | `sql/cashflow_tarjetas_historico_manual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_HIST_MANUAL`: el histórico de 3 meses de quien tiene tarjeta Supervisora y no carga gastos | Esas personas aparecen en Gastos Supervisoras sin proyección, y no hay botón para cargarles el histórico. El tablero no cambia |
 
-El **2, el 4 y el 5 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero. **El 5 y el 6 son de `feature/tarjetas-resumenes-seguros`** y se corren después de los anteriores, en cualquier orden entre ellos.
+El **2, el 4 y el 5 dependen del 1** (tienen una FK contra el maestro) y cortan con un mensaje si falta. El 3 no depende técnicamente de los otros dos, pero conviene último: una fila activa apuntada a un proveedor sin tablas muestra un cero. **El 5, el 6 y el 7 son de `feature/tarjetas-resumenes-seguros`** y se corren después de los anteriores, en cualquier orden entre ellos. **El 7 hay que correrlo el mismo día que se sube el código**: el código nuevo deja de leer las marcas mensuales, y sin el 7 esa estimación desaparece de la fila.
 
 **La vista `RO_V_CASHFLOW_USUARIOS_TARJETAS` no la crea ningún script de este repo.** Ya existe y se mantiene aparte. El script 1 sólo verifica que esté con `OBJECT_ID` y avisa si falta; la pantalla hace lo mismo y se dibuja apagada en vez de fallar.
 
@@ -73,7 +74,11 @@ Lo que falte cargar **no rompe nada**, pero deja plata fuera del tablero. Cada f
 | **La tarjeta Supervisora de quien no carga gastos** (Johanna) y su **histórico manual** de 3 meses | *Parámetros › Tarjetas* y el botón ↺ de su fila en Gastos Supervisoras | Aparece en la grilla sin proyección (`SIN_HISTORICO`) y un aviso la nombra. Su gasto no entra al tablero |
 | **Los resúmenes compartidos**: volver a cargar como uno solo los de las tarjetas adicionales de una misma cuenta (hoy las 6 supervisoras y las corporativas 7 y 8 son del banco 025 y vencen el 5) | El formulario de resumen, eligiendo todas y la titular | Cada resumen cargado por separado sigue valiendo en su tarjeta, como hasta hoy. Si el banco manda uno solo y está cargado entero en cada tarjeta, se cuenta una vez por tarjeta |
 
-> Las secciones de **Tarjetas Socios por banco** y **Seguros** se completan en sus etapas.
+| **El maestro de Proveedores Locales de los seguros**: forma de pago `TARJETA CORP` en **OGRSA** y **OGZURI** (hoy en blanco), y rubro `SEGUROS` en **OGMESE** (La Meridional, hoy en `LOCALES`; ya tiene `TARJETA CORP`) | *Cuentas a Pagar Locales › Proveedores* | Un proveedor que no cumple *rubro `SEGUROS` + `TARJETA CORP` en el maestro* no se trata como seguro: sus facturas siguen en la grilla y no se le puede cargar póliza |
+| **Las pólizas de OGRSA, OGZURI, OGLCAJ y OGMESE** | Tarjetas Pagos Corporativos › Seguros | Las facturas de seguros salen de la grilla y del tablero, y sin póliza vigente ese proveedor no proyecta nada. El aviso dice cuánto proyectaban sus facturas |
+| **Revisar los 77 vencimientos corregidos** (ver la sección 4) | La columna VTO. A CONSIDERAR | Nada se rompe: las correcciones siguen moviendo la fecha de pago. La mayoría ya no hace falta |
+
+> La sección de **Tarjetas Socios por banco** se completa en su etapa.
 
 ---
 
@@ -323,9 +328,24 @@ Al 26/09/2026 el universo son **135 vencimientos por $ 89.896.563,43 en 94 compr
 
 El motivo pasó de `VENCIDA_SIN_TARJETA` a **`SIN_TARJETA`**, y la precedencia queda **`EXCLUIDA` > `CUBIERTA` > `SIN_TARJETA` > `OK`**.
 
-### La fecha es el vencimiento de Tango, y no la de Proveedores Locales
+### La fecha de una vinculada es el débito de su tarjeta
 
-Esta pestaña **no sigue la jerarquía de `Proveedores::resolverFechaPago()`**, que prefiere la fecha de pago cargada a mano. Es una diferencia deliberada: el pago de una tarjeta lo fija el banco, no una fecha que alguien cargó pensando en un echeq.
+> Desde `feature/tarjetas-resumenes-seguros`. Antes era el vencimiento de Tango, y por eso en Tango se cargaba como vencimiento el del resumen.
+
+**La fecha de pago de una factura vinculada es el primer débito de su tarjeta igual o posterior a su vencimiento** —el vigente: el corregido si lo hay— (`TarjetasVencimiento::pagoDesde()`).
+
+- **Se cuenta desde el vencimiento y no desde hoy**, porque hay facturas en cuotas: cada cuota va al débito que le toca. Una que vence antes del día de la tarjeta sale en el débito de su mes; una que vence después, en el del mes siguiente; una que vence el mismo día, en ese débito.
+- **El débito de cada mes es el resumen cargado si lo hay, si no la estimación** (`TarjetasVencimiento::delMes()`: el día de la tarjeta, acotado al último día del mes y corrido al hábil siguiente). Si el resumen de un mes vence antes que la cuota, la cuota va al mes siguiente.
+- **Si ese débito ya pasó**, rige la regla de las vencidas: el próximo pago de la tarjeta posterior a hoy.
+- **Si vence después del último débito del horizonte**, queda sin fecha (`SIN_FECHA`) y lo dice.
+- **La no vinculada sigue con su vencimiento de Tango**, y como hasta ahora no suma.
+- **Con esto deja de depender de que Proveedores cargue en Tango el vencimiento del resumen.** La corrección del vencimiento sigue sirviendo para mandar una cuota al débito siguiente.
+
+En la grilla son **tres columnas**: **VTO. EN TANGO** (informativa, tal como está cargado), **VTO. A CONSIDERAR** (el que se corrige, ver más abajo) y **DÉBITO TARJETA** (la fecha de pago calculada, que es la que va al eje). La grilla abre ordenada por **DÉBITO TARJETA**; quien tenía guardado el orden por la columna vieja *VTO TANGO* lo pierde, porque esa columna ya no existe con ese nombre.
+
+> Medido el 31/10/2026: **el total de las facturas no cambia** ($ 92.999.453,05 antes y después). Cambian las columnas en las que cae cada una.
+
+**No sigue la jerarquía de `Proveedores::resolverFechaPago()`**, que prefiere la fecha de pago cargada a mano. Es una diferencia deliberada: el pago de una tarjeta lo fija el banco, no una fecha que alguien cargó pensando en un echeq.
 
 > **La consecuencia hay que tenerla presente: la misma factura puede verse en fechas distintas en las dos pestañas.** Hoy son 10 de las 135, que tienen una `FECHA_PAGO` cargada en Proveedores Locales.
 
@@ -351,7 +371,7 @@ cobertura(t, m) = PCT_COBERTURA(t) / 100 × Σ facturas vinculadas a t que se pa
 - Se ubica en el **`DIA_VENCIMIENTO` de la tarjeta**, no en la fecha de cada factura: es un gasto de la tarjeta, que se debita una vez por mes.
 - **Sólo sobre las que efectivamente suman.** Una excluida, una cubierta por un resumen o una sin vincular no está en la fila, así que no necesita cobertura: calcularla sumaría un importe que acompaña a nada.
 - **Las no vinculadas no generan cobertura**: no se sabe con qué tarjeta se pagan, así que no hay % que aplicar.
-- **Las estimaciones mensuales que proyectan sí**: se comportan como una factura vinculada de su tarjeta y su mes, y el tooltip las cuenta aparte.
+- **Las estimaciones de los proveedores que proyectan sí**: se comportan como una factura vinculada de su tarjeta y su mes, y el tooltip las cuenta aparte.
 - Una tarjeta con **0 % no genera ninguna fila**, y no una fila en cero: una fila de cobertura en cero se lee como *"esta tarjeta tiene cobertura y este mes no la usa"*, que es otra cosa.
 
 ### El resumen reemplaza las vinculadas de su mes, y su cobertura
@@ -362,40 +382,59 @@ El resumen es lo que el banco va a debitar: si está cargado, las facturas vincu
 
 ### El vencimiento de Tango se puede corregir, sólo en esta pestaña
 
-Quien carga en Tango **ya no pone en `FECHA_VTO` el vencimiento real de la factura sino el del resumen de la tarjeta** en el que se va a pagar. Si lo pone mal, la cuota cae en otro débito. La columna **VTO TANGO** se puede corregir con el mismo patrón que la fecha de Proveedores Locales: un input que guarda al cambiar y un **↺ que vuelve al de Tango**.
+Desde que la fecha sale del débito de la tarjeta, corregir el vencimiento sirve para **mandar una cuota a otro débito**. La columna **VTO. A CONSIDERAR** se corrige con el mismo patrón que la fecha de Proveedores Locales: un input que guarda al cambiar y un **↺ que vuelve al de Tango**.
+
+> **Al 31/10/2026 hay 77 correcciones vigentes en 26 proveedores**, todas de la misma persona entre el 22 y el 28/10, casi todas llevando la factura al débito del resumen (52 al 02/11). Eran necesarias con la regla vieja; con la nueva, la mayoría da la misma fecha sin corregir. **Están para revisar**, y no se tocaron. **No deciden qué facturas repite un proveedor que proyecta**: eso lo dice el vencimiento de Tango (ver la sección siguiente).
 
 - **La clave es la cuota**, `(COD_PROVEE, T_COMP, N_COMP, FECHA_VTO_TANGO)`: una factura en cuotas tiene varias filas y cada una se corrige por separado. Tabla `RO_T_CASHFLOW_TARJETAS_FACTURA_VTO`, con índice único filtrado por `VIGENTE = 1`, auditoría completa y **sin borrado físico**: deshacer marca `VIGENTE = 0`.
 - **La fecha corregida reemplaza a la de Tango en toda la lógica**: si está vencida, la reubicación al próximo pago de la tarjeta, el mes de pago, la cobertura y el reemplazo por resumen. **Una vencida corregida a una fecha futura deja de estar vencida.**
 - **La fecha mínima es hoy**, validada en el backend (`TarjetasCorporativas::validarVtoEditado()`); el `min` del input es comodidad. **El motivo es opcional**: se pide en un diálogo y se puede dejar vacío.
 - **Sólo vale en esta pestaña**: la fecha de pago de Cuentas a Pagar Locales no se entera. Se puede corregir en filas vinculadas y no vinculadas.
 - Corregida **se ve distinta** —en azul, como una fecha cargada a mano— y el tooltip dice el vencimiento original de Tango y quién lo cambió. Sin permiso se ve sólo la fecha; sin el script, el input se dibuja apagado nombrando `sql/cashflow_tarjetas_vto_mensual.sql`.
-- **La grilla abre ordenada por VTO TANGO ascendente**, el vencimiento vigente —el corregido, si lo hay—: lo que vence primero, arriba. Es `porDefecto` en `crearOrdenTabla()`, con `data-orden-nombre="VTO TANGO"` **igual al rótulo** para no hacerle perder a nadie el orden que ya eligió a mano. La celda ya tenía `data-orden` con la fecha vigente. Ver *Las que abren ordenadas* en `README-cashflow.md`.
+- **La grilla abre ordenada por DÉBITO TARJETA ascendente**: lo que se paga primero, arriba. Es `porDefecto` en `crearOrdenTabla()`, con `data-orden-nombre="DÉBITO TARJETA"` **igual al rótulo**. Hasta `feature/tarjetas-resumenes-seguros` abría por *VTO TANGO*. Ver *Las que abren ordenadas* en `README-cashflow.md`.
 - **Tildar "todas" ya no ordena la grilla.** El clic en el check del encabezado subía a su `<th>` y `tabla-orden.js` lo tomaba como un clic para ordenar, y guardaba ese orden. La columna de selección declara `data-orden="no"` y el control ignora los clics sobre un campo del encabezado.
 
 **Si Tango cambia el vencimiento de esa cuota**, la corrección queda sin cuota a la que aplicarse: **queda inerte** —no se reapunta sola, porque el vencimiento nuevo de Tango puede ser justamente la corrección— y **se avisa con los comprobantes**, con una lista bajo la grilla para darla de baja. **Sólo se avisa si el comprobante sigue pendiente**: una corrección de un comprobante que ya se pagó no corrige nada, y avisarla haría crecer el aviso para siempre.
 
-### Facturas mensuales: la estimación de los abonos
+### Proveedores que proyectan: la estimación de los abonos
 
-Para las facturas que se repiten todos los meses: **marcarla como mensual genera una estimación de los meses siguientes.** Se marca con el ícono de repetir de la columna *ESTADO*.
+> Desde `feature/tarjetas-resumenes-seguros`, en lugar de *"marcar mensual"*. Script: `sql/cashflow_tarjetas_prov_proyecta.sql`.
 
-> **Va en la fila y no en la barra de selección**, y es a propósito: la barra actúa sobre varias facturas a la vez, y marcar mensual es de **una** —hay una sola estimación vigente por proveedor, así que marcar dos del mismo proveedor en un lote sería contradictorio—.
+Antes se marcaba **una factura** como mensual y se guardaba una copia; había una sola estimación por proveedor y se apagaba por mes cuando aparecía la factura real. Ahora se marca el **proveedor**, en *Parámetros › Tarjetas › Proveedores que proyectan*, y la regla mira sus facturas pendientes (`TarjetasCorporativas::estimacionesPorProveedor()`, pura):
 
-**Las reglas** (`TarjetasCorporativas::datosMarcaMensual()` y `estimaciones()`, puras):
+1. **Su último mes** es el del **vencimiento original de Tango** más tardío entre sus facturas pendientes **vinculadas** a una tarjeta, **excluidas incluidas**.
+   - **El de Tango y no el corregido.** La corrección vale para la fecha de pago, pero casi todas llevaban la factura al débito del resumen y juntaban meses distintos: las boletas de Edenor del 28/09 al 21/10 quedaban todas en noviembre y se repetían todas. Qué facturas forman *"el mes"* lo dice cuándo vencen, no en qué débito se pagan.
+   - **Una sin vincular no cuenta**: no suma, así que no duplica nada. Genera el aviso *"<proveedor> tiene una factura sin vincular; vinculala para que reemplace la proyección"*.
+   - **Una excluida sí cuenta**: corta la repetición de las anteriores, aunque ella no se repita.
+2. **Se repiten las facturas de ese mes**, vinculadas y no excluidas: cada una con el **importe de su cuota** (`IMPORTE_VTO`, sin inflación), su tarjeta y la fecha del débito de esa tarjeta, **todos los meses después de su mes de pago y hasta el fin del horizonte**. Las de meses anteriores cuentan sólo en su mes: cuando se carga la de noviembre deja de repetirse la de octubre, y el abono no se duplica.
+3. **Una factura que se cancela sale de pendientes, y con ella sus estimaciones.** Entre el pago de una y la carga de la siguiente puede no haber proyección: es lo esperado.
 
-- **Sólo una factura vinculada a una tarjeta y no excluida.** Lo valida el backend.
-- Se guarda una **copia** en `RO_T_CASHFLOW_TARJETAS_MENSUAL`: proveedor y razón social, el comprobante de origen con su vencimiento, la tarjeta, el importe, el día del mes y el primer mes. Existe porque la factura sale de pendientes cuando se paga, y la estimación tiene que seguir viva.
-- **El importe es el de la cuota marcada, antes de imputaciones (`IMPORTE_VTO`), no el pendiente**: el pendiente puede estar pagado en parte, y lo que se repite es lo que se debita por mes. En una factura de una cuota coincide con el total; en una en cuotas, el total del comprobante multiplicaría el importe por la cantidad de cuotas. **Fijo, sin inflación.**
-- **Desde el mes siguiente** al del vencimiento vigente —el corregido si lo hay— **hasta el fin del horizonte**, sin fecha de fin: se corta desmarcando.
-- **El día** es el del vencimiento vigente, **acotado al último día** en los meses que no lo tienen, y **no se corre al hábil**: ese día ya es el vencimiento del resumen.
-- **Una sola vigente por proveedor**: marcar otra factura del mismo proveedor da de baja la anterior, con confirmación. El índice único filtrado es la red.
-- **Se apaga sola por mes**: si en el universo de esta pestaña hay una factura real **del mismo proveedor** con vencimiento vigente en ese mes —cualquiera, vinculada o no, excluida o cubierta—, ese mes no proyecta y la grilla dice *"reemplazada por FAC …"*, aunque esa factura no sume.
-- **Una estimación con fecha ≤ hoy no se proyecta.**
-- **Se comporta como una factura vinculada**: genera cobertura con el % de su tarjeta en su mes, y si ese mes tiene resumen cargado queda cubierta y no suma.
-- **Si su tarjeta está inactiva, ya no existe o dejó de ser corporativa**, no proyecta y se avisa.
-- **Excluir la factura de origen no toca la estimación**: son decisiones distintas, y la estimación se desmarca explícitamente.
+**Cada mes estimado se comporta como una factura vinculada**: genera cobertura con el % de su tarjeta (`estimacionesComoFilas()`), queda **cubierto** si la tarjeta tiene resumen ese mes, **no se proyecta** si la fecha es hoy o antes, y **no proyecta y se avisa** si la tarjeta está inactiva o dejó de ser corporativa.
 
-**En pantalla**, una sección propia, **Estimaciones mensuales**, separada de la grilla por el mismo motivo que *Cobertura y resúmenes* —no son facturas—: proveedor, comprobante de origen, tarjeta, importe, día, el estado de cada mes (*entra*, *reemplazada por …*, *cubierta por resumen*, *ya pasó*, *sin tarjeta activa*), las columnas del eje con las mismas vistas y su pie, y quién la marcó. Se desmarca desde ahí, **también cuando la factura de origen ya se pagó**. El KPI *Entra al flujo* las incluye y dice cuánto es estimación.
+**En pantalla**: se fue el ícono de marcar mensual de la fila (queda un ícono informativo cuando el proveedor proyecta). La sección **Estimaciones mensuales** muestra una fila por factura que se repite: proveedor —con quién lo marcó—, factura de origen con su vencimiento de Tango, tarjeta, importe, día, el estado de cada mes y las columnas del eje con su pie. **Se desmarca en Parámetros**, no desde acá. El KPI *Entra al flujo* dice cuánto es estimación.
 
+**En Parámetros › Tarjetas**: un buscador con los proveedores que tienen facturas pendientes `TARJETA CORP` —el mismo universo de la pestaña—, alta, baja lógica e historial con quién y cuándo. El alta se valida contra ese universo **en el servidor**. Permiso: el de *Parámetros › Tarjetas*.
+
+**Las marcas mensuales** (`RO_T_CASHFLOW_TARJETAS_MENSUAL`) quedan como **historial de sólo lectura**. La regla vieja (`datosMarcaMensual()`, `estimaciones()`), sus endpoints y sus pruebas se fueron.
+
+#### La migración, y cuánto mueve el tablero
+
+El script da de alta como *"proyectan"*, con usuario `MIGRACION`, a los proveedores con una marca mensual vigente: **17 marcas de 16 proveedores**. No toca la tabla de marcas, y no revive un proveedor que alguien haya desmarcado después.
+
+Medido contra la base el 31/10/2026 (horizonte hasta el 30/09/2027):
+
+| | develop | Con la migración |
+| --- | --- | --- |
+| Facturas | $ 92.999.453,05 | $ 92.999.453,05 |
+| Estimaciones | $ 80.533.930,09 (marcas mensuales) | $ 138.696.117,35 (por proveedor) |
+| **CORPORATIVAS** | $ 173.533.383,14 | **$ 231.695.570,40** |
+| **TOTAL de la fila** | $ 325.291.967,45 | **$ 383.454.154,71 (+$ 58.162.187,26)** |
+
+**La diferencia es de la regla, no de un error**: la marca vieja repetía **una** factura por proveedor, y la regla nueva repite **todas** las del último mes. Pesan dos proveedores con un comprobante por local:
+- **Edenor (SPEDEN)**: 6 boletas de octubre (L80 San Justo, L10 Solar, Uruguay 4415, L84 Terrazas de Mayo, L11 TOM, L78 Arcos), $ 5,7 M por mes → $ 57,1 M en el horizonte. Antes se repetía una de $ 1,07 M.
+- **Telecom (SPTELE)**: 8 líneas de octubre, $ 1,28 M por mes → $ 12,8 M.
+
+Sin migrar, la fila habría bajado $ 80,5 M hasta que alguien marcara los proveedores.
 
 ### La exclusión saca de la serie, no del universo
 
@@ -649,11 +688,13 @@ php cashflow/tests/run.php tarjetas      los cinco archivos del módulo
 | `tests/test_tarjetas_vencimiento.php` | El día del mes en **meses cortos** y en **año bisiesto**, el corrimiento al hábil **siguiente** —contrastado contra el **anterior** de `CronogramaPagos`—, fin de semana, **feriado encadenado**, cruce de mes y de año, el fallback de calendario con su aviso, el tope defensivo, el próximo vencimiento posterior a hoy —con el que cae hoy quedando afuera—, los **dos rangos de calendario opuestos**, y la **inflación compuesta** con su mes faltante, comparada contra `acumulada()` sobre el mismo trimestre |
 | `tests/test_tarjetas_maestro.php` | Los tres tipos **contrastados contra el `CHECK` del script**, los últimos 4 con su **cero de adelante**, el % con su tope, los importes del resumen —al menos uno, ninguno en cero ni negativo—, el aviso cuando el período y la fecha no coinciden, el rótulo único, la declaración del módulo de Parámetros con su posición y su endpoint, y que los tres scripts sean **reejecutables, no borren nada y no creen la vista** |
 | `tests/test_tarjetas_supervisoras.php` | El efectivo en **los lunes del mes** —quintos en un mes de cinco, cuartos en uno de cuatro, sin cambiar la parte cuando los primeros ya pasaron—; la **ventana dinámica** —incluido el cruce de año y que no se mueva dentro del mes—, que **siempre se divida por 3**, la proporción de la ventana, la inflación compuesta con un mes faltante, los cuatro motivos para no proyectar, el **reparto en 2 pagos** con el que cae hoy y el que ya pasó, que el **resumen pise importe y fecha**, que un **resumen pagado salga del horizonte**, y que sin tarjeta no se invente una fecha |
-| `tests/test_tarjetas_corporativas.php` | Que **una no vinculada no suma**, vencida o no, y que no haya aviso de doble conteo; el **vencimiento corregido** reemplazando al de Tango en vencida, reubicación, cobertura y resumen, que deshacer vuelva al de Tango, que sea **por cuota**, la **fecha mínima hoy** y la **corrección inerte** con su aviso; la **estimación mensual** desde el mes siguiente, con el **día acotado** en meses cortos y sin correr al hábil, **reemplazada por la factura real** del mismo proveedor y mes, **cubierta por resumen**, con **cobertura**, sin tarjeta activa, con la factura de origen ya pagada y **una por proveedor**; y que **lea el `FECHA_VTO` de Tango** y no la fecha que reubica el cronograma de Proveedores Locales. Además: el universo por forma vigente, que **lo vencido no se apile en el día uno**, la reubicación al próximo pago, que una vencida sin vincular no proyecte, que la **exclusión saque de la serie y no del universo**, la **cobertura sobre las vinculadas** —y no sobre las que no suman—, que el **resumen reemplace facturas y cobertura**, que las **no vinculadas sigan sumando con aviso**, y el próximo pago mirando resúmenes y estimaciones |
+| `tests/test_tarjetas_corporativas.php` | Que **una no vinculada no suma**, vencida o no, y que no haya aviso de doble conteo; el **vencimiento corregido** reemplazando al de Tango en vencida, reubicación, cobertura y resumen, que deshacer vuelva al de Tango, que sea **por cuota**, la **fecha mínima hoy** y la **corrección inerte** con su aviso; y que **lea el `FECHA_VTO` de Tango** y no la fecha que reubica el cronograma de Proveedores Locales. Además: el universo por forma vigente, que **lo vencido no se apile en el día uno**, la reubicación al próximo pago, que una vencida sin vincular no proyecte, que la **exclusión saque de la serie y no del universo**, la **cobertura sobre las vinculadas** —y no sobre las que no suman—, que el **resumen reemplace facturas y cobertura**, que las **no vinculadas sigan sumando con aviso**, y el próximo pago mirando resúmenes y estimaciones |
 | `tests/test_tarjetas_socios.php` | La base de 3 resúmenes y que **se divida por los que hay**, que la **inflación no toque el componente en U$S**, la **regla BCRA para el próximo y futuro para los siguientes**, que un resumen del mes en curso sea el próximo pago, que un pagado salga del horizonte, que sin cotización quede en `null`, y que el **total no sume un `null` como cero** |
 | `tests/test_tarjetas_formulario.php` | El **formato de los importes** (`1.234.567,89`, `1.500`, `320.50`, vacío es `null`) con cscript; la **base histórica de exactamente 3 renglones** validada en el servidor —dos o cuatro rechazados, el renglón con error nombrado, mes repetido, fecha que no existe—; las validaciones del resumen suelto; y que la pantalla ya no parta una línea por `|` |
 | `tests/test_tarjetas_compartido.php` | Que las tarjetas de **distinto banco o distinto día** se rechacen, también un socio, una de baja o sin titular; que el resumen aparezca en **todas** las tarjetas que incluye y sea titular en una; que **pise la estimación** de la supervisora adicional y cubra las facturas de la corporativa adicional, sin cobertura aparte; que **sume una sola vez**, en la serie de la titular, con el **invariante** adentro; y el script |
 | `tests/test_tarjetas_hist_manual.php` | Los **3 meses cerrados** validados en el servidor; el promedio **sobre 3**, todo tarjeta, con el mes base en el último cargado; la **inflación compuesta** desde ahí y el mes sin inflación en `null`; el **débito en su tarjeta** con su cobertura, y el resumen que lo pisa; quién entra a la grilla —con histórico, sin histórico— y que **manden los gastos**; que una **tarjeta Supervisora activa** cuente como activa a quien no está en el maestro, pero no a una inactiva del maestro; y el script |
+| `tests/test_tarjetas_fecha_debito.php` | El **débito a partir del vencimiento**: cuota antes y después del día de la tarjeta, el mismo día, el día corrido al hábil, fuera del horizonte; una factura en cuotas con **cada cuota en su débito**; la vencida al próximo pago; la **corregida** al débito siguiente; la no vinculada en su vencimiento de Tango; el resumen que fija el débito de su mes; y las tres columnas de la grilla |
+| `tests/test_tarjetas_prov_proyecta.php` | Los ejemplos de la especificación: **dos facturas del mismo mes** se repiten las dos; con **facturas de dos meses** se repite la última y el abono no se duplica; el **último mes por el vencimiento de Tango** y no el corregido; la **cancelada** deja de proyectar; la **excluida** corta pero no se repite; la **sin vincular** no corta y se avisa; sólo los marcados; y que la estimación **se comporte como una vinculada** —cobertura, resumen, fecha pasada, tarjeta inactiva—. Además el buscador, los endpoints con sus permisos, que se fue *marcar mensual*, el script y su **migración reejecutable** |
 | `tests/test_tarjetas_provider.php` | **`TOTAL = SUPERVISORAS + CORPORATIVAS + SOCIOS` columna por columna**, también con **estimaciones mensuales** adentro y su celda anotada, que las excluidas no entren al total, los importes en positivo, que el eje ubique cada pago, el `detalle` de las celdas con resumen —y que **sobreviva a `normalizar()`**—, que dos resúmenes en la misma columna **junten sus notas**, los casos de fila en cero **con su aviso**, y que un módulo que lanza **no tumbe el tablero** |
 | `tests/test_menu.php` | Que `pagos_tarjetas` **dejó de ser un placeholder**, que el menú la declara con datos, que las otras dos de Financiero siguen pendientes y que la categoría pasa a **1 de 3** |
 | `tests/test_providers.php` | **19 módulos** con datos reales (eran 18), que `FINANCIERO` **no se tocó** y que el total declara sus tres componentes |
@@ -680,7 +721,8 @@ Class/
   TarjetasFactura.php          el vínculo factura-tarjeta
   TarjetasExclusion.php        la exclusión por factura, de esta pestaña
   TarjetasFacturaVto.php       el vencimiento corregido de una cuota
-  TarjetasMensual.php          las facturas marcadas como mensuales
+  TarjetasMensual.php          las marcas mensuales viejas: historial, sólo lectura
+  TarjetasProvProyecta.php     los proveedores que proyectan
   TarjetasHistManual.php       el histórico manual de quien no carga gastos
   GastosSupervision.php        los gastos autorizados y el maestro de supervisoras
   PagosTarjetas.php            el armador: lee una vez y arma las tres sub-pestañas
@@ -711,12 +753,15 @@ sql/
   cashflow_tarjetas_vto_mensual.sql
   cashflow_tarjetas_resumen_compartido.sql
   cashflow_tarjetas_historico_manual.sql
+  cashflow_tarjetas_prov_proyecta.sql
 
 tests/
   js/importe_formulario.wsf
   test_tarjetas_formulario.php
   test_tarjetas_compartido.php
   test_tarjetas_hist_manual.php
+  test_tarjetas_fecha_debito.php
+  test_tarjetas_prov_proyecta.php
   test_tarjetas_vencimiento.php
   test_tarjetas_maestro.php
   test_tarjetas_supervisoras.php
@@ -732,7 +777,8 @@ tests/
 - **El permiso `cashflow.tab.pagos_tarjetas` hay que darlo a mano** en Gestión de Usuarios. Este repo no siembra permisos para ninguna pestaña.
 - **No hay ninguna tarjeta cargada todavía.** Hasta que las haya, la pestaña avisa y **la parte de Corporativas de la fila del tablero va en cero**: sin tarjeta, ninguna factura entra al flujo.
 - **Una corrección de vencimiento de un comprobante que ya se pagó queda vigente y no se avisa.** No aplica a nada; avisarla haría crecer el aviso para siempre. Si molesta en el historial, se depura aparte.
-- **Una estimación mensual no tiene fecha de fin.** Se corta desmarcándola; si un abono se da de baja con el proveedor, alguien tiene que acordarse de desmarcarlo.
+- **La proyección de un proveedor no tiene fecha de fin.** Se corta cuando se paga su última factura o desmarcándolo; si un abono se da de baja con el proveedor, la última factura se sigue repitiendo hasta que se pague.
+- **Los 77 vencimientos corregidos están para revisar** (ver la sección 4). No se tocaron.
 - **El doble conteo con los comprobantes de tarjeta de supervisoras se evalúa en producción**, excluyendo facturas.
 - **La inflación de un mes anterior a la ventana editable no se puede cargar.** La grilla de *Parámetros › Generales* arranca dos meses antes del mes en curso, así que una tarjeta de socio cuyo resumen más nuevo sea más viejo que eso queda sin proyectar, avisando un mes que no tiene dónde tipearse. No se tocó `Inflacion::MESES_ATRAS`: ensancharlo es una decisión sobre una pantalla que usan todos los módulos.
 - **El resto del módulo sigue grabando `NULL` en la auditoría.** Ver la sección 10.

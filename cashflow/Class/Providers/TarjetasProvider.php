@@ -298,7 +298,7 @@ class TarjetasProvider extends CashflowProvider {
             self::anotar($detalle, $h->columna($p['fecha']), $p['importe'],
                 'Estimación mensual de ' . $p['proveedor'] . ' (' . $p['mes'] . '): $ '
                 . number_format($p['importe'], 2, ',', '.') . ', el ' . self::corto($p['fecha'])
-                . '. Es un abono marcado como mensual: todavía no hay factura de ese mes.');
+                . '. Es una estimación: el proveedor proyecta y todavía no hay factura de ese mes.');
         }
 
         // La parte tarjeta de las supervisoras que salio de un resumen.
