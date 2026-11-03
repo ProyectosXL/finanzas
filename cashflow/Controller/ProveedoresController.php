@@ -365,10 +365,14 @@ try {
             $enTango = $prov->estadoComprobantesEnTango(
                 Proveedores::sinCruce($parse['filas'], $pendientes));
 
+            /* EL IMPORTE SE CLASIFICA con el % de excedente de ahora: neto,
+               excedente o parcial. Sin el script es null y la importacion es la
+               de antes. El % viaja en la respuesta y vuelve con la
+               confirmacion: si cambio en el medio, no se aplica nada. */
             $comp = Proveedores::compararImportacion(
                 $parse['filas'], $pendientes, $prov->getPagos(), $h->hoy(),
                 $prov->getAperturas(), $prov->tablaMedioCreada(), $prov->retenciones()->config(),
-                $enTango);
+                $enTango, $prov->opcionesExcedente($h));
 
             $comp['separador'] = $parse['separador'];
 
@@ -386,7 +390,7 @@ try {
                la entrada del archivo contra la base de ahora, y si algo cambio
                desde la previsualizacion no aplica nada. */
             $h = Horizonte::desdeParametros(new Parametros());
-            $r = $prov->aplicarImportacion($data['comparacion'], $usuario, $h->hoy());
+            $r = $prov->aplicarImportacion($data['comparacion'], $usuario, $h->hoy(), $h);
 
             echo json_encode([
                 'success' => true,

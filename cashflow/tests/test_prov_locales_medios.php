@@ -117,11 +117,13 @@ seccion('lo que se escribe con dos medios');
 $campos = Proveedores::camposDeImportacion($c['filas']);
 
 chequear('dos medios en la apertura', 2, count($campos['medios']));
-chequear('en orden, con su fecha, su forma y su importe', [
+chequear('en orden, con su fecha, su forma y su importe, y que es NETO contra que se comparo', [
     ['orden' => 1, 'fecha' => '2026-10-20', 'forma' => 'ECHEQ', 'forma_orig' => 'echeq',
-     'importe' => 150000.0],
+     'importe' => 150000.0, 'clasificacion' => 'NETO', 'pendiente_import' => 200000.0,
+     'neto_import' => 200000.0],
     ['orden' => 2, 'fecha' => '2026-10-27', 'forma' => 'TRANSFERENCIA',
-     'forma_orig' => 'TRANSFERENCIA', 'importe' => 50000.8]
+     'forma_orig' => 'TRANSFERENCIA', 'importe' => 50000.8, 'clasificacion' => 'NETO',
+     'pendiente_import' => 200000.0, 'neto_import' => 200000.0]
 ], $campos['medios']);
 
 /* LA FECHA MAS TARDIA VA A LA TABLA DE PAGOS. Es la que mide el desvio de la
@@ -493,7 +495,8 @@ chequear('la apertura no tiene bajas fisicas', false, stripos($apert, 'DELETE') 
 chequear('reemplazar es dar de baja las vigentes', true,
     strpos($apert, 'SET VIGENTE = 0, " . Auditoria::SET_BAJA') !== false);
 chequear('con el usuario de la escritura en el alta y la modificacion', true,
-    strpos($apert, 'IMPORTE, USUARIO_ALTA, USUARIO_MODIF)') !== false);
+    strpos($apert, "'USUARIO_ALTA, USUARIO_MODIF'") !== false
+    && strpos($apert, 'round(floatval($m[\'importe\']), 2), $usuario, $usuario];') !== false);
 
 seccion('la escritura de la apertura pasa por un solo lugar');
 

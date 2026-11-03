@@ -2049,9 +2049,18 @@
         /* En pagos, altas, cambios y sin cambios son COMPROBANTES —uno pagado
            con dos medios es uno, aunque sean dos filas— y lo que no se carga
            son FILAS, que es lo que hay que ir a corregir en la planilla. */
+        /* "Con excedente" y "Pago parcial" cuentan comprobantes y dicen un
+           importe al lado: el excedente que queda a cuenta, y lo que se paga.
+           Ver Proveedores::clasificarImporte(). */
         var chips = que === 'Pagos'
             ? [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
                ['sin_cambios', 'Sin cambios', 'secondary'], ['dos_medios', 'En dos medios', 'info'],
+               ['con_excedente', 'Con excedente', 'primary', 'importe_excedente',
+                'Comprobantes que se pagan con más que su neto a pagar. El importe es el excedente, '
+                + 'que queda a cuenta del proveedor en Tango.'],
+               ['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',
+                'Comprobantes que se pagan con menos que su neto a pagar. El importe es lo que se paga; '
+                + 'el saldo sigue con su vencimiento o el próximo día de pago.'],
                ['ya_pagadas', 'Ya pagadas en Tango', 'warning text-dark'],
                ['errores', 'Filas que no se cargan', 'danger']]
             : [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
@@ -2091,9 +2100,22 @@
 
         html += '<div class="d-flex gap-2 flex-wrap mb-3">';
         chips.forEach(function(c) {
-            html += '<span class="badge bg-' + c[2] + '">' + c[1] + ': ' + (r[c[0]] || 0) + '</span>';
+            // Los chips con importe se dibujan sólo si hay alguno: en cero no dicen nada.
+            if (c[3] && !r[c[0]]) { return; }
+
+            html += '<span class="badge bg-' + c[2] + ' prov-chip-' + c[0] + '"'
+                + (c[4] ? ' title="' + escapar(c[4]) + '"' : '') + '>' + c[1] + ': ' + (r[c[0]] || 0)
+                + (c[3] ? ' · ' + plata(r[c[3]] || 0) : '') + '</span>';
         });
         html += '</div>';
+
+        /* SIN EL % DE EXCEDENTE NO SE ACEPTA NINGÚN EXCEDENTE: es crítico, va
+           en rojo y dice dónde cargarlo. No frena la confirmación: el resto de
+           la planilla se carga igual. */
+        (d.criticos || []).forEach(function(t) {
+            html += '<div class="alert alert-danger py-2 px-3 small mb-2 prov-preview-critico">'
+                + '<i class="fas fa-circle-exclamation me-1"></i>' + escapar(t) + '</div>';
+        });
 
         bloqueos.forEach(function(b) {
             html += '<div class="alert alert-danger py-2 px-3 small mb-2">'
@@ -2191,7 +2213,8 @@
             + '<thead><tr><th>Línea</th><th>Clave</th><th>Estado</th>'
             + (conNeto ? '<th class="text-end">Total</th><th class="text-end">Retenciones</th>'
                 + '<th class="text-end" title="Contra este número se compara el IMPORTE de la '
-                + 'planilla, con $1 de tolerancia">Neto a pagar</th>' : '')
+                + 'planilla: con $1 de tolerancia es el neto, más es un excedente —hasta el % de '
+                + 'Parámetros › Prov. Locales— y menos es un pago parcial">Neto a pagar</th>' : '')
             + '<th>Detalle</th></tr></thead><tbody>';
 
         filas.forEach(function(f) {
@@ -2208,6 +2231,15 @@
                 clave += ' · ' + f.parte + '/2';
                 detalle = '<strong>' + escapar(f.forma_pago + ' ' + plata(f.importe) + ' el '
                     + fechaCorta(f.fecha_pago)) + '</strong> — ' + detalle;
+            }
+
+            /* CON EXCEDENTE O PARCIAL: la marca va adelante del motivo, que dice
+               cuánto es cada cosa. Sólo una vez por comprobante. */
+            if (que === 'Pagos' && f.estado !== 'ERROR' && (f.parte || 1) <= 1
+                && (f.clasificacion === 'EXCEDENTE' || f.clasificacion === 'PARCIAL')) {
+                detalle = '<span class="badge bg-primary me-1 prov-preview-clasif">'
+                    + (f.clasificacion === 'EXCEDENTE' ? '+ excedente' : 'pago parcial') + '</span>'
+                    + detalle;
             }
 
             /* LA FORMA VIGENTE NO ES DEL CRONOGRAMA: se acepta, y se dice que

@@ -1879,6 +1879,22 @@ chequear('y su propio indicador en el resumen', true,
 chequear('la previsualizacion muestra total, retenciones y neto por fila', true,
     strpos($jsProv, '+ (conNeto ? celdasNetoPreview(f) : \'\')') !== false);
 
+seccion('Importar: los chips de excedente y de pago parcial');
+
+chequear('el chip Con excedente cuenta comprobantes y dice el excedente', true,
+    strpos($jsProv, "['con_excedente', 'Con excedente', 'primary', 'importe_excedente',") !== false);
+chequear('el chip Pago parcial cuenta comprobantes y dice lo que se paga', true,
+    strpos($jsProv, "['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',") !== false);
+chequear('y el importe se dibuja al lado de la cantidad', true,
+    strpos($jsProv, "(c[3] ? ' · ' + plata(r[c[3]] || 0) : '')") !== false);
+chequear('el aviso crítico del % va en rojo', true,
+    strpos($jsProv, "(d.criticos || []).forEach(function(t) {") !== false
+    && strpos($jsProv, 'alert alert-danger py-2 px-3 small mb-2 prov-preview-critico') !== false);
+chequear('cada fila dice si es excedente o parcial', true,
+    strpos($jsProv, "(f.clasificacion === 'EXCEDENTE' ? '+ excedente' : 'pago parcial')") !== false);
+chequear('el controller clasifica con el % y el cronograma de ahora', true,
+    strpos($ctrlProv, '$enTango, $prov->opcionesExcedente($h));') !== false);
+
 seccion('Cuentas a Pagar: el boton Conciliar ya no esta');
 
 $tabProv = file_get_contents($TABS . '/proveedores_locales.php');
