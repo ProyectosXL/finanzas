@@ -635,8 +635,17 @@ preg_match('/var COLS_DESC = (\d+);/', $jsCodigo, $mCols);
 
 /* Se cuentan las de rowspan="2" y no todos los <th>: son las descriptivas, y
    el resto de la fila -los totales del eje- lo agrega el JS. */
+/* LAS QUE SOLO BAJAN AL EXCEL NO CUENTAN: COLS_DESC son las visibles, y las
+   ocultas se declaran aparte (COLS_SOLO_EXPORT), igual que las de impuestos. */
+preg_match('/var COLS_SOLO_EXPORT = (\d+);/', $jsCodigo, $mSolo);
+
 chequear('el encabezado tiene tantas descriptivas como declara COLS_DESC',
-    substr_count($encabezado, '<th rowspan="2"'), intval($mCols[1]));
+    substr_count($encabezado, '<th rowspan="2"')
+        - substr_count($encabezado, '<th rowspan="2" class="prov-solo-export" data-exportar-solo'),
+    intval($mCols[1]));
+chequear('y tantas que sólo se exportan como declara COLS_SOLO_EXPORT',
+    substr_count($encabezado, '<th rowspan="2" class="prov-solo-export" data-exportar-solo'),
+    intval($mSolo[1]));
 
 /* El pie tiene que repartir las mismas columnas que el encabezado: un colspan
    mal contado deja el total debajo de otra columna y el numero queda diciendo

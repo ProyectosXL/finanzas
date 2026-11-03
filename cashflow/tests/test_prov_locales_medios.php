@@ -592,8 +592,11 @@ $celdaAbierta = $cuerpoJs('celdaFechaAbierta');
 
 chequear('la celda de un comprobante abierto existe', true, $celdaAbierta !== '');
 chequear('y no tiene campo de fecha: no se edita', false, strpos($celdaAbierta, '<input') !== false);
+/* La etiqueta la arma etiquetaImportado(), que es la misma para la celda y
+   para la columna que sólo baja al Excel. */
 chequear('lleva 1/2 y 2/2 como etiqueta, fuera del texto que se exporta', true,
-    strpos($celdaAbierta, "f.APERTURA.parte + '/' + f.APERTURA.de") !== false
+    strpos($celdaAbierta, 'var etiqueta = etiquetaImportado(f);') !== false
+    && strpos($cuerpoJs('etiquetaImportado'), "return f.APERTURA.parte + '/' + f.APERTURA.de;") !== false
     && strpos($celdaAbierta, 'data-etiqueta="') !== false);
 chequear('el tooltip dice los medios y quien los cargo', true,
     strpos($celdaAbierta, 'textoMedios(abierta)') !== false

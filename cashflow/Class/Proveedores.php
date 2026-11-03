@@ -4494,10 +4494,12 @@ class Proveedores {
     }
 
     /**
-     * Saca de un lote los comprobantes pagados con dos medios.
+     * Saca de un lote los comprobantes con un pago importado: con dos medios,
+     * con excedente o parcial. Todos tienen filas en la tabla de medios.
      *
-     * El fechado masivo pone UNA fecha, y un comprobante abierto tiene dos: su
-     * fecha se cambia reimportando o con el boton de volver al vencimiento. Se
+     * El fechado masivo pone UNA fecha, y un comprobante abierto tiene dos -o
+     * una parte pagada y un saldo-: su fecha se cambia reimportando o con el
+     * boton de volver al vencimiento. Se
      * dice en el dialogo antes de confirmar, y se vuelve a filtrar aca porque
      * el endpoint se alcanza sin pasar por la pantalla.
      *
@@ -4569,10 +4571,13 @@ class Proveedores {
            tipeada en la celda no dice a cual de las dos reemplaza. La grilla no
            ofrece el campo para esas filas; esto es para quien llegue al
            endpoint por su cuenta. */
+        /* Y UNO CON UN PAGO IMPORTADO CON EXCEDENTE O PARCIAL TAMPOCO: su fecha
+           es parte de lo importado -lo pagado va en la de la planilla, el saldo
+           por la jerarquia- y una fecha tipeada partiria esa decision a medias. */
         if (isset($this->getAperturas()[self::clavePago($cod, $t, $n)])) {
-            throw new Exception('Este comprobante está pagado con dos medios, así que tiene dos '
-                . 'fechas. Se cambian reimportando la planilla de pagos, o con el botón de volver '
-                . 'al vencimiento, que borra la apertura entera.');
+            throw new Exception('Este comprobante tiene un pago importado —con dos medios, con '
+                . 'excedente o parcial—, así que su fecha sale de la planilla. Se cambia reimportando '
+                . 'la planilla de pagos, o con el botón de volver al vencimiento, que lo borra entero.');
         }
 
         /* Ver la nota del docblock de guardarPago(): lo que no entra al mapa no
@@ -4650,8 +4655,9 @@ class Proveedores {
         list($claves, $omitidos) = self::sinAbiertos($claves, $this->getAperturas());
 
         if (empty($claves)) {
-            throw new Exception('Los ' . $omitidos . ' comprobante(s) elegidos están pagados con dos '
-                . 'medios: sus fechas se cambian reimportando la planilla de pagos.');
+            throw new Exception('Los ' . $omitidos . ' comprobante(s) elegidos tienen un pago importado '
+                . '—con dos medios, con excedente o parcial—: sus fechas se cambian reimportando la '
+                . 'planilla de pagos.');
         }
 
         $this->guardarLote($claves, ['FECHA_PAGO' => $f], 'MANUAL', $usuario);

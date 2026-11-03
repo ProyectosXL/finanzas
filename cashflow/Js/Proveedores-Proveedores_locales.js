@@ -341,6 +341,12 @@
               }).join(' · ')
             : '');
 
+        /* Cuánto del total es EXCEDENTE: sale de la caja y por eso suma, pero
+           no es deuda de Tango —queda a cuenta del proveedor—. */
+        texto('excedenteProv', k.excedente
+            ? 'Incluye ' + plata(k.excedente) + ' de excedente, a cuenta de los proveedores'
+            : '');
+
         texto('vencidoProv', plata(k.vencido_sin_fecha));
         texto('detalleVencidoProv', (k.n_vencido_sin_fecha
             ? k.n_vencido_sin_fecha + ' comprobantes — nadie dijo cuándo se pagan'
@@ -380,7 +386,8 @@
     function calcularIndicadores(filas) {
         var k = { total: 0, vencimientos: 0, proveedores: 0,
                   vencido_sin_fecha: 0, n_vencido_sin_fecha: 0,
-                  con_fecha: 0, n_con_fecha: 0, retenido: 0, retenido_por_impuesto: {} };
+                  con_fecha: 0, n_con_fecha: 0, retenido: 0, retenido_por_impuesto: {},
+                  excedente: 0 };
 
         var provs = {};
 
@@ -389,6 +396,10 @@
             var importe = aPagar(f);
 
             k.retenido += Number(f.RETENIDO) || 0;
+
+            /* El excedente de un pago importado YA está en el importe: suma en
+               el total. Se cuenta aparte sólo para decir cuánto es. */
+            k.excedente += Number(f.EXCEDENTE) || 0;
 
             Object.keys(f.RETENIDO_POR_IMPUESTO || {}).forEach(function(c) {
                 k.retenido_por_impuesto[c] = (k.retenido_por_impuesto[c] || 0)
@@ -646,7 +657,8 @@
                     return '<td class="currency prov-solo-export" data-exportar-solo>'
                         + (r !== undefined ? plata(r) : '') + '</td>';
                   }).join('')
-                + '<td class="currency fw-bold">' + plata(aPagar(f)) + '</td>'
+                + celdaNeto(f)
+                + '<td class="prov-solo-export" data-exportar-solo>' + escapar(etiquetaImportado(f)) + '</td>'
                 + celdaFechaPago(f)
                 + '<td class="center">' + celdaForma(f) + '</td>'
                 + '<td class="center">' + celdaExcluir(f) + '</td>';
@@ -663,7 +675,7 @@
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="' + (COLS_DESC + impuestosGrilla().length + cols.length) + '" '
+            html = '<tr><td colspan="' + (COLS_DESC + COLS_SOLO_EXPORT + impuestosGrilla().length + cols.length) + '" '
                  + 'class="text-center text-muted py-4">No hay cuentas a pagar que coincidan '
                  + 'con el filtro.</td></tr>';
         }
@@ -690,6 +702,13 @@
      */
     var COLS_DESC = 15;
 
+    /**
+     * Las descriptivas que SÓLO bajan al Excel y están en el HTML: hoy una,
+     * "Pago importado". Igual que las de impuestos, no cuentan en COLS_DESC
+     * —no se ven— pero sí en el colspan de "no hay resultados".
+     */
+    var COLS_SOLO_EXPORT = 1;
+
     /* ================================================================
        LAS RETENCIONES EN LA GRILLA
 
@@ -705,6 +724,35 @@
         var r = (datos && datos.retenciones) || {};
 
         return r.disponible ? (r.impuestos || []) : [];
+    }
+
+    /**
+     * La celda Neto a pagar: lo que sale de la caja. Con un pago importado con
+     * EXCEDENTE lleva la marca "+ excedente", con el detalle en el tooltip: el
+     * neto, el excedente, el total pagado, el % y quién lo importó. El número
+     * ya incluye el excedente, igual que el eje y la fila del tablero.
+     */
+    function celdaNeto(f) {
+        var exc = Number(f.EXCEDENTE) || 0;
+
+        if (!exc || !f.PAGO_IMPORTADO) {
+            return '<td class="currency fw-bold">' + plata(aPagar(f)) + '</td>';
+        }
+
+        var p = f.PAGO_IMPORTADO;
+        var titulo = 'Neto ' + plata(aPagar(f) - exc) + ' + excedente ' + plata(exc) + ' = '
+            + plata(aPagar(f)) + (Number(p.de) > 1 ? ' en esta parte' : '') + '.'
+            + '\nTotal pagado: ' + plata(p.pagado) + ', sobre un neto de ' + plata(p.neto)
+            + (p.porc_excedente !== null ? ' (' + String(p.porc_excedente).replace('.', ',') + '% más)' : '')
+            + '.\nEl excedente queda a cuenta del proveedor en Tango.'
+            + '\n' + Auditoria.texto({ usuario: p.usuario, fecha: p.fecha_modif });
+
+        /* LA MARCA VA EN data-etiqueta Y LA DIBUJA EL CSS, como "vto." o
+           "crono" en la fecha: el Excel se queda con el texto de la celda, y
+           "1.030.000,00 + excedente" no es un importe. Lo que dice la marca lo
+           baja la columna Pago importado. */
+        return '<td class="currency fw-bold" title="' + escapar(titulo) + '">' + plata(aPagar(f))
+            + '<span class="prov-marca-excedente" data-etiqueta="+ excedente"></span></td>';
     }
 
     /** Lo que sale de la caja. Una fila sin el campo aporta su pendiente. */
@@ -752,10 +800,11 @@
 
         if (!r) { return '<td></td>'; }
 
-        /* En un comprobante en dos medios la retención va entera en la parte
-           1/2: la 2/2 lo dice y no la repite, para que los totales no la
-           dupliquen. */
-        if (esParteExtra(f)) {
+        /* En un comprobante NETO en dos medios la retención va entera en la
+           parte 1/2: la 2/2 lo dice y no la repite, para que los totales no la
+           dupliquen. Con excedente o parcial cada fila trae su parte de la
+           retención, y se muestra como cualquier otra. */
+        if (f.APERTURA && Number(f.APERTURA.parte) > 1) {
             return '<td class="text-center text-muted small" title="La retención de este '
                 + 'comprobante va en su parte 1/2: se calcula sobre la factura entera.">—</td>';
         }
@@ -862,6 +911,7 @@
                     + plata(porImpuesto[i.CODIGO] || 0) + '</td>';
               }).join('')
             + '<td class="currency fw-bold">' + plata(total) + '</td>'
+            + '<td class="prov-solo-export" data-exportar-solo></td>'
             + '<td colspan="' + (COLS_DESC - 12) + '"></td>';
 
         /* Los totales del eje van al pie y arriba de cada fecha
@@ -1100,18 +1150,94 @@
        indicadores hablan de comprobantes.
        ================================================================ */
 
-    /** La segunda parte de un comprobante abierto: suma, pero no se cuenta */
+    /**
+     * La segunda parte de un comprobante abierto: suma, pero no se cuenta. Lo
+     * mismo la segunda fila de una cuota partida por un pago parcial —lo
+     * pagado y el saldo—, que llega con PARTE_EXTRA. Es la misma regla que
+     * Proveedores::cuentaComoVencimiento().
+     */
     function esParteExtra(f) {
-        return !!(f.APERTURA && Number(f.APERTURA.parte) > 1);
+        return !!(f.PARTE_EXTRA || (f.APERTURA && Number(f.APERTURA.parte) > 1));
     }
 
     /**
-     * Si el comprobante tiene una apertura en dos medios vigente, esté partido
-     * o no: también cuando ya no coincide con el pendiente. Para esos la fecha
-     * no se edita en la celda ni con el fechado masivo.
+     * Si el comprobante tiene un pago importado vigente: una apertura en dos
+     * medios —partida o no, también cuando ya no coincide— o un pago con
+     * excedente o parcial (PAGO_IMPORTADO). Para esos la fecha no se edita en
+     * la celda ni con el fechado masivo: se cambia reimportando o con ↺.
      */
     function esAbierto(f) {
-        return !!(f.APERTURA || f.APERTURA_DESCUADRADA);
+        return !!(f.APERTURA || f.APERTURA_DESCUADRADA || f.PAGO_IMPORTADO);
+    }
+
+    /**
+     * La etiqueta de un pago importado, para la columna Fecha de pago y la que
+     * sólo baja al Excel: "pago parcial", "saldo", "1/2 · parcial", "1/2",
+     * "+ excedente". Vacía si la fila no tiene pago importado.
+     */
+    function etiquetaImportado(f) {
+        if (f.APERTURA) {
+            return f.APERTURA.parte + '/' + f.APERTURA.de;
+        }
+
+        if (f.APERTURA_DESCUADRADA) { return 'no coincide'; }
+
+        var p = f.PAGO_IMPORTADO;
+
+        if (!p) { return ''; }
+        if (p.estado === 'REGISTRADO') { return 'parcial en Tango'; }
+        if (p.estado === 'DESCUADRADO') { return 'no coincide'; }
+        if (p.tipo === 'SALDO') { return 'saldo'; }
+
+        var dos = Number(p.de) > 1 ? p.parte + '/' + p.de : '';
+
+        if (p.clasificacion === 'PARCIAL') {
+            return dos ? dos + ' · parcial' : 'pago parcial';
+        }
+
+        return (dos ? dos + ' · ' : '') + (Number(f.EXCEDENTE) ? '+ excedente' : 'con excedente');
+    }
+
+    /**
+     * Lo que dice el tooltip de un pago importado: pagado, neto, excedente o
+     * saldo, de dónde sale la fecha del saldo, y quién lo importó y cuándo.
+     */
+    function textoImportado(f) {
+        var p = f.PAGO_IMPORTADO;
+        var lineas = [];
+
+        if (p.estado === 'REGISTRADO') {
+            lineas.push('Se importó un pago ' + (p.clasificacion === 'PARCIAL' ? 'parcial' : 'con excedente')
+                + ' de ' + plata(p.pagado) + ' y Tango ya lo registró'
+                + (p.fecha_real ? ' (pagado el ' + fechaCorta(p.fecha_real) + ')' : '') + ': se proyecta '
+                + 'sólo lo que quedó pendiente en Tango, con su vencimiento o el próximo día de pago.');
+        } else if (p.estado === 'DESCUADRADO') {
+            lineas.push('Se importó un pago ' + (p.clasificacion === 'PARCIAL' ? 'parcial' : 'con excedente')
+                + ' de ' + plata(p.pagado) + ' sobre un pendiente de ' + plata(p.pendiente_import)
+                + ', pero en Tango el pendiente subió a ' + plata(p.pendiente) + ': se proyecta el '
+                + 'pendiente de Tango. Reimportá para corregirlo.');
+        } else if (p.clasificacion === 'EXCEDENTE') {
+            lineas.push('Pago con excedente: se paga ' + plata(p.pagado) + ' — neto ' + plata(p.neto)
+                + ' + excedente ' + plata(p.excedente)
+                + (p.porc_excedente !== null ? ' (' + String(p.porc_excedente).replace('.', ',') + '%)' : '')
+                + '. El excedente queda a cuenta del proveedor en Tango.');
+        } else {
+            lineas.push('Pago parcial: se paga ' + plata(p.pagado) + ' de un neto de ' + plata(p.neto)
+                + '. Saldo ' + plata(p.saldo)
+                + (p.saldo_fecha && p.saldo_fecha.fecha
+                    ? ', que se proyecta el ' + fechaCorta(p.saldo_fecha.fecha) + ' (' + p.saldo_fecha.origen + ')'
+                    : '') + '.');
+            lineas.push(p.tipo === 'SALDO'
+                ? 'Esta fila es el saldo: va con la jerarquía de siempre, como si no tuviera fecha cargada.'
+                : 'Esta fila es lo que se paga, en la fecha de la planilla.');
+        }
+
+        if (Number(p.de) > 1) { lineas.push(textoMedios(p)); }
+
+        lineas.push('La fecha se cambia reimportando la planilla de pagos, o con ↺.');
+        lineas.push(Auditoria.texto({ usuario: p.usuario, fecha: p.fecha_modif }));
+
+        return lineas.join('\n');
     }
 
     /** Las filas, una por comprobante: la primera que aparece */
@@ -1168,11 +1294,17 @@
     function celdaFechaAbierta(f) {
         var abierta = f.APERTURA || f.APERTURA_DESCUADRADA;
         var valor = f.PAGO_CRONO ? (f.Pago || '') : (f.FECHA_PAGO || '');
-        var etiqueta = f.APERTURA
-            ? f.APERTURA.parte + '/' + f.APERTURA.de
-            : 'no coincide';
+        var etiqueta = etiquetaImportado(f);
 
-        var titulo = (f.APERTURA
+        /* UN PAGO CON EXCEDENTE O PARCIAL: la fecha que muestra es la que usa
+           el eje —la de la planilla, la del saldo por la jerarquía, o la del
+           cronograma si ya pasó— y el tooltip dice qué es cada fila. */
+        if (!abierta) {
+            valor = f.Pago || '';
+            abierta = { usuario: f.PAGO_IMPORTADO.usuario, fecha_modif: f.PAGO_IMPORTADO.fecha_modif };
+        }
+
+        var titulo = f.PAGO_IMPORTADO ? textoImportado(f) : (f.APERTURA
                 ? 'Pagado con dos medios. Esta fila es la parte ' + etiqueta + ' y su importe va '
                   + 'en la columna de su fecha'
                   + (f.PAGO_CRONO ? ' (la fecha ya pasó: va al próximo día de pago del cronograma)'
@@ -1187,8 +1319,12 @@
             + '\nLa fecha se cambia reimportando la planilla de pagos, o con ↺.'
             + '\n' + Auditoria.texto({ usuario: abierta.usuario, fecha: abierta.fecha_modif });
 
+        var descuadrado = f.APERTURA_DESCUADRADA
+            || (f.PAGO_IMPORTADO && f.PAGO_IMPORTADO.estado === 'DESCUADRADO');
+
         var html = '<td class="center prov-celda-fecha prov-fuente-medios'
-            + (f.APERTURA_DESCUADRADA ? ' prov-medios-descuadrados' : '') + '"'
+            + (descuadrado ? ' prov-medios-descuadrados' : '')
+            + (f.PAGO_IMPORTADO && f.PAGO_IMPORTADO.tipo === 'SALDO' ? ' prov-fuente-saldo' : '') + '"'
             + ' data-orden="' + escapar(valor) + '" title="' + escapar(titulo) + '">'
             + fechaCorta(valor)
             + ' <span class="prov-fuente-fecha" data-etiqueta="' + escapar(etiqueta) + '"></span>';
@@ -1198,9 +1334,9 @@
                 + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
                 + ' data-tcomp="' + escapar(f.T_COMP) + '"'
                 + ' data-ncomp="' + escapar(f.N_COMP) + '"'
-                + ' title="' + escapar('Borrar los dos medios: el comprobante vuelve a su '
-                    + 'vencimiento o al cronograma. La exclusión, la forma y la observación de '
-                    + 'esta factura, si tiene, se conservan.') + '">'
+                + ' title="' + escapar((f.PAGO_IMPORTADO ? 'Borrar el pago importado' : 'Borrar los dos medios')
+                    + ': el comprobante vuelve a su vencimiento o al cronograma, por el neto a pagar. '
+                    + 'La exclusión, la forma y la observación de esta factura, si tiene, se conservan.') + '">'
                 + '<i class="fas fa-rotate-left"></i></button>';
         }
 
@@ -1862,8 +1998,9 @@
         }
 
         if (abiertos) {
-            detalle += ' ' + abiertos + ' de las seleccionadas está(n) pagada(s) con dos medios y '
-                + 'no se van a tocar: sus fechas se cambian reimportando la planilla.';
+            detalle += ' ' + abiertos + ' de las seleccionadas tiene(n) un pago importado —con dos '
+                + 'medios, con excedente o parcial— y no se van a tocar: sus fechas se cambian '
+                + 'reimportando la planilla.';
         }
 
         Notificacion.pedirFecha({

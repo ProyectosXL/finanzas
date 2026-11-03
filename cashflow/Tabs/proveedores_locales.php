@@ -53,7 +53,7 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-card-title"
-                          title="Lo que sale de la caja: el neto de retenciones en las facturas que se pagan por orden de pago, el total en las demás. Es lo que va al eje y a la fila del tablero.">Neto a pagar</span>
+                          title="Lo que sale de la caja: el neto de retenciones en las facturas que se pagan por orden de pago, el total en las demás, y lo que se paga de más en un pago importado con excedente. Es lo que va al eje y a la fila del tablero.">Neto a pagar</span>
                     <div class="kpi-card-icon blue"><i class="fas fa-file-invoice-dollar"></i></div>
                 </div>
                 <div class="kpi-card-value" id="totalProv">$ 0,00</div>
@@ -63,6 +63,10 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                          de la caja, así que no suma en el neto, pero se dice
                          cuánta es. -->
                     <div class="small text-muted" id="retenidoProv"></div>
+                    <!-- Cuánto del total es EXCEDENTE de pagos importados: sí
+                         sale de la caja y suma en el total, pero no es deuda
+                         de Tango; queda a cuenta del proveedor. -->
+                    <div class="small text-muted" id="excedenteProv"></div>
                 </div>
             </div>
         </div>
@@ -338,6 +342,13 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                     title="Lo que sale de la caja: el pendiente menos las retenciones. Es el número que va al eje y a la fila del tablero.">
                                     Neto a pagar
                                 </th>
+                                <!-- EL PAGO IMPORTADO: "pago parcial", "saldo",
+                                     "1/2 · parcial", "+ excedente"… En pantalla
+                                     lo dicen la etiqueta de la fecha y la marca
+                                     del neto, que dibuja el CSS y el Excel no
+                                     baja; por eso esta columna existe sólo para
+                                     el Excel (data-exportar-solo). -->
+                                <th rowspan="2" class="prov-solo-export" data-exportar-solo>Pago importado</th>
                                 <!-- data-orden-nombre igual al rótulo: ancla el
                                      nombre del orden guardado sin cambiarlo. Es
                                      el del porDefecto del JS. Ver
