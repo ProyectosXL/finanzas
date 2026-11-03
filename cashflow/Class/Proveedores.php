@@ -1366,6 +1366,12 @@ class Proveedores {
         if ($estado !== 'PARTIDO') {
             $info['estado'] = $estado;
 
+            /* Si recien ahora se ve que Tango lo registro, la pestaña lo deja
+               anotado en la tabla de medios -con la fecha real-, igual que la
+               conciliacion. Ver registrarPagosAutomatico(). */
+            $info['por_registrar'] = ($estado === 'REGISTRADO'
+                && (!isset($primero['estado_tango']) || $primero['estado_tango'] !== 'REGISTRADO'));
+
             foreach ($filas as $i => $f) {
                 $filas[$i]['PAGO_IMPORTADO'] = array_merge($info, ['tipo' => null]);
             }
@@ -1650,9 +1656,13 @@ class Proveedores {
             : "'NETO' AS CLASIFICACION, NULL AS PENDIENTE_IMPORT, NULL AS NETO_IMPORT,
                'PREVISTO' AS ESTADO_TANGO, NULL AS FECHA_REAL, NULL AS PENDIENTE_REAL";
 
+        /* QUIEN LA IMPORTO Y CUANDO es el alta: una parte no se modifica, se
+           reemplaza. La unica escritura posterior es la del sistema anotando
+           que Tango ya registro el pago, y esa no es quien importo. */
         $stmt = sqlsrv_query($this->conectar(),
             "SELECT COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                    CAST(IMPORTE AS FLOAT) AS IMPORTE, USUARIO_MODIF, FECHA_MODIF, " . $extra . "
+                    CAST(IMPORTE AS FLOAT) AS IMPORTE, USUARIO_ALTA AS USUARIO_MODIF,
+                    FECHA_ALTA AS FECHA_MODIF, " . $extra . "
              FROM dbo." . self::TABLA_MEDIO . "
              WHERE VIGENTE = 1
              ORDER BY COD_PROVEE, T_COMP, N_COMP, ORDEN");
@@ -5568,6 +5578,190 @@ class Proveedores {
         }
 
         return $avisos;
+    }
+
+    /* ====================================================================
+       EL PAGO IMPORTADO QUE TANGO YA REGISTRO
+
+       Un pago parcial no saca la factura de pendientes: le baja el pendiente.
+       La proyeccion ya se da cuenta sola -proyectarPagoImportado() compara el
+       pendiente con el de la importacion- y deja de proyectar lo pagado. Lo
+       que hace esto es DEJARLO ANOTADO, como la conciliacion: la parte pasa a
+       REGISTRADO con la fecha real y el pendiente que quedo, y no se borra.
+       Asi se puede ver despues que hubo un pago parcial y cuando se hizo.
+
+       Corre sola al cargar la pestaña, con el usuario del sistema. El
+       tablero no escribe: solo proyecta.
+       ==================================================================== */
+
+    /** Quien firma la marca: SISTEMA:Proveedores.registrarPagosAutomatico */
+    public static function usuarioRegistro() {
+        return AuthCashflow::origen('Proveedores.registrarPagosAutomatico');
+    }
+
+    /**
+     * QUE HAY QUE ANOTAR, sin escribir nada: los comprobantes cuyo pago
+     * importado Tango registro y todavia figuran PREVISTO. Estatica y pura.
+     *
+     * @param array $items Filas de getPendientes() con horizonte, ya proyectadas
+     * @return array Lista de ['cod_provee', 't_comp', 'n_comp', 'pendiente', 'clasificacion']
+     */
+    public static function planRegistroPagos($items) {
+        $plan = [];
+
+        foreach (is_array($items) ? $items : [] as $i) {
+            if (empty($i['PAGO_IMPORTADO']) || empty($i['PAGO_IMPORTADO']['por_registrar'])) {
+                continue;
+            }
+
+            $clave = self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP']);
+
+            if (!isset($plan[$clave])) {
+                $plan[$clave] = ['cod_provee' => $i['COD_PROVEE'], 't_comp' => $i['T_COMP'],
+                                 'n_comp' => $i['N_COMP'], 'pendiente' => 0.0,
+                                 'clasificacion' => $i['PAGO_IMPORTADO']['clasificacion'],
+                                 'pagado' => $i['PAGO_IMPORTADO']['pagado'],
+                                 'razon_social' => isset($i['RAZON_SOC']) ? $i['RAZON_SOC'] : ''];
+            }
+
+            $plan[$clave]['pendiente'] = round($plan[$clave]['pendiente'] + floatval($i['IMPORTE_PENDIENTE']), 2);
+        }
+
+        return array_values($plan);
+    }
+
+    /**
+     * Anota los pagos importados que Tango ya registro. Escribe solo si hay
+     * algo que anotar. LANZA si falla al leer o escribir: quien llama decide,
+     * y la pestaña carga igual con un aviso.
+     *
+     * LA FECHA REAL es la de la ultima imputacion del comprobante en Tango,
+     * MAX(CPA05.F_COMP_CAN): el mismo criterio que la conciliacion, con la
+     * misma consulta acotada (estadoComprobantesEnTango()).
+     *
+     * @param array $items Filas de getPendientes() con horizonte
+     * @return array ['registrados' => [...], 'avisos' => [...]]
+     */
+    public function registrarPagosAutomatico($items) {
+        $vacio = ['registrados' => [], 'avisos' => []];
+
+        if (!$this->tablaExcedenteCreada()) {
+            return $vacio;
+        }
+
+        $plan = self::planRegistroPagos($items);
+
+        if (empty($plan)) {
+            return $vacio;
+        }
+
+        $pares = [];
+
+        foreach ($plan as $p) {
+            $pares[$p['cod_provee'] . '|' . $p['n_comp']] = ['cod' => $p['cod_provee'], 'n' => $p['n_comp']];
+        }
+
+        $enTango = $this->estadoComprobantesEnTango(array_values($pares));
+
+        if ($enTango === null) {
+            throw new Exception('no se pudo leer la fecha real de los pagos en Tango');
+        }
+
+        foreach ($plan as $k => $p) {
+            $plan[$k]['fecha_real'] = null;
+
+            foreach (isset($enTango[$p['cod_provee'] . '|' . $p['n_comp']])
+                         ? $enTango[$p['cod_provee'] . '|' . $p['n_comp']] : [] as $c) {
+                if (Planilla::codigo($c['T_COMP']) === $p['t_comp']) {
+                    $plan[$k]['fecha_real'] = $c['FECHA_CANCELADO'];
+                }
+            }
+        }
+
+        $hechos = $this->escribirRegistroPagos($plan, self::usuarioRegistro());
+
+        return ['registrados' => $hechos, 'avisos' => self::avisosRegistroPagos($hechos)];
+    }
+
+    /**
+     * Escribe la marca, en UNA transaccion. Idempotente: cada UPDATE toca las
+     * partes VIGENTES que siguen PREVISTO; si otra carga ya las marco, no
+     * afecta nada y no se cuenta. Sin bajas fisicas: la parte sigue vigente
+     * -es lo que dice que hubo un pago- hasta que se reimporte o se borre.
+     *
+     * Protegida para que una prueba pueda reemplazar la escritura.
+     *
+     * @param array $plan
+     * @param string $usuario
+     * @return array Los que efectivamente se marcaron
+     */
+    protected function escribirRegistroPagos($plan, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $cid = $this->conectar();
+        $hechos = [];
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($plan as $p) {
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_MEDIO . "
+                     SET ESTADO_TANGO = 'REGISTRADO', FECHA_REAL = ?, PENDIENTE_REAL = ?,
+                         FECHA_REGISTRO = GETDATE(), " . Auditoria::SET_MODIF . "
+                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ? AND VIGENTE = 1
+                       AND ESTADO_TANGO = 'PREVISTO'",
+                    [$p['fecha_real'], $p['pendiente'], $usuario, $p['cod_provee'], $p['t_comp'], $p['n_comp']]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al anotar el pago de ' . $p['t_comp'] . ' '
+                        . $p['n_comp']));
+                }
+
+                if (sqlsrv_rows_affected($stmt) > 0) {
+                    $hechos[] = $p;
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la marca de los pagos'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $hechos;
+    }
+
+    /**
+     * El aviso de lo que se anoto, en la seccion Conciliacion: informativo,
+     * como el de las conciliadas. Si no se anoto nada, ninguno.
+     *
+     * @param array $hechos
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosRegistroPagos($hechos) {
+        if (empty($hechos)) {
+            return [];
+        }
+
+        $detalle = [];
+
+        foreach (array_slice($hechos, 0, 10) as $h) {
+            $detalle[] = trim($h['razon_social'] . ' (' . $h['cod_provee'] . ') ' . $h['t_comp'] . ' '
+                . $h['n_comp']) . ': queda ' . self::plata($h['pendiente'])
+                . ($h['fecha_real'] !== null ? ', pagado el ' . self::formatoCorto($h['fecha_real']) : '');
+        }
+
+        return [Aviso::nuevo(Aviso::INFO, 'Tango registró ' . count($hechos) . ' pago(s) importado(s) que '
+            . 'no cancelaban la factura: deja de proyectarse lo pagado y se proyecta sólo lo que quedó '
+            . 'pendiente, con su vencimiento o el próximo día de pago. ' . implode('; ', $detalle)
+            . (count($hechos) > 10 ? '; y ' . (count($hechos) - 10) . ' más' : '') . '.', 'Conciliación')];
     }
 
     /* ====================================================================

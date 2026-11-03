@@ -109,6 +109,19 @@ try {
                     'Conciliación')];
             }
 
+            /* EL PAGO IMPORTADO QUE TANGO YA REGISTRO se anota solo, como la
+               conciliacion: un parcial no saca la factura de pendientes, le
+               baja el pendiente. La proyeccion ya lo tiene en cuenta; esto deja
+               la marca con la fecha real. Si falla, la pestaña carga igual. */
+            try {
+                $avisosConciliacion = array_merge($avisosConciliacion,
+                    $prov->registrarPagosAutomatico($items)['avisos']);
+            } catch (Throwable $e) {
+                $avisosConciliacion[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo anotar qué pagos importados '
+                    . 'ya registró Tango (' . $e->getMessage() . '). La grilla se muestra igual: lo ya pagado '
+                    . 'deja de proyectarse por sí solo, y se reintenta en la próxima carga.', 'Conciliación');
+            }
+
             /* EL EJE VA EN NETO: cada comprobante cae en su fecha por lo que sale
                de la caja -el neto de retenciones donde las hay-, igual que la
                fila del tablero. El pendiente sigue en su columna. */

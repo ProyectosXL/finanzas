@@ -705,3 +705,81 @@ seccion('el tablero: con la planilla vacía no se mueve un peso');
 $sinPlanilla = $repartir->invoke($provTab, $hTab, Proveedores::abrirEnMedios($universo, [], $hoy, null, $cfgRet));
 $directo = $repartir->invoke($provTab, $hTab, $universo);
 chequear('las series son idénticas', $directo, $sinPlanilla);
+
+/* ================================================================
+   EL PAGO QUE TANGO YA REGISTRO SE ANOTA, Y NO SE BORRA
+   ================================================================ */
+class ProveedoresRegistroPrueba extends Proveedores {
+    public $tangoFalso = [];
+    public $escrituras = [];
+
+    public function tablaExcedenteCreada() { return true; }
+    public function estadoComprobantesEnTango($pares) { return $this->tangoFalso; }
+
+    protected function escribirRegistroPagos($plan, $usuario) {
+        $this->escrituras[] = ['plan' => $plan, 'usuario' => $usuario];
+
+        return $plan;
+    }
+}
+
+$apParcial = ['PROVA|FAC|A0001' => [$medio(1, '2026-10-20', 400000.0, 'PARCIAL', 1000000.0, 1000000.0)]];
+
+seccion('registro: qué hay que anotar');
+
+$proyectadas = Proveedores::abrirEnMedios([$item('PROVA', 'A0001', 600000.0, '2026-11-20')], $apParcial, $hoy);
+$plan = Proveedores::planRegistroPagos($proyectadas);
+
+chequear('el parcial que Tango registró, con el pendiente que quedó', [['PROVA', 'FAC', 'A0001', 600000.0, 'PARCIAL']],
+    array_map(function ($p) {
+        return [$p['cod_provee'], $p['t_comp'], $p['n_comp'], $p['pendiente'], $p['clasificacion']];
+    }, $plan));
+
+chequear('uno que Tango todavía no registró no se anota', [],
+    Proveedores::planRegistroPagos(Proveedores::abrirEnMedios($items, $apParcial, $hoy)));
+chequear('uno ya anotado tampoco', [], Proveedores::planRegistroPagos(Proveedores::abrirEnMedios(
+    [$item('PROVA', 'A0001', 600000.0, '2026-11-20')], $yaMarcado, $hoy)));
+chequear('ni uno cuyo pendiente subió', [], Proveedores::planRegistroPagos(Proveedores::abrirEnMedios(
+    [$item('PROVA', 'A0001', 1100000.0, '2026-11-20')], $apParcial, $hoy)));
+
+seccion('registro: se anota con la fecha real y firma el sistema');
+
+$pr = new ProveedoresRegistroPrueba();
+$pr->tangoFalso = ['PROVA|A0001' => [['T_COMP' => 'FAC', 'ESTADO' => 'PEN', 'FECHA_CANCELADO' => '2026-10-21']]];
+$r = $pr->registrarPagosAutomatico($proyectadas);
+
+chequear('escribe una vez', 1, count($pr->escrituras));
+chequear('con la fecha real de Tango', '2026-10-21', $pr->escrituras[0]['plan'][0]['fecha_real']);
+chequear('firmado por el sistema, no por quien mira', 'SISTEMA:Proveedores.registrarPagosAutomatico',
+    $pr->escrituras[0]['usuario']);
+chequear('y avisa en la sección Conciliación, informativo', ['info', 'Conciliación'],
+    [$r['avisos'][0]['nivel'], $r['avisos'][0]['seccion']]);
+chequear('el aviso dice cuánto quedó y cuándo se pagó', true,
+    strpos($r['avisos'][0]['texto'], 'queda $ 600.000,00, pagado el 21/10/2026') !== false);
+
+$pr = new ProveedoresRegistroPrueba();
+$pr->registrarPagosAutomatico(Proveedores::abrirEnMedios($items, $apParcial, $hoy));
+chequear('sin nada que anotar no escribe', 0, count($pr->escrituras));
+
+$escribir = $cuerpo('Proveedores.php', 'protected function escribirRegistroPagos(');
+chequear('la marca no borra nada: la previsión queda', false, stripos($escribir, 'DELETE') !== false);
+chequear('ni da de baja la parte', false, strpos($escribir, 'VIGENTE = 0') !== false);
+chequear('sólo toca lo que sigue PREVISTO, en una transacción', true,
+    strpos($escribir, "AND ESTADO_TANGO = 'PREVISTO'") !== false
+    && strpos($escribir, 'sqlsrv_begin_transaction') !== false && strpos($escribir, 'sqlsrv_rollback') !== false);
+
+$ctrl = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/ProveedoresController.php'));
+chequear('la pestaña la corre al cargar, y si falla carga igual', true,
+    preg_match('/try \{\s*\$avisosConciliacion = array_merge\(\$avisosConciliacion,\s*\$prov->registrarPagosAutomatico\(\$items\)/', $ctrl) === 1);
+
+seccion('con excedente: cuando Tango cancela la factura, concilia como siempre');
+
+$c = $comparar([$fila(2, 'PROVA', 'A0001', '20/10/2026', '', '1030000')], $con5);
+$campos = Proveedores::camposDeImportacion($c['filas']);
+$pagoGuardado = ['PROVA|FAC|A0001' => ['COD_PROVEE' => 'PROVA', 'T_COMP' => 'FAC', 'N_COMP' => 'A0001',
+    'ESTADO' => 'PREVISTO', 'FECHA_PAGO' => $campos['pago']['FECHA_PAGO'], 'FECHA_CANCELADO' => null]];
+$conc = Proveedores::planConciliacion($pagoGuardado, [],
+    ['PROVA|A0001' => [['T_COMP' => 'FAC', 'ESTADO' => 'CAN', 'FECHA_CANCELADO' => '2026-10-22']]]);
+
+chequear('concilia, con el desvío contra la fecha de la planilla', [1, 2],
+    [count($conc['concilia']), $conc['concilia'][0]['desvio_dias']]);
