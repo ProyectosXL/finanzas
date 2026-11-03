@@ -631,13 +631,21 @@
 
     function filaCrono(c, p, editable) {
         var off = editable ? '' : ' disabled';
+        var haciaDonde = (c && c.corrimiento === 'SIGUIENTE') ? 'siguiente' : 'anterior';
         var corrida = p.corrida
             ? ' <span class="badge bg-warning text-dark" ' +
-              'title="El día de pago no es hábil: se corrió al día hábil anterior">' +
+              'title="El día de pago no es hábil: se corrió al día hábil ' + haciaDonde + '">' +
               'corrida</span>'
             : '';
+        // En un concepto que se corre al siguiente, la fecha a mano que cae en un
+        // no hábil también se corre: el input muestra la cargada y esto, la que vale.
+        var ovCorrido = p.override_corrido
+            ? ' <span class="badge bg-warning text-dark mt-1" ' +
+              'title="La fecha cargada a mano no es hábil: se paga el día hábil siguiente">' +
+              'se paga el ' + esc(fecha(p.fecha)) + '</span>'
+            : '';
         var aMano = p.override
-            ? '<span class="badge bg-info text-dark mt-1">a mano</span>' +
+            ? '<span class="badge bg-info text-dark mt-1">a mano</span>' + ovCorrido +
               Auditoria.icono({ alta: { usuario: p.usuario, fecha: p.fecha_alta } }) : '';
         var motivoOff = editable ? '' :
             ' title="Falta correr sql/cashflow_cronograma_conceptos.sql"';
@@ -652,7 +660,7 @@
             '<td><small class="text-muted">' + esc(fecha(p.calculada)) + '</small>' + corrida + '</td>' +
             '<td>' +
                 '<input type="date" class="form-control form-control-sm pgen-crono-fecha" ' +
-                    'value="' + esc(p.fecha) + '"' + off + '>' + aMano +
+                    'value="' + esc(p.override_fecha || p.fecha) + '"' + off + '>' + aMano +
             '</td>' +
             '<td>' +
                 '<input type="text" class="form-control form-control-sm pgen-crono-motivo" ' +

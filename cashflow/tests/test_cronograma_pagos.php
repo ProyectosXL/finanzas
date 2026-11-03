@@ -533,7 +533,8 @@ chequear('el defecto es lunes semanal', [1, 'SEMANAL'],
     [CronogramaPagos::CONCEPTOS['GASTOS_LOCALES']['dia'],
      CronogramaPagos::CONCEPTOS['GASTOS_LOCALES']['frecuencia']]);
 chequear('se corre al SIGUIENTE', 'SIGUIENTE', CronogramaPagos::corrimiento('GASTOS_LOCALES'));
-chequear('los otros tres siguen al ANTERIOR', ['ANTERIOR', 'ANTERIOR', 'ANTERIOR'],
+chequear('Proveedores y Logistica siguen al ANTERIOR; Supervisoras, al SIGUIENTE',
+    ['ANTERIOR', 'ANTERIOR', 'SIGUIENTE'],
     [CronogramaPagos::corrimiento('PROV_LOCALES'), CronogramaPagos::corrimiento('LOGISTICA'),
      CronogramaPagos::corrimiento('SUPERVISORAS')]);
 chequear('solo admite semanal', ['SEMANAL'], CronogramaPagos::frecuenciasDe('GASTOS_LOCALES'));
@@ -557,16 +558,44 @@ chequear('sin parametros el aviso nombra SU script', true,
     strpos($glSin['aviso'], 'sql/cashflow_gastos_locales.sql') !== false);
 chequear('y la config lleva la direccion', 'SIGUIENTE', $glSin['corrimiento']);
 
-// Lunes 12/10/2026 feriado: Gastos Locales paga el martes 13; Supervisoras el viernes 9.
+// Lunes 12/10/2026 feriado: Gastos Locales y Supervisoras pagan el martes 13; Logistica, que es
+// viernes, no se entera.
 $habGL = calendarioCP('2026-09-01', '2026-11-30', ['2026-10-12']);
 $glOct = CronogramaPagos::delMes('2026-10', $glSin, $habGL);
 chequear('el 2do lunes de octubre (12, feriado) se paga el martes 13', '2026-10-13',
     $glOct[1]['fecha']);
 chequear('queda marcado corrido, con la teorica a la vista', [true, '2026-10-12'],
     [$glOct[1]['corrida'], $glOct[1]['teorica']]);
-chequear('el mismo feriado en Supervisoras sigue yendo al viernes 9', '2026-10-09',
+chequear('el mismo feriado en Supervisoras tambien va al martes 13', '2026-10-13',
     CronogramaPagos::delMes('2026-10', CronogramaPagos::configDesdeMapa([], 'SUPERVISORAS'),
         $habGL)[1]['fecha']);
+
+seccion('Supervisoras: el override en un no habil se corre al siguiente');
+
+/* El 2do lunes de noviembre (9, feriado) se movio a mano al miercoles 11, que
+   tambien es feriado: se paga el jueves 12. Es el caso real del 03/11/2026. */
+$supQ = CronogramaPagos::configDesdeMapa(['cronograma_supervisoras_dia' => '1',
+    'cronograma_supervisoras_frecuencia' => 'QUINCENAL'], 'SUPERVISORAS');
+$habSup = calendarioCP('2026-10-01', '2026-12-31', ['2026-11-09', '2026-11-11']);
+$supNov = CronogramaPagos::delMes('2026-11', $supQ, $habSup,
+    ['2026-11' => [1 => ['fecha' => '2026-11-11', 'motivo' => 'Feriado']]]);
+
+chequear('la calculada del lunes 9 feriado es el martes 10', '2026-11-10', $supNov[0]['calculada']);
+chequear('el override del 11 (feriado) se paga el 12, marcado', ['2026-11-12', true, true, '2026-11-11'],
+    [$supNov[0]['fecha'], $supNov[0]['override'], $supNov[0]['override_corrido'],
+     $supNov[0]['override_fecha']]);
+
+$supNovOk = CronogramaPagos::delMes('2026-11', $supQ, $habSup,
+    ['2026-11' => [1 => ['fecha' => '2026-11-13', 'motivo' => 'x']]]);
+
+chequear('un override en dia habil queda tal cual', ['2026-11-13', false],
+    [$supNovOk[0]['fecha'], $supNovOk[0]['override_corrido']]);
+
+$logNov = CronogramaPagos::delMes('2026-11', CronogramaPagos::configDesdeMapa([], 'LOGISTICA'),
+    $habSup, ['2026-11' => [1 => ['fecha' => '2026-11-11', 'motivo' => 'x']]]);
+
+chequear('en un concepto que se corre al anterior, el override no se toca', ['2026-11-11', false],
+    [$logNov[0]['fecha'], $logNov[0]['override_corrido']]);
 
 // Feriado encadenado lunes y martes: miercoles.
 $glEnc = CronogramaPagos::delMes('2026-10', $glSin,
