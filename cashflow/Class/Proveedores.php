@@ -915,7 +915,16 @@ class Proveedores {
 
                 // La apertura en dos medios, si la hay: ver abrirEnMedios().
                 'APERTURA' => null,
-                'APERTURA_DESCUADRADA' => null
+                'APERTURA_DESCUADRADA' => null,
+
+                /* UN PAGO IMPORTADO CON EXCEDENTE O PARCIAL, si lo hay: que se
+                   pago, cuanto, el saldo y de donde sale su fecha. EXCEDENTE es
+                   lo que esta fila proyecta de mas sobre su neto; PARTE_EXTRA,
+                   que es la segunda fila de una cuota partida y no cuenta como
+                   otro vencimiento. Ver proyectarPagoImportado(). */
+                'PAGO_IMPORTADO' => null,
+                'EXCEDENTE' => 0.0,
+                'PARTE_EXTRA' => false
             ];
 
             /* LA RETENCION Y EL NETO A PAGAR, con la fecha con la que cae en el
@@ -2087,6 +2096,11 @@ class Proveedores {
         $compExcluidos = 0;
         $descuadrados = [];
 
+        /* UN PAGO CON EXCEDENTE O PARCIAL CUYO PENDIENTE SUBIO desde que se
+           importo -una nota de debito, por ejemplo-. Que baje no se avisa:
+           es Tango registrando el pago. Ver proyectarPagoImportado(). */
+        $importadosDescuadrados = [];
+
         /* LOS DEL CRONOGRAMA QUE SE PROYECTAN SIN RETENER porque un impuesto "a
            todos" no tiene alicuota general vigente a su fecha de pago -y el
            proveedor tampoco tiene una propia-. No es una retencion de 0: falta
@@ -2113,6 +2127,10 @@ class Proveedores {
 
             if (!empty($i['APERTURA_DESCUADRADA'])) {
                 $descuadrados[self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP'])] = true;
+            }
+
+            if (!empty($i['PAGO_IMPORTADO']) && $i['PAGO_IMPORTADO']['estado'] === 'DESCUADRADO') {
+                $importadosDescuadrados[self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP'])] = true;
             }
 
             if (!empty($i['EXCLUIDO'])) {
@@ -2152,6 +2170,12 @@ class Proveedores {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, count($descuadrados) . ' comprobante(s) '
                 . 'abiertos en dos medios ya no coinciden con su neto a pagar: se proyecta el saldo '
                 . 'en la fecha más tardía. Reimportá para corregirlo.');
+        }
+
+        if (!empty($importadosDescuadrados)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($importadosDescuadrados) . ' comprobante(s) con '
+                . 'pago parcial o excedente ya no coinciden con lo importado: se proyecta el pendiente de '
+                . 'Tango. Reimportá para corregirlo.');
         }
 
         if ($sinGeneral > 0) {
