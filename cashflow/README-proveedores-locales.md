@@ -1152,6 +1152,43 @@ Dos chips nuevos, **Con excedente** y **Pago parcial**, con la cantidad de compr
 
 Un parcial **no cuenta como vencido resuelto**: el saldo sigue sin fecha.
 
+### Los saldos a cuenta
+
+Lo que los proveedores tienen **a cuenta en Tango sin imputar a ninguna factura**. Se **informa**: no suma en ninguna serie ni descuenta nada de lo próximo a pagar. Cuando Proveedores lo imputa a una factura nueva en Tango, el pendiente de esa factura ya viene reducido —eso sí entra al cashflow, por `getPendientes()`— y el aviso desaparece solo. Descontarlo antes sería adivinar a qué factura se va a imputar.
+
+#### Cómo lo registra Tango
+
+Medido contra la base el 03/11/2026:
+
+- **La O/P vive en `CPA04`** con `T_COMP = 'O/P'`. Si se imputó entera queda en `IMP` (57.862 locales); si le quedó algo a cuenta, en **`CTA`** (254); las anuladas, en `ANU`.
+- **Lo que tiene a cuenta** es `IMPORTE_TO` menos lo imputado en `CPA05` por **`ID_CPA04_CANCELADO`**. Verificado: ninguna O/P en `IMP` tiene un resto de más de $1 con esa cuenta.
+- **Lo que imputó al emitirse** lleva además `ID_CPA04_OP`. **Cuando después se imputa a una factura nueva**, la fila de `CPA05` va con `ID_CPA04_OP` en `NULL`, **con la fecha de la O/P —no la de la imputación—**, y la O/P pasa de `CTA` a `IMP`.
+- **`OP_IMPORTE_TOTAL_PAGO_CUENTA` no sirve**: es lo que quedó a cuenta al emitir, y no se actualiza cuando se imputa.
+- **Ninguna O/P aparece en `getPendientes()`**, que sólo lee `PEN`: ni como fila negativa ni restando a otra factura. Los 549 pendientes de ese día eran todos `FAC`.
+
+Ese día había **141 O/P con excedente por $ 6,5 M** y **112 sin nada imputado al emitirse por $ 1.284,7 M**, algunas de 2006 —contando todos los proveedores locales, también los excluidos del módulo—. Y **19 comprobantes pendientes con un pago parcial de una O/P**: $ 69,5 M pagados y $ 43,3 M de saldo.
+
+#### Los dos tipos, y el aviso
+
+| Tipo | Qué es | Qué se lista |
+| --- | --- | --- |
+| **Con excedente** | La O/P imputó una factura al emitirse y le sobró: lo que se pagó de más | Todas, **sin tope de antigüedad**; las de **más de un año** van en su propio renglón: *"N O/P con saldo a cuenta de más de un año por $ X: revisarlas en Tango"* |
+| **Sin ninguna factura asociada** | La O/P no tiene **ninguna** imputación en `CPA05`: un anticipo | Sólo las de los **últimos 12 meses** |
+
+Una O/P que no imputó nada al emitirse **pero sí después** ya tiene factura asociada: no es ninguna de las dos. Lo decide `Proveedores::clasificarSaldosACuenta()`, pura.
+
+El aviso va en la pestaña y en el tablero, sección **Saldos a cuenta**, **informativo**, un renglón por tipo: cuántos proveedores, cuánto y en cuántas O/P, y el detalle por proveedor —el de más saldo primero—, O/P, fecha e importe a cuenta.
+
+- **Los restos de hasta `TOLERANCIA_IMPORTE` ($1) no cuentan**: Tango deja O/P en `CTA` por centavos.
+- **Los proveedores excluidos del módulo quedan afuera**, igual que su deuda. La aduana está excluida, así que sus anticipos —$ 1.220 M en los últimos doce meses— no se avisan acá.
+- **La lectura va acotada**: las O/P en `CTA`, con el mismo filtro de exterior y cláusula que `getPendientes()`, y lo imputado sólo para esas. Tarda unos 400 ms. **Si falla, la pestaña y el tablero cargan igual**, con un aviso de atención (`avisosSaldosConNivel()`).
+
+Al 03/11/2026, sin los excluidos: **36 O/P con excedente por $ 2,4 M** de 18 proveedores, **78 de más de un año por $ 3,9 M**, y **31 sin factura por $ 41,5 M** de 9 proveedores.
+
+#### Una factura cancelada con un saldo a cuenta, en la conciliación
+
+Como Tango fecha la imputación de un saldo a cuenta con la fecha de la O/P vieja, **la fecha real de esa factura puede ser anterior a cuando se cargó su previsión**. Concilia igual, pero queda **marcada "cancelada con saldo a cuenta"** y **no entra en el desvío promedio**: meterla diría que se paga meses antes de lo previsto. La marca se deriva al leer —`FECHA_CANCELADO` anterior a `FECHA_ALTA` de la previsión, las dos guardadas— y el aviso de la conciliación dice cuáles son. Al 03/11/2026 eran **9 de las 86 conciliadas**.
+
 ---
 
 ## La clave incluye al proveedor, y es lo contrario de cobranzas
@@ -1176,7 +1213,7 @@ Queda marcada `CONCILIADO` con la **fecha real al lado**, sin pisar la prevista.
 
 > Es lo único que permite después contestar la pregunta por la que vale la pena guardar las dos: **¿le acertamos a la fecha?** Borrándola, esa pregunta se queda sin respuesta para siempre.
 
-Por eso el aviso informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice.
+Por eso el aviso informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice. **Las canceladas con un saldo a cuenta no entran**: su fecha real es la de una O/P vieja. Ver *Una factura cancelada con un saldo a cuenta, en la conciliación*.
 
 **Un comprobante pagado con dos medios mide el desvío contra la fecha más tardía**: es la que guarda la tabla de pagos (ver *Un comprobante pagado con dos medios*), y es cuando termina de pagarse. **Uno con excedente**, contra la fecha de la planilla.
 
@@ -1594,8 +1631,10 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 - **La proyección**: excedente con uno y dos medios, parcial con el saldo en su vencimiento, en el cronograma o en el primer día del eje, cuotas de la más vieja a la más nueva con el excedente en la última cubierta, la retención repartida al centavo, Tango que registró el pago —en cualquier importe— y un pendiente que subió, con su aviso; sin pagos importados todo sale idéntico, y **un neto en dos medios da exactamente lo mismo que antes**.
 - **El tablero**: las dos particiones cierran con excedentes y parciales, `bruto + excedente = serie + retenciones` en cada serie, la pestaña y el tablero suman lo mismo, y con la planilla vacía las series no se mueven.
 - **La marca de Tango**: qué hay que anotar, con la fecha real y el usuario del sistema, sin borrar ni dar de baja nada, y un excedente que concilia contra la fecha de la planilla.
+- **Los saldos a cuenta**: excedente, excedente de más de un año, sin factura de los últimos 12 meses; que una imputada después no es ninguna de las dos; los restos de hasta $1 y los excluidos del módulo afuera; los tres renglones informativos con su detalle; que no entran en ninguna serie; que si la lectura falla se avisa; y, con base, la lectura real.
+- **La conciliación con saldo a cuenta**: concilia, queda marcada y no entra en el desvío promedio.
 
-*Suite completa: 9935 OK, 0 fallas (84 archivos), con la base.*
+*Suite completa: 9966 OK, 0 fallas (84 archivos), con la base.*
 
 ---
 
@@ -1642,5 +1681,4 @@ Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`. Del pago 
 - **ARCA/Aduana está cargada con dos códigos** (`OGADUN` $235,4 M y `OGADUA` $131,8 M, mismo nombre). No se unifican en el resolutor: la clave es el código de Tango y arreglar el maestro no le toca a este módulo. Si los dos llevan el mismo rubro, el tablero los junta solo. El control de faltantes los muestra por separado, que es lo que va a revelar si la planilla trae uno solo.
 - **Las series por rubro se resuelven contra el maestro en cada pedido.** Con 26 rubros y un cache por request alcanza; si algún día el maestro creciera mucho, el lugar para mirar es `CashflowRegistry::resolverExtra()`.
 - **Antes de la primera importación con las listas como regla, hay que completar las cinco listas de *Parámetros*.** Mientras falten valores en uso, la planilla real va a rechazar filas en masa. La previsualización los lista agrupados justamente para poder cargarlos de una pasada, pero conviene hacerlo **antes** y no descubrirlo importando.
-- **El aviso de saldos a cuenta todavía no está.** La medición (03/11/2026) está hecha: una O/P con excedente queda en `CPA04` con `ESTADO = 'CTA'`, y lo que tiene a cuenta es `IMPORTE_TO` menos lo que se le imputó en `CPA05` por `ID_CPA04_CANCELADO`; cuando se imputa a una factura nueva, pasa a `IMP`. Ninguna O/P aparece en `getPendientes()`, que sólo lee `PEN`. Falta decidir qué entra en el aviso: hoy hay **141 O/P con excedente** por **$ 6,5 M** y **112 anticipos** —O/P que no imputaron nada al emitirse— por **$ 1.284,7 M**, algunos de 2006.
 - **Un proveedor viejo con un valor fuera de lista no se puede guardar hasta que alguien resuelva ese valor.** Se abre, se ve y no se pierde —y el campo lo avisa en naranja— pero `Guardar` lo rechaza, incluso si lo que se estaba editando era otro campo. Es la contracara de que las listas signifiquen algo; si resultara molesto en la práctica, la discusión es si el alta manual debe poder conservar un valor heredado, no si la importación debe aceptarlo.
