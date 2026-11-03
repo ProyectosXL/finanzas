@@ -583,9 +583,19 @@ class Logistica {
 
         $cod = Planilla::codigo($codProvee);
 
-        $stmt = sqlsrv_query($this->conectar(),
+        /* EL ESQUEMA SE RESUELVE ANTES DE CONECTAR, Y LA CONEXION QUEDA EN UNA
+           VARIABLE. conectar() abre una conexion nueva cada vez y lo unico que la
+           mantiene viva es $_SESSION['cid'], que la siguiente pisa. Con
+           noHabitualesCreado() adentro de los argumentos de sqlsrv_query, su
+           conexion pisaba esa referencia, la de la consulta se cerraba al volver
+           sqlsrv_query, y el fetch fallaba con "supplied resource is not a valid
+           ss_sqlsrv_stmt resource": el alta de un fletero no guardaba. */
+        $colHabitual = $this->noHabitualesCreado() ? "HABITUAL" : "CAST(1 AS BIT) AS HABITUAL";
+        $cid = $this->conectar();
+
+        $stmt = sqlsrv_query($cid,
             "SELECT COD_PROVEE, NOMBRE, HORAS_MES, VALOR_HORA_BASE, MES_BASE, ACTIVO,
-                    " . ($this->noHabitualesCreado() ? "HABITUAL" : "CAST(1 AS BIT) AS HABITUAL") . "
+                    " . $colHabitual . "
              FROM dbo." . self::TABLA . " WHERE COD_PROVEE = ?", [$cod]);
 
         if ($stmt === false) {
