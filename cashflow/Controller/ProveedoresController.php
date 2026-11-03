@@ -109,6 +109,24 @@ try {
                     'Conciliación')];
             }
 
+            /* EL PAGO IMPORTADO QUE TANGO YA REGISTRO se anota solo, como la
+               conciliacion: un parcial no saca la factura de pendientes, le
+               baja el pendiente. La proyeccion ya lo tiene en cuenta; esto deja
+               la marca con la fecha real. Si falla, la pestaña carga igual. */
+            try {
+                $avisosConciliacion = array_merge($avisosConciliacion,
+                    $prov->registrarPagosAutomatico($items)['avisos']);
+            } catch (Throwable $e) {
+                $avisosConciliacion[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo anotar qué pagos importados '
+                    . 'ya registró Tango (' . $e->getMessage() . '). La grilla se muestra igual: lo ya pagado '
+                    . 'deja de proyectarse por sí solo, y se reintenta en la próxima carga.', 'Conciliación');
+            }
+
+            /* LOS SALDOS A CUENTA: lo que los proveedores tienen a cuenta en Tango
+               sin imputar. Solo se informa -no suma ni descuenta nada-, y si la
+               lectura falla la pestaña carga igual. */
+            $avisosSaldos = $prov->avisosSaldosConNivel($h->hoy());
+
             /* EL EJE VA EN NETO: cada comprobante cae en su fecha por lo que sale
                de la caja -el neto de retenciones donde las hay-, igual que la
                fila del tablero. El pendiente sigue en su columna. */
@@ -127,6 +145,7 @@ try {
                 $avisosConciliacion,
                 $prov->avisosCronogramaConNivel(),
                 Proveedores::avisosPendientesConNivel($items),
+                $avisosSaldos,
                 Aviso::lista($payload['warnings'])
             );
             $payload['warnings'] = Aviso::textos($payload['avisos_con_nivel']);
@@ -365,10 +384,14 @@ try {
             $enTango = $prov->estadoComprobantesEnTango(
                 Proveedores::sinCruce($parse['filas'], $pendientes));
 
+            /* EL IMPORTE SE CLASIFICA con el % de excedente de ahora: neto,
+               excedente o parcial. Sin el script es null y la importacion es la
+               de antes. El % viaja en la respuesta y vuelve con la
+               confirmacion: si cambio en el medio, no se aplica nada. */
             $comp = Proveedores::compararImportacion(
                 $parse['filas'], $pendientes, $prov->getPagos(), $h->hoy(),
                 $prov->getAperturas(), $prov->tablaMedioCreada(), $prov->retenciones()->config(),
-                $enTango);
+                $enTango, $prov->opcionesExcedente($h));
 
             $comp['separador'] = $parse['separador'];
 
@@ -386,7 +409,7 @@ try {
                la entrada del archivo contra la base de ahora, y si algo cambio
                desde la previsualizacion no aplica nada. */
             $h = Horizonte::desdeParametros(new Parametros());
-            $r = $prov->aplicarImportacion($data['comparacion'], $usuario, $h->hoy());
+            $r = $prov->aplicarImportacion($data['comparacion'], $usuario, $h->hoy(), $h);
 
             echo json_encode([
                 'success' => true,

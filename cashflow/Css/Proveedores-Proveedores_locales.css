@@ -336,6 +336,37 @@
     background-color: #ffe5c2;
 }
 
+/* EL SALDO DE UN PAGO PARCIAL: su fecha no la decidió nadie —es la de
+   siempre, vencimiento o cronograma—, así que va atenuada como "vto.", con
+   "saldo" al lado. No se edita: es la otra mitad de lo importado. */
+.tab-proveedores_locales .prov-fuente-saldo {
+    color: #495057;
+    font-weight: normal;
+}
+
+.tab-proveedores_locales .prov-fuente-saldo .prov-fuente-fecha {
+    color: #495057;
+    background-color: #e9ecef;
+}
+
+/* "+ excedente" al lado del neto. Como las etiquetas de la fecha, el texto
+   sale del atributo: el Excel baja el importe solo, y la marca va en su
+   propia columna, la que sólo se exporta. */
+.tab-proveedores_locales .prov-marca-excedente {
+    margin-left: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #084298;
+    background-color: #cfe2ff;
+    white-space: nowrap;
+}
+
+.tab-proveedores_locales .prov-marca-excedente::after {
+    content: attr(data-etiqueta);
+}
+
 .tab-proveedores_locales .prov-fuente-medios .prov-btn-borrar {
     padding: 0 5px;
     line-height: 1.4;

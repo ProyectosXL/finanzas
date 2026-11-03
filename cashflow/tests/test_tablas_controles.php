@@ -1712,8 +1712,8 @@ chequear('y va arriba de las listas: deciden cuánta plata sale de la caja', tru
     strpos($tabPplo, 'id="retencionesPplo"') < strpos($tabPplo, 'id="listasPplo"'));
 chequear('el JS lee el bloque prov_locales_retenciones del módulo', true,
     strpos($jsPplo, 'modulo.prov_locales_retenciones') !== false);
-chequear('y lo pinta antes que las listas', true,
-    strpos($jsPplo, "pintarRetenciones();\n                pintarListas();") !== false);
+chequear('y lo pinta antes que las listas, con la importación de pagos en el medio', true,
+    strpos($jsPplo, "pintarRetenciones();\n                pintarImportacion();\n                pintarListas();") !== false);
 
 foreach (['addImpuestoProvLocal', 'saveImpuestoProvLocal', 'activarImpuestoProvLocal',
           'addAlicuotaProvLocal', 'bajaAlicuotaProvLocal'] as $accion) {
@@ -1732,6 +1732,42 @@ chequear('sin el script, la seccion dice cual falta', true,
 chequear('las tablas tienen id, para ordenarlas y exportarlas', [true, true],
     [strpos($jsPplo, 'id="tablaImpuestosPplo"') !== false,
      strpos($jsPplo, 'id="tablaGeneralesPplo"') !== false]);
+
+seccion('Parametros -> Prov. Locales: la seccion Importación de pagos esta enganchada');
+
+require_once __DIR__ . '/../Class/Parametros.php';
+
+$modPplo = null;
+
+foreach (Parametros::getModulos() as $m) {
+    if ($m['codigo'] === 'PROV_LOCALES') { $modPplo = $m; }
+}
+
+chequear('el módulo declara la sección, entre las retenciones y las listas',
+    ['prov_locales_retenciones', 'prov_locales_importacion', 'prov_locales_opciones'],
+    $modPplo['secciones']);
+chequear('la pestaña tiene su contenedor, después de las retenciones', true,
+    strpos($tabPplo, 'id="importacionPplo"') !== false
+    && strpos($tabPplo, 'id="retencionesPplo"') < strpos($tabPplo, 'id="importacionPplo"')
+    && strpos($tabPplo, 'id="importacionPplo"') < strpos($tabPplo, 'id="listasPplo"'));
+chequear('el JS lee el bloque prov_locales_importacion', true,
+    strpos($jsPplo, 'modulo.prov_locales_importacion') !== false);
+chequear('el rótulo es el de la especificación', true,
+    strpos($jsPplo, '% de excedente permitido') !== false
+    && strpos($jsPplo, 'El excedente queda a cuenta del proveedor en Tango') !== false);
+chequear('el JS llama a savePorcExcedenteProvLocal', true,
+    strpos($jsPplo, "'savePorcExcedenteProvLocal'") !== false);
+chequear('el controller la atiende y guarda por Proveedores::guardarPorcExcedente()', true,
+    strpos($ctrlParam, "case 'savePorcExcedenteProvLocal':") !== false
+    && strpos($ctrlParam, '->guardarPorcExcedente(') !== false);
+chequear('y pide el permiso de Parametros > Prov. Locales', [['parametros', 'PROV_LOCALES']],
+    AuthCashflow::ESCRITURAS['Parametros']['savePorcExcedenteProvLocal']);
+chequear('sin permiso de edición el campo y el botón no quedan', true,
+    preg_match('/function pintarImportacion\(\)[\s\S]*?Permisos\.soloLectura\(cont\);/', $jsPplo) === 1);
+chequear('dice quién lo cambió por última vez', true,
+    preg_match('/function pintarImportacion\(\)[\s\S]*?Auditoria\.texto\(/', $jsPplo) === 1);
+chequear('sin el script, la sección dice cuál falta', true,
+    strpos($jsPplo, 'sql/cashflow_prov_locales_excedente_parcial.sql') !== false);
 
 // ============================================================================
 // Proveedores Locales > Maestro: las retenciones de cada proveedor
@@ -1805,8 +1841,10 @@ chequear('el tooltip dice alicuota y de donde sale', true,
     strpos($jsProv, "GENERAL: 'general, vigente desde el '") !== false
     && strpos($jsProv, "PROVEEDOR: 'del proveedor, desde el '") !== false
     && strpos($jsProv, "NO_RETIENE: 'no se retiene'") !== false);
-chequear('en dos medios la retencion va en la parte 1/2', true,
-    strpos($jsProv, "if (esParteExtra(f)) {\n            return '<td class=\"text-center text-muted small\" title=\"La retención de este '") !== false);
+/* Sólo en NETO: con excedente o parcial cada fila trae su parte, y una cuota
+   partida (PARTE_EXTRA) también la muestra. */
+chequear('en dos medios NETO la retencion va en la parte 1/2', true,
+    strpos($jsProv, "if (f.APERTURA && Number(f.APERTURA.parte) > 1) {\n            return '<td class=\"text-center text-muted small\" title=\"La retención de este '") !== false);
 chequear('el pie suma el neto y, aparte, lo retenido por impuesto', true,
     strpos($jsProv, 'total += aPagar(f);') !== false
     && strpos($jsProv, 'porImpuesto[k] = (porImpuesto[k] || 0)') !== false);
@@ -1818,7 +1856,9 @@ seccion('Cuentas a Pagar: el Excel baja una columna por impuesto');
 
 chequear('tabla-export.js respeta data-exportar-solo', true,
     strpos($jsExport, "!viva_f.cells[c].hasAttribute('data-exportar-solo')") !== false);
-chequear('las columnas por impuesto llevan la marca, en encabezado, filas y pie', 3,
+/* Cinco en el JS: las de impuestos en encabezado, filas y pie, y la de Pago
+   importado en filas y pie (su encabezado está en el PHP). */
+chequear('las columnas por impuesto y la de Pago importado llevan la marca, en encabezado, filas y pie', 5,
     substr_count($jsProv, 'prov-solo-export'));
 chequear('y el CSS de la pestaña las esconde en pantalla', true,
     (bool) preg_match('/\.prov-solo-export\s*\{\s*display:\s*none;/', $cssProv));
@@ -1842,6 +1882,52 @@ chequear('y su propio indicador en el resumen', true,
     strpos($jsProv, "['ya_pagadas', 'Ya pagadas en Tango', 'warning text-dark']") !== false);
 chequear('la previsualizacion muestra total, retenciones y neto por fila', true,
     strpos($jsProv, '+ (conNeto ? celdasNetoPreview(f) : \'\')') !== false);
+
+seccion('Importar: los chips de excedente y de pago parcial');
+
+chequear('el chip Con excedente cuenta comprobantes y dice el excedente', true,
+    strpos($jsProv, "['con_excedente', 'Con excedente', 'primary', 'importe_excedente',") !== false);
+chequear('el chip Pago parcial cuenta comprobantes y dice lo que se paga', true,
+    strpos($jsProv, "['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',") !== false);
+chequear('y el importe se dibuja al lado de la cantidad', true,
+    strpos($jsProv, "(c[3] ? ' · ' + plata(r[c[3]] || 0) : '')") !== false);
+chequear('el aviso crítico del % va en rojo', true,
+    strpos($jsProv, "(d.criticos || []).forEach(function(t) {") !== false
+    && strpos($jsProv, 'alert alert-danger py-2 px-3 small mb-2 prov-preview-critico') !== false);
+chequear('cada fila dice si es excedente o parcial', true,
+    strpos($jsProv, "(f.clasificacion === 'EXCEDENTE' ? '+ excedente' : 'pago parcial')") !== false);
+chequear('el controller clasifica con el % y el cronograma de ahora', true,
+    strpos($ctrlProv, '$enTango, $prov->opcionesExcedente($h));') !== false);
+
+seccion('Cuentas a Pagar: las marcas del pago con excedente y del pago parcial');
+
+$tabProvLoc = file_get_contents($TABS . '/proveedores_locales.php');
+$cssProv = file_get_contents(__DIR__ . '/../Css/Proveedores-Proveedores_locales.css');
+
+chequear('el neto lleva "+ excedente" en data-etiqueta, no como texto de la celda', true,
+    strpos($jsProv, '<span class="prov-marca-excedente" data-etiqueta="+ excedente"></span>') !== false
+    && strpos($cssProv, '.prov-marca-excedente::after') !== false);
+chequear('las etiquetas de la fecha: pago parcial, saldo, 1/2 · parcial', [true, true, true], [
+    strpos($jsProv, "'pago parcial'") !== false,
+    strpos($jsProv, "return 'saldo';") !== false,
+    strpos($jsProv, "dos + ' · parcial'") !== false]);
+chequear('la fecha de un pago importado no se edita: sólo reimportar o ↺', true,
+    strpos($jsProv, 'return !!(f.APERTURA || f.APERTURA_DESCUADRADA || f.PAGO_IMPORTADO);') !== false);
+chequear('una cuota partida cuenta una vez', true,
+    strpos($jsProv, 'return !!(f.PARTE_EXTRA || (f.APERTURA && Number(f.APERTURA.parte) > 1));') !== false);
+chequear('la etiqueta baja al Excel en su columna, que sólo se exporta', [true, true, true], [
+    strpos($tabProvLoc, '<th rowspan="2" class="prov-solo-export" data-exportar-solo>Pago importado</th>') !== false,
+    strpos($jsProv, "'<td class=\"prov-solo-export\" data-exportar-solo>' + escapar(etiquetaImportado(f)) + '</td>'") !== false,
+    strpos($jsProv, "+ '<td class=\"prov-solo-export\" data-exportar-solo></td>'") !== false]);
+chequear('la columna va entre el neto y la fecha, en el encabezado y en la fila', true,
+    strpos($tabProvLoc, 'Neto a pagar') < strpos($tabProvLoc, '>Pago importado</th>')
+    && strpos($tabProvLoc, '>Pago importado</th>') < strpos($tabProvLoc, 'data-orden-nombre="Fecha de pago"')
+    && strpos($jsProv, "+ celdaNeto(f)\n                + '<td class=\"prov-solo-export\"") !== false);
+chequear('la tarjeta del total dice cuánto es excedente', true,
+    strpos($tabProvLoc, 'id="excedenteProv"') !== false
+    && strpos($jsProv, "texto('excedenteProv'") !== false);
+chequear('con excedente o parcial, cada fila muestra su retención', true,
+    strpos($jsProv, "if (f.APERTURA && Number(f.APERTURA.parte) > 1) {") !== false);
 
 seccion('Cuentas a Pagar: el boton Conciliar ya no esta');
 

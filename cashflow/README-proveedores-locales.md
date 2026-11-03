@@ -44,7 +44,10 @@ Contra `central`, en cualquier momento:
 -- 8. sql/cashflow_prov_exclusion_modulo.sql          (excluir un proveedor entero del módulo)
 -- 9. sql/cashflow_prov_locales_pago_medio.sql        (un comprobante pagado con dos medios)
 -- 10. sql/cashflow_prov_locales_retenciones.sql      (las retenciones: impuestos y alícuotas)
+-- 11. sql/cashflow_prov_locales_excedente_parcial.sql (pago con excedente y pago parcial)
 ```
+
+El undécimo le agrega a `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO` lo que hace falta para guardar un pago con excedente o parcial —la clasificación, el pendiente y el neto al importar, y la marca de que Tango ya lo registró—, hace nullable su `FORMA_PAGO` y siembra el **% de excedente permitido en 5**, sin pisarlo si ya está. Va **después del noveno**, al que le agrega columnas —corta si no está—, y necesita el **cuarto**, que hace nullable la fecha de la tabla de pagos: un pago parcial deja esa fecha vacía. **El día que se corre el tablero no se mueve**: las aperturas que ya hay quedan como `NETO` y se proyectan igual. **Sin él** la planilla funciona como antes —el importe tiene que ser el neto a pagar con $1 de tolerancia— y la pestaña avisa qué script falta. Ver *Un pago con excedente o parcial*.
 
 El décimo crea las tres tablas de las retenciones —los impuestos, sus alícuotas generales y las de cada proveedor— y siembra **IIBB** y **GANANCIAS** "a todos" y **SUSS** "solo a los asignados", **sin alícuotas**: **el día que se corre el tablero no se mueve**. No depende de ningún otro. Es reejecutable: la semilla es un `MERGE` sobre el código que sólo inserta lo que falta, así que un impuesto renombrado, con otro alcance o dado de baja no se pisa ni se reactiva. **Sin él** las facturas se proyectan por el total, como antes, y la pestaña avisa qué script falta. Después de correrlo, **hasta que se carguen las alícuotas generales** en *Parámetros › Prov. Locales* tampoco se retiene nada, y la pestaña avisa cuántos comprobantes del cronograma están sin retención por eso. Ver *Las retenciones*.
 
@@ -951,11 +954,13 @@ Si el archivo daría de baja **más de la mitad** del maestro, lo más probable 
 
 Campos: **cód. proveedor, número de factura, fecha de pago, forma de pago e importe**. Los tres primeros son obligatorios.
 
-**`IMPORTE` es el neto de retenciones**, que es lo que pone quien arma la planilla: lo que sale de la caja. **Es opcional con un medio** (sinónimos `MONTO`, `IMPORTE_PAGO`): vacío quiere decir *el neto a pagar*. Si viene, tiene que coincidir con **el neto a pagar del comprobante con $1 de tolerancia**; otro número es otro comprobante o un pago parcial que Tango todavía no sabe, y la fila queda en error. Un importe que no es un número también es un error: tomar el neto porque la celda decía *"mil pesos"* sería decidir por quien armó la planilla.
+**`IMPORTE` es el neto de retenciones**, que es lo que pone quien arma la planilla: lo que sale de la caja. **Es opcional con un medio** (sinónimos `MONTO`, `IMPORTE_PAGO`): vacío quiere decir *el neto a pagar*. Si viene **se clasifica** contra el neto a pagar del comprobante —con dos medios, la suma de los dos—: el neto con $1 de tolerancia, un **pago con excedente** hasta el % permitido, o un **pago parcial**. Ver *Un pago con excedente o parcial*. Un importe que no es un número, cero o negativo es un error: tomar el neto porque la celda decía *"mil pesos"* sería decidir por quien armó la planilla.
+
+> **Sin `sql/cashflow_prov_locales_excedente_parcial.sql`** la regla es la de antes: el importe tiene que coincidir con el neto a pagar con $1 de tolerancia, y otro número deja la fila en error.
 
 El neto se calcula con la misma regla que la grilla (*El cálculo*, arriba), **a la `FECHA_PAGO` de la planilla** —la que va a quedar cargada— y, con dos medios, a la más tardía de las dos. Un comprobante **sin retención** —otra forma, nota de crédito, proveedor sin impuestos que le apliquen, o sin el script— tiene neto = total, y la regla es la de antes.
 
-**El motivo ayuda a corregir.** El error del primer día va a ser poner el total de la factura, así que si el importe **coincide con el total sin retenciones** (±$1) el motivo lo dice: *"El importe coincide con el total de la factura sin retenciones ($ X). El neto a pagar con retenciones es $ Y (IIBB $ a, Ganancias $ b). Si a este proveedor no se le retiene, cargale alícuota 0 en el Maestro"*. En cualquier otro desajuste muestra total, retenciones, neto y diferencia. **La previsualización** muestra, por fila, el total, las retenciones —con el desglose en el tooltip— y el neto contra el que se comparó.
+**El motivo ayuda a corregir.** Un importe que **supera el máximo** dice cuánto supera el neto, en pesos y en %, y cuál es el máximo permitido. Si además **coincide con el total sin retenciones** (±$1) —el error del primer día— lo dice: *"El importe coincide con el total de la factura sin retenciones ($ X). El neto a pagar con retenciones es $ Y (IIBB $ a, Ganancias $ b). Si a este proveedor no se le retiene, cargale alícuota 0 en el Maestro"*. **Dentro del máximo, el total sin retenciones ya no es un error**: es un pago con excedente, y se acepta. **La previsualización** muestra, por fila, el total, las retenciones —con el desglose en el tooltip— y el neto contra el que se comparó.
 
 **El tipo de comprobante no es obligatorio**, a propósito: quien arma la planilla mira una factura y copia su número, no su tipo. Cuando falta se deduce de los pendientes del proveedor.
 
@@ -979,7 +984,7 @@ El neto se calcula con la misma regla que la grilla (*El cálculo*, arriba), **a
 
 **El aviso que importa dice cuántos vencidos quedan resueltos.** Es la razón de ser de esta importación, y hay que verlo *antes* de confirmar.
 
-**Confirmar no le cree a lo que vuelve del navegador.** Cada fila de la previsualización viaja con lo que decía el archivo (`crudo`), y `aplicarImportacion()` vuelve a calcular el diff con eso contra los pendientes, los pagos, las aperturas **y las alícuotas** de *ahora*. Si una sola línea da un estado distinto del que se previsualizó —se pagó una parte en Tango, alguien cargó otra fecha— **o el mismo estado con otro neto** —cambió una alícuota—, **no se aplica nada** y el mensaje dice qué línea cambió. Antes se le creía al diff que se reenviaba; desde que hay una regla que depende de sumar importes contra el pendiente, eso no podía depender de la pantalla. Mismo criterio que el maestro y que Cob. Electrónicos.
+**Confirmar no le cree a lo que vuelve del navegador.** Cada fila de la previsualización viaja con lo que decía el archivo (`crudo`), y `aplicarImportacion()` vuelve a calcular el diff con eso contra los pendientes, los pagos, las aperturas, **las alícuotas y el % de excedente** de *ahora*. Si una sola línea da un estado distinto del que se previsualizó —se pagó una parte en Tango, alguien cargó otra fecha—, **el mismo estado con otro neto** —cambió una alícuota— **u otra clasificación**, o **si cambió el %**, **no se aplica nada** y el mensaje dice qué cambió. Antes se le creía al diff que se reenviaba; desde que hay una regla que depende de sumar importes contra el pendiente, eso no podía depender de la pantalla. Mismo criterio que el maestro y que Cob. Electrónicos.
 
 ### Un comprobante pagado con dos medios
 
@@ -990,8 +995,8 @@ Una factura se puede pagar parte con un echeq y parte con una transferencia, o c
 | | Un medio (una fila) | Dos medios (dos filas) |
 | --- | --- | --- |
 | `FORMA_PAGO` | opcional, como siempre | **obligatoria**, `ECHEQ` o `TRANSFERENCIA`. Puede repetirse |
-| `IMPORTE` | opcional; si viene, = neto a pagar ± $1 | **obligatorio en las dos**, mayor a cero, neto |
-| La suma | — | = neto a pagar ± $1 |
+| `IMPORTE` | opcional; si viene, se clasifica: neto, excedente o parcial | **obligatorio en las dos**, mayor a cero, neto |
+| La suma | — | se clasifica igual que el importe de un medio |
 | En cuotas | se carga | **error**: *"es un comprobante en cuotas: cargalo con un solo medio"* |
 
 - **Tres filas o más** dejan en error **todas**, nombrando las líneas. No hay tercer medio, y elegir cuáles dos valen sería decidir por quien armó la planilla.
@@ -1018,6 +1023,8 @@ Una fila por medio, con la clave del comprobante en `Latin1_General_BIN`, `ORDEN
 
 `getPendientes()` **con el horizonte** devuelve **una fila por parte**, con `IMPORTE_A_PAGAR` = el importe de la parte y su fecha resuelta con la jerarquía de siempre, cada una por separado: una parte futura se respeta tal cual, y una que ya pasó, si la forma vigente es del cronograma, va al próximo día de pago. Lo hace `Proveedores::abrirEnMedios()`, pura.
 
+> **Lo que sigue es un comprobante en dos medios clasificado como neto**: las dos partes suman el neto con $1 de tolerancia. Con excedente o parcial —con uno o dos medios— cada parte proyecta su importe, la retención se reparte y hay un saldo; ver *Un pago con excedente o parcial*.
+
 **Las partes son importes netos.** La planilla trae lo que sale por cada medio, que es después de retenciones, así que las dos partes suman **el neto a pagar** del comprobante. La retención se calcula **sobre el comprobante entero, una sola vez**, a la **fecha más tardía** de las dos partes —una orden de pago retiene sobre la factura, no sobre cada medio— y **va entera en la primera parte**: su pendiente es su neto más la retención, y el de la segunda, su neto. Sin alícuotas, el neto es el pendiente y todo funciona como antes.
 
 - **Las series no ganan ni pierden un peso.** La última parte se lleva el resto —neto menos las anteriores—, así que la tolerancia de $1 no llega al cuadro. Los pendientes de las partes siguen sumando el pendiente del comprobante, `IMPORTE_VTO` e `IMPUTACIONES` se reparten en la misma proporción, y los pies de *Importe* y *Pendiente* tampoco se mueven. Las retenciones van en una sola parte, así que los totales por impuesto no se duplican. Las dos particiones de `PAGOS_TODO` siguen cerrando; lo único que cambia es en qué columna cae cada peso.
@@ -1041,6 +1048,146 @@ Cuando el comprobante sale de pendientes, concilia como cualquier otro, y **el d
 - **Los indicadores cuentan el comprobante una vez** y suman su importe completo. La regla está escrita una vez, en `Proveedores::cuentaComoVencimiento()`, y la usan los indicadores, los avisos de la pestaña y del tablero, y el control de faltantes; la pantalla la repite en `esParteExtra()`.
 - **El fechado masivo no toca los comprobantes abiertos**: el diálogo dice cuántos son y que no se van a tocar, y el backend los vuelve a saltear (`sinAbiertos()`).
 - **Exportar a Excel** baja las dos filas, con su importe y su fecha.
+
+### Un pago con excedente o parcial
+
+> Esto es **nuevo**, de `feature/prov-locales-excedente-pago-parcial`. Antes el `IMPORTE` tenía que ser el neto a pagar con $1 de tolerancia, y con un medio sólo se validaba: no se guardaba y el eje proyectaba el neto calculado.
+
+Hay dos casos que antes eran error:
+
+| | Qué pasa en Tango | Qué proyecta el cashflow |
+| --- | --- | --- |
+| **Con excedente** | Se carga una O/P por más que la factura: la factura queda cancelada y la diferencia queda **a cuenta del proveedor** (la O/P queda en estado `CTA`), que después Proveedores imputa a una factura nueva | El **importe pagado completo** —neto + excedente— en la fecha de la planilla |
+| **Parcial** | La O/P cancela una parte: la factura **sigue pendiente**, con un pendiente menor | Lo pagado en la fecha de la planilla y el **saldo** con la jerarquía de siempre |
+
+Una factura se puede pagar **en N veces**: cada planilla trae otro parcial contra lo que quede pendiente, y eso cubre también los comprobantes en cuotas.
+
+#### La regla: `Proveedores::clasificarImporte()`
+
+Una sola regla, pura, que usan un medio, dos medios —sobre la **suma**— y la confirmación. Con `máximo = neto × (1 + %/100)`:
+
+| Importe | Clasificación | Qué pasa |
+| --- | --- | --- |
+| vacío (un medio) | **Neto** | Se toma el neto a pagar, como siempre |
+| neto ± $1 | **Neto** | Como siempre |
+| mayor a neto + $1 y hasta máximo + $1 | **Con excedente** | Se acepta |
+| mayor a máximo + $1 | **Error** | *"El importe ($ X) supera el neto a pagar ($ Y) en $ Z (N%): el máximo permitido es $ M (5%)."* |
+| mayor a 0 y menor a neto − $1 | **Pago parcial** | Se acepta, sin mínimo |
+| 0, negativo o no numérico | **Error** | Como siempre |
+
+- **El tope es sobre el neto a pagar** —lo que sale de la caja—, no sobre el total de la factura, y **sobre el comprobante entero**, también con cuotas.
+- **El neto es el del pendiente de hoy.** Si Tango ya registró un parcial, el siguiente pago —otro parcial, el que cancela o uno con excedente— se mide contra lo que quedó.
+- **Si cae dentro del máximo se acepta, punto**, aunque coincida con el total de la factura sin retenciones.
+- **Dos medios**: cada fila tiene que ser mayor a cero, y la suma se clasifica. **Dos medios con cuotas sigue siendo error**, como antes. Un medio con cuotas sí puede ser excedente o parcial.
+- **La forma de pago sigue sin decidir el cronograma**: lo decide la forma vigente.
+
+#### El % de excedente permitido
+
+En *Parámetros › Prov. Locales*, sección **Importación de pagos**, entre Retenciones y las listas. **Uno solo, general.** Un número ≥ 0 y < 100 con hasta dos decimales; **0 quiere decir "no se acepta excedente"** y es válido. El script lo siembra en **5**.
+
+Vive en `RO_T_CASHFLOW_PARAMETROS` (`prov_locales_pct_excedente`) con **su propio camino de guardado** —`Proveedores::guardarPorcExcedente()`, acción `savePorcExcedenteProvLocal` con el permiso de *Parámetros › Prov. Locales*—, igual que los plazos de Echeqs: `Parametros::saveParametro()` guarda cualquier texto y **rechaza esta clave**. Rige desde que se guarda, sin vigencias; la sección muestra quién lo cambió por última vez y cuándo.
+
+**Si falta o está roto, no se acepta ningún excedente**, y la pestaña y la previsualización lo avisan en **crítico** diciendo dónde cargarlo. **No se asume el 5**: un respaldo inventado haría aceptar pagos que nadie autorizó. Los parciales y los netos se cargan igual. El tablero no lo avisa: no usa el %.
+
+**Confirmar recalcula con el % de ahora.** El % con el que se previsualizó vuelve con la confirmación, y si alguien lo cambió en el medio no se aplica nada, aunque ninguna línea haya cambiado de estado. Lo mismo si cambió la clasificación de una línea. Ver *Confirmar no le cree a lo que vuelve del navegador*.
+
+#### Qué se guarda
+
+En la misma tabla de los dos medios, `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, **con una parte o con dos**. Lo que no es *neto* se guarda porque es lo que se va a proyectar; **un comprobante neto con un medio sigue sin filas ahí**, y funciona exactamente como antes. Cada parte lleva `CLASIFICACION`, el **pendiente y el neto del comprobante al importar** (`PENDIENTE_IMPORT`, `NETO_IMPORT`) —con eso se sabe después si Tango ya registró el pago— y la marca de Tango (`ESTADO_TANGO`, `FECHA_REAL`, `PENDIENTE_REAL`, `FECHA_REGISTRO`). Con un medio, la forma sigue en la tabla de pagos y en la de medios va en `NULL`.
+
+La tabla de pagos —la de los overrides— queda así:
+
+| | `FECHA_PAGO` | Por qué |
+| --- | --- | --- |
+| **Con excedente** | la de la planilla (la más tardía con dos medios) | La O/P cancela la factura y **concilia como cualquier otra**, con el desvío contra esa fecha |
+| **Parcial** | **ninguna** | La factura sigue pendiente: el saldo —y después el pendiente que deje Tango— va por la jerarquía de siempre. Una fecha cargada a mano antes **se reemplaza**: reimportar reemplaza lo cargado |
+
+Reimportar el comprobante **reemplaza** lo cargado (baja lógica con historial, como siempre). Una fila sin importe lo deshace y vuelve al neto. Lo escriben `camposDeImportacion()` —pura— y `guardarApertura()`, como antes.
+
+#### En el eje y en el tablero: `Proveedores::proyectarPagoImportado()`
+
+La regla de cuánto se paga y cuándo, escrita una vez. La usan la grilla y el tablero —por `abrirEnMedios()`— y la previsualización, que con ella dice en qué fecha cae el saldo.
+
+- **Con excedente**: el importe pagado completo en la fecha de la planilla. Con dos medios **cada parte proyecta su importe**: ninguna se lleva el resto. El excedente se reparte entre las partes en proporción a su importe.
+- **Parcial**: lo pagado en la fecha de la planilla y el saldo **como si no tuviera fecha cargada**: vencimiento, emisión + plazo, y si es del cronograma el próximo día de pago; si ya venció, el próximo día de pago, o el primer día del eje si no es del cronograma.
+- **Cuotas**: lo pagado cubre las cuotas **en orden de vencimiento, la más vieja primero**, que es como imputa Tango. Las cubiertas van a la fecha de la planilla, la que queda a medias se parte, y las que no se tocan siguen con su fecha. **El excedente va en la última cuota cubierta.**
+- **La retención se calcula una vez**, sobre el comprobante entero, a la fecha más tardía de la planilla, y **se reparte en proporción al neto de cada fila**, impuesto por impuesto, con la última llevándose el resto: en cada fila **neto + retención = pendiente** y los pendientes suman el del comprobante al centavo. **El excedente no lleva retención**: no es factura. *Pendiente* e *Importe* de la grilla no se mueven.
+- **Un comprobante neto en dos medios no cambió**: sigue con la última parte llevándose el resto y la retención entera en la *1/2*. Hay una prueba que lo fija.
+
+**El excedente es plata que sale y no está en el pendiente de Tango.** Suma en *Cuentas a Pagar Locales* con el rubro del proveedor —está en `IMPORTE_A_PAGAR`— y la auditoría del tablero lo cuenta aparte, en `excedente`. Ver *El tablero va en neto*.
+
+`IMPORTE_PENDIENTE` **no cambió de significado**: sigue siendo lo que dice Tango. Y como el reparto sólo se hace con el horizonte, *Tarjetas Pagos Corporativos* no cambia.
+
+#### Cuando Tango registra el pago
+
+La proyección compara el pendiente de hoy con el que tenía el comprobante al importar:
+
+| El pendiente de Tango… | Qué se proyecta | Aviso |
+| --- | --- | --- |
+| **sigue igual** | Lo pagado y el saldo, como arriba | — |
+| **bajó, en cualquier importe** | Tango registró el pago: **deja de proyectarse lo pagado** y queda sólo el pendiente de Tango, con la jerarquía de siempre | — |
+| **subió** (una nota de débito, por ejemplo) | El pendiente de Tango, con la jerarquía de siempre | **Atención**: *"N comprobante(s) con pago parcial o excedente ya no coinciden con lo importado: se proyecta el pendiente de Tango. Reimportá para corregirlo"* |
+
+**Bajar en cualquier importe es "registrado"**, y no "bajó en lo pagado ± $1", a propósito: Tango retiene Ganancias con mínimos y acumulados del mes, y lo que imputa una O/P no tiene por qué ser proporcional a lo que la planilla dijo. Medirlo contra lo pagado daría avisos falsos.
+
+**La previsión no se borra**, como en la conciliación. Al cargar la pestaña, `registrarPagosAutomatico()` deja la parte en `REGISTRADO` con la **fecha real** —`MAX(CPA05.F_COMP_CAN)`, la misma consulta acotada de la conciliación— y el pendiente que quedó, firmado por `SISTEMA:Proveedores.registrarPagosAutomatico`, y avisa en la sección *Conciliación*. La parte sigue vigente: es lo que dice que hubo un pago parcial y cuándo. El tablero no escribe; la proyección no depende de esta marca. Si falla, la pestaña carga igual, con un aviso.
+
+**Con excedente**, la O/P cancela la factura, sale de pendientes y **concilia como cualquier otra**, con el desvío contra la fecha de la planilla.
+
+#### En la grilla de Cuentas a Pagar
+
+- **Con excedente**: al lado del neto, la marca **"+ excedente"**; el tooltip dice neto, excedente, total pagado, % y quién lo importó y cuándo.
+- **Parcial**: el comprobante en **dos filas**, lo que se paga en la fecha de la planilla —*pago parcial*, o *1/2 · parcial* y *2/2 · parcial* con dos medios— y el **saldo** en su fecha —*saldo*, atenuado: esa fecha no la decidió nadie—. El tooltip dice pagado, saldo, neto y de dónde sale la fecha del saldo. Uno que Tango ya registró dice *parcial en Tango*, con la fecha real.
+- **La fecha no se edita en la celda** ni con el fechado masivo: se cambia reimportando o con **↺**, que borra lo importado y deja la exclusión, el override de forma y la observación.
+- **Tildar una de las filas selecciona el comprobante**, y los indicadores lo cuentan una vez (`cuentaComoVencimiento()` / `esParteExtra()`, con `PARTE_EXTRA`).
+- **La tarjeta del total** suma lo que se proyecta, con los excedentes, y dice cuánto es excedente.
+- **Exportar** baja todas las filas con su importe y su fecha, y una columna **Pago importado** con la etiqueta —*pago parcial*, *saldo*, *+ excedente*, *1/2*—. Las marcas de la pantalla van en `data-etiqueta` y las dibuja el CSS, así que el Excel no las baja; por eso esa columna existe sólo para el Excel (`data-exportar-solo`).
+
+#### En la previsualización
+
+Dos chips nuevos, **Con excedente** y **Pago parcial**, con la cantidad de comprobantes y el importe —el excedente que queda a cuenta, y lo que se paga—, y el motivo de cada fila:
+
+- *"Se paga $ X: neto $ Y + excedente $ Z (N%), que queda a cuenta del proveedor en Tango."*
+- *"Se paga $ X de un neto de $ Y. El saldo de $ Z se proyecta el dd/mm/aaaa (vencimiento)."* —o *próximo día de pago*—.
+
+Un parcial **no cuenta como vencido resuelto**: el saldo sigue sin fecha.
+
+### Los saldos a cuenta
+
+Lo que los proveedores tienen **a cuenta en Tango sin imputar a ninguna factura**. Se **informa**: no suma en ninguna serie ni descuenta nada de lo próximo a pagar. Cuando Proveedores lo imputa a una factura nueva en Tango, el pendiente de esa factura ya viene reducido —eso sí entra al cashflow, por `getPendientes()`— y el aviso desaparece solo. Descontarlo antes sería adivinar a qué factura se va a imputar.
+
+#### Cómo lo registra Tango
+
+Medido contra la base el 03/11/2026:
+
+- **La O/P vive en `CPA04`** con `T_COMP = 'O/P'`. Si se imputó entera queda en `IMP` (57.862 locales); si le quedó algo a cuenta, en **`CTA`** (254); las anuladas, en `ANU`.
+- **Lo que tiene a cuenta** es `IMPORTE_TO` menos lo imputado en `CPA05` por **`ID_CPA04_CANCELADO`**. Verificado: ninguna O/P en `IMP` tiene un resto de más de $1 con esa cuenta.
+- **Lo que imputó al emitirse** lleva además `ID_CPA04_OP`. **Cuando después se imputa a una factura nueva**, la fila de `CPA05` va con `ID_CPA04_OP` en `NULL`, **con la fecha de la O/P —no la de la imputación—**, y la O/P pasa de `CTA` a `IMP`.
+- **`OP_IMPORTE_TOTAL_PAGO_CUENTA` no sirve**: es lo que quedó a cuenta al emitir, y no se actualiza cuando se imputa.
+- **Ninguna O/P aparece en `getPendientes()`**, que sólo lee `PEN`: ni como fila negativa ni restando a otra factura. Los 549 pendientes de ese día eran todos `FAC`.
+
+Ese día había **141 O/P con excedente por $ 6,5 M** y **112 sin nada imputado al emitirse por $ 1.284,7 M**, algunas de 2006 —contando todos los proveedores locales, también los excluidos del módulo—. Y **19 comprobantes pendientes con un pago parcial de una O/P**: $ 69,5 M pagados y $ 43,3 M de saldo.
+
+#### Los dos tipos, y el aviso
+
+| Tipo | Qué es | Qué se lista |
+| --- | --- | --- |
+| **Con excedente** | La O/P imputó una factura al emitirse y le sobró: lo que se pagó de más | Todas, **sin tope de antigüedad**; las de **más de un año** van en su propio renglón: *"N O/P con saldo a cuenta de más de un año por $ X: revisarlas en Tango"* |
+| **Sin ninguna factura asociada** | La O/P no tiene **ninguna** imputación en `CPA05`: un anticipo | Sólo las de los **últimos 12 meses** |
+
+Una O/P que no imputó nada al emitirse **pero sí después** ya tiene factura asociada: no es ninguna de las dos. Lo decide `Proveedores::clasificarSaldosACuenta()`, pura.
+
+El aviso va en la pestaña y en el tablero, sección **Saldos a cuenta**, **informativo**, un renglón por tipo: cuántos proveedores, cuánto y en cuántas O/P, y el detalle por proveedor —el de más saldo primero—, O/P, fecha e importe a cuenta.
+
+- **Los restos de hasta `TOLERANCIA_IMPORTE` ($1) no cuentan**: Tango deja O/P en `CTA` por centavos.
+- **Los proveedores excluidos del módulo quedan afuera**, igual que su deuda. La aduana está excluida, así que sus anticipos —$ 1.220 M en los últimos doce meses— no se avisan acá.
+- **La lectura va acotada**: las O/P en `CTA`, con el mismo filtro de exterior y cláusula que `getPendientes()`, y lo imputado sólo para esas. Tarda unos 400 ms. **Si falla, la pestaña y el tablero cargan igual**, con un aviso de atención (`avisosSaldosConNivel()`).
+
+Al 03/11/2026, sin los excluidos: **36 O/P con excedente por $ 2,4 M** de 18 proveedores, **78 de más de un año por $ 3,9 M**, y **31 sin factura por $ 41,5 M** de 9 proveedores.
+
+#### Una factura cancelada con un saldo a cuenta, en la conciliación
+
+Como Tango fecha la imputación de un saldo a cuenta con la fecha de la O/P vieja, **la fecha real de esa factura puede ser anterior a cuando se cargó su previsión**. Concilia igual, pero queda **marcada "cancelada con saldo a cuenta"** y **no entra en el desvío promedio**: meterla diría que se paga meses antes de lo previsto. La marca se deriva al leer —`FECHA_CANCELADO` anterior a `FECHA_ALTA` de la previsión, las dos guardadas— y el aviso de la conciliación dice cuáles son. Al 03/11/2026 eran **9 de las 86 conciliadas**.
 
 ---
 
@@ -1066,9 +1213,11 @@ Queda marcada `CONCILIADO` con la **fecha real al lado**, sin pisar la prevista.
 
 > Es lo único que permite después contestar la pregunta por la que vale la pena guardar las dos: **¿le acertamos a la fecha?** Borrándola, esa pregunta se queda sin respuesta para siempre.
 
-Por eso el aviso informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice.
+Por eso el aviso informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice. **Las canceladas con un saldo a cuenta no entran**: su fecha real es la de una O/P vieja. Ver *Una factura cancelada con un saldo a cuenta, en la conciliación*.
 
-**Un comprobante pagado con dos medios mide el desvío contra la fecha más tardía**: es la que guarda la tabla de pagos (ver *Un comprobante pagado con dos medios*), y es cuando termina de pagarse.
+**Un comprobante pagado con dos medios mide el desvío contra la fecha más tardía**: es la que guarda la tabla de pagos (ver *Un comprobante pagado con dos medios*), y es cuando termina de pagarse. **Uno con excedente**, contra la fecha de la planilla.
+
+**Un pago parcial no concilia**: la factura sigue pendiente. Lo que se anota es que Tango lo registró —en la tabla de medios, con la fecha real— y el aviso va en esta misma sección. Ver *Cuando Tango registra el pago*.
 
 ### Detecta los dos sentidos
 
@@ -1146,13 +1295,13 @@ Eso lo fija `tests/test_proveedores.php` contra los datos reales: si una de las 
 
 La fila *Cuentas a Pagar Locales* muestra **lo que sale de la caja**: el neto de retenciones. Cada fila aporta el **mismo** importe a todas sus series, así que **las dos particiones siguen cerrando** contra `PAGOS_TODO`, ahora en neto.
 
-**La retención no se proyecta como egreso en ninguna fila**: es plata que no sale. Para auditar el corte, cada serie lleva **escalares** —no series elegibles— en `auditoria`: el `bruto` (el pendiente) y `retencion_<IMPUESTO>` de cada impuesto. El invariante, en cada serie:
+**La retención no se proyecta como egreso en ninguna fila**: es plata que no sale. Para auditar el corte, cada serie lleva **escalares** —no series elegibles— en `auditoria`: el `bruto` (el pendiente), `retencion_<IMPUESTO>` de cada impuesto y, si hay pagos importados con excedente, `excedente`. El invariante, en cada serie:
 
 ```
-bruto = lo que suma la serie (eje + fuera del horizonte + sin fecha) + Σ retencion_<IMPUESTO>
+bruto + excedente = lo que suma la serie (eje + fuera del horizonte + sin fecha) + Σ retencion_<IMPUESTO>
 ```
 
-y en particular **universo en bruto = `PAGOS_TODO` + retenciones**. La auditoría cuenta exactamente lo que cuenta la serie: lo que cae fuera del horizonte se informa sólo en `PAGOS_TODO`, y su bruto también. `CashflowProvider::normalizar()` arma la serie con una lista cerrada de claves —lo que no está ahí se pierde en silencio, y ya pasó una vez con los fondos de cobertura—, así que `auditoria` se agregó a esa lista.
+y en particular **universo en bruto + excedentes = `PAGOS_TODO` + retenciones**. El excedente es lo contrario de la retención: **sí sale** de la caja —se paga de más en la O/P— pero **no está en el pendiente de Tango**, así que sin contarlo aparte el invariante dejaría de cerrar justo por ese importe. La clave `excedente` está sólo en las series que tienen alguno: las demás dicen exactamente lo de antes. Ver *Un pago con excedente o parcial*. La auditoría cuenta exactamente lo que cuenta la serie: lo que cae fuera del horizonte se informa sólo en `PAGOS_TODO`, y su bruto también. `CashflowProvider::normalizar()` arma la serie con una lista cerrada de claves —lo que no está ahí se pierde en silencio, y ya pasó una vez con los fondos de cobertura—, así que `auditoria` se agregó a esa lista.
 
 **Medido contra la base real** (14/10/2026, 558 vencimientos), con alícuotas **simuladas en memoria** —IIBB 3% y Ganancias 2%, ilustrativas; no hay ninguna cargada—: `PAGOS` pasa de $ 292.876.379,42 a $ 278.232.560,42 y `PAGOS_TODO` de $ 2.102.534.036,32 a $ 2.006.126.682,93; se retienen $ 96.407.353,39 en 118 comprobantes; los dos cortes cierran y el invariante vale en las 34 series. Sin alícuotas —el estado el día que se corre el script— las 34 series dan idénticas a antes.
 
@@ -1472,7 +1621,20 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 - **La importación**: importe = neto carga, el total da el motivo que ayuda, otro importe da total-retenciones-neto-diferencia, vacío toma el neto, dos medios suman el neto, sin retención es como siempre, y una alícuota que cambia entre previsualizar y confirmar frena todo. **Las ya pagadas**: advertencia con la fecha real, sin `TIPO_COMP` todos cancelados, dos filas son dos advertencias, la inexistente es error sin *"si ya se pagó"* y el `***` tiene su motivo.
 - **La conciliación automática**, con una subclase que reemplaza la base: concilia y reabre, sólo consulta las previstas que salieron, no escribe si no hay cambios, firma con el usuario fijo, lanza sin Tango y el controller la envuelve; y la escritura condicionada al estado de partida, en una transacción.
 
-*Suite completa: 8033 OK, 0 fallas (61 archivos).*
+`tests/test_prov_locales_excedente_parcial.php` fija el pago con excedente y el pago parcial, sin base:
+
+- **El %**: 0, 5 y 12,5 se guardan; −1, 100, vacío, texto o tres decimales se rechazan diciendo por qué; uno que falta o está roto es `null` con el motivo, nunca un 5 de respaldo; `saveParametro()` rechaza la clave; el script lo siembra en 5 sin pisarlo.
+- **La clasificación**: con neto $1.000.000 y 5%, $1.000.000,80 es neto, $1.030.000 y $1.050.000,90 son excedente, $1.051.500 es error con el máximo en el motivo, $400.000 es parcial y 0 es error; con 0% todo lo que pasa de neto + $1 es error; sin % el excedente es error y el parcial no.
+- **La previsualización**: los motivos de excedente y de parcial —con la fecha del saldo—, los chips, el aviso crítico sin %, el total sin retenciones dentro del máximo como excedente, dos medios por la suma, un segundo parcial contra lo que dejó el primero, cuotas, y sin el script la regla de antes.
+- **Lo que se guarda**: la tabla de pagos con la fecha de la planilla para un excedente y sin fecha para un parcial; las partes con su clasificación y contra qué se comparó; reimportar igual es `SIN_CAMBIOS` y sin importe vuelve al neto.
+- **La confirmación**: cambiar el % o la clasificación de una línea frena.
+- **La proyección**: excedente con uno y dos medios, parcial con el saldo en su vencimiento, en el cronograma o en el primer día del eje, cuotas de la más vieja a la más nueva con el excedente en la última cubierta, la retención repartida al centavo, Tango que registró el pago —en cualquier importe— y un pendiente que subió, con su aviso; sin pagos importados todo sale idéntico, y **un neto en dos medios da exactamente lo mismo que antes**.
+- **El tablero**: las dos particiones cierran con excedentes y parciales, `bruto + excedente = serie + retenciones` en cada serie, la pestaña y el tablero suman lo mismo, y con la planilla vacía las series no se mueven.
+- **La marca de Tango**: qué hay que anotar, con la fecha real y el usuario del sistema, sin borrar ni dar de baja nada, y un excedente que concilia contra la fecha de la planilla.
+- **Los saldos a cuenta**: excedente, excedente de más de un año, sin factura de los últimos 12 meses; que una imputada después no es ninguna de las dos; los restos de hasta $1 y los excluidos del módulo afuera; los tres renglones informativos con su detalle; que no entran en ninguna serie; que si la lectura falla se avisa; y, con base, la lectura real.
+- **La conciliación con saldo a cuenta**: concilia, queda marcada y no entra en el desvío promedio.
+
+*Suite completa: 9966 OK, 0 fallas (84 archivos), con la base.*
 
 ---
 
@@ -1487,6 +1649,7 @@ sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factu
 sql/cashflow_prov_locales_opciones.sql         Las cinco listas de opciones + semilla
 sql/cashflow_prov_locales_pago_medio.sql       Un comprobante pagado con dos medios
 sql/cashflow_prov_locales_retenciones.sql      Las retenciones: impuestos, generales y por proveedor
+sql/cashflow_prov_locales_excedente_parcial.sql  Pago con excedente y pago parcial, y el % de excedente
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion, compartido (el servidor)
 cashflow/Js/planilla-excel.js                  El lector de Excel y las plantillas, compartido (el navegador)
@@ -1508,7 +1671,7 @@ tests/test_proveedores.php
 
 Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_extra`) · `Class/CobElectronicos.php` (delega en `Planilla`, sin cambiar su contrato) · `Class/Menu.php` (la pestaña pasa a `DATOS`) · `Class/Parametros.php` (el módulo `PROV_LOCALES` y su sección) · `Tabs/parametros.php` (la sub-pestaña) · `Js/notificaciones.js` (`pedirFecha()`, el tercer diálogo sobre el mismo armazón) · `tests/test_providers.php` y `tests/test_menu.php` (los conteos).
 
-Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`.
+Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`. Del pago con excedente y el parcial: `tests/test_prov_locales_excedente_parcial.php`.
 
 ---
 

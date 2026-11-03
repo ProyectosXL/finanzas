@@ -58,14 +58,17 @@ require_once __DIR__ . '/../TarjetasCorporativas.php';
  * porque cada fila aporta el mismo importe a todas sus series.
  *
  * Para auditar el corte, cada serie lleva ESCALARES -no series elegibles- en
- * 'auditoria': el bruto (el pendiente) y la retencion de cada impuesto. El
- * invariante, en cada serie:
+ * 'auditoria': el bruto (el pendiente), la retencion de cada impuesto y el
+ * excedente de los pagos importados con excedente. El invariante, en cada
+ * serie:
  *
- *     bruto = lo que suma la serie (eje + fuera del horizonte + sin fecha)
- *             + la suma de sus retencion_<IMPUESTO>
+ *     bruto + excedente = lo que suma la serie (eje + fuera del horizonte
+ *                         + sin fecha) + la suma de sus retencion_<IMPUESTO>
  *
- * y en particular: universo en bruto = PAGOS_TODO + retenciones. La retencion
- * NO se proyecta como egreso en ninguna fila: es plata que no sale.
+ * y en particular: universo en bruto + excedentes = PAGOS_TODO + retenciones.
+ * La retencion NO se proyecta como egreso en ninguna fila: es plata que no
+ * sale. El excedente SI: se paga de mas en la O/P y queda a cuenta del
+ * proveedor, pero no esta en el pendiente de Tango. Ver sumarAuditoria().
  *
  * EL TOTAL Y SUS PARTES NO PUEDEN CONVIVIR. PAGOS trae todo y las demas son
  * aperturas suyas: activar las dos contaria dos veces el mismo importe. El
@@ -201,6 +204,12 @@ class ProveedoresProvider extends CashflowProvider {
 
         // Excluir al proveedor fue una decision, y su deuda sale por su serie.
         $this->avisarTodos(self::avisosExcluidosProveedor($items), Aviso::INFO);
+
+        /* LOS SALDOS A CUENTA, el mismo aviso que la pestaña. NO SUMAN EN
+           NINGUNA SERIE: lo que se pago de mas o por adelantado ya salio de la
+           caja, y descontarlo de lo proximo a pagar seria adivinar a que
+           factura se va a imputar. Si la lectura falla, avisa y sigue. */
+        $this->avisarTodos($prov->avisosSaldosConNivel($h->hoy()));
 
         return $this->repartir($h, $items);
     }
@@ -676,8 +685,11 @@ class ProveedoresProvider extends CashflowProvider {
     /**
      * Lo que una fila aporta a las series: LO QUE SALE DE LA CAJA. El neto a
      * pagar donde hay retencion (las facturas del cronograma que se pagan por
-     * orden de pago), y el pendiente donde no. Una fila sin el campo -armada a
-     * mano, o de antes de las retenciones- aporta su pendiente.
+     * orden de pago), y el pendiente donde no. Con un pago importado con
+     * excedente, el neto MAS el excedente, que tambien sale: ya viene sumado
+     * en IMPORTE_A_PAGAR (Proveedores::proyectarPagoImportado()). Una fila sin
+     * el campo -armada a mano, o de antes de las retenciones- aporta su
+     * pendiente.
      *
      * Estatica y pura.
      *
@@ -689,16 +701,23 @@ class ProveedoresProvider extends CashflowProvider {
     }
 
     /**
-     * Suma a los escalares de auditoria de una serie el BRUTO de la fila y lo
-     * que se le retiene, impuesto por impuesto.
+     * Suma a los escalares de auditoria de una serie el BRUTO de la fila, lo
+     * que se le retiene, impuesto por impuesto, y su EXCEDENTE si lo tiene.
      *
      * NO SON SERIES ELEGIBLES y no entran en ninguna fila del tablero: la
      * retencion no es un egreso de la caja -es plata que no sale-, y
      * proyectarla en otra fila la contaria como si saliera. Son escalares,
      * para poder auditar el corte:
      *
-     *     bruto = lo que la serie suma (eje + fuera del horizonte + sin fecha)
-     *             + la suma de sus retencion_<IMPUESTO>
+     *     bruto + excedente = lo que la serie suma (eje + fuera del horizonte
+     *                         + sin fecha) + la suma de sus retencion_<IMPUESTO>
+     *
+     * EL EXCEDENTE ES PLATA QUE SALE Y NO ESTA EN EL PENDIENTE DE TANGO: es lo
+     * que se paga de mas en una O/P y queda a cuenta del proveedor. La serie lo
+     * proyecta -esta en IMPORTE_A_PAGAR- y el bruto no lo tiene, asi que sin
+     * contarlo aparte el invariante dejaria de cerrar justo por ese importe.
+     * La clave 'excedente' existe solo en las series que tienen alguno: las
+     * demas siguen diciendo exactamente lo de antes.
      *
      * Viajan en 'auditoria', que CashflowProvider::normalizar() deja pasar.
      *
@@ -708,6 +727,13 @@ class ProveedoresProvider extends CashflowProvider {
     public static function sumarAuditoria(&$serie, $item) {
         $serie['auditoria']['bruto'] = (isset($serie['auditoria']['bruto']) ? $serie['auditoria']['bruto'] : 0.0)
             + floatval($item['IMPORTE_PENDIENTE']);
+
+        $excedente = isset($item['EXCEDENTE']) ? floatval($item['EXCEDENTE']) : 0.0;
+
+        if ($excedente != 0) {
+            $serie['auditoria']['excedente'] = (isset($serie['auditoria']['excedente'])
+                ? $serie['auditoria']['excedente'] : 0.0) + $excedente;
+        }
 
         foreach (isset($item['RETENIDO_POR_IMPUESTO']) ? $item['RETENIDO_POR_IMPUESTO'] : [] as $codigo => $r) {
             $clave = 'retencion_' . $codigo;

@@ -126,11 +126,33 @@ class Proveedores {
     const MAX_MEDIOS = 2;
 
     /**
-     * Cuanto se tolera entre un IMPORTE de la planilla y el pendiente de Tango:
-     * un peso. Es el redondeo de quien arma la planilla a mano, no un descuento;
-     * mas que eso es otro numero y la fila queda en error con la diferencia.
+     * Cuanto se tolera entre un IMPORTE de la planilla y el neto a pagar para
+     * que siga siendo "el neto": un peso. Es el redondeo de quien arma la
+     * planilla a mano, no un descuento. Mas que eso ya no es un error: es un
+     * pago con EXCEDENTE -hasta el % permitido, con el mismo peso sobre el
+     * maximo- o un pago PARCIAL. Ver clasificarImporte().
      */
     const TOLERANCIA_IMPORTE = 1.0;
+
+    /**
+     * Lo que puede decir clasificarImporte() de un importe. Las tres primeras
+     * se guardan tal cual en CLASIFICACION de la tabla de medios.
+     */
+    const CLASIF_NETO = 'NETO';
+    const CLASIF_EXCEDENTE = 'EXCEDENTE';
+    const CLASIF_PARCIAL = 'PARCIAL';
+    const CLASIF_ERROR = 'ERROR';
+
+    /**
+     * El % de excedente permitido, en RO_T_CASHFLOW_PARAMETROS. Tiene su propio
+     * camino de guardado (guardarPorcExcedente()): Parametros::saveParametro()
+     * guarda cualquier texto y rechaza esta clave. Parametros la repite, igual
+     * que las de Echeqs, y una prueba las ata.
+     */
+    const CLAVE_PORC_EXCEDENTE = 'prov_locales_pct_excedente';
+
+    /** El script que agrega el excedente y el pago parcial, y siembra el % */
+    const SCRIPT_EXCEDENTE = 'sql/cashflow_prov_locales_excedente_parcial.sql';
 
     /** @var Conexion */
     private $conn;
@@ -143,6 +165,12 @@ class Proveedores {
 
     /** @var bool|null Cache del chequeo de existencia de la tabla de medios */
     private $tablaMedio = null;
+
+    /** @var bool|null Cache de si la tabla de medios ya tiene las columnas del excedente */
+    private $conExcedente = null;
+
+    /** @var array|null Cache del % de excedente de este pedido. Ver getPorcExcedente() */
+    private $porcExcedente = null;
 
     /** @var array Cache de que columnas de override tiene la tabla de pagos */
     private $columnasPago = [];
@@ -255,6 +283,255 @@ class Proveedores {
         return $this->tablaMedio;
     }
 
+    /**
+     * Si ya se corrio sql/cashflow_prov_locales_excedente_parcial.sql: la tabla
+     * de medios tiene CLASIFICACION y lo que se guarda al importar.
+     *
+     * SIN EL, LA IMPORTACION ES LA DE ANTES: el importe tiene que ser el neto a
+     * pagar con un peso de tolerancia, porque un excedente o un pago parcial no
+     * tendrian donde guardarse y el eje proyectaria el neto calculado.
+     *
+     * @return bool
+     */
+    public function tablaExcedenteCreada() {
+        if ($this->conExcedente !== null) {
+            return $this->conExcedente;
+        }
+
+        /* UN PARCIAL DEJA LA TABLA DE PAGOS SIN FECHA -su saldo va por la
+           jerarquia de siempre-, y eso necesita FECHA_PAGO nullable, que es de
+           sql/cashflow_prov_locales_forma_por_factura.sql (el que crea
+           FORMA_PAGO_CRONOGRAMA). Sin el, tampoco hay excedente ni parcial. */
+        if (!$this->tablaMedioCreada() || !$this->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA')) {
+            $this->conExcedente = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COL_LENGTH('dbo." . self::TABLA_MEDIO . "', 'CLASIFICACION') AS C");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar las columnas del pago con excedente'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->conExcedente = ($row && $row['C'] !== null);
+
+        return $this->conExcedente;
+    }
+
+    /* ====================================================================
+       EL % DE EXCEDENTE PERMITIDO
+       ==================================================================== */
+
+    /**
+     * Valida un % de excedente que alguien quiere guardar. ES LA REGLA, escrita
+     * una vez: la usan el guardado y la lectura (porcExcedenteDesdeValor()).
+     *
+     * Un numero >= 0 y < 100, con hasta dos decimales. CERO ES VALIDO y quiere
+     * decir "no se acepta excedente": es una decision, no un dato que falta.
+     * 100 o mas no: aceptaria pagar el doble de una factura y dejar la mitad a
+     * cuenta, que no es un redondeo de nadie. Acepta la coma decimal, porque es
+     * como se tipea aca.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $valor
+     * @return float
+     * @throws Exception Con el motivo, para mostrarlo tal cual
+     */
+    public static function validarPorcExcedente($valor) {
+        $texto = str_replace(',', '.', trim((string) $valor));
+
+        if ($texto === '' || !preg_match('/^\d+(\.\d{1,2})?$/', $texto)) {
+            throw new Exception('El % de excedente es un número de 0 a 99,99, con hasta dos decimales '
+                . '(por ejemplo 5 o 12,5). 0 quiere decir que no se acepta excedente.');
+        }
+
+        $n = round(floatval($texto), 2);
+
+        if ($n >= 100) {
+            throw new Exception('El % de excedente tiene que ser menor a 100: con 100 se aceptaría '
+                . 'pagar el doble del neto a pagar.');
+        }
+
+        return $n;
+    }
+
+    /**
+     * Lo que vale el % guardado: el numero si sirve, o null con el motivo.
+     *
+     * NULL NO ES CERO. Cero es "no se acepta excedente", una decision; null es
+     * que el dato falta o esta roto, y entonces tampoco se acepta ninguno, pero
+     * se avisa en critico diciendo donde cargarlo. Nunca se asume el 5 de la
+     * semilla: un respaldo inventado haria aceptar pagos que nadie autorizo.
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $valor Lo que dice VALOR, o null si la clave no esta
+     * @return array ['porc' => float|null, 'error' => string|null]
+     */
+    public static function porcExcedenteDesdeValor($valor) {
+        if ($valor === null) {
+            return ['porc' => null, 'error' => 'Falta el % de excedente permitido ('
+                . self::CLAVE_PORC_EXCEDENTE . '): corré ' . self::SCRIPT_EXCEDENTE
+                . ' contra la base central, o cargalo en Parámetros › Prov. Locales › Importación de pagos.'];
+        }
+
+        try {
+            return ['porc' => self::validarPorcExcedente($valor), 'error' => null];
+        } catch (Exception $e) {
+            return ['porc' => null, 'error' => 'El % de excedente permitido guardado («' . trim((string) $valor)
+                . '») no sirve: ' . $e->getMessage() . ' Corregilo en Parámetros › Prov. Locales › '
+                . 'Importación de pagos.'];
+        }
+    }
+
+    /**
+     * El % de excedente permitido de hoy, con quien lo toco por ultima vez. Se
+     * lee una vez por pedido: la previsualizacion y la confirmacion lo leen
+     * cada una el suyo, y si difieren la confirmacion se frena.
+     *
+     * @return array ['porc' => float|null, 'error' => string|null,
+     *                'valor' => string|null, 'usuario' => string|null, 'fecha' => string|null]
+     */
+    public function getPorcExcedente() {
+        if ($this->porcExcedente !== null) {
+            return $this->porcExcedente;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT VALOR, USUARIO_MODIF, FECHA_MODIF
+             FROM dbo.RO_T_CASHFLOW_PARAMETROS
+             WHERE CLAVE = ?", [self::CLAVE_PORC_EXCEDENTE]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el % de excedente permitido'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $r = self::porcExcedenteDesdeValor($row ? $row['VALOR'] : null);
+
+        $r['valor'] = $row ? trim((string) $row['VALOR']) : null;
+        $r['usuario'] = $row ? $row['USUARIO_MODIF'] : null;
+        $r['fecha'] = ($row && $row['FECHA_MODIF'] instanceof DateTime)
+            ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : null;
+
+        $this->porcExcedente = $r;
+
+        return $r;
+    }
+
+    /**
+     * Guarda el % de excedente permitido. Rige desde ahora: no tiene
+     * vigencias. Queda con quien y cuando en USUARIO_MODIF / FECHA_MODIF.
+     *
+     * Un UPDATE y no un INSERT: la clave la siembra el script, y si no esta se
+     * dice cual correr en vez de crearla aca con datos a medias.
+     *
+     * @param mixed $valor
+     * @param string $usuario
+     * @return float El % guardado
+     */
+    public function guardarPorcExcedente($valor, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $porc = self::validarPorcExcedente($valor);
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "UPDATE dbo.RO_T_CASHFLOW_PARAMETROS
+             SET VALOR = ?, " . Auditoria::SET_MODIF . "
+             WHERE CLAVE = ?",
+            [self::textoPorc($porc), $usuario, self::CLAVE_PORC_EXCEDENTE]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar el % de excedente permitido'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas < 1) {
+            throw new Exception('Falta el parámetro ' . self::CLAVE_PORC_EXCEDENTE . ': corré '
+                . self::SCRIPT_EXCEDENTE . ' contra la base central.');
+        }
+
+        $this->porcExcedente = null;
+
+        return $porc;
+    }
+
+    /** 12.5 => '12.5', 5.0 => '5': como se guarda en VALOR */
+    private static function textoPorc($porc) {
+        return rtrim(rtrim(number_format(floatval($porc), 2, '.', ''), '0'), '.');
+    }
+
+    /**
+     * Con que se clasifica el importe de la planilla, para
+     * compararImportacion(): el % de hoy -o null con su motivo- y el
+     * cronograma, con el que se dice en que fecha cae el saldo de un parcial.
+     *
+     * NULL SIN EL SCRIPT, y eso es "la importacion de antes": el importe tiene
+     * que ser el neto con un peso de tolerancia. Si el % no se puede leer es
+     * como si faltara: no se acepta excedente y se avisa.
+     *
+     * @param Horizonte|null $h
+     * @return array|null ['porc', 'error', 'pagos_crono']
+     */
+    public function opcionesExcedente($h = null) {
+        if (!$this->tablaExcedenteCreada()) {
+            return null;
+        }
+
+        try {
+            $p = $this->getPorcExcedente();
+        } catch (Throwable $e) {
+            $p = ['porc' => null, 'error' => 'No se pudo leer el % de excedente permitido ('
+                . $e->getMessage() . ').'];
+        }
+
+        return [
+            'porc' => $p['porc'],
+            'error' => $p['error'],
+            'pagos_crono' => ($h === null) ? null : $this->leerCronograma($h)
+        ];
+    }
+
+    /**
+     * El aviso del % de excedente, para la pestaña y la previsualizacion. NO
+     * VA AL TABLERO: el tablero no usa el %, solo lo que ya se importo.
+     *
+     * CRITICO si falta o esta roto, porque la importacion rechaza cualquier
+     * excedente hasta que alguien lo cargue. Sin el script no dice nada aca: de
+     * eso avisa getAvisosConNivel(), y el % sin sus columnas no sirve de nada.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosPorcExcedente() {
+        if (!$this->tablaExcedenteCreada()) {
+            return [];
+        }
+
+        try {
+            $p = $this->getPorcExcedente();
+        } catch (Throwable $e) {
+            $p = ['porc' => null, 'error' => 'No se pudo leer el % de excedente permitido ('
+                . $e->getMessage() . ').'];
+        }
+
+        if ($p['porc'] !== null) {
+            return [];
+        }
+
+        return [Aviso::nuevo(Aviso::DANGER, $p['error'] . ' Mientras tanto la planilla de pagos no '
+            . 'acepta ningún pago con excedente; los pagos parciales y los netos se cargan igual.',
+            'Importación de pagos')];
+    }
+
     /** @return array Avisos de configuracion pendiente (textos) */
     public function getAvisos() {
         return Aviso::textos($this->getAvisosConNivel());
@@ -298,6 +575,14 @@ class Proveedores {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_MEDIO . '. Mientras '
                 . 'tanto un comprobante no se puede pagar con dos medios: la importación rechaza '
                 . 'las filas de dos medios, y todo lo demás funciona igual.');
+        }
+
+        /* Sin las columnas del excedente tampoco cambia ningun numero de hoy:
+           la planilla sigue exigiendo el neto a pagar, como antes. Atencion. */
+        if ($this->tablaMedioCreada() && !$this->tablaExcedenteCreada()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_EXCEDENTE . '. Mientras '
+                . 'tanto la planilla de pagos no acepta pagos con excedente ni pagos parciales: el '
+                . 'IMPORTE tiene que ser el neto a pagar, como antes, y todo lo demás funciona igual.');
         }
 
         $sinExclusion = $this->exclusion->avisoSinTabla();
@@ -525,6 +810,11 @@ class Proveedores {
                 'PAGO_CRONO_NOMBRE' => $resuelta['pago_nombre'],
                 'PAGO_CRONO_A_MANO' => $resuelta['pago_override'],
 
+                /* El plazo del maestro, en dias: el saldo de un pago parcial se
+                   vuelve a resolver con la jerarquia de siempre, y el plazo es
+                   su tercer escalon. Ver proyectarPagoImportado(). */
+                'PLAZO_DIAS' => $cat['plazo_dias'],
+
                 /* ORIGEN_FECHA con la carga desdoblada: MANUAL / ARCHIVO /
                    VENCIMIENTO / PLAZO / SIN_FECHA. Es lo que la columna Fecha
                    de pago muestra. ORIGEN_FECHA queda como estaba -CARGADA o
@@ -625,7 +915,16 @@ class Proveedores {
 
                 // La apertura en dos medios, si la hay: ver abrirEnMedios().
                 'APERTURA' => null,
-                'APERTURA_DESCUADRADA' => null
+                'APERTURA_DESCUADRADA' => null,
+
+                /* UN PAGO IMPORTADO CON EXCEDENTE O PARCIAL, si lo hay: que se
+                   pago, cuanto, el saldo y de donde sale su fecha. EXCEDENTE es
+                   lo que esta fila proyecta de mas sobre su neto; PARTE_EXTRA,
+                   que es la segunda fila de una cuota partida y no cuenta como
+                   otro vencimiento. Ver proyectarPagoImportado(). */
+                'PAGO_IMPORTADO' => null,
+                'EXCEDENTE' => 0.0,
+                'PARTE_EXTRA' => false
             ];
 
             /* LA RETENCION Y EL NETO A PAGAR, con la fecha con la que cae en el
@@ -706,19 +1005,28 @@ class Proveedores {
     }
 
     /**
-     * Parte en sus medios los comprobantes que se pagan con dos. ES LA REGLA
-     * DE COMO ENTRA AL EJE UNA APERTURA, escrita una sola vez.
+     * Parte los comprobantes que tienen un PAGO IMPORTADO guardado en la tabla
+     * de medios. ES LA REGLA DE COMO ENTRA AL EJE, escrita una sola vez, y la
+     * usan la grilla y el tablero. Hay dos casos:
      *
-     * UNA FILA POR PARTE, con IMPORTE_PENDIENTE = el importe de la parte y su
+     *   EXCEDENTE o PARCIAL, con uno o dos medios: proyectarPagoImportado(),
+     *   que proyecta lo pagado -con su excedente- en la fecha de la planilla y
+     *   el saldo con la jerarquia de siempre, y sabe de cuotas y de si Tango ya
+     *   registro el pago.
+     *
+     *   NETO EN DOS MEDIOS, el de antes, que es lo que sigue abajo y no cambio:
+     *   un comprobante neto con un medio no tiene filas guardadas.
+     *
+     * NETO EN DOS MEDIOS: UNA FILA POR PARTE, con IMPORTE_PENDIENTE = el importe de la parte y su
      * fecha resuelta con la jerarquia de siempre (resolverFechaPago()), cada
      * una por separado: una parte con fecha futura se respeta tal cual, y una
      * que ya paso y es del cronograma va al proximo dia de pago. Que entre al
      * cronograma lo sigue decidiendo la forma VIGENTE del comprobante
      * (CRONOGRAMA, que ya viene resuelto en la fila), no la de la parte.
      *
-     * LAS SERIES SIGUEN CERRANDO AL CENTAVO. La planilla tolera un peso entre
-     * la suma de las partes y el pendiente; lo que se proyecta, no. La ultima
-     * parte se lleva el resto -pendiente menos las anteriores-, asi que el
+     * LAS SERIES SIGUEN CERRANDO AL CENTAVO. Para NETO la planilla tolera un
+     * peso entre la suma de las partes y el neto; lo que se proyecta, no. La
+     * ultima parte se lleva el resto -pendiente menos las anteriores-, asi que el
      * comprobante suma exactamente lo mismo que sin apertura y lo unico que
      * cambia es en que columna cae cada peso. IMPORTE_VTO e IMPUTACIONES se
      * reparten en la misma proporcion, con el mismo criterio, para que el pie
@@ -749,8 +1057,12 @@ class Proveedores {
      *     pendiente, la retencion se recalcula sobre el pendiente nuevo y la
      *     apertura deja de coincidir;
      *   - la ultima parte se lleva el resto -neto menos las anteriores-, asi
-     *     que el cuadro cierra al centavo;
-     *   - LA RETENCION VA EN LA PRIMERA PARTE, entera. El pendiente de la
+     *     que el cuadro cierra al centavo. Solo en NETO: con excedente o
+     *     parcial cada parte proyecta su importe, y lo que no suma el neto es
+     *     excedente o saldo, no un resto;
+     *   - LA RETENCION VA EN LA PRIMERA PARTE, entera. Tambien solo en NETO,
+     *     que es como funcionaba y no cambio; con excedente o parcial se
+     *     reparte en proporcion al neto de cada fila. El pendiente de la
      *     primera es su neto mas la retencion, y el de la segunda, su neto: las
      *     dos siguen sumando el pendiente, y los totales por impuesto no se
      *     duplican.
@@ -765,7 +1077,8 @@ class Proveedores {
      * @param array|null $pagosCrono Pagos del cronograma PROV_LOCALES
      * @param array|null $retCfg De ProveedoresRetenciones::config(); null = sin
      *        retenciones
-     * @return array Las filas, con las abiertas reemplazadas por sus partes
+     * @return array Las filas, con las de un pago importado reemplazadas por
+     *         sus partes
      */
     public static function abrirEnMedios($items, $aperturas, $hoy, $pagosCrono = null, $retCfg = null) {
         if (empty($aperturas)) {
@@ -779,13 +1092,38 @@ class Proveedores {
         }
 
         $reemplazo = [];
+        $quitar = [];
 
         foreach ($aperturas as $clave => $medios) {
-            if (!isset($porClave[$clave]) || count($medios) < 2) {
+            if (!isset($porClave[$clave])) {
                 continue;
             }
 
             $indices = $porClave[$clave];
+
+            /* UN PAGO CON EXCEDENTE O PARCIAL -con uno o dos medios- tiene su
+               propia regla, que tambien sabe de cuotas y de si Tango ya lo
+               registro. Reemplaza TODAS las filas del comprobante. */
+            $clasif = isset($medios[0]['clasificacion']) ? $medios[0]['clasificacion'] : self::CLASIF_NETO;
+
+            if ($clasif !== self::CLASIF_NETO) {
+                $filasComp = [];
+
+                foreach ($indices as $i) {
+                    $filasComp[] = $items[$i];
+                    $quitar[$i] = true;
+                }
+
+                $reemplazo[$indices[0]] = self::proyectarPagoImportado($filasComp, $medios, $hoy,
+                    $pagosCrono, $retCfg)['filas'];
+
+                continue;
+            }
+
+            /* DOS MEDIOS QUE SUMAN EL NETO: la regla de siempre, sin tocar. */
+            if (count($medios) < 2) {
+                continue;
+            }
             $pendiente = 0.0;
 
             foreach ($indices as $i) {
@@ -896,12 +1234,357 @@ class Proveedores {
                 foreach ($reemplazo[$i] as $p) {
                     $salida[] = $p;
                 }
-            } else {
+            } elseif (!isset($quitar[$i])) {
                 $salida[] = $item;
             }
         }
 
         return $salida;
+    }
+
+    /**
+     * COMO ENTRA AL EJE UN COMPROBANTE PAGADO CON EXCEDENTE O PARCIAL. Es la
+     * regla de cuanto se paga y cuando, escrita una vez: la usan la grilla y el
+     * tablero (via abrirEnMedios()) y la previsualizacion, para decir en que
+     * fecha cae el saldo.
+     *
+     * PRIMERO, SI TANGO YA REGISTRO EL PAGO. Se compara el pendiente de hoy con
+     * el que tenia el comprobante al importar (PENDIENTE_IMPORT):
+     *
+     *   igual       todavia no: se parte, ver abajo
+     *   bajo        REGISTRADO, en cualquier importe. No se mide contra lo
+     *               pagado: Tango retiene Ganancias con minimos y acumulados del
+     *               mes, y lo que imputa no tiene por que ser proporcional. Se
+     *               deja de proyectar lo pagado y queda el pendiente de Tango,
+     *               con la jerarquia de siempre
+     *   subio       DESCUADRADO -una nota de debito, por ejemplo-: tambien se
+     *               proyecta el pendiente de Tango con la jerarquia de siempre,
+     *               y se avisa en atencion para que se reimporte
+     *
+     * En los dos ultimos las filas quedan como vinieron de getPendientes(): un
+     * parcial no tiene fecha en la tabla de pagos -va por vencimiento, plazo o
+     * cronograma- y un excedente tiene la de la planilla. Solo se les agrega
+     * PAGO_IMPORTADO, para que la grilla diga que hubo un pago importado.
+     *
+     * SI NO, SE PARTE EN LO PAGADO Y EL SALDO:
+     *
+     *   - lo pagado se aplica a las cuotas EN ORDEN DE VENCIMIENTO, la mas
+     *     vieja primero, que es como imputa Tango. Las cubiertas van a la fecha
+     *     de la planilla; la que queda a medias se parte; las que no se tocan
+     *     siguen con su fecha de siempre;
+     *   - con dos medios -nunca con cuotas- cada parte proyecta SU importe;
+     *     ninguna se lleva el resto;
+     *   - el EXCEDENTE no es factura: va en la ultima cuota cubierta (con dos
+     *     medios, repartido entre ellos en proporcion a su importe) y no lleva
+     *     retencion;
+     *   - el SALDO va con la jerarquia de siempre COMO SI NO TUVIERA FECHA
+     *     CARGADA: vencimiento, emision + plazo, y si es del cronograma el
+     *     proximo dia de pago.
+     *
+     * LA RETENCION SE CALCULA UNA VEZ, sobre el comprobante entero, a la fecha
+     * mas tardia de la planilla, y se REPARTE EN PROPORCION AL NETO de cada
+     * fila, impuesto por impuesto, con la ultima llevandose el resto. Asi en
+     * cada fila neto + retencion = pendiente, los pendientes suman el del
+     * comprobante al centavo, y la orden de pago que cancela lo pagado retiene
+     * lo que le toca. El excedente va aparte, en EXCEDENTE: lo que se proyecta
+     * es neto + excedente, y la auditoria del tablero lo cuenta por su lado.
+     *
+     * IMPORTE_PENDIENTE de cada fila es su parte del pendiente -bruto-, asi que
+     * Importe y Pendiente de la grilla no se mueven. IMPORTE_VTO e IMPUTACIONES
+     * se reparten dentro de cada cuota en la misma proporcion.
+     *
+     * Las filas extra de una cuota partida llevan PARTE_EXTRA: suman su
+     * importe pero no cuentan como otro vencimiento (cuentaComoVencimiento()).
+     *
+     * Estatica y pura.
+     *
+     * @param array $filas Las filas de getPendientes() de UN comprobante
+     * @param array $medios Las partes del pago, de getAperturas(), con su
+     *        CLASIFICACION, PENDIENTE_IMPORT y NETO_IMPORT
+     * @param string $hoy 'Y-m-d'
+     * @param array|null $pagosCrono Pagos del cronograma PROV_LOCALES
+     * @param array|null $retCfg De ProveedoresRetenciones::config()
+     * @return array ['estado' => PARTIDO|REGISTRADO|DESCUADRADO, 'filas', 'info']
+     */
+    public static function proyectarPagoImportado($filas, $medios, $hoy, $pagosCrono = null, $retCfg = null) {
+        $filas = array_values($filas);
+        $medios = array_values($medios);
+
+        usort($filas, function ($a, $b) {
+            return strcmp((string) $a['FECHA_VTO'], (string) $b['FECHA_VTO']);
+        });
+
+        $pendiente = 0.0;
+
+        foreach ($filas as $f) {
+            $pendiente += floatval($f['IMPORTE_PENDIENTE']);
+        }
+
+        $pendiente = round($pendiente, 2);
+        $primero = $medios[0];
+        $clasif = $primero['clasificacion'];
+        $pagado = 0.0;
+        $ultimaFecha = null;
+
+        foreach ($medios as $m) {
+            $pagado += floatval($m['importe']);
+
+            if ($ultimaFecha === null || $m['fecha'] > $ultimaFecha) {
+                $ultimaFecha = $m['fecha'];
+            }
+        }
+
+        $pagado = round($pagado, 2);
+
+        $info = array_merge(self::infoApertura($medios), [
+            'clasificacion' => $clasif,
+            'pendiente' => $pendiente,
+            'pendiente_import' => isset($primero['pendiente_import']) ? $primero['pendiente_import'] : null,
+            'neto_import' => isset($primero['neto_import']) ? $primero['neto_import'] : null,
+            'pagado' => $pagado,
+            'fecha_real' => isset($primero['fecha_real']) ? $primero['fecha_real'] : null,
+            'saldo_fecha' => null
+        ]);
+
+        /* 1. ¿TANGO YA LO REGISTRO? Lo que ya se marco REGISTRADO no vuelve
+              atras aunque el pendiente cambie de nuevo: el pago parcial ya se
+              hizo. */
+        $antes = ($info['pendiente_import'] === null) ? null : round(floatval($info['pendiente_import']), 2);
+        $estado = 'PARTIDO';
+
+        if ((isset($primero['estado_tango']) && $primero['estado_tango'] === 'REGISTRADO')
+            || ($antes !== null && $pendiente < $antes - 0.005)) {
+            $estado = 'REGISTRADO';
+        } elseif ($antes !== null && $pendiente > $antes + 0.005) {
+            $estado = 'DESCUADRADO';
+        } elseif (count($medios) > 1 && count($filas) > 1) {
+            // Dos medios contra un comprobante que paso a tener cuotas: no hay
+            // como repartirlos. Mismo trato que un pendiente que subio.
+            $estado = 'DESCUADRADO';
+        }
+
+        if ($estado !== 'PARTIDO') {
+            $info['estado'] = $estado;
+
+            /* Si recien ahora se ve que Tango lo registro, la pestaña lo deja
+               anotado en la tabla de medios -con la fecha real-, igual que la
+               conciliacion. Ver registrarPagosAutomatico(). */
+            $info['por_registrar'] = ($estado === 'REGISTRADO'
+                && (!isset($primero['estado_tango']) || $primero['estado_tango'] !== 'REGISTRADO'));
+
+            foreach ($filas as $i => $f) {
+                $filas[$i]['PAGO_IMPORTADO'] = array_merge($info, ['tipo' => null]);
+            }
+
+            return ['estado' => $estado, 'filas' => $filas, 'info' => $info];
+        }
+
+        /* 2. LA RETENCION DEL COMPROBANTE ENTERO, una vez, a la fecha mas
+              tardia de la planilla: la misma con la que la importacion
+              calculo el neto. */
+        $entero = $filas[0];
+        $entero['IMPORTE_PENDIENTE'] = $pendiente;
+        $entero = self::conRetencion($entero, $retCfg, $hoy, $ultimaFecha);
+        $neto = round(floatval($entero['IMPORTE_A_PAGAR']), 2);
+        $retPorImp = $entero['RETENIDO_POR_IMPUESTO'];
+
+        $excedente = ($clasif === self::CLASIF_EXCEDENTE) ? max(0.0, round($pagado - $neto, 2)) : 0.0;
+        $pagadoNeto = min($neto, round($pagado - $excedente, 2));
+
+        $info['neto'] = $neto;
+        $info['excedente'] = $excedente;
+        $info['porc_excedente'] = ($excedente > 0 && $neto > 0) ? round($excedente / $neto * 100, 2) : null;
+        $info['saldo'] = round($neto - $pagadoNeto, 2);
+        $info['estado'] = 'PARTIDO';
+
+        /* 3. LOS TRAMOS: que parte del neto va a que fecha. Cada uno es de una
+              cuota, PAGADO o SALDO. */
+        $tramos = [];
+
+        if (count($medios) > 1) {
+            $excAcum = 0.0;
+            $n = count($medios);
+
+            foreach ($medios as $k => $m) {
+                $exc = ($k === $n - 1) ? round($excedente - $excAcum, 2)
+                    : (($pagado > 0) ? round($excedente * floatval($m['importe']) / $pagado, 2) : 0.0);
+                $excAcum += $exc;
+                $tramos[] = ['cuota' => 0, 'tipo' => 'PAGADO', 'neto' => round(floatval($m['importe']) - $exc, 2),
+                             'excedente' => $exc, 'medio' => $m, 'parte' => $k + 1];
+            }
+
+            if ($info['saldo'] > 0.004) {
+                $tramos[] = ['cuota' => 0, 'tipo' => 'SALDO', 'neto' => $info['saldo'], 'excedente' => 0.0,
+                             'medio' => null, 'parte' => null];
+            }
+        } else {
+            // El neto de cada cuota, en proporcion a su pendiente.
+            $netos = self::repartir($neto, array_map(function ($f) {
+                return floatval($f['IMPORTE_PENDIENTE']);
+            }, $filas));
+
+            $resta = $pagadoNeto;
+            $ultimaCubierta = null;
+
+            foreach ($filas as $i => $f) {
+                $cubre = round(min($netos[$i], $resta), 2);
+                $resta = round($resta - $cubre, 2);
+
+                if ($cubre > 0.004) {
+                    $tramos[] = ['cuota' => $i, 'tipo' => 'PAGADO', 'neto' => $cubre, 'excedente' => 0.0,
+                                 'medio' => $medios[0], 'parte' => 1];
+                    $ultimaCubierta = count($tramos) - 1;
+                }
+
+                if (round($netos[$i] - $cubre, 2) > 0.004) {
+                    $tramos[] = ['cuota' => $i, 'tipo' => 'SALDO', 'neto' => round($netos[$i] - $cubre, 2),
+                                 'excedente' => 0.0, 'medio' => null, 'parte' => null];
+                }
+            }
+
+            if ($ultimaCubierta !== null) {
+                $tramos[$ultimaCubierta]['excedente'] = $excedente;
+            }
+        }
+
+        /* 4. LA RETENCION DE CADA TRAMO, en proporcion a su neto, impuesto por
+              impuesto; el ultimo tramo se lleva el resto de cada uno. */
+        $pesos = array_column($tramos, 'neto');
+        $retTramo = array_fill(0, count($tramos), []);
+
+        foreach ($retPorImp as $codigo => $total) {
+            foreach (self::repartir(floatval($total), $pesos) as $t => $r) {
+                $retTramo[$t][$codigo] = $r;
+            }
+        }
+
+        /* 5. Las filas. IMPORTE_VTO e IMPUTACIONES se reparten dentro de cada
+              cuota como su pendiente. */
+        $salida = [];
+        $porCuota = [];
+
+        foreach ($tramos as $t => $tr) {
+            $porCuota[$tr['cuota']][] = $t;
+        }
+
+        foreach ($porCuota as $c => $ids) {
+            $cuota = $filas[$c];
+            $brutos = [];
+
+            foreach ($ids as $t) {
+                $brutos[$t] = round($tramos[$t]['neto'] + array_sum($retTramo[$t]), 2);
+            }
+
+            $vtos = self::repartir(floatval(isset($cuota['IMPORTE_VTO']) ? $cuota['IMPORTE_VTO'] : 0),
+                array_values($brutos));
+            $imps = self::repartir(floatval(isset($cuota['IMPUTACIONES']) ? $cuota['IMPUTACIONES'] : 0),
+                array_values($brutos));
+
+            foreach (array_values($ids) as $j => $t) {
+                $tr = $tramos[$t];
+                $fila = $cuota;
+
+                $fila['IMPORTE_PENDIENTE'] = $brutos[$t];
+                $fila['IMPORTE_VTO'] = $vtos[$j];
+                $fila['IMPUTACIONES'] = $imps[$j];
+                $fila['RETENCION'] = $entero['RETENCION'];
+                $fila['RETENIDO_POR_IMPUESTO'] = $retTramo[$t];
+                $fila['RETENIDO'] = round(array_sum($retTramo[$t]), 2);
+                $fila['IMPORTE_A_PAGAR'] = round($tr['neto'] + $tr['excedente'], 2);
+                $fila['EXCEDENTE'] = $tr['excedente'];
+                $fila['PARTE_EXTRA'] = ($j > 0);
+
+                if ($tr['tipo'] === 'PAGADO') {
+                    $r = self::resolverFechaPago($tr['medio']['fecha'], $cuota['FECHA_VTO'],
+                        isset($cuota['FECHA_EMIS']) ? $cuota['FECHA_EMIS'] : null,
+                        null, $hoy, $pagosCrono, !empty($cuota['CRONOGRAMA']));
+                    $fila['FECHA_PAGO'] = $tr['medio']['fecha'];
+                    $fila['FUENTE_FECHA'] = 'ARCHIVO';
+                } else {
+                    /* EL SALDO, COMO SI NO TUVIERA FECHA CARGADA. */
+                    $r = self::resolverFechaPago(null, $cuota['FECHA_VTO'],
+                        isset($cuota['FECHA_EMIS']) ? $cuota['FECHA_EMIS'] : null,
+                        isset($cuota['PLAZO_DIAS']) ? $cuota['PLAZO_DIAS'] : null, $hoy, $pagosCrono,
+                        !empty($cuota['CRONOGRAMA']));
+                    $fila['FECHA_PAGO'] = null;
+                    $fila['FUENTE_FECHA'] = $r['origen'];
+
+                    if ($info['saldo_fecha'] === null) {
+                        $info['saldo_fecha'] = ['fecha' => $r['fecha'], 'origen' => self::origenTexto($r)];
+                    }
+                }
+
+                $fila['Pago'] = $r['fecha'];
+                $fila['PAGO_ORIGINAL'] = $r['original'];
+                $fila['ORIGEN_FECHA'] = $r['origen'];
+                $fila['PAGO_CRONO'] = $r['crono'];
+                $fila['PAGO_BASE'] = $r['base'];
+                $fila['PAGO_CRONO_NOMBRE'] = $r['pago_nombre'];
+                $fila['PAGO_CRONO_A_MANO'] = $r['pago_override'];
+                $fila['VENCIDA'] = $r['vencida'];
+                $fila['SIN_FECHA_CARGADA'] = $r['sin_fecha_cargada'];
+                $fila['PAGO_IMPORTADO'] = ['tipo' => $tr['tipo'], 'parte' => $tr['parte'],
+                                           'de' => count($medios)];
+
+                $salida[] = $fila;
+            }
+        }
+
+        $cuotasSaldo = count(array_unique(array_column(array_filter($tramos, function ($tr) {
+            return $tr['tipo'] === 'SALDO';
+        }), 'cuota')));
+
+        if ($info['saldo_fecha'] !== null) {
+            $info['saldo_fecha']['cuotas'] = $cuotasSaldo;
+        }
+
+        foreach ($salida as $i => $f) {
+            $salida[$i]['PAGO_IMPORTADO'] = array_merge($info, $f['PAGO_IMPORTADO']);
+        }
+
+        return ['estado' => 'PARTIDO', 'filas' => $salida, 'info' => $info];
+    }
+
+    /**
+     * Reparte un total en proporcion a unos pesos, redondeando a centavos, con
+     * el ultimo llevandose el resto: la suma da el total al centavo. Con pesos
+     * en cero va todo al primero.
+     *
+     * @param float $total
+     * @param array $pesos
+     * @return array Un importe por peso, en el mismo orden
+     */
+    private static function repartir($total, $pesos) {
+        $pesos = array_values($pesos);
+        $suma = array_sum($pesos);
+        $n = count($pesos);
+        $v = [];
+        $acum = 0.0;
+
+        foreach ($pesos as $i => $p) {
+            if ($i === $n - 1) {
+                $v[] = round($total - $acum, 2);
+            } else {
+                $x = ($suma != 0) ? round($total * $p / $suma, 2) : ($i === 0 ? round($total, 2) : 0.0);
+                $v[] = $x;
+                $acum += $x;
+            }
+        }
+
+        return $v;
+    }
+
+    /** De donde sale una fecha resuelta, para un motivo: "vencimiento", "próximo día de pago" */
+    private static function origenTexto($r) {
+        if (!empty($r['crono'])) {
+            return 'próximo día de pago';
+        }
+
+        switch ($r['origen']) {
+            case 'VENCIMIENTO': return !empty($r['vencida']) ? 'vencimiento, ya vencido' : 'vencimiento';
+            case 'PLAZO': return 'emisión + plazo';
+            default: return 'sin fecha';
+        }
     }
 
     /**
@@ -930,8 +1613,11 @@ class Proveedores {
      * Si una fila de getPendientes() CUENTA COMO UN VENCIMIENTO en los
      * contadores. Las dos partes de un comprobante abierto son un solo
      * vencimiento partido en dos columnas: la segunda suma su importe pero no
-     * se cuenta. Es la regla de los indicadores de la pestaña, de los avisos y
-     * de la selección, escrita una vez.
+     * se cuenta. Lo mismo una cuota partida por un pago parcial en lo pagado
+     * y su saldo, o en dos medios: la fila que no es la primera de su cuota
+     * llega con PARTE_EXTRA (ver proyectarPagoImportado()). Es la regla de los
+     * indicadores de la pestaña, de los avisos y de la selección, escrita una
+     * vez.
      *
      * Estatica y pura.
      *
@@ -939,6 +1625,10 @@ class Proveedores {
      * @return bool
      */
     public static function cuentaComoVencimiento($item) {
+        if (!empty($item['PARTE_EXTRA'])) {
+            return false;
+        }
+
         return empty($item['APERTURA']) || intval($item['APERTURA']['parte']) === 1;
     }
 
@@ -957,9 +1647,22 @@ class Proveedores {
             return [];
         }
 
+        /* Sin sql/cashflow_prov_locales_excedente_parcial.sql todas son NETO:
+           es lo unico que la tabla podia guardar. */
+        $extra = $this->tablaExcedenteCreada()
+            ? "CLASIFICACION, CAST(PENDIENTE_IMPORT AS FLOAT) AS PENDIENTE_IMPORT,
+               CAST(NETO_IMPORT AS FLOAT) AS NETO_IMPORT, ESTADO_TANGO, FECHA_REAL,
+               CAST(PENDIENTE_REAL AS FLOAT) AS PENDIENTE_REAL"
+            : "'NETO' AS CLASIFICACION, NULL AS PENDIENTE_IMPORT, NULL AS NETO_IMPORT,
+               'PREVISTO' AS ESTADO_TANGO, NULL AS FECHA_REAL, NULL AS PENDIENTE_REAL";
+
+        /* QUIEN LA IMPORTO Y CUANDO es el alta: una parte no se modifica, se
+           reemplaza. La unica escritura posterior es la del sistema anotando
+           que Tango ya registro el pago, y esa no es quien importo. */
         $stmt = sqlsrv_query($this->conectar(),
             "SELECT COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                    CAST(IMPORTE AS FLOAT) AS IMPORTE, USUARIO_MODIF, FECHA_MODIF
+                    CAST(IMPORTE AS FLOAT) AS IMPORTE, USUARIO_ALTA AS USUARIO_MODIF,
+                    FECHA_ALTA AS FECHA_MODIF, " . $extra . "
              FROM dbo." . self::TABLA_MEDIO . "
              WHERE VIGENTE = 1
              ORDER BY COD_PROVEE, T_COMP, N_COMP, ORDEN");
@@ -979,7 +1682,17 @@ class Proveedores {
                 'importe' => round(floatval($row['IMPORTE']), 2),
                 'usuario' => $row['USUARIO_MODIF'],
                 'fecha_modif' => ($row['FECHA_MODIF'] instanceof DateTime)
-                    ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF']
+                    ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF'],
+                // NETO / EXCEDENTE / PARCIAL, y lo que hace falta para saber si
+                // Tango ya registro el pago. Ver proyectarPagoImportado().
+                'clasificacion' => $row['CLASIFICACION'],
+                'pendiente_import' => ($row['PENDIENTE_IMPORT'] === null) ? null
+                    : round(floatval($row['PENDIENTE_IMPORT']), 2),
+                'neto_import' => ($row['NETO_IMPORT'] === null) ? null : round(floatval($row['NETO_IMPORT']), 2),
+                'estado_tango' => $row['ESTADO_TANGO'],
+                'fecha_real' => Horizonte::normalizarFecha($row['FECHA_REAL']),
+                'pendiente_real' => ($row['PENDIENTE_REAL'] === null) ? null
+                    : round(floatval($row['PENDIENTE_REAL']), 2)
             ];
         }
 
@@ -1393,6 +2106,11 @@ class Proveedores {
         $compExcluidos = 0;
         $descuadrados = [];
 
+        /* UN PAGO CON EXCEDENTE O PARCIAL CUYO PENDIENTE SUBIO desde que se
+           importo -una nota de debito, por ejemplo-. Que baje no se avisa:
+           es Tango registrando el pago. Ver proyectarPagoImportado(). */
+        $importadosDescuadrados = [];
+
         /* LOS DEL CRONOGRAMA QUE SE PROYECTAN SIN RETENER porque un impuesto "a
            todos" no tiene alicuota general vigente a su fecha de pago -y el
            proveedor tampoco tiene una propia-. No es una retencion de 0: falta
@@ -1419,6 +2137,10 @@ class Proveedores {
 
             if (!empty($i['APERTURA_DESCUADRADA'])) {
                 $descuadrados[self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP'])] = true;
+            }
+
+            if (!empty($i['PAGO_IMPORTADO']) && $i['PAGO_IMPORTADO']['estado'] === 'DESCUADRADO') {
+                $importadosDescuadrados[self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP'])] = true;
             }
 
             if (!empty($i['EXCLUIDO'])) {
@@ -1458,6 +2180,12 @@ class Proveedores {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, count($descuadrados) . ' comprobante(s) '
                 . 'abiertos en dos medios ya no coinciden con su neto a pagar: se proyecta el saldo '
                 . 'en la fecha más tardía. Reimportá para corregirlo.');
+        }
+
+        if (!empty($importadosDescuadrados)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($importadosDescuadrados) . ' comprobante(s) con '
+                . 'pago parcial o excedente ya no coinciden con lo importado: se proyecta el pendiente de '
+                . 'Tango. Reimportá para corregirlo.');
         }
 
         if ($sinGeneral > 0) {
@@ -1525,7 +2253,8 @@ class Proveedores {
         $cid = $this->conectar();
 
         $sql = "SELECT COD_PROVEE, T_COMP, N_COMP, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO_MODIF, FECHA_MODIF, "
+                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO_MODIF, FECHA_MODIF,
+                       FECHA_ALTA, "
                        . $this->overrideSql('FORMA_PAGO_CRONOGRAMA') . " AS FORMA_PAGO_CRONOGRAMA, "
                        . ($this->tieneColumnaPago('EXCLUIDA') ? 'EXCLUIDA' : '0') . " AS EXCLUIDA, "
                        . $this->overrideSql('MOTIVO_EXCLUSION') . " AS MOTIVO_EXCLUSION, "
@@ -1572,6 +2301,10 @@ class Proveedores {
                 'OBSERVACION' => $row['OBSERVACION'],
                 'ESTADO' => $row['ESTADO'],
                 'FECHA_CANCELADO' => Horizonte::normalizarFecha($row['FECHA_CANCELADO']),
+                /* Cuando se cargo la prevision. Una factura cuya fecha real es
+                   ANTERIOR se cancelo con un saldo a cuenta viejo: ver
+                   planConciliacion(). */
+                'FECHA_ALTA' => Horizonte::normalizarFecha($row['FECHA_ALTA']),
                 'ORIGEN' => $row['ORIGEN'],
 
                 /* De donde salio LA FECHA, que no es lo mismo que ORIGEN: ese
@@ -1720,20 +2453,22 @@ class Proveedores {
             /* EL IMPORTE ES OPCIONAL CON UN MEDIO Y OBLIGATORIO CON DOS, y es
                NETO DE RETENCIONES: lo que sale de la caja, que es lo que pone
                quien arma la planilla. Con una sola fila por comprobante, vacio
-               quiere decir "el neto a pagar"; si viene, tiene que coincidir con
-               el neto -con un peso de tolerancia-, porque otro numero es otro
-               comprobante o un pago parcial que la planilla no sabe. Con dos
-               filas es lo que dice cuanto va por cada medio, y suman el neto.
-               Sin retenciones el neto es el pendiente. Ver
-               compararImportacion(). */
+               quiere decir "el neto a pagar". Si viene -o la suma de los dos
+               medios- se clasifica contra el neto: el neto con un peso de
+               tolerancia, MAS hasta el % de excedente permitido -la diferencia
+               queda a cuenta del proveedor en Tango- o MENOS, que es un pago
+               parcial y deja el saldo pendiente. Sin el script del excedente
+               tiene que ser el neto, como antes. Ver clasificarImporte(). */
             'importe' => [
                 'titulo' => 'IMPORTE',
                 'obligatoria' => false,
                 'tipo' => 'importe',
-                'ayuda' => 'Neto de retenciones. Opcional con un solo medio: vacío es el neto a pagar, '
-                    . 'y si viene tiene que coincidir con el neto. Con dos medios —dos filas del '
-                    . 'mismo comprobante, cada una ECHEQ o TRANSFERENCIA— es obligatorio en las dos, '
-                    . 'y tienen que sumar el neto a pagar. Sin separador de miles.',
+                'ayuda' => 'Neto de retenciones. Opcional con un solo medio: vacío es el neto a pagar. '
+                    . 'Puede ser más que el neto, hasta el % de excedente permitido (el excedente queda '
+                    . 'a cuenta del proveedor en Tango), o menos: un pago parcial, y el saldo sigue '
+                    . 'pendiente. Con dos medios —dos filas del mismo comprobante, cada una ECHEQ o '
+                    . 'TRANSFERENCIA— es obligatorio en las dos, y la regla se aplica a la suma. Sin '
+                    . 'separador de miles.',
                 'sinonimos' => ['IMPORTE', 'MONTO', 'IMPORTE_PAGO', 'IMPORTEPAGO', 'MONTO_PAGO',
                                 'MONTOPAGO']
             ],
@@ -1809,12 +2544,15 @@ class Proveedores {
      * Las filas se juntan por comprobante y se deciden juntas:
      *
      *   1 fila       un medio, el caso de siempre. IMPORTE es opcional: vacio
-     *                es el NETO A PAGAR, y si viene tiene que coincidir con el
-     *                neto con TOLERANCIA_IMPORTE. La forma es opcional y no
-     *                decide nada, como siempre.
+     *                es el NETO A PAGAR. Si viene se clasifica
+     *                (clasificarImporte()): el neto ± $1, un EXCEDENTE hasta
+     *                el % permitido o un pago PARCIAL. Sin el script del
+     *                excedente tiene que ser el neto ± $1, como antes. La forma
+     *                es opcional y no decide nada, como siempre.
      *   2 filas      DOS MEDIOS. Cada fila con su fecha, su forma -ECHEQ o
      *                TRANSFERENCIA, obligatoria- y su importe -obligatorio,
-     *                mayor a cero-, y las dos tienen que sumar el neto.
+     *                mayor a cero-, y la SUMA se clasifica igual que el
+     *                importe de un medio.
      *
      * EL NETO A PAGAR ES EL TOTAL MENOS LAS RETENCIONES, resuelto con la regla
      * de siempre -ProveedoresRetenciones::calcular()- a la fecha de pago de la
@@ -1862,11 +2600,16 @@ class Proveedores {
      *        neto es el pendiente
      * @param array|null $enTango De estadoComprobantesEnTango(): el estado en
      *        Tango de los que no cruzaron. null = no se consulto
-     * @return array ['filas', 'resumen', 'avisos']
+     * @param array|null $excedente De opcionesExcedente(): ['porc', 'error',
+     *        'pagos_crono']. NULL ES "SIN EL SCRIPT": el importe tiene que ser
+     *        el neto con $1 de tolerancia, como antes. Con el script, el importe
+     *        se clasifica (clasificarImporte()) y un excedente o un parcial se
+     *        aceptan; con 'porc' null, el excedente no
+     * @return array ['filas', 'resumen', 'avisos', 'criticos', 'porc_excedente']
      */
     public static function compararImportacion($filasArchivo, $pendientes, $pagos, $hoy = null,
                                                $aperturas = [], $conMedios = true, $retCfg = null,
-                                               $enTango = null) {
+                                               $enTango = null, $excedente = null) {
         $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
 
         /* Los pendientes, indexados de dos formas: por clave completa -cuando la
@@ -1902,7 +2645,11 @@ class Proveedores {
             'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0, 'errores' => 0,
             'importe_con_fecha' => 0.0, 'vencidos_resueltos' => 0,
             'forma_desconocida' => 0, 'dos_medios' => 0, 'dos_medios_fuera_cronograma' => 0,
-            'ya_pagadas' => 0
+            'ya_pagadas' => 0,
+            /* Comprobantes que se pagan con excedente -y cuanto es el excedente-
+               y con un pago parcial -y cuanto se paga-. Son los chips nuevos. */
+            'con_excedente' => 0, 'importe_excedente' => 0.0,
+            'pagos_parciales' => 0, 'importe_parcial' => 0.0
         ];
 
         foreach ($grupos as $grupo) {
@@ -1921,9 +2668,9 @@ class Proveedores {
             }
 
             if (count($grupo) === 1) {
-                $grupo = [self::unMedio($grupo[0], $pagos, $aperturas, $retCfg)];
+                $grupo = [self::unMedio($grupo[0], $pagos, $aperturas, $retCfg, $excedente, $hoyStr)];
             } elseif (count($grupo) === self::MAX_MEDIOS) {
-                $grupo = self::dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg);
+                $grupo = self::dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg, $excedente, $hoyStr);
             } else {
                 $grupo = self::demasiadasFilas($grupo);
             }
@@ -1947,11 +2694,26 @@ class Proveedores {
                     continue;
                 }
 
-                /* Lo que se reubica es lo que sale de la caja: el neto. */
-                $resumen['importe_con_fecha'] += ($fila['neto'] !== null) ? $fila['neto']
-                    : $fila['importe_pendiente'];
+                /* Lo que se reubica es lo que sale de la caja: el neto, o lo que
+                   se paga si es un excedente o un parcial. */
+                if ($fila['clasificacion'] === self::CLASIF_NETO) {
+                    $resumen['importe_con_fecha'] += ($fila['neto'] !== null) ? $fila['neto']
+                        : $fila['importe_pendiente'];
+                } else {
+                    $resumen['importe_con_fecha'] += $fila['pagado'];
+                }
 
-                if ($fila['estaba_vencido']) {
+                if ($fila['clasificacion'] === self::CLASIF_EXCEDENTE) {
+                    $resumen['con_excedente']++;
+                    $resumen['importe_excedente'] += $fila['excedente'];
+                } elseif ($fila['clasificacion'] === self::CLASIF_PARCIAL) {
+                    $resumen['pagos_parciales']++;
+                    $resumen['importe_parcial'] += $fila['pagado'];
+                }
+
+                /* UN PARCIAL NO RESUELVE EL VENCIDO: el saldo sigue sin fecha,
+                   y va por la jerarquia de siempre. */
+                if ($fila['estaba_vencido'] && $fila['clasificacion'] !== self::CLASIF_PARCIAL) {
                     $resumen['vencidos_resueltos']++;
                 }
 
@@ -1971,10 +2733,35 @@ class Proveedores {
             }
         }
 
+        // Las cuotas del comprobante sirvieron para proyectar el saldo; al
+        // navegador no le hacen falta.
+        foreach ($filas as $i => $f) {
+            unset($filas[$i]['_vtos']);
+        }
+
+        $resumen['importe_excedente'] = round($resumen['importe_excedente'], 2);
+        $resumen['importe_parcial'] = round($resumen['importe_parcial'], 2);
+
+        /* SIN EL % NO SE ACEPTA NINGUN EXCEDENTE, y eso es critico: va arriba,
+           en rojo, y dice donde cargarlo. Sin el script no: la importacion es
+           la de antes y la pestaña ya avisa que falta. */
+        $criticos = [];
+
+        if ($excedente !== null && $excedente['porc'] === null) {
+            $criticos[] = $excedente['error'] . ' Mientras tanto no se acepta ningún pago con excedente; '
+                . 'los pagos parciales y los netos se cargan igual.';
+        }
+
         return [
             'filas' => $filas,
             'resumen' => $resumen,
-            'avisos' => self::avisosImportacionPagos($resumen)
+            'avisos' => self::avisosImportacionPagos($resumen),
+            'criticos' => $criticos,
+            /* EL % CON EL QUE SE CLASIFICO. Vuelve con la confirmacion, y si el
+               de ese momento es otro no se aplica nada: ver
+               diferenciasConLoVisto(). */
+            'con_excedente' => ($excedente !== null),
+            'porc_excedente' => ($excedente === null) ? null : $excedente['porc']
         ];
     }
 
@@ -2028,7 +2815,8 @@ class Proveedores {
      * @param array $aperturas
      * @return array La fila, con su estado y su motivo
      */
-    private static function unMedio($fila, $pagos, $aperturas, $retCfg = null) {
+    private static function unMedio($fila, $pagos, $aperturas, $retCfg = null, $excedente = null,
+                                    $hoy = null) {
         if ($fila['estado'] === 'ERROR') {
             return $fila;
         }
@@ -2037,16 +2825,13 @@ class Proveedores {
            quedar cargada, y con la que la grilla va a resolver la alicuota. */
         $fila = self::conNeto($fila, $retCfg, $fila['fecha_pago']);
 
-        /* CON UN MEDIO, EL IMPORTE TIENE QUE SER EL NETO A PAGAR: lo que sale de
-           la caja, que es lo que pone quien arma la planilla. Otro numero es
-           otro comprobante, o un pago parcial que la planilla sabe y Tango
-           todavia no: cargarle la fecha a todo el pendiente diria una cosa que
-           la planilla no dice. Sin retenciones el neto es el pendiente, y la
-           regla es la de siempre. */
-        if ($fila['importe'] !== null) {
-            $dif = round($fila['importe'] - $fila['neto'], 2);
-
-            if (abs($dif) > self::TOLERANCIA_IMPORTE) {
+        if ($excedente === null) {
+            /* SIN EL SCRIPT DEL EXCEDENTE, EL IMPORTE TIENE QUE SER EL NETO A
+               PAGAR, como antes: un excedente o un parcial no tendrian donde
+               guardarse, y cargarle la fecha a todo el pendiente diria una cosa
+               que la planilla no dice. Sin retenciones el neto es el pendiente. */
+            if ($fila['importe'] !== null
+                && abs(round($fila['importe'] - $fila['neto'], 2)) > self::TOLERANCIA_IMPORTE) {
                 $fila['estado'] = 'ERROR';
                 $fila['motivo'] = self::motivoImporte('El importe (' . self::plata($fila['importe']) . ')',
                     $fila['importe'], $fila)
@@ -2054,11 +2839,51 @@ class Proveedores {
 
                 return $fila;
             }
+        } else {
+            /* CON EL SCRIPT, EL IMPORTE SE CLASIFICA: neto, excedente hasta el
+               %, o parcial. Lo que no es neto se guarda, porque es lo que se va
+               a proyectar. */
+            $c = self::clasificarImporte($fila['importe'], $fila['neto'], $excedente['porc'],
+                $excedente['error']);
+
+            if ($c['clasificacion'] === self::CLASIF_ERROR) {
+                return self::enErrorPorImporte($fila, $c,
+                    ' Con un solo medio, el IMPORTE puede quedar vacío y se toma el neto a pagar.');
+            }
+
+            $fila = self::conClasificacion($fila, $c, $fila['importe'], $excedente, $hoy, $retCfg);
         }
 
         $clave = self::clavePago($fila['cod_provee'], $fila['t_comp'], $fila['n_comp']);
         $existente = isset($pagos[$clave]) ? $pagos[$clave] : null;
         $apertura = isset($aperturas[$clave]) ? $aperturas[$clave] : null;
+
+        /* UN PAGO CON EXCEDENTE O PARCIAL se compara contra lo guardado en la
+           tabla de medios: igual es SIN_CAMBIOS, otro es CAMBIO -reimportar
+           reemplaza lo cargado-. */
+        if ($fila['clasificacion'] !== self::CLASIF_NETO) {
+            $texto = $fila['motivo'];
+
+            if ($apertura !== null && self::mismaApertura($apertura, $fila['medios'])) {
+                $fila['estado'] = 'SIN_CAMBIOS';
+                $fila['motivo'] = 'Ya estaba cargado igual. ' . $texto;
+            } elseif ($apertura !== null || ($existente !== null && $existente['FECHA_PAGO'] !== null)) {
+                $fila['estado'] = 'CAMBIO';
+                $fila['antes'] = [
+                    'fecha_pago' => $existente === null ? null : $existente['FECHA_PAGO'],
+                    'forma_pago' => $existente === null ? null : $existente['FORMA_PAGO'],
+                    'medios' => $apertura
+                ];
+                $fila['motivo'] = $texto . ' Reemplaza lo cargado ('
+                    . ($apertura !== null ? self::textoMedios($apertura)
+                        : 'fecha ' . self::formatoCorto($existente['FECHA_PAGO'])) . ').';
+            } else {
+                $fila['estado'] = 'ALTA';
+                $fila['motivo'] = $texto;
+            }
+
+            return self::marcarConciliado($fila, $existente);
+        }
 
         if ($existente === null && $apertura === null) {
             $fila['estado'] = 'ALTA';
@@ -2072,8 +2897,12 @@ class Proveedores {
                 'forma_pago' => null,
                 'medios' => $apertura
             ];
-            $fila['motivo'] = 'Deja de estar pagado con dos medios (' . self::textoMedios($apertura)
-                . '): vuelve a ser un comprobante con una sola fecha.';
+            $fila['motivo'] = (count($apertura) > 1)
+                ? 'Deja de estar pagado con dos medios (' . self::textoMedios($apertura)
+                    . '): vuelve a ser un comprobante con una sola fecha.'
+                : 'Deja de ser un pago ' . self::nombreClasificacion($apertura[0]) . ' ('
+                    . self::textoMedios($apertura) . '): vuelve a ser un comprobante con una sola '
+                    . 'fecha, por el neto a pagar.';
         } elseif ($existente['FECHA_PAGO'] === $fila['fecha_pago']
             && trim((string) $existente['FORMA_PAGO']) === trim((string) $fila['forma_pago'])) {
             $fila['estado'] = 'SIN_CAMBIOS';
@@ -2167,6 +2996,231 @@ class Proveedores {
     }
 
     /**
+     * QUE ES UN IMPORTE DE LA PLANILLA contra el neto a pagar. ES LA REGLA,
+     * escrita una vez: la usan un medio, dos medios -sobre la suma- y la
+     * confirmacion, que vuelve a pasar por aca.
+     *
+     * Con maximo = neto × (1 + %/100):
+     *
+     *   vacio                         NETO       se toma el neto, como siempre
+     *   neto ± $1                     NETO       el redondeo de quien la arma
+     *   > neto + $1 y <= maximo + $1  EXCEDENTE  la O/P deja la diferencia a
+     *                                            cuenta del proveedor en Tango
+     *   > maximo + $1                 ERROR      con el maximo en el motivo
+     *   > 0 y < neto − $1             PARCIAL    sin minimo: el saldo sigue
+     *                                            pendiente
+     *   0 o negativo                  ERROR
+     *
+     * SI CAE DENTRO DEL MAXIMO SE ACEPTA, PUNTO. Aunque coincida con el total
+     * de la factura sin retenciones: eso dejo de ser un error. motivoImporte()
+     * sigue ayudando a corregir solo cuando el importe supera el maximo.
+     *
+     * EL TOPE ES SOBRE EL NETO DEL COMPROBANTE ENTERO, tambien con cuotas, y el
+     * neto es el del pendiente de HOY: si Tango ya registro un pago parcial, el
+     * siguiente se mide contra lo que quedo. Asi una factura se paga en N veces.
+     *
+     * SIN % ($porc null, porque falta o esta roto) NO SE ACEPTA NINGUN
+     * EXCEDENTE, y el motivo dice por que y donde cargarlo. El parcial y el
+     * neto no dependen del %.
+     *
+     * Estatica y pura.
+     *
+     * @param float|null $importe El de la planilla, o la suma de los dos medios
+     * @param float $neto El neto a pagar del comprobante, a la fecha de pago
+     * @param float|null $porc El % de excedente permitido; null = no se sabe
+     * @param string|null $sinPorc El motivo por el que no hay %, para el error
+     * @return array ['clasificacion', 'maximo', 'excedente', 'saldo', 'porc',
+     *                'motivo' (solo en ERROR)]
+     */
+    public static function clasificarImporte($importe, $neto, $porc, $sinPorc = null) {
+        $neto = round(floatval($neto), 2);
+        $maximo = ($porc === null) ? null : round($neto * (1 + floatval($porc) / 100), 2);
+
+        $r = ['clasificacion' => self::CLASIF_NETO, 'maximo' => $maximo, 'excedente' => 0.0,
+              'saldo' => 0.0, 'porc' => null, 'motivo' => null];
+
+        if ($importe === null) {
+            return $r;
+        }
+
+        $importe = round(floatval($importe), 2);
+
+        if ($importe <= 0) {
+            $r['clasificacion'] = self::CLASIF_ERROR;
+            $r['motivo'] = 'El importe (' . self::plata($importe) . ') tiene que ser mayor a cero.';
+
+            return $r;
+        }
+
+        $dif = round($importe - $neto, 2);
+
+        if (abs($dif) <= self::TOLERANCIA_IMPORTE) {
+            return $r;
+        }
+
+        if ($dif < 0) {
+            $r['clasificacion'] = self::CLASIF_PARCIAL;
+            $r['saldo'] = round(-$dif, 2);
+
+            return $r;
+        }
+
+        $r['excedente'] = $dif;
+        $r['porc'] = ($neto > 0) ? round($dif / $neto * 100, 2) : null;
+
+        $supera = 'El importe (' . self::plata($importe) . ') supera el neto a pagar (' . self::plata($neto)
+            . ') en ' . self::plata($dif) . ($r['porc'] === null ? '' : ' (' . self::textoPorcentaje($r['porc']) . ')');
+
+        if ($maximo === null) {
+            $r['clasificacion'] = self::CLASIF_ERROR;
+            $r['motivo'] = $supera . ', y no se puede aceptar como excedente: '
+                . ($sinPorc !== null ? $sinPorc : 'falta el % de excedente permitido.');
+
+            return $r;
+        }
+
+        if ($importe > $maximo + self::TOLERANCIA_IMPORTE) {
+            $r['clasificacion'] = self::CLASIF_ERROR;
+            $r['motivo'] = $supera . ': el máximo permitido es ' . self::plata($maximo) . ' ('
+                . self::textoPorcentaje($porc) . ').';
+
+            return $r;
+        }
+
+        $r['clasificacion'] = self::CLASIF_EXCEDENTE;
+
+        return $r;
+    }
+
+    /**
+     * Una fila cuyo importe no se puede aceptar. Si supera el maximo y ademas
+     * coincide con el total de la factura sin retenciones, el motivo lo dice
+     * como siempre: es el error del primer dia, y motivoImporte() sabe
+     * explicarlo. Dentro del maximo eso ya no es un error.
+     *
+     * @param array $fila
+     * @param array $c Lo que devolvio clasificarImporte()
+     * @param string $cola Lo que se agrega al final del motivo
+     * @return array
+     */
+    private static function enErrorPorImporte($fila, $c, $cola = '') {
+        $fila['estado'] = 'ERROR';
+        $fila['motivo'] = $c['motivo'];
+
+        if ($fila['importe'] !== null && $fila['retenido'] > 0
+            && abs(round($fila['importe'] - $fila['importe_pendiente'], 2)) <= self::TOLERANCIA_IMPORTE) {
+            $fila['motivo'] .= ' ' . self::motivoImporte('El importe (' . self::plata($fila['importe']) . ')',
+                $fila['importe'], $fila);
+        }
+
+        $fila['motivo'] .= $cola;
+
+        return $fila;
+    }
+
+    /**
+     * Le agrega a una fila -o a la primera de dos medios- lo que dice su
+     * clasificacion: cuanto se paga, el excedente, el saldo, y los medios que
+     * se van a guardar. Para un parcial, proyecta el saldo con la regla del eje
+     * para decir en que fecha cae.
+     *
+     * @param array $fila
+     * @param array $c Lo que devolvio clasificarImporte()
+     * @param float $pagado El importe, o la suma de los dos medios
+     * @param array $excedente De opcionesExcedente()
+     * @param string|null $hoy
+     * @param array|null $retCfg
+     * @param array|null $medios Los medios, con dos; con uno se arma aca
+     * @return array
+     */
+    private static function conClasificacion($fila, $c, $pagado, $excedente, $hoy, $retCfg, $medios = null) {
+        $fila['clasificacion'] = $c['clasificacion'];
+        $fila['maximo'] = $c['maximo'];
+
+        if ($c['clasificacion'] === self::CLASIF_NETO) {
+            return $fila;
+        }
+
+        $fila['pagado'] = round(floatval($pagado), 2);
+        $fila['excedente'] = $c['excedente'];
+        $fila['porc_excedente'] = $c['porc'];
+        $fila['saldo'] = $c['saldo'];
+
+        if ($medios === null) {
+            /* CON UN MEDIO LA FORMA SIGUE EN LA TABLA DE PAGOS, como siempre:
+               en la de medios va en NULL. */
+            $medios = [['orden' => 1, 'fecha' => $fila['fecha_pago'], 'forma' => null, 'importe' => $fila['pagado']]];
+        }
+
+        foreach ($medios as $i => $m) {
+            $medios[$i]['clasificacion'] = $c['clasificacion'];
+            $medios[$i]['pendiente_import'] = $fila['importe_pendiente'];
+            $medios[$i]['neto_import'] = $fila['neto'];
+        }
+
+        $fila['medios'] = $medios;
+
+        $proy = null;
+
+        if ($c['clasificacion'] === self::CLASIF_PARCIAL && !empty($fila['_vtos'])) {
+            $proy = self::proyectarPagoImportado($fila['_vtos'], $medios,
+                ($hoy === null) ? date('Y-m-d') : $hoy,
+                isset($excedente['pagos_crono']) ? $excedente['pagos_crono'] : null, $retCfg);
+            $fila['saldo_fecha'] = $proy['info']['saldo_fecha'];
+        }
+
+        $fila['motivo'] = self::textoClasificacion($c, $fila['pagado'], $fila['neto'], $proy);
+
+        return $fila;
+    }
+
+    /** 'con excedente' / 'parcial', para los motivos */
+    private static function nombreClasificacion($medio) {
+        $c = isset($medio['clasificacion']) ? $medio['clasificacion'] : self::CLASIF_NETO;
+
+        return ($c === self::CLASIF_EXCEDENTE) ? 'con excedente'
+            : (($c === self::CLASIF_PARCIAL) ? 'parcial' : 'por el neto');
+    }
+
+    /** 5 => '5%', 12.5 => '12,5%', 2.94 => '2,94%' */
+    private static function textoPorcentaje($n) {
+        return rtrim(rtrim(number_format(floatval($n), 2, ',', '.'), '0'), ',') . '%';
+    }
+
+    /**
+     * Lo que dice la previsualizacion de un pago con excedente o parcial. El
+     * saldo dice EN QUE FECHA se proyecta, y para eso usa la misma regla que el
+     * eje -proyectarPagoImportado()-: si la planilla dijera una fecha y la
+     * grilla otra, no habria donde notarlo.
+     *
+     * @param array $c Lo que devolvio clasificarImporte()
+     * @param float $pagado
+     * @param float $neto
+     * @param array|null $proy Lo que devolvio proyectarPagoImportado(), si hay saldo
+     * @return string
+     */
+    private static function textoClasificacion($c, $pagado, $neto, $proy = null) {
+        if ($c['clasificacion'] === self::CLASIF_EXCEDENTE) {
+            return 'Se paga ' . self::plata($pagado) . ': neto ' . self::plata($neto) . ' + excedente '
+                . self::plata($c['excedente']) . ' (' . self::textoPorcentaje($c['porc'])
+                . '), que queda a cuenta del proveedor en Tango.';
+        }
+
+        $texto = 'Se paga ' . self::plata($pagado) . ' de un neto de ' . self::plata($neto) . '. El saldo de '
+            . self::plata($c['saldo']) . ' se proyecta';
+
+        $saldo = ($proy === null) ? null : $proy['info']['saldo_fecha'];
+
+        if ($saldo === null || $saldo['fecha'] === null) {
+            return $texto . ' con la jerarquía de siempre: vencimiento, emisión + plazo, o el próximo día '
+                . 'de pago si es del cronograma.';
+        }
+
+        return $texto . ' el ' . self::formatoCorto($saldo['fecha']) . ' (' . $saldo['origen'] . ')'
+            . ($saldo['cuotas'] > 1 ? ', y el resto de las cuotas en sus fechas' : '') . '.';
+    }
+
+    /**
      * Un comprobante en DOS filas: dos medios. Se cargan las dos o ninguna.
      * Ver compararImportacion().
      *
@@ -2182,7 +3236,8 @@ class Proveedores {
      * @param array|null $retCfg
      * @return array Las dos filas, con el mismo estado y el mismo motivo
      */
-    private static function dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg = null) {
+    private static function dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg = null,
+                                      $excedente = null, $hoy = null) {
         $lineas = 'líneas ' . $grupo[0]['linea'] . ' y ' . $grupo[1]['linea'];
 
         foreach ($grupo as $i => $f) {
@@ -2272,7 +3327,19 @@ class Proveedores {
                 . implode('; ', $importes);
         }
 
-        if ($importesOk) {
+        /* CON EL SCRIPT DEL EXCEDENTE, LA SUMA SE CLASIFICA como un importe de
+           un medio: neto, excedente hasta el %, o parcial. Cada fila sigue
+           teniendo que ser mayor a cero, y eso ya se miro arriba. */
+        $c = null;
+
+        if ($importesOk && $excedente !== null) {
+            $c = self::clasificarImporte($suma, $base['neto'], $excedente['porc'], $excedente['error']);
+
+            if ($c['clasificacion'] === self::CLASIF_ERROR) {
+                $problemas[] = lcfirst(rtrim(str_replace('El importe (' . self::plata($suma) . ')',
+                    'Los importes suman ' . self::plata($suma), $c['motivo']), '.'));
+            }
+        } elseif ($importesOk) {
             $dif = round($suma - $base['neto'], 2);
 
             if (abs($dif) > self::TOLERANCIA_IMPORTE) {
@@ -2306,6 +3373,36 @@ class Proveedores {
             $grupo[$i]['parte'] = $i + 1;
             $medios[] = ['orden' => $i + 1, 'fecha' => $f['fecha_pago'], 'forma' => $f['forma_pago'],
                          'importe' => round($f['importe'], 2)];
+        }
+
+        /* LO QUE DICE LA CLASIFICACION, igual en las dos filas: cuanto se
+           paga, el excedente o el saldo, y en que fecha cae el saldo. Los
+           medios salen de aca con su clasificacion, que es lo que se guarda. */
+        $textoClasif = '';
+
+        if ($c !== null) {
+            $clasificada = self::conClasificacion($base, $c, $suma, $excedente, $hoy, $retCfg, $medios);
+
+            if ($c['clasificacion'] !== self::CLASIF_NETO) {
+                $medios = $clasificada['medios'];
+                $textoClasif = ' ' . $clasificada['motivo'];
+            } else {
+                foreach ($medios as $i => $m) {
+                    $medios[$i]['clasificacion'] = self::CLASIF_NETO;
+                    $medios[$i]['pendiente_import'] = $base['importe_pendiente'];
+                    $medios[$i]['neto_import'] = $base['neto'];
+                }
+            }
+
+            foreach ($grupo as $i => $f) {
+                foreach (['clasificacion', 'maximo', 'pagado', 'excedente', 'porc_excedente', 'saldo'] as $k) {
+                    $grupo[$i][$k] = $clasificada[$k];
+                }
+
+                if (isset($clasificada['saldo_fecha'])) {
+                    $grupo[$i]['saldo_fecha'] = $clasificada['saldo_fecha'];
+                }
+            }
         }
 
         $clave = self::clavePago($base['cod_provee'], $base['t_comp'], $base['n_comp']);
@@ -2342,7 +3439,7 @@ class Proveedores {
 
         foreach ($grupo as $i => $f) {
             $grupo[$i]['estado'] = $estado;
-            $grupo[$i]['motivo'] = $motivo;
+            $grupo[$i]['motivo'] = $motivo . $textoClasif;
             $grupo[$i]['medios'] = $medios;
             $grupo[$i]['aviso'] = $aviso;
             $grupo[$i]['antes'] = ($antes === null && $existente === null) ? null : [
@@ -2423,18 +3520,31 @@ class Proveedores {
                 || round(floatval($m['importe']), 2) !== round(floatval($b[$i]['importe']), 2)) {
                 return false;
             }
+
+            /* LA MISMA PLATA PUEDE SER OTRA COSA: si el neto cambio, lo que
+               antes era el neto ahora es un parcial. Sin clasificacion -la
+               tabla de antes del script- es NETO. */
+            $ca = isset($m['clasificacion']) ? $m['clasificacion'] : self::CLASIF_NETO;
+            $cb = isset($b[$i]['clasificacion']) ? $b[$i]['clasificacion'] : self::CLASIF_NETO;
+
+            if ($ca !== $cb) {
+                return false;
+            }
         }
 
         return true;
     }
 
-    /** "ECHEQ $ 150.000,00 el 20/10/2026 y TRANSFERENCIA $ 50.000,00 el 27/10/2026" */
+    /**
+     * "ECHEQ $ 150.000,00 el 20/10/2026 y TRANSFERENCIA $ 50.000,00 el 27/10/2026".
+     * Un pago de un medio no guarda la forma en la tabla de medios: dice "pago".
+     */
     private static function textoMedios($medios) {
         $partes = [];
 
         foreach ($medios as $m) {
-            $partes[] = $m['forma'] . ' ' . self::plata($m['importe']) . ' el '
-                . self::formatoCorto($m['fecha']);
+            $partes[] = (empty($m['forma']) ? 'pago' : $m['forma']) . ' ' . self::plata($m['importe'])
+                . ' el ' . self::formatoCorto($m['fecha']);
         }
 
         return implode(' y ', $partes);
@@ -2704,6 +3814,19 @@ class Proveedores {
             'retenido' => 0.0,
             'retenciones' => [],
             'neto' => null,
+            /* QUE ES EL IMPORTE contra el neto: NETO, EXCEDENTE o PARCIAL -ver
+               clasificarImporte()-, cuanto se paga, el excedente, el saldo que
+               queda, y el maximo que se habria aceptado. */
+            'clasificacion' => self::CLASIF_NETO,
+            'pagado' => null,
+            'excedente' => 0.0,
+            'porc_excedente' => null,
+            'saldo' => 0.0,
+            'maximo' => null,
+            /* Las cuotas pendientes del comprobante, tal como las da
+               getPendientes(): con ellas se proyecta el saldo de un parcial.
+               No viajan al navegador. */
+            '_vtos' => [],
             'fecha_vto' => null,
             'estaba_vencido' => false,
             // Cuantos vencimientos pendientes tiene: con mas de uno no se parte.
@@ -2828,6 +3951,7 @@ class Proveedores {
 
             $fila['importe_pendiente'] += floatval($c['IMPORTE_PENDIENTE']);
             $fila['vencimientos']++;
+            $fila['_vtos'][] = $c;
 
             if (!empty($c['SIN_FECHA_CARGADA'])) {
                 $fila['estaba_vencido'] = true;
@@ -2902,6 +4026,18 @@ class Proveedores {
                     : '');
         }
 
+        if ($resumen['con_excedente'] > 0) {
+            $avisos[] = $resumen['con_excedente'] . ' comprobante(s) se pagan con excedente: '
+                . self::plata($resumen['importe_excedente']) . ' más que su neto a pagar, que quedan a '
+                . 'cuenta de los proveedores en Tango. El cashflow proyecta el importe pagado completo.';
+        }
+
+        if ($resumen['pagos_parciales'] > 0) {
+            $avisos[] = $resumen['pagos_parciales'] . ' comprobante(s) se pagan en parte: '
+                . self::plata($resumen['importe_parcial']) . ' en la fecha de la planilla, y el saldo de '
+                . 'cada uno sigue con su vencimiento o el próximo día de pago.';
+        }
+
         if ($resumen['errores'] > 0) {
             $avisos[] = $resumen['errores'] . ' fila(s) no se pueden cargar y quedan afuera. '
                 . 'El resto se importa igual: mirá el motivo de cada una, porque no todas '
@@ -2964,6 +4100,70 @@ class Proveedores {
      */
     public static function camposDeImportacion($filas) {
         $filas = array_values($filas);
+        $clasif = isset($filas[0]['clasificacion']) ? $filas[0]['clasificacion'] : self::CLASIF_NETO;
+
+        /* UN PAGO CON EXCEDENTE O PARCIAL SE GUARDA, con uno o dos medios: es
+           lo que se va a proyectar. Los medios ya vienen armados de
+           compararImportacion(), con su clasificacion y el pendiente y el neto
+           del comprobante al importar.
+
+           LA FECHA DE LA TABLA DE PAGOS:
+             EXCEDENTE  la de la planilla -la mas tardia con dos medios-: la
+                        O/P cancela la factura y concilia como cualquier otra,
+                        midiendo el desvio contra esa fecha;
+             PARCIAL    NINGUNA. La factura sigue pendiente despues del pago, y
+                        el saldo -y despues el pendiente que deje Tango- va por
+                        la jerarquia de siempre, como si no tuviera fecha
+                        cargada. Una fecha cargada a mano antes se reemplaza:
+                        reimportar reemplaza lo cargado.
+
+           Con un medio la forma va en la tabla de pagos, como siempre; con dos,
+           en cada medio. */
+        if ($clasif !== self::CLASIF_NETO) {
+            $obs = [];
+            $ultima = null;
+
+            foreach ($filas as $f) {
+                if ($f['observacion'] !== null && !in_array($f['observacion'], $obs, true)) {
+                    $obs[] = $f['observacion'];
+                }
+
+                if ($ultima === null || $f['fecha_pago'] > $ultima) {
+                    $ultima = $f['fecha_pago'];
+                }
+            }
+
+            $uno = (count($filas) === 1);
+            $medios = [];
+
+            foreach ($filas[0]['medios'] as $m) {
+                $orig = null;
+
+                foreach ($filas as $f) {
+                    if (!$uno && $f['fecha_pago'] === $m['fecha'] && $f['forma_pago'] === $m['forma']) {
+                        $orig = ($f['forma_pago_orig'] === '') ? null : $f['forma_pago_orig'];
+                    }
+                }
+
+                $medios[] = [
+                    'orden' => $m['orden'], 'fecha' => $m['fecha'], 'forma' => $uno ? null : $m['forma'],
+                    'forma_orig' => $orig, 'importe' => round(floatval($m['importe']), 2),
+                    'clasificacion' => $clasif, 'pendiente_import' => $m['pendiente_import'],
+                    'neto_import' => $m['neto_import']
+                ];
+            }
+
+            return [
+                'pago' => [
+                    'FECHA_PAGO' => ($clasif === self::CLASIF_PARCIAL) ? null : $ultima,
+                    'FORMA_PAGO' => $uno ? $filas[0]['forma_pago'] : null,
+                    'FORMA_PAGO_ORIG' => ($uno && $filas[0]['forma_pago_orig'] !== '')
+                        ? $filas[0]['forma_pago_orig'] : null,
+                    'OBSERVACION' => empty($obs) ? null : mb_substr(implode(' · ', $obs), 0, 200)
+                ],
+                'medios' => $medios
+            ];
+        }
 
         if (count($filas) === 1) {
             $f = $filas[0];
@@ -2991,7 +4191,11 @@ class Proveedores {
                 'fecha' => $f['fecha_pago'],
                 'forma' => $f['forma_pago'],
                 'forma_orig' => ($f['forma_pago_orig'] === '') ? null : $f['forma_pago_orig'],
-                'importe' => round(floatval($f['importe']), 2)
+                'importe' => round(floatval($f['importe']), 2),
+                // Con el script, se guarda que es NETO y contra que se comparo.
+                'clasificacion' => self::CLASIF_NETO,
+                'pendiente_import' => isset($f['importe_pendiente']) ? $f['importe_pendiente'] : null,
+                'neto_import' => isset($f['neto']) ? $f['neto'] : null
             ];
 
             if ($ultima === null || $f['fecha_pago'] > $ultima) {
@@ -3025,26 +4229,46 @@ class Proveedores {
      *
      * Estatica y pura.
      *
+     * TAMBIEN EL % DE EXCEDENTE, y la clasificacion de cada linea. Si alguien
+     * cambio el % entre la previsualizacion y la confirmacion, lo que se
+     * confirmaria se clasifico con otra regla, aunque ninguna linea haya
+     * cambiado de estado: se frena igual que cualquier otro cambio.
+     *
      * @param array $vistas Filas de la comparacion que vino del navegador
      * @param array $actuales Filas de la comparacion recalculada
+     * @param mixed $porcVisto El % con el que se previsualizo; false = no se compara
+     * @param mixed $porcActual El % de ahora; false = no se compara
      * @return array Textos, uno por linea que cambio
      */
-    public static function diferenciasConLoVisto($vistas, $actuales) {
+    public static function diferenciasConLoVisto($vistas, $actuales, $porcVisto = false, $porcActual = false) {
         $antes = [];
         $ahora = [];
         $netoAntes = [];
+        $clasifAntes = [];
+        $difs = [];
+
+        if ($porcActual !== false) {
+            $va = ($porcVisto === false || $porcVisto === null || $porcVisto === '') ? null
+                : round(floatval($porcVisto), 2);
+            $ac = ($porcActual === null) ? null : round(floatval($porcActual), 2);
+
+            if ($porcVisto === false || $va !== $ac) {
+                $difs[] = 'el % de excedente permitido pasó de '
+                    . ($va === null ? 'sin cargar' : self::textoPorcentaje($va)) . ' a '
+                    . ($ac === null ? 'sin cargar' : self::textoPorcentaje($ac));
+            }
+        }
 
         foreach (is_array($vistas) ? $vistas : [] as $f) {
             $l = intval(isset($f['linea']) ? $f['linea'] : 0);
             $antes[$l] = isset($f['estado']) ? $f['estado'] : '';
             $netoAntes[$l] = isset($f['neto']) ? $f['neto'] : null;
+            $clasifAntes[$l] = isset($f['clasificacion']) ? $f['clasificacion'] : self::CLASIF_NETO;
         }
 
         foreach ($actuales as $f) {
             $ahora[intval($f['linea'])] = $f['estado'];
         }
-
-        $difs = [];
 
         foreach ($actuales as $f) {
             $linea = intval($f['linea']);
@@ -3064,7 +4288,14 @@ class Proveedores {
             if ($f['estado'] !== 'ERROR' && $na !== null && $f['neto'] !== null
                 && abs(round(floatval($na) - floatval($f['neto']), 2)) > 0.004) {
                 $difs[] = 'línea ' . $linea . ': el neto a pagar pasó de ' . self::plata($na) . ' a '
-                    . self::plata($f['neto']) . ' (cambió una alícuota de retención)';
+                    . self::plata($f['neto']) . ' (cambió una alícuota de retención o el pendiente)';
+                continue;
+            }
+
+            $ca = isset($f['clasificacion']) ? $f['clasificacion'] : self::CLASIF_NETO;
+
+            if ($f['estado'] !== 'ERROR' && isset($clasifAntes[$linea]) && $clasifAntes[$linea] !== $ca) {
+                $difs[] = 'línea ' . $linea . ': pasó de ' . $clasifAntes[$linea] . ' a ' . $ca;
             }
         }
 
@@ -3101,9 +4332,11 @@ class Proveedores {
      *        volvio del navegador
      * @param string $usuario
      * @param string|null $hoy 'Y-m-d'
+     * @param Horizonte|null $h Para el cronograma con el que se describe el
+     *        saldo de un parcial
      * @return array ['altas', 'cambios'] por comprobante
      */
-    public function aplicarImportacion($comparacion, $usuario, $hoy = null) {
+    public function aplicarImportacion($comparacion, $usuario, $hoy = null, $h = null) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
 
         if (!$this->tablaCreada()) {
@@ -3127,15 +4360,23 @@ class Proveedores {
         $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
         $conMedios = $this->tablaMedioCreada();
 
-        /* CON LAS ALICUOTAS DE AHORA: si alguna cambio desde la
-           previsualizacion, el neto de esa linea cambio y no se aplica nada. */
+        /* CON LAS ALICUOTAS Y EL % DE AHORA: si alguno cambio desde la
+           previsualizacion, el neto o la clasificacion de esa linea cambio y no
+           se aplica nada. */
         $this->retenciones->olvidar();
+        $this->porcExcedente = null;
+        $excedente = $this->opcionesExcedente($h);
         $pendientes = $this->getPendientes($hoyStr);
         $actual = self::compararImportacion($crudas, $pendientes, $this->getPagos(),
             $hoyStr, $this->getAperturas(), $conMedios, $this->retenciones->config(),
-            $this->estadoComprobantesEnTango(self::sinCruce($crudas, $pendientes)));
+            $this->estadoComprobantesEnTango(self::sinCruce($crudas, $pendientes)), $excedente);
 
-        $difs = self::diferenciasConLoVisto($vistas, $actual['filas']);
+        /* EL % SE COMPARA SOLO CON EL SCRIPT CORRIDO: sin el no hay %. Uno que
+           no vino del navegador cuenta como distinto, y frena. */
+        $difs = self::diferenciasConLoVisto($vistas, $actual['filas'],
+            ($excedente === null) ? false
+                : (array_key_exists('porc_excedente', $comparacion) ? $comparacion['porc_excedente'] : false),
+            ($excedente === null) ? false : $excedente['porc']);
 
         if (!empty($difs)) {
             throw new Exception('Algo cambió desde que se previsualizó la planilla ('
@@ -3226,15 +4467,28 @@ class Proveedores {
 
         sqlsrv_free_stmt($stmt);
 
+        /* Con el script del excedente se guarda ademas que es -NETO, EXCEDENTE o
+           PARCIAL- y el pendiente y el neto del comprobante al importar: con
+           eso se sabe despues si Tango ya registro el pago. */
+        $conExcedente = $this->tablaExcedenteCreada();
+
         foreach (is_array($medios) ? $medios : [] as $m) {
+            $cols = 'COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG, IMPORTE, '
+                . 'USUARIO_ALTA, USUARIO_MODIF';
+            $vals = [$cod, $t, $n, intval($m['orden']), $m['fecha'], $m['forma'],
+                     isset($m['forma_orig']) ? $m['forma_orig'] : null,
+                     round(floatval($m['importe']), 2), $usuario, $usuario];
+
+            if ($conExcedente) {
+                $cols .= ', CLASIFICACION, PENDIENTE_IMPORT, NETO_IMPORT';
+                $vals[] = isset($m['clasificacion']) ? $m['clasificacion'] : self::CLASIF_NETO;
+                $vals[] = isset($m['pendiente_import']) ? $m['pendiente_import'] : null;
+                $vals[] = isset($m['neto_import']) ? $m['neto_import'] : null;
+            }
+
             $stmt = sqlsrv_query($cid,
-                "INSERT INTO dbo." . self::TABLA_MEDIO . "
-                    (COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                     IMPORTE, USUARIO_ALTA, USUARIO_MODIF)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [$cod, $t, $n, intval($m['orden']), $m['fecha'], $m['forma'],
-                 isset($m['forma_orig']) ? $m['forma_orig'] : null,
-                 round(floatval($m['importe']), 2), $usuario, $usuario]);
+                "INSERT INTO dbo." . self::TABLA_MEDIO . " (" . $cols . ")
+                 VALUES (" . implode(', ', array_fill(0, count($vals), '?')) . ")", $vals);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al guardar la apertura en dos medios'));
@@ -3245,10 +4499,12 @@ class Proveedores {
     }
 
     /**
-     * Saca de un lote los comprobantes pagados con dos medios.
+     * Saca de un lote los comprobantes con un pago importado: con dos medios,
+     * con excedente o parcial. Todos tienen filas en la tabla de medios.
      *
-     * El fechado masivo pone UNA fecha, y un comprobante abierto tiene dos: su
-     * fecha se cambia reimportando o con el boton de volver al vencimiento. Se
+     * El fechado masivo pone UNA fecha, y un comprobante abierto tiene dos -o
+     * una parte pagada y un saldo-: su fecha se cambia reimportando o con el
+     * boton de volver al vencimiento. Se
      * dice en el dialogo antes de confirmar, y se vuelve a filtrar aca porque
      * el endpoint se alcanza sin pasar por la pantalla.
      *
@@ -3320,10 +4576,13 @@ class Proveedores {
            tipeada en la celda no dice a cual de las dos reemplaza. La grilla no
            ofrece el campo para esas filas; esto es para quien llegue al
            endpoint por su cuenta. */
+        /* Y UNO CON UN PAGO IMPORTADO CON EXCEDENTE O PARCIAL TAMPOCO: su fecha
+           es parte de lo importado -lo pagado va en la de la planilla, el saldo
+           por la jerarquia- y una fecha tipeada partiria esa decision a medias. */
         if (isset($this->getAperturas()[self::clavePago($cod, $t, $n)])) {
-            throw new Exception('Este comprobante está pagado con dos medios, así que tiene dos '
-                . 'fechas. Se cambian reimportando la planilla de pagos, o con el botón de volver '
-                . 'al vencimiento, que borra la apertura entera.');
+            throw new Exception('Este comprobante tiene un pago importado —con dos medios, con '
+                . 'excedente o parcial—, así que su fecha sale de la planilla. Se cambia reimportando '
+                . 'la planilla de pagos, o con el botón de volver al vencimiento, que lo borra entero.');
         }
 
         /* Ver la nota del docblock de guardarPago(): lo que no entra al mapa no
@@ -3401,8 +4660,9 @@ class Proveedores {
         list($claves, $omitidos) = self::sinAbiertos($claves, $this->getAperturas());
 
         if (empty($claves)) {
-            throw new Exception('Los ' . $omitidos . ' comprobante(s) elegidos están pagados con dos '
-                . 'medios: sus fechas se cambian reimportando la planilla de pagos.');
+            throw new Exception('Los ' . $omitidos . ' comprobante(s) elegidos tienen un pago importado '
+                . '—con dos medios, con excedente o parcial—: sus fechas se cambian reimportando la '
+                . 'planilla de pagos.');
         }
 
         $this->guardarLote($claves, ['FECHA_PAGO' => $f], 'MANUAL', $usuario);
@@ -4145,13 +5405,22 @@ class Proveedores {
                 }
 
                 if ($c['ESTADO'] !== 'PEN' && $c['FECHA_CANCELADO'] !== null) {
+                    $alta = isset($pago['FECHA_ALTA']) ? $pago['FECHA_ALTA'] : null;
+
                     $plan['concilia'][] = [
                         'cod_provee' => $pago['COD_PROVEE'], 't_comp' => $pago['T_COMP'],
                         'n_comp' => $pago['N_COMP'], 'fecha_prevista' => $pago['FECHA_PAGO'],
                         'fecha_cancelado' => $c['FECHA_CANCELADO'],
                         // Cuantos dias antes o despues de lo previsto se pago. Es
                         // el dato por el que existe guardar las dos fechas.
-                        'desvio_dias' => self::desvioDias($pago['FECHA_PAGO'], $c['FECHA_CANCELADO'])
+                        'desvio_dias' => self::desvioDias($pago['FECHA_PAGO'], $c['FECHA_CANCELADO']),
+                        /* CANCELADA CON SALDO A CUENTA: la fecha real es ANTERIOR
+                           a cuando se cargo la prevision. No es que se pago antes
+                           de decidirlo: Tango le pone a la imputacion de un saldo
+                           a cuenta la fecha de la O/P vieja. Concilia igual, pero
+                           su desvio no dice nada de la prevision. Se deriva al
+                           leer: las dos fechas ya estan guardadas. */
+                        'a_cuenta' => ($alta !== null && $c['FECHA_CANCELADO'] < $alta)
                     ];
                 }
             }
@@ -4294,12 +5563,25 @@ class Proveedores {
             $texto = 'Se conciliaron ' . count($concilia) . ' previsión(es) con Tango: ya figuran '
                 . 'pagadas. Su fecha prevista queda, con la real al lado.';
 
+            /* LAS CANCELADAS CON SALDO A CUENTA NO ENTRAN EN EL DESVIO: su fecha
+               real es la de una O/P vieja, y meterlas diria que se paga meses
+               antes de lo previsto. Se dicen aparte. */
             $conDesvio = [];
+            $aCuenta = [];
 
             foreach ($concilia as $c) {
-                if ($c['desvio_dias'] !== null) {
+                if (!empty($c['a_cuenta'])) {
+                    $aCuenta[] = $c['t_comp'] . ' ' . $c['n_comp'] . ' (' . $c['cod_provee'] . ')';
+                } elseif ($c['desvio_dias'] !== null) {
                     $conDesvio[] = $c['desvio_dias'];
                 }
+            }
+
+            if (!empty($aCuenta)) {
+                $texto .= ' ' . count($aCuenta) . ' de ellas quedan marcadas "cancelada con saldo a cuenta": '
+                    . 'su fecha real es anterior a la previsión, porque Tango usa la fecha de la O/P vieja, '
+                    . 'y no entran en el desvío promedio (' . implode(', ', array_slice($aCuenta, 0, 10))
+                    . (count($aCuenta) > 10 ? ' y ' . (count($aCuenta) - 10) . ' más' : '') . ').';
             }
 
             if (count($conDesvio) >= 5) {
@@ -4329,6 +5611,449 @@ class Proveedores {
         }
 
         return $avisos;
+    }
+
+    /* ====================================================================
+       EL PAGO IMPORTADO QUE TANGO YA REGISTRO
+
+       Un pago parcial no saca la factura de pendientes: le baja el pendiente.
+       La proyeccion ya se da cuenta sola -proyectarPagoImportado() compara el
+       pendiente con el de la importacion- y deja de proyectar lo pagado. Lo
+       que hace esto es DEJARLO ANOTADO, como la conciliacion: la parte pasa a
+       REGISTRADO con la fecha real y el pendiente que quedo, y no se borra.
+       Asi se puede ver despues que hubo un pago parcial y cuando se hizo.
+
+       Corre sola al cargar la pestaña, con el usuario del sistema. El
+       tablero no escribe: solo proyecta.
+       ==================================================================== */
+
+    /** Quien firma la marca: SISTEMA:Proveedores.registrarPagosAutomatico */
+    public static function usuarioRegistro() {
+        return AuthCashflow::origen('Proveedores.registrarPagosAutomatico');
+    }
+
+    /**
+     * QUE HAY QUE ANOTAR, sin escribir nada: los comprobantes cuyo pago
+     * importado Tango registro y todavia figuran PREVISTO. Estatica y pura.
+     *
+     * @param array $items Filas de getPendientes() con horizonte, ya proyectadas
+     * @return array Lista de ['cod_provee', 't_comp', 'n_comp', 'pendiente', 'clasificacion']
+     */
+    public static function planRegistroPagos($items) {
+        $plan = [];
+
+        foreach (is_array($items) ? $items : [] as $i) {
+            if (empty($i['PAGO_IMPORTADO']) || empty($i['PAGO_IMPORTADO']['por_registrar'])) {
+                continue;
+            }
+
+            $clave = self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP']);
+
+            if (!isset($plan[$clave])) {
+                $plan[$clave] = ['cod_provee' => $i['COD_PROVEE'], 't_comp' => $i['T_COMP'],
+                                 'n_comp' => $i['N_COMP'], 'pendiente' => 0.0,
+                                 'clasificacion' => $i['PAGO_IMPORTADO']['clasificacion'],
+                                 'pagado' => $i['PAGO_IMPORTADO']['pagado'],
+                                 'razon_social' => isset($i['RAZON_SOC']) ? $i['RAZON_SOC'] : ''];
+            }
+
+            $plan[$clave]['pendiente'] = round($plan[$clave]['pendiente'] + floatval($i['IMPORTE_PENDIENTE']), 2);
+        }
+
+        return array_values($plan);
+    }
+
+    /**
+     * Anota los pagos importados que Tango ya registro. Escribe solo si hay
+     * algo que anotar. LANZA si falla al leer o escribir: quien llama decide,
+     * y la pestaña carga igual con un aviso.
+     *
+     * LA FECHA REAL es la de la ultima imputacion del comprobante en Tango,
+     * MAX(CPA05.F_COMP_CAN): el mismo criterio que la conciliacion, con la
+     * misma consulta acotada (estadoComprobantesEnTango()).
+     *
+     * @param array $items Filas de getPendientes() con horizonte
+     * @return array ['registrados' => [...], 'avisos' => [...]]
+     */
+    public function registrarPagosAutomatico($items) {
+        $vacio = ['registrados' => [], 'avisos' => []];
+
+        if (!$this->tablaExcedenteCreada()) {
+            return $vacio;
+        }
+
+        $plan = self::planRegistroPagos($items);
+
+        if (empty($plan)) {
+            return $vacio;
+        }
+
+        $pares = [];
+
+        foreach ($plan as $p) {
+            $pares[$p['cod_provee'] . '|' . $p['n_comp']] = ['cod' => $p['cod_provee'], 'n' => $p['n_comp']];
+        }
+
+        $enTango = $this->estadoComprobantesEnTango(array_values($pares));
+
+        if ($enTango === null) {
+            throw new Exception('no se pudo leer la fecha real de los pagos en Tango');
+        }
+
+        foreach ($plan as $k => $p) {
+            $plan[$k]['fecha_real'] = null;
+
+            foreach (isset($enTango[$p['cod_provee'] . '|' . $p['n_comp']])
+                         ? $enTango[$p['cod_provee'] . '|' . $p['n_comp']] : [] as $c) {
+                if (Planilla::codigo($c['T_COMP']) === $p['t_comp']) {
+                    $plan[$k]['fecha_real'] = $c['FECHA_CANCELADO'];
+                }
+            }
+        }
+
+        $hechos = $this->escribirRegistroPagos($plan, self::usuarioRegistro());
+
+        return ['registrados' => $hechos, 'avisos' => self::avisosRegistroPagos($hechos)];
+    }
+
+    /**
+     * Escribe la marca, en UNA transaccion. Idempotente: cada UPDATE toca las
+     * partes VIGENTES que siguen PREVISTO; si otra carga ya las marco, no
+     * afecta nada y no se cuenta. Sin bajas fisicas: la parte sigue vigente
+     * -es lo que dice que hubo un pago- hasta que se reimporte o se borre.
+     *
+     * Protegida para que una prueba pueda reemplazar la escritura.
+     *
+     * @param array $plan
+     * @param string $usuario
+     * @return array Los que efectivamente se marcaron
+     */
+    protected function escribirRegistroPagos($plan, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $cid = $this->conectar();
+        $hechos = [];
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($plan as $p) {
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_MEDIO . "
+                     SET ESTADO_TANGO = 'REGISTRADO', FECHA_REAL = ?, PENDIENTE_REAL = ?,
+                         FECHA_REGISTRO = GETDATE(), " . Auditoria::SET_MODIF . "
+                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ? AND VIGENTE = 1
+                       AND ESTADO_TANGO = 'PREVISTO'",
+                    [$p['fecha_real'], $p['pendiente'], $usuario, $p['cod_provee'], $p['t_comp'], $p['n_comp']]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al anotar el pago de ' . $p['t_comp'] . ' '
+                        . $p['n_comp']));
+                }
+
+                if (sqlsrv_rows_affected($stmt) > 0) {
+                    $hechos[] = $p;
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la marca de los pagos'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $hechos;
+    }
+
+    /**
+     * El aviso de lo que se anoto, en la seccion Conciliacion: informativo,
+     * como el de las conciliadas. Si no se anoto nada, ninguno.
+     *
+     * @param array $hechos
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosRegistroPagos($hechos) {
+        if (empty($hechos)) {
+            return [];
+        }
+
+        $detalle = [];
+
+        foreach (array_slice($hechos, 0, 10) as $h) {
+            $detalle[] = trim($h['razon_social'] . ' (' . $h['cod_provee'] . ') ' . $h['t_comp'] . ' '
+                . $h['n_comp']) . ': queda ' . self::plata($h['pendiente'])
+                . ($h['fecha_real'] !== null ? ', pagado el ' . self::formatoCorto($h['fecha_real']) : '');
+        }
+
+        return [Aviso::nuevo(Aviso::INFO, 'Tango registró ' . count($hechos) . ' pago(s) importado(s) que '
+            . 'no cancelaban la factura: deja de proyectarse lo pagado y se proyecta sólo lo que quedó '
+            . 'pendiente, con su vencimiento o el próximo día de pago. ' . implode('; ', $detalle)
+            . (count($hechos) > 10 ? '; y ' . (count($hechos) - 10) . ' más' : '') . '.', 'Conciliación')];
+    }
+
+    /* ====================================================================
+       LOS SALDOS A CUENTA
+
+       Lo que los proveedores tienen a cuenta en Tango y todavia no se imputo
+       a ninguna factura. NO SUMA EN NINGUNA SERIE NI DESCUENTA NADA de lo
+       proximo a pagar: solo se informa. Cuando Proveedores lo imputa a una
+       factura nueva, el pendiente de esa factura ya viene reducido y el aviso
+       desaparece solo.
+
+       COMO LO REGISTRA TANGO (medido el 03/11/2026): una O/P que no se imputo
+       entera queda en CPA04 con ESTADO = 'CTA'. Lo que tiene a cuenta es
+       IMPORTE_TO menos lo imputado en CPA05 por ID_CPA04_CANCELADO. Cuando
+       se imputa a una factura nueva, la fila de CPA05 lleva ID_CPA04_OP en
+       NULL y LA FECHA DE LA O/P, no la de la imputacion, y la O/P pasa a
+       'IMP'. OP_IMPORTE_TOTAL_PAGO_CUENTA no sirve: es lo que quedo a cuenta
+       al emitir, y no se actualiza.
+
+       DOS TIPOS, y se avisan por separado porque son cosas distintas:
+
+         EXCEDENTE    la O/P imputo una factura al emitirse (CPA05 con
+                      ID_CPA04_OP) y le sobro: lo que se pago de mas. Sin
+                      tope de antiguedad, pero los de mas de un año van en su
+                      propio renglon, para revisarlos en Tango.
+         SIN FACTURA  la O/P no tiene ninguna imputacion en CPA05: un
+                      anticipo. Solo los de los ultimos 12 meses -hay de
+                      2006-, el mismo criterio del listado que se reviso.
+
+       Los restos de hasta TOLERANCIA_IMPORTE no cuentan: Tango deja O/P en
+       CTA por centavos. Los proveedores excluidos del modulo, tampoco.
+       ==================================================================== */
+
+    /** Desde cuantos meses un saldo a cuenta es "viejo" -o deja de listarse, si es sin factura- */
+    const ANTIGUEDAD_SALDO_MESES = 12;
+
+    /**
+     * Los saldos a cuenta de los proveedores locales, clasificados. La lectura
+     * va acotada: solo las O/P en CTA, con el mismo filtro de exterior y
+     * clausula que getPendientes(), y lo imputado solo para esas. LANZA si
+     * falla: quien llama decide, y la pestaña carga igual con un aviso.
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return array Lo que devuelve clasificarSaldosACuenta()
+     */
+    public function getSaldosACuenta($hoy = null) {
+        $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $cid = $this->conectar();
+
+        $stmt = sqlsrv_query($cid, "
+            SELECT op.ID_CPA04, op.COD_PROVEE, p.NOM_PROVEE, op.N_COMP,
+                   CAST(op.FECHA_EMIS AS DATE) AS FECHA, CAST(op.IMPORTE_TO AS FLOAT) AS IMPORTE
+            FROM CPA04 op
+            INNER JOIN CPA01 p ON p.COD_PROVEE = op.COD_PROVEE
+            WHERE op.T_COMP = 'O/P' AND op.ESTADO = 'CTA'
+              AND op.COD_PROVEE NOT LIKE '" . self::PREFIJO_EXTERIOR . "%'
+              AND p.CLAUSULA <> 1");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer las O/P a cuenta'));
+        }
+
+        $ops = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $ops[] = [
+                'id' => intval($row['ID_CPA04']),
+                'cod' => Planilla::codigo($row['COD_PROVEE']),
+                'razon' => trim((string) $row['NOM_PROVEE']),
+                'n_comp' => trim((string) $row['N_COMP']),
+                'fecha' => Horizonte::normalizarFecha($row['FECHA']),
+                'importe' => round(floatval($row['IMPORTE']), 2)
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        $alEmitir = $this->sumaImputadaPor('ID_CPA04_OP', array_column($ops, 'id'));
+        $imputado = $this->sumaImputadaPor('ID_CPA04_CANCELADO', array_column($ops, 'id'));
+        $excluidos = $this->exclusion->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
+
+        return self::clasificarSaldosACuenta($ops, $alEmitir, $imputado, $excluidos, $hoyStr);
+    }
+
+    /**
+     * Lo imputado en CPA05 por O/P, agrupado por la columna que se pida:
+     * ID_CPA04_OP es lo que la O/P imputo al emitirse, ID_CPA04_CANCELADO
+     * todo lo que imputo, tambien despues. En lotes de mil, como parametros.
+     *
+     * @param string $columna Una de las dos, nunca algo que mande el cliente
+     * @param array $ids
+     * @return array id => importe
+     */
+    private function sumaImputadaPor($columna, $ids) {
+        if (!in_array($columna, ['ID_CPA04_OP', 'ID_CPA04_CANCELADO'], true)) {
+            throw new Exception('Columna de imputación desconocida: ' . $columna);
+        }
+
+        $mapa = [];
+
+        foreach (array_chunk(array_values(array_unique($ids)), 1000) as $lote) {
+            $stmt = sqlsrv_query($this->conectar(),
+                "SELECT " . $columna . " AS ID, CAST(SUM(IMPORT_CAN) AS FLOAT) AS T
+                 FROM CPA05 WHERE " . $columna . " IN (" . implode(',', array_fill(0, count($lote), '?')) . ")
+                 GROUP BY " . $columna, $lote);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer lo imputado de las O/P a cuenta'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $mapa[intval($row['ID'])] = round(floatval($row['T']), 2);
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $mapa;
+    }
+
+    /**
+     * QUE ES CADA O/P A CUENTA. Estatica y pura.
+     *
+     *   saldo = importe − todo lo imputado; hasta TOLERANCIA_IMPORTE no cuenta
+     *   imputo algo al emitirse            EXCEDENTE (viejo si tiene mas de un año)
+     *   no imputo nada, nunca              SIN FACTURA, solo si es de los
+     *                                      ultimos ANTIGUEDAD_SALDO_MESES meses
+     *   no imputo al emitirse pero si      ninguno de los dos: ya tiene factura
+     *   despues                            asociada
+     *
+     * Los proveedores excluidos del modulo quedan afuera.
+     *
+     * @param array $ops Lista de ['id', 'cod', 'razon', 'n_comp', 'fecha', 'importe']
+     * @param array $alEmitir id => lo imputado al emitirse (ID_CPA04_OP)
+     * @param array $imputado id => todo lo imputado (ID_CPA04_CANCELADO)
+     * @param array $excluidos Mapa cod => ... de los excluidos del modulo
+     * @param string $hoy 'Y-m-d'
+     * @return array ['excedentes', 'excedentes_viejos', 'sin_factura', 'desde']
+     */
+    public static function clasificarSaldosACuenta($ops, $alEmitir, $imputado, $excluidos, $hoy) {
+        $desde = date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -' . self::ANTIGUEDAD_SALDO_MESES . ' months'));
+        $r = ['excedentes' => [], 'excedentes_viejos' => [], 'sin_factura' => [], 'desde' => $desde];
+
+        foreach (is_array($ops) ? $ops : [] as $o) {
+            if (isset($excluidos[$o['cod']])) {
+                continue;
+            }
+
+            $emitir = isset($alEmitir[$o['id']]) ? floatval($alEmitir[$o['id']]) : 0.0;
+            $todo = isset($imputado[$o['id']]) ? floatval($imputado[$o['id']]) : 0.0;
+            $o['saldo'] = round(floatval($o['importe']) - $todo, 2);
+
+            if ($o['saldo'] <= self::TOLERANCIA_IMPORTE) {
+                continue;
+            }
+
+            if ($emitir != 0) {
+                $r[$o['fecha'] < $desde ? 'excedentes_viejos' : 'excedentes'][] = $o;
+            } elseif ($todo == 0 && $o['fecha'] >= $desde) {
+                $r['sin_factura'][] = $o;
+            }
+        }
+
+        return $r;
+    }
+
+    /**
+     * Los avisos de los saldos a cuenta, sección "Saldos a cuenta", todos
+     * INFORMATIVOS: no son trabajo pendiente del cashflow, y nada de esto
+     * suma ni descuenta. Un renglon por tipo, y los excedentes viejos aparte.
+     * Cada uno dice cantidad y total, y el detalle por proveedor, O/P, fecha e
+     * importe a cuenta. Sin nada, ningun aviso.
+     *
+     * Estatica y pura.
+     *
+     * @param array $s Lo que devolvio clasificarSaldosACuenta()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosSaldosACuenta($s) {
+        $avisos = [];
+        $nadaSeDescuenta = ' No se descuenta de lo próximo a pagar: cuando Proveedores lo imputa a una '
+            . 'factura nueva en Tango, esa factura ya viene reducida y el aviso desaparece solo.';
+
+        if (!empty($s['excedentes'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, self::resumenSaldos($s['excedentes'])
+                . ' a cuenta sin imputar, de O/P que cancelaron una factura y les sobró (excedente).'
+                . $nadaSeDescuenta . ' ' . self::detalleSaldos($s['excedentes']), 'Saldos a cuenta');
+        }
+
+        if (!empty($s['excedentes_viejos'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, count($s['excedentes_viejos']) . ' O/P con saldo a cuenta de '
+                . 'más de un año por ' . self::plata(array_sum(array_column($s['excedentes_viejos'], 'saldo')))
+                . ': revisarlas en Tango. ' . self::detalleSaldos($s['excedentes_viejos']), 'Saldos a cuenta');
+        }
+
+        if (!empty($s['sin_factura'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, self::resumenSaldos($s['sin_factura'])
+                . ' a cuenta en O/P sin ninguna factura asociada, de los últimos '
+                . self::ANTIGUEDAD_SALDO_MESES . ' meses (desde el ' . self::formatoCorto($s['desde']) . ').'
+                . $nadaSeDescuenta . ' ' . self::detalleSaldos($s['sin_factura']), 'Saldos a cuenta');
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Los avisos de los saldos a cuenta, leidos de Tango. Es lo que llaman la
+     * pestaña y el tablero, y la proteccion esta escrita una vez: SI LA
+     * LECTURA FALLA no se cae nada, se avisa en atencion. Los saldos solo se
+     * informan, asi que no tenerlos no cambia ningun numero.
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosSaldosConNivel($hoy = null) {
+        try {
+            return self::avisosSaldosACuenta($this->getSaldosACuenta($hoy));
+        } catch (Throwable $e) {
+            return [Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los saldos a cuenta de los '
+                . 'proveedores en Tango (' . $e->getMessage() . '). El resto se muestra igual: los saldos '
+                . 'a cuenta sólo se informan, no cambian ningún número.', 'Saldos a cuenta')];
+        }
+    }
+
+    /** "3 proveedor(es) tienen $ X en 5 O/P" */
+    private static function resumenSaldos($lista) {
+        return count(array_unique(array_column($lista, 'cod'))) . ' proveedor(es) tienen '
+            . self::plata(array_sum(array_column($lista, 'saldo'))) . ' en ' . count($lista) . ' O/P';
+    }
+
+    /**
+     * El detalle, por proveedor -el de mas saldo primero- y dentro de cada uno
+     * por fecha: "RAZON (COD) $ total: O/P n del dd/mm/aaaa $ saldo, ...".
+     */
+    private static function detalleSaldos($lista) {
+        $porProv = [];
+
+        foreach ($lista as $o) {
+            $porProv[$o['cod']]['razon'] = $o['razon'];
+            $porProv[$o['cod']]['ops'][] = $o;
+            $porProv[$o['cod']]['total'] = (isset($porProv[$o['cod']]['total']) ? $porProv[$o['cod']]['total'] : 0.0)
+                + $o['saldo'];
+        }
+
+        uasort($porProv, function ($a, $b) { return $b['total'] <=> $a['total']; });
+
+        $partes = [];
+
+        foreach ($porProv as $cod => $p) {
+            usort($p['ops'], function ($a, $b) { return strcmp($a['fecha'], $b['fecha']); });
+
+            $partes[] = trim($p['razon'] . ' (' . $cod . ')') . ' ' . self::plata($p['total']) . ': '
+                . implode(', ', array_map(function ($o) {
+                    return 'O/P ' . $o['n_comp'] . ' del ' . self::formatoCorto($o['fecha']) . ' '
+                        . self::plata($o['saldo']);
+                }, $p['ops']));
+        }
+
+        return 'Detalle: ' . implode('; ', $partes) . '.';
     }
 
     /* ====================================================================

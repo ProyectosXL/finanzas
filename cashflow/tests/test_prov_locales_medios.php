@@ -117,11 +117,13 @@ seccion('lo que se escribe con dos medios');
 $campos = Proveedores::camposDeImportacion($c['filas']);
 
 chequear('dos medios en la apertura', 2, count($campos['medios']));
-chequear('en orden, con su fecha, su forma y su importe', [
+chequear('en orden, con su fecha, su forma y su importe, y que es NETO contra que se comparo', [
     ['orden' => 1, 'fecha' => '2026-10-20', 'forma' => 'ECHEQ', 'forma_orig' => 'echeq',
-     'importe' => 150000.0],
+     'importe' => 150000.0, 'clasificacion' => 'NETO', 'pendiente_import' => 200000.0,
+     'neto_import' => 200000.0],
     ['orden' => 2, 'fecha' => '2026-10-27', 'forma' => 'TRANSFERENCIA',
-     'forma_orig' => 'TRANSFERENCIA', 'importe' => 50000.8]
+     'forma_orig' => 'TRANSFERENCIA', 'importe' => 50000.8, 'clasificacion' => 'NETO',
+     'pendiente_import' => 200000.0, 'neto_import' => 200000.0]
 ], $campos['medios']);
 
 /* LA FECHA MAS TARDIA VA A LA TABLA DE PAGOS. Es la que mide el desvio de la
@@ -493,15 +495,27 @@ chequear('la apertura no tiene bajas fisicas', false, stripos($apert, 'DELETE') 
 chequear('reemplazar es dar de baja las vigentes', true,
     strpos($apert, 'SET VIGENTE = 0, " . Auditoria::SET_BAJA') !== false);
 chequear('con el usuario de la escritura en el alta y la modificacion', true,
-    strpos($apert, 'IMPORTE, USUARIO_ALTA, USUARIO_MODIF)') !== false);
+    strpos($apert, "'USUARIO_ALTA, USUARIO_MODIF'") !== false
+    && strpos($apert, 'round(floatval($m[\'importe\']), 2), $usuario, $usuario];') !== false);
 
 seccion('la escritura de la apertura pasa por un solo lugar');
 
 $escriturasMedio = '/(INSERT INTO|UPDATE|DELETE FROM) dbo\." \. self::TABLA_MEDIO/';
 
-chequear('solo guardarApertura() escribe la tabla de medios: todas sus escrituras estan ahi',
-    preg_match_all($escriturasMedio, $fuente), preg_match_all($escriturasMedio, $apert));
-chequear('y son dos: la baja y el alta', 2, preg_match_all($escriturasMedio, $apert));
+/* DOS LUGARES Y NINGUNO MAS: guardarApertura() escribe lo IMPORTADO -la baja y
+   el alta de las partes- y escribirRegistroPagos() solo anota que Tango ya
+   registro un pago parcial, como escribirConciliacion() con la tabla de pagos.
+   Una tercera escritura seria un camino que cambia lo importado sin pasar por
+   la importacion. */
+$registro = $cuerpoDe('escribirRegistroPagos');
+
+chequear('solo guardarApertura() y la marca de Tango escriben la tabla de medios',
+    preg_match_all($escriturasMedio, $fuente),
+    preg_match_all($escriturasMedio, $apert) + preg_match_all($escriturasMedio, $registro));
+chequear('guardarApertura() son dos: la baja y el alta', 2, preg_match_all($escriturasMedio, $apert));
+chequear('la marca es una, y no toca lo importado: sólo el estado en Tango', [1, 1], [
+    preg_match_all($escriturasMedio, $registro),
+    preg_match('/SET ESTADO_TANGO = \'REGISTRADO\', FECHA_REAL = \?, PENDIENTE_REAL = \?,\s*FECHA_REGISTRO = GETDATE\(\), " \. Auditoria::SET_MODIF/', $registro)]);
 chequear('aplicarImportacion() la escribe en su transaccion, junto con la fila de pagos', true,
     strpos($cuerpoDe('aplicarImportacion'), 'sqlsrv_begin_transaction')
         < strpos($cuerpoDe('aplicarImportacion'), '$this->guardarApertura(')
@@ -578,8 +592,11 @@ $celdaAbierta = $cuerpoJs('celdaFechaAbierta');
 
 chequear('la celda de un comprobante abierto existe', true, $celdaAbierta !== '');
 chequear('y no tiene campo de fecha: no se edita', false, strpos($celdaAbierta, '<input') !== false);
+/* La etiqueta la arma etiquetaImportado(), que es la misma para la celda y
+   para la columna que sólo baja al Excel. */
 chequear('lleva 1/2 y 2/2 como etiqueta, fuera del texto que se exporta', true,
-    strpos($celdaAbierta, "f.APERTURA.parte + '/' + f.APERTURA.de") !== false
+    strpos($celdaAbierta, 'var etiqueta = etiquetaImportado(f);') !== false
+    && strpos($cuerpoJs('etiquetaImportado'), "return f.APERTURA.parte + '/' + f.APERTURA.de;") !== false
     && strpos($celdaAbierta, 'data-etiqueta="') !== false);
 chequear('el tooltip dice los medios y quien los cargo', true,
     strpos($celdaAbierta, 'textoMedios(abierta)') !== false
