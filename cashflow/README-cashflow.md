@@ -376,6 +376,16 @@ Pestaña nueva *Proveedores › Gastos Locales* (el promedio de 90 días de la c
 
 Los tres contra `central`, en ese orden. **El 48 mueve el tablero**: al 31/10/2026 aparece un egreso nuevo de **$ 9.177.962,15** en el horizonte. El 47 no mueve nada: todos los fleteros quedan habituales. Después, dar `cashflow.tab.gastos_locales` en Gestión de Usuarios (la pestaña es de sólo lectura: no tiene clave de edición).
 
+### Proveedores Locales: pago con excedente y pago parcial (`feature/prov-locales-excedente-pago-parcial`)
+
+El `IMPORTE` de la planilla de pagos ya no tiene que ser el neto a pagar: puede ser **más**, hasta un % de excedente que queda a cuenta del proveedor en Tango, o **menos**, un pago parcial cuyo saldo sigue pendiente. Ver *Un pago con excedente o parcial* en `README-proveedores-locales.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 49 | `sql/cashflow_prov_locales_excedente_parcial.sql` | A `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO` le suma la clasificación (`NETO` / `EXCEDENTE` / `PARCIAL`), el pendiente y el neto al importar y la marca de Tango; `FORMA_PAGO` pasa a admitir `NULL`. Siembra `prov_locales_pct_excedente` en **5** sin pisarlo | La importación es la de antes —el importe tiene que ser el neto con $1 de tolerancia— y la pestaña avisa con el nombre del script |
+
+Contra `central`, **después del 37** (`cashflow_prov_locales_pago_medio.sql`): le agrega columnas a su tabla y corta si no está. Necesita también `cashflow_prov_locales_forma_por_factura.sql`, que hace nullable la fecha de la tabla de pagos: sin él la pantalla se comporta como si el 49 no estuviera. **El día que se corre el tablero no se mueve un peso**: las dos aperturas que hay en producción quedan como `NETO` y se proyectan igual. Medido el 03/11/2026 con la planilla vacía: las series, sus ejes y la auditoría dan idénticas al centavo con el código de `develop` y con el de esta rama.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -426,7 +436,13 @@ En este orden, contra `central`:
 -- 43. sql/cashflow_saldos_mp_consulta.sql           (Saldos: Mercado Pago en vivo de MP_T_SALDO_DEMANDA)
 -- 44. sql/cashflow_saldos_edicion_fila.sql          (Saldos: el saldo se edita desde la fila)
 -- 45. sql/cashflow_comex_dolar_bcra.sql            (Comex: dolar BCRA para los pagos de los proximos dias)
+-- 46. sql/cashflow_gastos_locales.sql               (Gastos Locales: cronograma y cuentas excluidas)
+-- 47. sql/cashflow_logistica_no_habituales.sql      (Logistica: fleteros no habituales)
+-- 48. sql/cashflow_estructura_gastos_locales.sql    (la fila Gastos Locales)
+-- 49. sql/cashflow_prov_locales_excedente_parcial.sql  (Prov. Locales: pago con excedente y pago parcial)
 ```
+
+**El 49 va después del 37**, al que le agrega columnas, y del de la forma por factura de Proveedores Locales. Ver *Proveedores Locales: pago con excedente y pago parcial*, más arriba.
 
 **El 39 va después del 38**: sin las alícuotas y el plazo, los depositados no tienen neto. **El 40 no depende de ninguno de los dos.** Los depósitos se leen de Tango; ninguno de los tres crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO`, que está en desuso. Ver `README-echeqs.md`.
 
