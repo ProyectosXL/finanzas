@@ -292,6 +292,14 @@ class PagosTarjetas {
         $faltanCalendario = [];
 
         foreach ($estimado as $nombre => $fila) {
+            /* UNA SUPERVISORA INACTIVA EN EL MAESTRO NO SE MUESTRA (desde
+               fix/correcciones-cashflow, 03/11/2026): no proyecta nada -dejo de
+               trabajar- y eso ya lo informan los parametros. Sin fila tampoco va
+               en el aviso de las que no proyectan, ni en ninguna suma. */
+            if ($fila['motivo'] === TarjetasSupervisoras::INACTIVA) {
+                continue;
+            }
+
             $clave = GastosSupervision::clave($nombre);
             $tarjetasDe = isset($porSupervisora[$clave]) ? $porSupervisora[$clave] : [];
 
@@ -433,8 +441,8 @@ class PagosTarjetas {
         }
 
         $textos = [
+            // INACTIVA no llega: esas no tienen fila (ver supervisoras()).
             TarjetasSupervisoras::SIN_SUPERVISORA => 'no están en el maestro de supervisoras',
-            TarjetasSupervisoras::INACTIVA => 'están inactivas en el maestro',
             TarjetasSupervisoras::SIN_IMPORTE => 'tienen gastos autorizados que suman cero'
         ];
 
@@ -711,7 +719,7 @@ class PagosTarjetas {
         }
 
         $ep = TarjetasCorporativas::estimacionesPorProveedor($marcados, $r['filas'], $tarjetas,
-            $resumenes, $habiles, $meses, $hoy);
+            $resumenes, $habiles, $meses, $hoy, $inflacion);
         $salida['estimaciones'] = $ep['estimaciones'];
         $salida['proveedores_proyectan'] = array_values($marcados);
 
@@ -723,6 +731,14 @@ class PagosTarjetas {
 
         foreach (TarjetasCorporativas::avisosEstimaciones($salida['estimaciones']) as $a) {
             $salida['avisos'][] = $a;
+        }
+
+        /* LAS ESTIMACIONES SE AJUSTAN POR INFLACION: un mes sin el % cargado no
+           proyecta, y se avisa una sola vez con todos los meses que faltan. */
+        $avisoInfEst = Inflacion::avisoFaltan($ep['faltan_inflacion'], $hoy);
+
+        if ($avisoInfEst !== '') {
+            $salida['avisos'][] = 'Estimaciones mensuales: ' . $avisoInfEst;
         }
 
         foreach (TarjetasCorporativas::avisosPorProveedor($marcados, $r['filas']) as $a) {

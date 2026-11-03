@@ -295,7 +295,7 @@ foreach (glob(__DIR__ . '/../Class/{,Providers/}*.php', GLOB_BRACE) as $archivo)
 chequear('solo Comex.php resuelve con la regla', ['Comex.php'], $conRegla);
 
 chequear('bcra() pide la punta VENDEDORA al leer la cotizacion', 1,
-    preg_match('/ultimaHasta\(\$hoy, Cotizacion::VENDEDOR\)/', $srcDolar));
+    preg_match('/ultimaHasta\(self::diaAnterior\(\$hoy\),\s*Cotizacion::VENDEDOR\)/', $srcDolar));
 
 chequear('los avisos del dolar salen en las dos pestanas de Comex', 2,
     substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel()'));
@@ -340,3 +340,15 @@ $fila = Comex::valuar(['PENDIENTE_USD' => 1000, 'FECHA_PAGO_EFECTIVA' => $hoy], 
 chequear('la fila valuada con BCRA lleva su fecha para la marca', '2026-10-28',
     $fila['COTIZ_BCRA_FECHA']);
 chequear('y su importe en pesos', 1480000.0, $fila['IMPORTE_ARS']);
+
+seccion('el dolar BCRA es el vendedor del dia anterior, en las tres pantallas');
+
+/* Los pagos al exterior y las nacionalizaciones de los proximos dias se liquidan
+   con el BCRA vendedor de AYER, no el de hoy: se busca la ultima publicada hasta
+   el dia anterior. Un lunes da la del viernes; un martes, la del lunes. */
+chequear('un martes busca hasta el lunes', '2026-11-02', DolarFuturo::diaAnterior('2026-11-03'));
+chequear('un lunes busca hasta el domingo, y ultimaHasta() da la del viernes', '2026-11-01',
+    DolarFuturo::diaAnterior('2026-11-02'));
+chequear('cruza el mes y el anio', '2026-12-31', DolarFuturo::diaAnterior('2027-01-01'));
+chequear('nadie arma una regla BCRA con la cotizacion de hoy', 0,
+    preg_match('/ultimaHasta\(\$hoy,/', $srcDolar));

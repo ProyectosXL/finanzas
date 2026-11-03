@@ -563,12 +563,14 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                     <h5 class="mb-0">Estimaciones mensuales</h5>
                     <small class="text-muted">
                         Las de los <strong>proveedores que proyectan</strong>, que se marcan en
-                        <em>Parámetros › Tarjetas</em>. Se repiten las facturas vinculadas del
-                        <strong>último mes</strong> del proveedor —por su vencimiento de Tango—,
-                        cada una con el <strong>importe de su cuota</strong>, fijo y sin
-                        inflación, en el débito de su tarjeta, desde el mes siguiente a su pago y
-                        hasta el fin del horizonte. Cuando se carga la factura del mes siguiente,
-                        pasa a ser ésa la que se repite; cuando se paga, deja de proyectar. Un mes
+                        <em>Parámetros › Tarjetas</em>. Se repite <strong>cada factura pendiente
+                        y vinculada</strong> del proveedor —de una en cuotas, la última—, con el
+                        <strong>importe de su cuota ajustado por la inflación mensual
+                        esperada</strong> de <em>Parámetros › Generales</em>, compuesta desde el
+                        mes de pago de la factura, en el débito de su tarjeta, desde el mes
+                        siguiente a su pago y hasta el fin del horizonte. Un mes sin la inflación
+                        cargada no proyecta y se avisa. Cuando se paga la factura, deja de
+                        proyectar. Un mes
                         queda cubierto si la tarjeta tiene <strong>resumen</strong> cargado, y
                         generan cobertura como una factura vinculada.
                     </small>
@@ -581,7 +583,8 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                     <th rowspan="2" class="col-texto">PROVEEDOR</th>
                                     <th rowspan="2">FACTURA DE ORIGEN</th>
                                     <th rowspan="2">TARJETA</th>
-                                    <th rowspan="2" class="text-end">IMPORTE</th>
+                                    <th rowspan="2" class="text-end"
+                                        title="El de la cuota de la factura de origen, antes del ajuste por inflación">IMPORTE BASE</th>
                                     <th rowspan="2" class="text-center">DÍA</th>
                                     <th rowspan="2">ESTADO POR MES</th>
                                     <!-- Acá terminan las descriptivas: el resto

@@ -1029,7 +1029,8 @@
             PROYECTA: ['bg-success', 'entra'],
             CUBIERTA: ['bg-info text-dark', 'cubierta por resumen'],
             PASADA: ['bg-secondary', 'ya pasó'],
-            SIN_TARJETA: ['bg-secondary', 'sin tarjeta activa']
+            SIN_TARJETA: ['bg-secondary', 'sin tarjeta activa'],
+            SIN_INFLACION: ['bg-warning text-dark', 'falta inflación']
         };
 
         if (!e.meses || !e.meses.length) {
@@ -1040,10 +1041,30 @@
             var mk = marcas[m.estado] || ['bg-secondary', m.estado];
             var texto = mk[1];
 
-            return '<span class="badge ' + mk[0] + ' me-1" title="' + esc(fecha(m.fecha)) + '">'
+            return '<span class="badge ' + mk[0] + ' me-1" title="' + esc(fecha(m.fecha)
+                + tooltipInflacionEst(m)) + '">'
                 + esc(m.mes.substring(5) + '/' + m.mes.substring(2, 4)) + ' · ' + esc(texto)
                 + '</span>';
         }).join('');
+    }
+
+    /**
+     * El ajuste por inflación de un mes estimado, para el tooltip: el importe de
+     * la factura de origen, el % de cada mes del camino (compuesto) y el
+     * resultado. Sin ajuste —el factor es null— dice qué mes falta.
+     */
+    function tooltipInflacionEst(m) {
+        var det = m.inflacion || {};
+        var pasos = Object.keys(det).sort().map(function(k) {
+            return k + ': ' + (det[k] === null ? 'falta' : String(det[k]).replace('.', ',') + ' %');
+        });
+
+        if (!pasos.length) { return ''; }
+
+        return ' · ' + plata(m.importe_base) + ' ajustado por inflación compuesta ('
+            + pasos.join(', ') + ')'
+            + (m.factor === null ? ': falta la inflación, no proyecta'
+                : ' = ' + plata(m.importe));
     }
 
     /* ---- selección y acciones masivas ---- */

@@ -37,6 +37,14 @@ $TP = [7 => ['ID' => 7, 'TIPO' => 'CORPORATIVA', 'PCT_COBERTURA' => 10.0, 'DIA_V
 
 $PROV = ['OGABO' => ['COD_PROVEE' => 'OGABO', 'RAZON_SOC' => 'ABONO SA']];
 
+/* La inflacion en cero en todos los meses: las reglas de la repeticion se prueban
+   con el importe de la cuota tal cual. El ajuste tiene su seccion. */
+$INF0 = [];
+
+foreach (['2026-08', '2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03'] as $mInf) {
+    $INF0[$mInf] = 0.0;
+}
+
 function fpTC($n, $vto, $importe, $cod = 'OGABO') {
     return ['COD_PROVEE' => $cod, 'RAZON_SOC' => 'ABONO SA', 'T_COMP' => 'FAC', 'N_COMP' => $n,
             'FECHA_VTO' => $vto, 'IMPORTE_PENDIENTE' => $importe, 'IMPORTE_VTO' => $importe,
@@ -45,7 +53,7 @@ function fpTC($n, $vto, $importe, $cod = 'OGABO') {
 
 /** Resuelve las facturas y devuelve las estimaciones de los proveedores marcados */
 function estimarPP($facturas, $vinculos, $excluidas = [], $resumenes = [], $prov = null) {
-    global $TP, $HABP, $MP, $HP, $PROV;
+    global $TP, $HABP, $MP, $HP, $PROV, $INF0;
 
     $v = [];
 
@@ -71,7 +79,7 @@ function estimarPP($facturas, $vinculos, $excluidas = [], $resumenes = [], $prov
 
     return ['filas' => $r['filas'],
             'est' => TarjetasCorporativas::estimacionesPorProveedor($prov === null ? $PROV : $prov,
-                $r['filas'], $TP, $resumenes, $HABP, $MP, $HP)['estimaciones']];
+                $r['filas'], $TP, $resumenes, $HABP, $MP, $HP, $INF0)['estimaciones']];
 }
 
 /** Lo que proyecta cada mes, sumando todas las estimaciones */
@@ -103,7 +111,7 @@ chequear('desde noviembre se repiten las dos: 150.000 por mes',
     ['2026-11' => 150000.0, '2026-12' => 150000.0, '2027-01' => 150000.0, '2027-02' => 150000.0],
     porMesPP($r['est']));
 chequear('en el vencimiento de su tarjeta', '2026-11-10', $r['est'][0]['meses'][0]['fecha']);
-chequear('con el importe de la cuota, sin inflacion', 100000.0, $r['est'][0]['meses'][3]['importe']);
+chequear('con inflacion en cero, el importe de la cuota', 100000.0, $r['est'][0]['meses'][3]['importe']);
 
 seccion('cada factura pendiente se repite, no solo las del ultimo mes');
 
@@ -137,7 +145,7 @@ $rc = TarjetasCorporativas::resolver([$bSep, $bOct],
     [TarjetasCorporativas::clave($bSep) => 7, TarjetasCorporativas::clave($bOct) => 7], [], $TP, [],
     $HABP, $MP, $HP, $corrPP);
 $estC = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rc['filas'], $TP, [], $HABP, $MP,
-    $HP)['estimaciones'];
+    $HP, $INF0)['estimaciones'];
 
 chequear('la del 28/09 se repite, no queda afuera', ['L1', 'L2'], array_column($estC, 'N_COMP'));
 chequear('la correccion sigue valiendo para su fecha de pago: el debito de noviembre',
@@ -172,7 +180,7 @@ $rC = TarjetasCorporativas::resolver([$cOct, $cDic], [TarjetasCorporativas::clav
     $TP, [], $HABP, $MP, $HP, [TarjetasCorporativas::claveCuota($cOct) => ['FECHA_VTO' => '2027-01-05',
         'MOTIVO' => null, 'USUARIO_ALTA' => 'u', 'FECHA_ALTA' => '2026-09-26 10:00']]);
 $estC2 = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rC['filas'], $TP, [], $HABP, $MP,
-    $HP)['estimaciones'];
+    $HP, $INF0)['estimaciones'];
 
 chequear('la cuota corregida se paga en enero', '2027-01', $rC['filas'][0]['MES_PAGO']);
 chequear('la repeticion de la ultima arranca en febrero, no en enero', ['2027-02' => 30000.0],
@@ -267,7 +275,7 @@ $pasada = TarjetasCorporativas::estimacionesPorProveedor($PROV,
     TarjetasCorporativas::resolver([fpTC('A1', '2026-09-05', 1000)],
         [TarjetasCorporativas::clave(fpTC('A1', '2026-09-05', 1000)) => 7], [], $TP, [], $HABP,
         ['2026-09', '2026-10', '2026-11'], '2026-09-01')['filas'],
-    $TP, [], $HABP, ['2026-09', '2026-10', '2026-11'], '2026-10-15')['estimaciones'];
+    $TP, [], $HABP, ['2026-09', '2026-10', '2026-11'], '2026-10-15', $INF0)['estimaciones'];
 
 chequear('una estimacion con fecha hasta hoy no se proyecta', ['PASADA', 'PROYECTA'],
     array_column($pasada[0]['meses'], 'estado'));
@@ -277,6 +285,56 @@ $r = estimarPP([fpTC('A1', '2026-10-05', 100000)], ['A1' => 8]);
 chequear('si su tarjeta esta inactiva, no proyecta y se avisa', [false, 1],
     [$r['est'] ? $r['est'][0]['TARJETA_OK'] : null,
      count(TarjetasCorporativas::avisosEstimaciones($r['est']))]);
+
+/* ================================================================
+   EL AJUSTE POR INFLACION
+   ================================================================ */
+seccion('la estimacion se ajusta por la inflacion esperada, compuesta');
+
+/* La factura vence el 05/10 y se paga el 12/10 (octubre). Desde noviembre se
+   repite: noviembre lleva la inflacion de noviembre; diciembre, la de noviembre y
+   diciembre compuestas. La de octubre no entra: es la factura real. */
+$INFR = ['2026-10' => 9.0, '2026-11' => 2.0, '2026-12' => 3.0, '2027-01' => 1.5, '2027-02' => 2.5];
+$rInf = TarjetasCorporativas::resolver([fpTC('A1', '2026-10-05', 100000)],
+    [TarjetasCorporativas::clave(fpTC('A1', '2026-10-05', 100000)) => 7], [], $TP, [], $HABP, $MP, $HP);
+$epInf = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rInf['filas'], $TP, [], $HABP, $MP,
+    $HP, $INFR);
+
+chequear('cada mes compone la inflacion desde el mes de pago de la factura',
+    ['2026-11' => 102000.0, '2026-12' => 105060.0, '2027-01' => 106635.9, '2027-02' => 109301.8],
+    porMesPP($epInf['estimaciones']));
+chequear('guarda el importe base y el factor para el tooltip', [100000.0, 1.0506],
+    [$epInf['estimaciones'][0]['meses'][1]['importe_base'],
+     round($epInf['estimaciones'][0]['meses'][1]['factor'], 4)]);
+chequear('sin meses que falten', [], $epInf['faltan_inflacion']);
+
+$cobInf = TarjetasCorporativas::cobertura(TarjetasCorporativas::estimacionesComoFilas($epInf['estimaciones']),
+    $TP, [], $HABP, $MP, $HP);
+
+chequear('la cobertura se calcula sobre el importe ajustado', 10506.0,
+    $cobInf[array_search('2026-12', array_column($cobInf, 'mes'), true)]['importe']);
+
+seccion('un mes sin inflacion no proyecta, y los anteriores si');
+
+$INFH = $INFR;
+unset($INFH['2027-01']);
+$epHueco = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rInf['filas'], $TP, [], $HABP, $MP,
+    $HP, $INFH);
+
+chequear('desde el mes que falta, SIN_INFLACION; antes, proyecta',
+    ['PROYECTA', 'PROYECTA', 'SIN_INFLACION', 'SIN_INFLACION'],
+    array_column($epHueco['estimaciones'][0]['meses'], 'estado'));
+chequear('en blanco y no en cero', [null, false],
+    [$epHueco['estimaciones'][0]['meses'][2]['importe'], $epHueco['estimaciones'][0]['meses'][2]['proyecta']]);
+chequear('el mes que falta viaja para el aviso, una vez', ['2027-01'], $epHueco['faltan_inflacion']);
+
+$resInf = [7 => ['2027-01' => ['ID' => 9, 'MES' => '2027-01', 'IMPORTE_ARS' => 1.0,
+                               'FECHA_VENCIMIENTO' => '2027-01-11', 'PAGADO' => false]]];
+$epCub = TarjetasCorporativas::estimacionesPorProveedor($PROV, $rInf['filas'], $TP, $resInf, $HABP,
+    $MP, $HP, $INFH);
+
+chequear('un mes cubierto por resumen no pide la inflacion: manda el estado', 'CUBIERTA',
+    $epCub['estimaciones'][0]['meses'][2]['estado']);
 
 /* ================================================================
    EL SCRIPT

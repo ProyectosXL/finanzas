@@ -248,3 +248,18 @@ chequear('el script deja a todos como habituales', true,
     && strpos($sqlNH, 'DEFAULT (1) WITH VALUES') !== false);
 chequear('las dos tablas con las seis columnas de auditoria', 2,
     min(substr_count($sqlNH, 'USUARIO_ALTA '), substr_count($sqlNH, 'USUARIO_BAJA ')));
+
+seccion('getFletero no abre otra conexion entre la consulta y el fetch');
+
+/* conectar() abre una conexion nueva y solo $_SESSION['cid'] la mantiene viva.
+   Con noHabitualesCreado() adentro de los argumentos de sqlsrv_query, la
+   conexion de la consulta se cerraba antes del fetch y el alta de un fletero
+   fallaba con "supplied resource is not a valid ss_sqlsrv_stmt resource". */
+$fuenteLog = file_get_contents(__DIR__ . '/../Class/Logistica.php');
+$cuerpoGF = substr($fuenteLog, strpos($fuenteLog, 'public function getFletero('));
+$cuerpoGF = substr($cuerpoGF, 0, strpos($cuerpoGF, 'sqlsrv_fetch_array'));
+
+chequear('el esquema se resuelve antes de la consulta, y la conexion queda en una variable',
+    [true, false],
+    [strpos($cuerpoGF, "sqlsrv_query(\$cid,") !== false,
+     (bool) preg_match('/sqlsrv_query\([^;]*noHabitualesCreado/s', $cuerpoGF)]);

@@ -128,9 +128,15 @@ class CronogramaPagos {
         'LOGISTICA' => ['nombre' => 'Logística Local', 'dia' => 5,
                         'frecuencia' => self::QUINCENAL,
                         'usa' => 'Logística Local'],
+        /* SE CORRE HACIA ADELANTE desde fix/correcciones-cashflow (03/11/2026),
+           por decision del negocio: el efectivo de las supervisoras de un lunes
+           feriado se paga el dia habil siguiente. Y es el unico concepto con
+           overrides que se corre al siguiente, asi que el override que cae en un
+           no habil tambien se corre (ver delMes()). */
         'SUPERVISORAS' => ['nombre' => 'Supervisoras', 'dia' => 1,
                            'frecuencia' => self::SEMANAL,
-                           'usa' => 'la parte en efectivo de Gastos Supervisoras'],
+                           'usa' => 'la parte en efectivo de Gastos Supervisoras',
+                           'corrimiento' => self::SIGUIENTE],
 
         /* EL UNICO QUE SE CORRE HACIA ADELANTE, y es una decision del negocio:
            el reintegro de la caja de los locales se hace el dia habil siguiente,
@@ -594,28 +600,51 @@ class CronogramaPagos {
         foreach ($teoricas as $nro => $teorica) {
             $corrida = self::correr($teorica, $habiles, $config);
             $ov = isset($delMes[$nro]) ? $delMes[$nro] : null;
+            $hayOv = (bool) ($ov && !empty($ov['fecha']));
+            $fecha = $hayOv ? $ov['fecha'] : $corrida['fecha'];
+            $ovCorrido = false;
+            $faltan = $corrida['faltan'];
 
-            /* EL OVERRIDE NO SE CORRE AL DIA HABIL. Lo cargo una persona que
-               sabe algo que el calendario no sabe -como que ese pago se
+            /* EL OVERRIDE NO SE CORRE AL DIA HABIL ANTERIOR. Lo cargo una persona
+               que sabe algo que el calendario no sabe -como que ese pago se
                adelanta por vacaciones- y corregirlo seria contradecirla en
                silencio. Mismo criterio que el override de cotizacion de Comex,
-               que manda sobre la curva. */
+               que manda sobre la curva.
+
+               EN UN CONCEPTO QUE SE CORRE AL SIGUIENTE (Supervisoras), SI: un
+               override que cae en un no habil se corre al habil siguiente. Es
+               la regla del concepto -un pago no sale un feriado- y la fecha
+               queda marcada 'override_corrido' para que la pantalla lo diga. */
+            if ($hayOv && isset($config['corrimiento']) && $config['corrimiento'] === self::SIGUIENTE) {
+                $c = self::correr($ov['fecha'], $habiles, $config);
+                $fecha = $c['fecha'];
+                $ovCorrido = $c['corrida'];
+
+                foreach ($c['faltan'] as $m) {
+                    if (!in_array($m, $faltan, true)) {
+                        $faltan[] = $m;
+                    }
+                }
+            }
+
             $pagos[] = [
                 'nro' => $nro,
                 'mes' => (string) $mes,
                 'nombre' => self::nombrePago($nro, $config),
                 'teorica' => $teorica,
                 'calculada' => $corrida['fecha'],
-                'fecha' => ($ov && !empty($ov['fecha'])) ? $ov['fecha'] : $corrida['fecha'],
+                'fecha' => $fecha,
                 'corrida' => $corrida['corrida'],
-                'override' => (bool) ($ov && !empty($ov['fecha'])),
+                'override' => $hayOv,
+                'override_fecha' => $hayOv ? $ov['fecha'] : null,
+                'override_corrido' => $ovCorrido,
                 'motivo' => ($ov && isset($ov['motivo'])) ? $ov['motivo'] : null,
                 'cantidad' => count($teoricas),
 
                 // Quien movio la fecha y cuando, para la pantalla (Js/auditoria.js)
                 'usuario' => ($ov && isset($ov['usuario'])) ? $ov['usuario'] : null,
                 'fecha_alta' => ($ov && isset($ov['fecha_alta'])) ? $ov['fecha_alta'] : null,
-                'faltan' => $corrida['faltan']
+                'faltan' => $faltan
             ];
         }
 

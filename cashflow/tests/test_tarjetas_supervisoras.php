@@ -594,3 +594,16 @@ chequear('septiembre 2026 tiene cuatro lunes: cuartos', 25000.0, $pagosSepL[0]['
 chequear('el 7 y el 14 ya pasaron y no se proyectan', [false, false, true, true],
     array_column($pagosSepL, 'proyecta'));
 chequear('y el que queda sigue siendo un cuarto, no un medio', 25000.0, $pagosSepL[3]['importe']);
+
+seccion('una supervisora inactiva en el maestro no tiene fila en la sub-pestana');
+
+/* No proyecta nada y los parametros ya lo informan: PagosTarjetas::supervisoras()
+   la saltea antes de armar la fila, asi que tampoco va en el aviso. */
+$fuentePTi = file_get_contents(__DIR__ . '/../Class/PagosTarjetas.php');
+$cuerpoSupI = substr($fuentePTi, strpos($fuentePTi, 'foreach ($estimado as $nombre => $fila) {'));
+$cuerpoSupI = substr($cuerpoSupI, 0, strpos($cuerpoSupI, '$clave = GastosSupervision::clave($nombre);'));
+
+chequear('la inactiva se saltea antes de armar la fila', true,
+    strpos($cuerpoSupI, "if (\$fila['motivo'] === TarjetasSupervisoras::INACTIVA) {") !== false);
+chequear('y el aviso ya no la nombra', false,
+    strpos($fuentePTi, "'están inactivas en el maestro'") !== false);

@@ -805,6 +805,7 @@ class TarjetasCorporativas {
     const EST_CUBIERTA = 'CUBIERTA';
     const EST_PASADA = 'PASADA';
     const EST_SIN_TARJETA = 'SIN_TARJETA';
+    const EST_SIN_INFLACION = 'SIN_INFLACION';
 
     /**
      * Las estimaciones de los proveedores que proyectan.
@@ -814,7 +815,7 @@ class TarjetasCorporativas {
      * Para cada proveedor marcado:
      *
      *   1. SE REPITE CADA FACTURA PENDIENTE, VINCULADA Y NO EXCLUIDA, con su
-     *      importe de cuota (IMPORTE_VTO, sin inflacion) y su tarjeta, todos los
+     *      importe de cuota (IMPORTE_VTO, AJUSTADO POR INFLACION) y su tarjeta, todos los
      *      meses DESPUES DE SU MES DE PAGO y hasta el fin del horizonte, en el
      *      debito de su tarjeta. Una sin vincular no se repite -no suma- y se
      *      avisa; una excluida tampoco.
@@ -833,9 +834,23 @@ class TarjetasCorporativas {
      *      estimaciones. Entre el pago de una y la carga de la siguiente puede no
      *      haber proyeccion: es lo esperado.
      *
+     *   4. EL IMPORTE SE AJUSTA POR LA INFLACION MENSUAL ESPERADA de Parametros ->
+     *      Generales, COMPUESTA (Inflacion::compuesta()) desde el MES DE PAGO de la
+     *      factura de origen: ese mes es la factura real, y cada mes repetido sube
+     *      sobre el anterior ya aumentado. El primer mes repetido lleva la
+     *      inflacion de ese mes; el segundo, la de los dos. Compuesta y no sumada
+     *      porque no hay nada pactado: es llevar un importe conocido a moneda de un
+     *      mes futuro, igual que Supervisoras y Socios.
+     *
+     *      SI FALTA EL % DE ALGUN MES DEL CAMINO, ESE MES NO PROYECTA
+     *      (SIN_INFLACION) y el mes que falta viaja en 'faltan_inflacion' para el
+     *      aviso. No se toma como cero: daria un egreso proyectado de menos.
+     *
      * Cada mes estimado se comporta como una factura vinculada: CUBIERTA si la
      * tarjeta tiene resumen ese mes, PASADA si la fecha es hoy o antes, y
-     * SIN_TARJETA si la tarjeta esta inactiva o dejo de ser corporativa.
+     * SIN_TARJETA si la tarjeta esta inactiva o dejo de ser corporativa. Esos tres
+     * mandan sobre SIN_INFLACION: pedir la inflacion de un mes que igual no
+     * proyecta mandaria a cargar un dato que no cambia nada.
      *
      * DEVUELVE LA FORMA QUE LEEN LA GRILLA, LA COBERTURA (estimacionesComoFilas())
      * Y EL TABLERO.
@@ -849,13 +864,16 @@ class TarjetasCorporativas {
      * @param array $habiles Mapa 'Y-m-d' => bool
      * @param array $meses Los meses del horizonte
      * @param string $hoy 'Y-m-d'
-     * @return array ['estimaciones' => [...], 'faltan_calendario' => ['Y-m']]
+     * @param array $inflacion Mapa 'Y-m' => float, en puntos (Parametros -> Generales)
+     * @return array ['estimaciones' => [...], 'faltan_calendario' => ['Y-m'],
+     *                'faltan_inflacion' => ['Y-m']]
      */
     public static function estimacionesPorProveedor($proveedores, $filas, $tarjetas, $resumenes,
-                                                    $habiles, $meses, $hoy) {
+                                                    $habiles, $meses, $hoy, $inflacion) {
         $hoyStr = substr((string) $hoy, 0, 10);
         $porProveedor = [];
         $faltan = [];
+        $faltanInf = [];
 
         foreach ($filas as $f) {
             $cod = $f['COD_PROVEE'];
@@ -950,12 +968,25 @@ class TarjetasCorporativas {
                         }
                     }
 
+                    /* EL AJUSTE, compuesto desde el mes de pago de la factura de
+                       origen. Ver el punto 4 del encabezado. */
+                    $inf = Inflacion::compuesta(is_array($inflacion) ? $inflacion : [], $hasta, $mes);
+                    $ajustado = ($inf['factor'] !== null) ? round($importe * $inf['factor'], 2) : null;
+
                     if (!$tarjetaOk) {
                         $estado = self::EST_SIN_TARJETA;
                     } elseif ($fecha !== null && $fecha <= $hoyStr) {
                         $estado = self::EST_PASADA;
                     } elseif ($resumen !== null) {
                         $estado = self::EST_CUBIERTA;
+                    } elseif ($inf['factor'] === null) {
+                        $estado = self::EST_SIN_INFLACION;
+
+                        foreach ($inf['faltan'] as $m) {
+                            if (!in_array($m, $faltanInf, true)) {
+                                $faltanInf[] = $m;
+                            }
+                        }
                     } else {
                         $estado = self::EST_PROYECTA;
                     }
@@ -963,7 +994,10 @@ class TarjetasCorporativas {
                     $est['meses'][] = [
                         'mes' => $mes,
                         'fecha' => $fecha,
-                        'importe' => $importe,
+                        'importe' => $ajustado,
+                        'importe_base' => $importe,
+                        'factor' => $inf['factor'],
+                        'inflacion' => $inf['meses'],
                         'estado' => $estado,
                         'por' => null,
                         'proyecta' => ($estado === self::EST_PROYECTA)
@@ -974,7 +1008,10 @@ class TarjetasCorporativas {
             }
         }
 
-        return ['estimaciones' => $v, 'faltan_calendario' => $faltan];
+        sort($faltanInf);
+
+        return ['estimaciones' => $v, 'faltan_calendario' => $faltan,
+                'faltan_inflacion' => $faltanInf];
     }
 
     /**

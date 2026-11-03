@@ -321,7 +321,7 @@ class DolarFuturo {
 
     /**
      * La regla del dolar BCRA de hoy: los dos parametros y la ultima
-     * cotizacion BCRA VENDEDORA publicada hasta hoy. Es lo que reciben
+     * cotizacion BCRA VENDEDORA publicada ANTES de hoy. Es lo que reciben
      * resolver() y Comex::valuar().
      *
      * UNA LECTURA POR PEDIDO, cacheada por dia: la usan las filas de las dos
@@ -332,6 +332,13 @@ class DolarFuturo {
      * del BCRA deja la cotizacion en null y el motivo en 'error', y los pagos
      * de los proximos dias quedan sin valuar con su aviso. Con N = 0 ni
      * siquiera se pide la cotizacion: nadie la usa.
+     *
+     * DEL DIA ANTERIOR, Y NO LA DE HOY (fix/correcciones-cashflow, 03/11/2026):
+     * los pagos al exterior y las nacionalizaciones se liquidan con el BCRA
+     * vendedor del dia anterior. Se busca la ultima publicada hasta AYER, asi
+     * que un lunes da la del viernes y un martes la del lunes. Vale para las
+     * tres pantallas -Proveedores Exterior, Crono Nacionalizacion y Compras
+     * Proyectadas- y para el aviso de antiguedad, que leen esta misma regla.
      *
      * @param string|null $hoy 'Y-m-d'. Por defecto, hoy.
      * @return array Lo que devuelve reglaBcra()
@@ -352,7 +359,8 @@ class DolarFuturo {
             try {
                 require_once __DIR__ . '/Cotizacion.php';
 
-                $cotizacion = (new Cotizacion())->ultimaHasta($hoy, Cotizacion::VENDEDOR);
+                $cotizacion = (new Cotizacion())->ultimaHasta(self::diaAnterior($hoy),
+                    Cotizacion::VENDEDOR);
             } catch (Throwable $e) {
                 $error = $e->getMessage();
             }
@@ -362,6 +370,18 @@ class DolarFuturo {
             $params[self::PARAM_ANTIGUEDAD_BCRA], $cotizacion, $error);
 
         return $this->reglas[$hoy];
+    }
+
+    /**
+     * Hasta que dia se busca la cotizacion BCRA: el anterior a hoy. Ver bcra().
+     *
+     * Estatica y pura.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return string 'Y-m-d'
+     */
+    public static function diaAnterior($hoy) {
+        return date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -1 day'));
     }
 
     /**
