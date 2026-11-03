@@ -474,7 +474,8 @@ Proveedor de seguros, número o descripción, tarjeta corporativa activa (de ell
 
 - **En dólares**, el mismo importe en U$S cada ciclo, con la curva de cada mes.
 - **En pesos**, cada ciclo es el total del anterior × (1 + **la suma** de la inflación de los meses de la vigencia anterior ÷ 100), sumada y no compuesta, como el ajuste del valor hora de Logística (`Inflacion::sumada()`, la variante de N meses de `acumulada()`). Una vigencia de 1 mes sube cada mes la inflación del mes anterior; una de 3, la suma de los 3; una de 12, la de los 12.
-- **Si falta la inflación de algún mes**, ese ciclo y los siguientes quedan en `null` (`SIN_INFLACION`) con aviso. **Ojo**: la inflación cargada arranca en 2026-07, así que una póliza en pesos que haya empezado antes no se puede continuar.
+- **Si falta la inflación de algún mes desde el mes en curso en adelante**, ese ciclo y los siguientes quedan en `null` (`SIN_INFLACION`) con aviso.
+- **Si falta la de un mes pasado**, se omite y se suma solo lo cargado en *Parámetros › Generales* (`TarjetasSeguros::ajusteContinuacion()`), con un aviso informativo y el tooltip diciendo qué meses no entraron. Un mes pasado ya no proyecta y queda fuera de la ventana editable: exigirlo dejaba la continuación en blanco para siempre, como le pasaba a la póliza 273130 (empezó en 2026-04 y la inflación cargada arranca en 2026-07).
 - **La póliza siguiente** —mismo proveedor y número, con inicio igual o posterior al fin de esta— **corta la continuación desde su inicio** (`TarjetasSeguros::siguientes()`).
 - Los pagos de la continuación **se ven distintos** (en itálica y atenuados) y el tooltip dice que son estimados y cómo se ajustaron.
 

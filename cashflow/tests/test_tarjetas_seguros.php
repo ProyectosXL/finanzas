@@ -234,6 +234,33 @@ chequear('marzo se proyecta, abril (ajustado por marzo) queda en null y los sigu
 chequear('dice que mes falta', ['2027-03'], $rf['faltan_inflacion']);
 chequear('el estado lo dice', TarjetasSeguros::SIN_INFLACION, $rf['pagos'][5]['estado']);
 
+seccion('los meses pasados sin inflacion se omiten y se suma lo cargado');
+
+/* Como la 273130: empezo en abril, la inflacion arranca en julio y hoy es noviembre. */
+$INFJUL = [];
+
+for ($m = '2026-07'; $m <= '2028-12'; $m = Inflacion::mesMas($m, 1)) {
+    $INFJUL[$m] = 2.0;
+}
+
+$rp = pagosSG(polizaSG(4, 1200000, 'ARS', '2026-04-15', 12, 0, '2026-05'),
+    ['inflacion' => $INFJUL, 'hoy' => '2026-11-03']);
+$rpm = porMesSG($rp);
+
+chequear('la continuacion sube los 9 meses cargados, 18 %, y no queda en null',
+    [100000.0, 118000.0], [$rpm['2027-04'], $rpm['2027-05']]);
+chequear('no lo cuenta como faltante', [], $rp['faltan_inflacion']);
+chequear('pero dice que meses omitio', ['2026-04', '2026-05', '2026-06'], $rp['omitidos_inflacion']);
+$may27 = array_values(array_filter($rp['pagos'], function ($x) { return $x['mes'] === '2027-05'; }))[0];
+
+chequear('y el tooltip tambien', true, strpos($may27['tooltip'], 'Sin 2026-04, 2026-05, 2026-06') !== false);
+chequear('sin un 0,00 por el mes que falta', false, strpos($may27['tooltip'], '2026-04 0,00') !== false);
+
+$aj = TarjetasSeguros::ajusteContinuacion(['2026-10' => 2.0], '2026-10', 3, '2026-11-03');
+
+chequear('un mes del mes en curso en adelante sigue dejando el ajuste en null',
+    [null, ['2026-11', '2026-12'], []], [$aj['pct'], $aj['faltan'], $aj['omitidos']]);
+
 seccion('la poliza siguiente corta la continuacion');
 
 $sig = TarjetasSeguros::siguientes([$a, polizaSG(9, 1500000, 'ARS', '2027-11-01', 12, 2, '2028-01')]);

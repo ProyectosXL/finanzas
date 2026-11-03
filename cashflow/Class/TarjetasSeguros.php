@@ -52,8 +52,10 @@ require_once __DIR__ . '/Aviso.php';
  *   en pesos    el total del ciclo anterior x (1 + SUMA de la inflacion de los
  *               meses de la vigencia anterior / 100), sumada y no compuesta
  *               (Inflacion::sumada()), como el ajuste del valor hora de
- *               Logistica. Si falta un mes, ese ciclo y los siguientes quedan en
- *               null con aviso.
+ *               Logistica. Si falta un mes desde el mes en curso en adelante,
+ *               ese ciclo y los siguientes quedan en null con aviso. Un mes
+ *               PASADO que falta se omite y se suma lo cargado
+ *               (ajusteContinuacion()).
  *
  * La poliza SIGUIENTE -mismo proveedor y mismo numero, con inicio igual o
  * posterior al fin de esta- corta la continuacion desde su inicio.
@@ -382,8 +384,8 @@ class TarjetasSeguros {
     public static function pagos($p, $tarjeta, $resumenes, $habiles, $meses, $hoy, $inflacion,
                                  $curva, $corte = null) {
         $hoyStr = substr((string) $hoy, 0, 10);
-        $salida = ['pagos' => [], 'faltan_inflacion' => [], 'faltan_cotizacion' => [],
-                   'faltan_calendario' => [], 'ciclos' => 0];
+        $salida = ['pagos' => [], 'faltan_inflacion' => [], 'omitidos_inflacion' => [],
+                   'faltan_cotizacion' => [], 'faltan_calendario' => [], 'ciclos' => 0];
 
         if (empty($meses)) {
             return $salida;
@@ -416,7 +418,13 @@ class TarjetasSeguros {
                ciclo anterior por la inflacion sumada de su vigencia. */
             if ($k > 0 && !$usd && $total !== null) {
                 $inicioAnterior = self::inicioSiguiente($p['FECHA_INICIO'], ($k - 1) * $vig);
-                $ajuste = Inflacion::sumada($inflacion, substr($inicioAnterior, 0, 7), $vig);
+                $ajuste = self::ajusteContinuacion($inflacion, substr($inicioAnterior, 0, 7), $vig, $hoyStr);
+
+                foreach ($ajuste['omitidos'] as $m) {
+                    if (!in_array($m, $salida['omitidos_inflacion'], true)) {
+                        $salida['omitidos_inflacion'][] = $m;
+                    }
+                }
 
                 if ($ajuste['pct'] === null) {
                     foreach ($ajuste['faltan'] as $m) {
@@ -519,6 +527,36 @@ class TarjetasSeguros {
     }
 
     /**
+     * El % de la continuacion en pesos: la inflacion SUMADA de los meses de la
+     * vigencia anterior, con lo que esta cargado en Parametros -> Generales.
+     *
+     * LOS MESES PASADOS QUE FALTAN SE OMITEN: un mes anterior al mes en curso ya
+     * no proyecta y queda fuera de la ventana que la pantalla deja editar, asi
+     * que exigirlo dejaria la continuacion en blanco para siempre. Se suma lo
+     * que se cargo y el tooltip dice que meses no entraron. Un mes que falta
+     * desde el mes en curso en adelante sigue dejando el ciclo en null.
+     *
+     * @param array $inflacion Mapa 'Y-m' => float
+     * @param string $desde 'Y-m', el primer mes de la vigencia anterior
+     * @param int $n Los meses de la vigencia
+     * @param string $hoy 'Y-m-d'
+     * @return array Lo de Inflacion::sumada() mas 'omitidos' => ['Y-m']
+     */
+    public static function ajusteContinuacion($inflacion, $desde, $n, $hoy) {
+        $ajuste = Inflacion::sumada($inflacion, $desde, $n);
+        $mesHoy = substr((string) $hoy, 0, 7);
+        $ajuste['omitidos'] = array_values(array_filter($ajuste['faltan'],
+            function ($m) use ($mesHoy) { return $m < $mesHoy; }));
+        $ajuste['faltan'] = array_values(array_diff($ajuste['faltan'], $ajuste['omitidos']));
+
+        if (empty($ajuste['faltan'])) {
+            $ajuste['pct'] = array_sum(array_filter($ajuste['meses'], function ($v) { return $v !== null; }));
+        }
+
+        return $ajuste;
+    }
+
+    /**
      * Los pagos que proyectan, como filas que TarjetasCorporativas::cobertura()
      * entiende: se comportan como una factura vinculada de su tarjeta y su mes.
      *
@@ -558,10 +596,16 @@ class TarjetasSeguros {
             if ($p['MONEDA'] === self::USD) {
                 $t .= ' En dólares se repite el mismo importe.';
             } elseif ($pago['ajuste'] !== null && $pago['ajuste']['pct'] !== null) {
+                $cargados = array_filter($pago['ajuste']['meses'], function ($v) { return $v !== null; });
                 $t .= ' En pesos, el ciclo anterior más ' . number_format($pago['ajuste']['pct'], 2, ',', '.')
                     . ' % de inflación sumada (' . implode(' + ', array_map(function ($m, $v) {
                         return $m . ' ' . number_format($v, 2, ',', '.');
-                    }, array_keys($pago['ajuste']['meses']), $pago['ajuste']['meses'])) . ').';
+                    }, array_keys($cargados), $cargados)) . ').';
+
+                if (!empty($pago['ajuste']['omitidos'])) {
+                    $t .= ' Sin ' . implode(', ', $pago['ajuste']['omitidos'])
+                        . ': son meses pasados que no están cargados, así que no suman.';
+                }
             }
         }
 

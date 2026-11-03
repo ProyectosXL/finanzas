@@ -877,6 +877,7 @@ class PagosTarjetas {
             'la curva de dólar futuro', $avisos, []);
         $siguientes = TarjetasSeguros::siguientes($polizas);
         $faltanInf = [];
+        $omitidosInf = [];
         $faltanCot = [];
         $faltanCal = [];
         $sinTarjeta = [];
@@ -892,8 +893,8 @@ class PagosTarjetas {
             } catch (Throwable $e) {
                 $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron calcular los pagos de la póliza '
                     . $p['POLIZA'] . ': ' . $e->getMessage());
-                $p['resueltos'] = ['pagos' => [], 'faltan_inflacion' => [], 'faltan_cotizacion' => [],
-                                   'faltan_calendario' => [], 'ciclos' => 0];
+                $p['resueltos'] = ['pagos' => [], 'faltan_inflacion' => [], 'omitidos_inflacion' => [],
+                                   'faltan_cotizacion' => [], 'faltan_calendario' => [], 'ciclos' => 0];
             }
 
             $p['TARJETA'] = $t;
@@ -903,7 +904,8 @@ class PagosTarjetas {
             $p['ES_SEGURO'] = isset($seguros[$p['COD_PROVEE']]);
             $conPoliza[$p['COD_PROVEE']] = true;
 
-            foreach (['faltan_inflacion' => &$faltanInf, 'faltan_cotizacion' => &$faltanCot,
+            foreach (['faltan_inflacion' => &$faltanInf, 'omitidos_inflacion' => &$omitidosInf,
+                      'faltan_cotizacion' => &$faltanCot,
                       'faltan_calendario' => &$faltanCal] as $k => &$lista) {
                 foreach ($p['resueltos'][$k] as $m) {
                     if (!in_array($m, $lista, true)) {
@@ -926,6 +928,13 @@ class PagosTarjetas {
             $avisos[] = 'Seguros: la continuación de una póliza en pesos necesita la inflación de los '
                 . 'meses de la vigencia anterior, y falta la de ' . implode(', ', $faltanInf)
                 . '. Esos pagos quedan en blanco y NO en cero.';
+        }
+
+        if (!empty($omitidosInf)) {
+            sort($omitidosInf);
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'Seguros: la continuación de una póliza en pesos se '
+                . 'ajusta sin la inflación de ' . implode(', ', $omitidosInf) . ', que son meses pasados '
+                . 'sin cargar: se suma solo lo cargado en Parámetros › Generales.');
         }
 
         if (!empty($faltanCot)) {
