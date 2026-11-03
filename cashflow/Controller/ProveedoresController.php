@@ -122,6 +122,11 @@ try {
                     . 'deja de proyectarse por sí solo, y se reintenta en la próxima carga.', 'Conciliación');
             }
 
+            /* LOS SALDOS A CUENTA: lo que los proveedores tienen a cuenta en Tango
+               sin imputar. Solo se informa -no suma ni descuenta nada-, y si la
+               lectura falla la pestaña carga igual. */
+            $avisosSaldos = $prov->avisosSaldosConNivel($h->hoy());
+
             /* EL EJE VA EN NETO: cada comprobante cae en su fecha por lo que sale
                de la caja -el neto de retenciones donde las hay-, igual que la
                fila del tablero. El pendiente sigue en su columna. */
@@ -140,6 +145,7 @@ try {
                 $avisosConciliacion,
                 $prov->avisosCronogramaConNivel(),
                 Proveedores::avisosPendientesConNivel($items),
+                $avisosSaldos,
                 Aviso::lista($payload['warnings'])
             );
             $payload['warnings'] = Aviso::textos($payload['avisos_con_nivel']);

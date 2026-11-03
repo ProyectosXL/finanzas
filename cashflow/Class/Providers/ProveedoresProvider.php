@@ -205,6 +205,12 @@ class ProveedoresProvider extends CashflowProvider {
         // Excluir al proveedor fue una decision, y su deuda sale por su serie.
         $this->avisarTodos(self::avisosExcluidosProveedor($items), Aviso::INFO);
 
+        /* LOS SALDOS A CUENTA, el mismo aviso que la pestaña. NO SUMAN EN
+           NINGUNA SERIE: lo que se pago de mas o por adelantado ya salio de la
+           caja, y descontarlo de lo proximo a pagar seria adivinar a que
+           factura se va a imputar. Si la lectura falla, avisa y sigue. */
+        $this->avisarTodos($prov->avisosSaldosConNivel($h->hoy()));
+
         return $this->repartir($h, $items);
     }
 

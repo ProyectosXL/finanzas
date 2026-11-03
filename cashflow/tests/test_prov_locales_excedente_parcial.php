@@ -792,3 +792,130 @@ $conc = Proveedores::planConciliacion($pagoGuardado, [],
 
 chequear('concilia, con el desvío contra la fecha de la planilla', [1, 2],
     [count($conc['concilia']), $conc['concilia'][0]['desvio_dias']]);
+
+/* ================================================================
+   LOS SALDOS A CUENTA
+   ================================================================ */
+$op = function ($id, $cod, $fecha, $importe) {
+    return ['id' => $id, 'cod' => $cod, 'razon' => 'RAZON ' . $cod, 'n_comp' => '00001000' . $id,
+            'fecha' => $fecha, 'importe' => $importe];
+};
+
+$hoySaldos = '2026-11-03';
+$ops = [
+    $op(1, 'PROVA', '2026-10-21', 2486970.86),  // imputó 2.415.000 al emitirse: excedente 71.970,86
+    $op(2, 'PROVA', '2024-05-10', 300000.0),    // imputó 200.000 al emitirse: excedente viejo 100.000
+    $op(3, 'PROVB', '2026-09-22', 225285396.0), // sin ninguna imputación: sin factura
+    $op(4, 'PROVB', '2025-01-15', 50000.0),     // sin imputación, pero de hace casi dos años
+    $op(5, 'PROVC', '2026-08-27', 122276469.0), // nada al emitirse, imputada después: ya tiene factura
+    $op(6, 'PROVD', '2026-10-28', 1000000.50),  // imputó 1.000.000 al emitirse: resto de 50 centavos
+    $op(7, 'PROVX', '2026-10-01', 900000.0)     // proveedor excluido del módulo
+];
+$alEmitir = [1 => 2415000.0, 2 => 200000.0, 6 => 1000000.0];
+$imputado = [1 => 2415000.0, 2 => 200000.0, 5 => 121865298.43, 6 => 1000000.0];
+$excluidos = ['PROVX' => ['MOTIVO' => 'Ya está en Crono Nacionalización']];
+
+$s = Proveedores::clasificarSaldosACuenta($ops, $alEmitir, $imputado, $excluidos, $hoySaldos);
+
+seccion('saldos a cuenta: qué es cada O/P');
+
+chequear('excedente: imputó una factura al emitirse y le sobró', [[1, 71970.86]],
+    array_map(function ($o) { return [$o['id'], $o['saldo']]; }, $s['excedentes']));
+chequear('el de más de un año va aparte, sin tope de antigüedad', [2], array_column($s['excedentes_viejos'], 'id'));
+chequear('sin factura: ninguna imputación, de los últimos 12 meses', [3], array_column($s['sin_factura'], 'id'));
+chequear('el corte de los 12 meses', '2025-11-03', $s['desde']);
+chequear('una sin factura de hace dos años no se lista', false,
+    in_array(4, array_column(array_merge($s['excedentes'], $s['excedentes_viejos'], $s['sin_factura']), 'id'), true));
+chequear('una imputada después ya tiene factura asociada: no es ninguna de las dos', false,
+    in_array(5, array_column(array_merge($s['excedentes'], $s['excedentes_viejos'], $s['sin_factura']), 'id'), true));
+chequear('un resto de hasta $1 no cuenta', false,
+    in_array(6, array_column(array_merge($s['excedentes'], $s['excedentes_viejos'], $s['sin_factura']), 'id'), true));
+chequear('un proveedor excluido del módulo queda afuera', false,
+    in_array(7, array_column(array_merge($s['excedentes'], $s['excedentes_viejos'], $s['sin_factura']), 'id'), true));
+
+seccion('saldos a cuenta: los avisos');
+
+$av = Proveedores::avisosSaldosACuenta($s);
+
+chequear('tres renglones: excedentes, los de más de un año y los sin factura', 3, count($av));
+chequear('todos informativos y en su sección', [['info', 'Saldos a cuenta'], ['info', 'Saldos a cuenta'],
+    ['info', 'Saldos a cuenta']], array_map(function ($a) { return [$a['nivel'], $a['seccion']]; }, $av));
+chequear('el de excedentes dice cuántos proveedores, cuánto y en cuántas O/P', 0,
+    strpos($av[0]['texto'], '1 proveedor(es) tienen $ 71.970,86 en 1 O/P a cuenta sin imputar'));
+chequear('y el detalle: proveedor, O/P, fecha e importe', true,
+    strpos($av[0]['texto'], 'RAZON PROVA (PROVA) $ 71.970,86: O/P 000010001 del 21/10/2026 $ 71.970,86') !== false);
+chequear('el de más de un año manda a revisarlas en Tango', 0,
+    strpos($av[1]['texto'], '1 O/P con saldo a cuenta de más de un año por $ 100.000,00: revisarlas en Tango.'));
+chequear('el de sin factura dice el período', true,
+    strpos($av[2]['texto'], 'en O/P sin ninguna factura asociada, de los últimos 12 meses (desde el 03/11/2025)') !== false);
+chequear('y que no se descuenta nada', true, strpos($av[2]['texto'], 'No se descuenta de lo próximo a pagar') !== false);
+chequear('sin saldos, ningún aviso', [], Proveedores::avisosSaldosACuenta(
+    Proveedores::clasificarSaldosACuenta([], [], [], [], $hoySaldos)));
+
+seccion('saldos a cuenta: no suman en ninguna serie, y si fallan se avisa');
+
+$provFuente = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Providers/ProveedoresProvider.php'));
+chequear('el tablero muestra el mismo aviso', true,
+    strpos($provFuente, '$this->avisarTodos($prov->avisosSaldosConNivel($h->hoy()));') !== false);
+chequear('y repartir() no sabe nada de saldos a cuenta', false,
+    stripos($cuerpo('Providers/ProveedoresProvider.php', 'private function repartir('), 'saldo') !== false);
+chequear('la pestaña también', true, strpos($ctrl, '$avisosSaldos = $prov->avisosSaldosConNivel($h->hoy());') !== false
+    && strpos($ctrl, '$avisosSaldos,') !== false);
+$conNivel = $cuerpo('Proveedores.php', 'public function avisosSaldosConNivel(');
+chequear('si la lectura falla, aviso de atención y nada se cae', true,
+    strpos($conNivel, 'catch (Throwable $e)') !== false && strpos($conNivel, 'Aviso::WARNING') !== false);
+$lectura = $cuerpo('Proveedores.php', 'public function getSaldosACuenta(');
+chequear('la lectura va acotada: O/P en CTA, locales, sin cláusula', [true, true, true], [
+    strpos($lectura, "op.T_COMP = 'O/P' AND op.ESTADO = 'CTA'") !== false,
+    strpos($lectura, "op.COD_PROVEE NOT LIKE '\" . self::PREFIJO_EXTERIOR . \"%'") !== false,
+    strpos($lectura, 'p.CLAUSULA <> 1') !== false]);
+
+if (Pruebas::hayBase()) {
+    $real = (new Proveedores())->getSaldosACuenta();
+    chequear('contra la base: se lee y se clasifica', [true, true, true],
+        [is_array($real['excedentes']), is_array($real['excedentes_viejos']), is_array($real['sin_factura'])]);
+    chequear('contra la base: ningún saldo de hasta $1', 0, count(array_filter(
+        array_merge($real['excedentes'], $real['excedentes_viejos'], $real['sin_factura']),
+        function ($o) { return $o['saldo'] <= 1; })));
+} else {
+    Pruebas::saltear('sin conexion a la base');
+}
+
+/* ================================================================
+   LA CONCILIACION DE UNA FACTURA CANCELADA CON SALDO A CUENTA
+   ================================================================ */
+seccion('conciliación: cancelada con un saldo a cuenta viejo');
+
+$prev = function ($n, $fechaPago, $alta) {
+    return ['COD_PROVEE' => 'OGTERM', 'T_COMP' => 'FAC', 'N_COMP' => $n, 'ESTADO' => 'PREVISTO',
+            'FECHA_PAGO' => $fechaPago, 'FECHA_CANCELADO' => null, 'FECHA_ALTA' => $alta];
+};
+$pagosPrev = [];
+// Seis normales, que se pagaron 2 días después de lo previsto.
+foreach (range(1, 6) as $i) {
+    $pagosPrev['OGTERM|FAC|N' . $i] = $prev('N' . $i, '2026-10-20', '2026-10-15');
+}
+// Una que Tango canceló con la O/P vieja del 09/10, cargada el 15/10.
+$pagosPrev['OGTERM|FAC|VIEJA'] = $prev('VIEJA', '2026-10-30', '2026-10-15');
+
+$tango = [];
+foreach (range(1, 6) as $i) {
+    $tango['OGTERM|N' . $i] = [['T_COMP' => 'FAC', 'ESTADO' => 'CAN', 'FECHA_CANCELADO' => '2026-10-22']];
+}
+$tango['OGTERM|VIEJA'] = [['T_COMP' => 'FAC', 'ESTADO' => 'CAN', 'FECHA_CANCELADO' => '2026-10-09']];
+
+$plan = Proveedores::planConciliacion($pagosPrev, [], $tango);
+$porN = array_column($plan['concilia'], null, 'n_comp');
+
+chequear('concilia igual', 7, count($plan['concilia']));
+chequear('marcada "cancelada con saldo a cuenta": la fecha real es anterior a la previsión', [true, false],
+    [$porN['VIEJA']['a_cuenta'], $porN['N1']['a_cuenta']]);
+
+$textoConc = Proveedores::avisosConciliacion($plan['concilia'], [])[0]['texto'];
+chequear('no entra en el desvío promedio: da los 2 días de las otras seis', true,
+    strpos($textoConc, 'En promedio se pagó 2 día(s) DESPUÉS de lo previsto, sobre 6 comprobante(s).') !== false);
+chequear('y el aviso dice cuál quedó marcada', true,
+    strpos($textoConc, '1 de ellas quedan marcadas "cancelada con saldo a cuenta"') !== false
+    && strpos($textoConc, 'FAC VIEJA (OGTERM)') !== false);
+chequear('getPagos() lee la fecha de alta de la previsión', true,
+    strpos($cuerpo('Proveedores.php', 'public function getPagos('), "'FECHA_ALTA' => Horizonte::normalizarFecha(\$row['FECHA_ALTA'])") !== false);

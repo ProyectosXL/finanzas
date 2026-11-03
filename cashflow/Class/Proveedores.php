@@ -2253,7 +2253,8 @@ class Proveedores {
         $cid = $this->conectar();
 
         $sql = "SELECT COD_PROVEE, T_COMP, N_COMP, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO_MODIF, FECHA_MODIF, "
+                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO_MODIF, FECHA_MODIF,
+                       FECHA_ALTA, "
                        . $this->overrideSql('FORMA_PAGO_CRONOGRAMA') . " AS FORMA_PAGO_CRONOGRAMA, "
                        . ($this->tieneColumnaPago('EXCLUIDA') ? 'EXCLUIDA' : '0') . " AS EXCLUIDA, "
                        . $this->overrideSql('MOTIVO_EXCLUSION') . " AS MOTIVO_EXCLUSION, "
@@ -2300,6 +2301,10 @@ class Proveedores {
                 'OBSERVACION' => $row['OBSERVACION'],
                 'ESTADO' => $row['ESTADO'],
                 'FECHA_CANCELADO' => Horizonte::normalizarFecha($row['FECHA_CANCELADO']),
+                /* Cuando se cargo la prevision. Una factura cuya fecha real es
+                   ANTERIOR se cancelo con un saldo a cuenta viejo: ver
+                   planConciliacion(). */
+                'FECHA_ALTA' => Horizonte::normalizarFecha($row['FECHA_ALTA']),
                 'ORIGEN' => $row['ORIGEN'],
 
                 /* De donde salio LA FECHA, que no es lo mismo que ORIGEN: ese
@@ -5400,13 +5405,22 @@ class Proveedores {
                 }
 
                 if ($c['ESTADO'] !== 'PEN' && $c['FECHA_CANCELADO'] !== null) {
+                    $alta = isset($pago['FECHA_ALTA']) ? $pago['FECHA_ALTA'] : null;
+
                     $plan['concilia'][] = [
                         'cod_provee' => $pago['COD_PROVEE'], 't_comp' => $pago['T_COMP'],
                         'n_comp' => $pago['N_COMP'], 'fecha_prevista' => $pago['FECHA_PAGO'],
                         'fecha_cancelado' => $c['FECHA_CANCELADO'],
                         // Cuantos dias antes o despues de lo previsto se pago. Es
                         // el dato por el que existe guardar las dos fechas.
-                        'desvio_dias' => self::desvioDias($pago['FECHA_PAGO'], $c['FECHA_CANCELADO'])
+                        'desvio_dias' => self::desvioDias($pago['FECHA_PAGO'], $c['FECHA_CANCELADO']),
+                        /* CANCELADA CON SALDO A CUENTA: la fecha real es ANTERIOR
+                           a cuando se cargo la prevision. No es que se pago antes
+                           de decidirlo: Tango le pone a la imputacion de un saldo
+                           a cuenta la fecha de la O/P vieja. Concilia igual, pero
+                           su desvio no dice nada de la prevision. Se deriva al
+                           leer: las dos fechas ya estan guardadas. */
+                        'a_cuenta' => ($alta !== null && $c['FECHA_CANCELADO'] < $alta)
                     ];
                 }
             }
@@ -5549,12 +5563,25 @@ class Proveedores {
             $texto = 'Se conciliaron ' . count($concilia) . ' previsión(es) con Tango: ya figuran '
                 . 'pagadas. Su fecha prevista queda, con la real al lado.';
 
+            /* LAS CANCELADAS CON SALDO A CUENTA NO ENTRAN EN EL DESVIO: su fecha
+               real es la de una O/P vieja, y meterlas diria que se paga meses
+               antes de lo previsto. Se dicen aparte. */
             $conDesvio = [];
+            $aCuenta = [];
 
             foreach ($concilia as $c) {
-                if ($c['desvio_dias'] !== null) {
+                if (!empty($c['a_cuenta'])) {
+                    $aCuenta[] = $c['t_comp'] . ' ' . $c['n_comp'] . ' (' . $c['cod_provee'] . ')';
+                } elseif ($c['desvio_dias'] !== null) {
                     $conDesvio[] = $c['desvio_dias'];
                 }
+            }
+
+            if (!empty($aCuenta)) {
+                $texto .= ' ' . count($aCuenta) . ' de ellas quedan marcadas "cancelada con saldo a cuenta": '
+                    . 'su fecha real es anterior a la previsión, porque Tango usa la fecha de la O/P vieja, '
+                    . 'y no entran en el desvío promedio (' . implode(', ', array_slice($aCuenta, 0, 10))
+                    . (count($aCuenta) > 10 ? ' y ' . (count($aCuenta) - 10) . ' más' : '') . ').';
             }
 
             if (count($conDesvio) >= 5) {
@@ -5768,6 +5795,265 @@ class Proveedores {
             . 'no cancelaban la factura: deja de proyectarse lo pagado y se proyecta sólo lo que quedó '
             . 'pendiente, con su vencimiento o el próximo día de pago. ' . implode('; ', $detalle)
             . (count($hechos) > 10 ? '; y ' . (count($hechos) - 10) . ' más' : '') . '.', 'Conciliación')];
+    }
+
+    /* ====================================================================
+       LOS SALDOS A CUENTA
+
+       Lo que los proveedores tienen a cuenta en Tango y todavia no se imputo
+       a ninguna factura. NO SUMA EN NINGUNA SERIE NI DESCUENTA NADA de lo
+       proximo a pagar: solo se informa. Cuando Proveedores lo imputa a una
+       factura nueva, el pendiente de esa factura ya viene reducido y el aviso
+       desaparece solo.
+
+       COMO LO REGISTRA TANGO (medido el 03/11/2026): una O/P que no se imputo
+       entera queda en CPA04 con ESTADO = 'CTA'. Lo que tiene a cuenta es
+       IMPORTE_TO menos lo imputado en CPA05 por ID_CPA04_CANCELADO. Cuando
+       se imputa a una factura nueva, la fila de CPA05 lleva ID_CPA04_OP en
+       NULL y LA FECHA DE LA O/P, no la de la imputacion, y la O/P pasa a
+       'IMP'. OP_IMPORTE_TOTAL_PAGO_CUENTA no sirve: es lo que quedo a cuenta
+       al emitir, y no se actualiza.
+
+       DOS TIPOS, y se avisan por separado porque son cosas distintas:
+
+         EXCEDENTE    la O/P imputo una factura al emitirse (CPA05 con
+                      ID_CPA04_OP) y le sobro: lo que se pago de mas. Sin
+                      tope de antiguedad, pero los de mas de un año van en su
+                      propio renglon, para revisarlos en Tango.
+         SIN FACTURA  la O/P no tiene ninguna imputacion en CPA05: un
+                      anticipo. Solo los de los ultimos 12 meses -hay de
+                      2006-, el mismo criterio del listado que se reviso.
+
+       Los restos de hasta TOLERANCIA_IMPORTE no cuentan: Tango deja O/P en
+       CTA por centavos. Los proveedores excluidos del modulo, tampoco.
+       ==================================================================== */
+
+    /** Desde cuantos meses un saldo a cuenta es "viejo" -o deja de listarse, si es sin factura- */
+    const ANTIGUEDAD_SALDO_MESES = 12;
+
+    /**
+     * Los saldos a cuenta de los proveedores locales, clasificados. La lectura
+     * va acotada: solo las O/P en CTA, con el mismo filtro de exterior y
+     * clausula que getPendientes(), y lo imputado solo para esas. LANZA si
+     * falla: quien llama decide, y la pestaña carga igual con un aviso.
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return array Lo que devuelve clasificarSaldosACuenta()
+     */
+    public function getSaldosACuenta($hoy = null) {
+        $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $cid = $this->conectar();
+
+        $stmt = sqlsrv_query($cid, "
+            SELECT op.ID_CPA04, op.COD_PROVEE, p.NOM_PROVEE, op.N_COMP,
+                   CAST(op.FECHA_EMIS AS DATE) AS FECHA, CAST(op.IMPORTE_TO AS FLOAT) AS IMPORTE
+            FROM CPA04 op
+            INNER JOIN CPA01 p ON p.COD_PROVEE = op.COD_PROVEE
+            WHERE op.T_COMP = 'O/P' AND op.ESTADO = 'CTA'
+              AND op.COD_PROVEE NOT LIKE '" . self::PREFIJO_EXTERIOR . "%'
+              AND p.CLAUSULA <> 1");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer las O/P a cuenta'));
+        }
+
+        $ops = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $ops[] = [
+                'id' => intval($row['ID_CPA04']),
+                'cod' => Planilla::codigo($row['COD_PROVEE']),
+                'razon' => trim((string) $row['NOM_PROVEE']),
+                'n_comp' => trim((string) $row['N_COMP']),
+                'fecha' => Horizonte::normalizarFecha($row['FECHA']),
+                'importe' => round(floatval($row['IMPORTE']), 2)
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        $alEmitir = $this->sumaImputadaPor('ID_CPA04_OP', array_column($ops, 'id'));
+        $imputado = $this->sumaImputadaPor('ID_CPA04_CANCELADO', array_column($ops, 'id'));
+        $excluidos = $this->exclusion->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
+
+        return self::clasificarSaldosACuenta($ops, $alEmitir, $imputado, $excluidos, $hoyStr);
+    }
+
+    /**
+     * Lo imputado en CPA05 por O/P, agrupado por la columna que se pida:
+     * ID_CPA04_OP es lo que la O/P imputo al emitirse, ID_CPA04_CANCELADO
+     * todo lo que imputo, tambien despues. En lotes de mil, como parametros.
+     *
+     * @param string $columna Una de las dos, nunca algo que mande el cliente
+     * @param array $ids
+     * @return array id => importe
+     */
+    private function sumaImputadaPor($columna, $ids) {
+        if (!in_array($columna, ['ID_CPA04_OP', 'ID_CPA04_CANCELADO'], true)) {
+            throw new Exception('Columna de imputación desconocida: ' . $columna);
+        }
+
+        $mapa = [];
+
+        foreach (array_chunk(array_values(array_unique($ids)), 1000) as $lote) {
+            $stmt = sqlsrv_query($this->conectar(),
+                "SELECT " . $columna . " AS ID, CAST(SUM(IMPORT_CAN) AS FLOAT) AS T
+                 FROM CPA05 WHERE " . $columna . " IN (" . implode(',', array_fill(0, count($lote), '?')) . ")
+                 GROUP BY " . $columna, $lote);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer lo imputado de las O/P a cuenta'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $mapa[intval($row['ID'])] = round(floatval($row['T']), 2);
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $mapa;
+    }
+
+    /**
+     * QUE ES CADA O/P A CUENTA. Estatica y pura.
+     *
+     *   saldo = importe − todo lo imputado; hasta TOLERANCIA_IMPORTE no cuenta
+     *   imputo algo al emitirse            EXCEDENTE (viejo si tiene mas de un año)
+     *   no imputo nada, nunca              SIN FACTURA, solo si es de los
+     *                                      ultimos ANTIGUEDAD_SALDO_MESES meses
+     *   no imputo al emitirse pero si      ninguno de los dos: ya tiene factura
+     *   despues                            asociada
+     *
+     * Los proveedores excluidos del modulo quedan afuera.
+     *
+     * @param array $ops Lista de ['id', 'cod', 'razon', 'n_comp', 'fecha', 'importe']
+     * @param array $alEmitir id => lo imputado al emitirse (ID_CPA04_OP)
+     * @param array $imputado id => todo lo imputado (ID_CPA04_CANCELADO)
+     * @param array $excluidos Mapa cod => ... de los excluidos del modulo
+     * @param string $hoy 'Y-m-d'
+     * @return array ['excedentes', 'excedentes_viejos', 'sin_factura', 'desde']
+     */
+    public static function clasificarSaldosACuenta($ops, $alEmitir, $imputado, $excluidos, $hoy) {
+        $desde = date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -' . self::ANTIGUEDAD_SALDO_MESES . ' months'));
+        $r = ['excedentes' => [], 'excedentes_viejos' => [], 'sin_factura' => [], 'desde' => $desde];
+
+        foreach (is_array($ops) ? $ops : [] as $o) {
+            if (isset($excluidos[$o['cod']])) {
+                continue;
+            }
+
+            $emitir = isset($alEmitir[$o['id']]) ? floatval($alEmitir[$o['id']]) : 0.0;
+            $todo = isset($imputado[$o['id']]) ? floatval($imputado[$o['id']]) : 0.0;
+            $o['saldo'] = round(floatval($o['importe']) - $todo, 2);
+
+            if ($o['saldo'] <= self::TOLERANCIA_IMPORTE) {
+                continue;
+            }
+
+            if ($emitir != 0) {
+                $r[$o['fecha'] < $desde ? 'excedentes_viejos' : 'excedentes'][] = $o;
+            } elseif ($todo == 0 && $o['fecha'] >= $desde) {
+                $r['sin_factura'][] = $o;
+            }
+        }
+
+        return $r;
+    }
+
+    /**
+     * Los avisos de los saldos a cuenta, sección "Saldos a cuenta", todos
+     * INFORMATIVOS: no son trabajo pendiente del cashflow, y nada de esto
+     * suma ni descuenta. Un renglon por tipo, y los excedentes viejos aparte.
+     * Cada uno dice cantidad y total, y el detalle por proveedor, O/P, fecha e
+     * importe a cuenta. Sin nada, ningun aviso.
+     *
+     * Estatica y pura.
+     *
+     * @param array $s Lo que devolvio clasificarSaldosACuenta()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosSaldosACuenta($s) {
+        $avisos = [];
+        $nadaSeDescuenta = ' No se descuenta de lo próximo a pagar: cuando Proveedores lo imputa a una '
+            . 'factura nueva en Tango, esa factura ya viene reducida y el aviso desaparece solo.';
+
+        if (!empty($s['excedentes'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, self::resumenSaldos($s['excedentes'])
+                . ' a cuenta sin imputar, de O/P que cancelaron una factura y les sobró (excedente).'
+                . $nadaSeDescuenta . ' ' . self::detalleSaldos($s['excedentes']), 'Saldos a cuenta');
+        }
+
+        if (!empty($s['excedentes_viejos'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, count($s['excedentes_viejos']) . ' O/P con saldo a cuenta de '
+                . 'más de un año por ' . self::plata(array_sum(array_column($s['excedentes_viejos'], 'saldo')))
+                . ': revisarlas en Tango. ' . self::detalleSaldos($s['excedentes_viejos']), 'Saldos a cuenta');
+        }
+
+        if (!empty($s['sin_factura'])) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, self::resumenSaldos($s['sin_factura'])
+                . ' a cuenta en O/P sin ninguna factura asociada, de los últimos '
+                . self::ANTIGUEDAD_SALDO_MESES . ' meses (desde el ' . self::formatoCorto($s['desde']) . ').'
+                . $nadaSeDescuenta . ' ' . self::detalleSaldos($s['sin_factura']), 'Saldos a cuenta');
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Los avisos de los saldos a cuenta, leidos de Tango. Es lo que llaman la
+     * pestaña y el tablero, y la proteccion esta escrita una vez: SI LA
+     * LECTURA FALLA no se cae nada, se avisa en atencion. Los saldos solo se
+     * informan, asi que no tenerlos no cambia ningun numero.
+     *
+     * @param string|null $hoy 'Y-m-d'
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosSaldosConNivel($hoy = null) {
+        try {
+            return self::avisosSaldosACuenta($this->getSaldosACuenta($hoy));
+        } catch (Throwable $e) {
+            return [Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los saldos a cuenta de los '
+                . 'proveedores en Tango (' . $e->getMessage() . '). El resto se muestra igual: los saldos '
+                . 'a cuenta sólo se informan, no cambian ningún número.', 'Saldos a cuenta')];
+        }
+    }
+
+    /** "3 proveedor(es) tienen $ X en 5 O/P" */
+    private static function resumenSaldos($lista) {
+        return count(array_unique(array_column($lista, 'cod'))) . ' proveedor(es) tienen '
+            . self::plata(array_sum(array_column($lista, 'saldo'))) . ' en ' . count($lista) . ' O/P';
+    }
+
+    /**
+     * El detalle, por proveedor -el de mas saldo primero- y dentro de cada uno
+     * por fecha: "RAZON (COD) $ total: O/P n del dd/mm/aaaa $ saldo, ...".
+     */
+    private static function detalleSaldos($lista) {
+        $porProv = [];
+
+        foreach ($lista as $o) {
+            $porProv[$o['cod']]['razon'] = $o['razon'];
+            $porProv[$o['cod']]['ops'][] = $o;
+            $porProv[$o['cod']]['total'] = (isset($porProv[$o['cod']]['total']) ? $porProv[$o['cod']]['total'] : 0.0)
+                + $o['saldo'];
+        }
+
+        uasort($porProv, function ($a, $b) { return $b['total'] <=> $a['total']; });
+
+        $partes = [];
+
+        foreach ($porProv as $cod => $p) {
+            usort($p['ops'], function ($a, $b) { return strcmp($a['fecha'], $b['fecha']); });
+
+            $partes[] = trim($p['razon'] . ' (' . $cod . ')') . ' ' . self::plata($p['total']) . ': '
+                . implode(', ', array_map(function ($o) {
+                    return 'O/P ' . $o['n_comp'] . ' del ' . self::formatoCorto($o['fecha']) . ' '
+                        . self::plata($o['saldo']);
+                }, $p['ops']));
+        }
+
+        return 'Detalle: ' . implode('; ', $partes) . '.';
     }
 
     /* ====================================================================
