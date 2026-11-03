@@ -1333,6 +1333,32 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* EL % DE EXCEDENTE PERMITIDO de la planilla de pagos. Tiene su propio
+           camino: saveParametro() guarda cualquier texto y rechaza esta clave.
+           Rige desde ahora; una previsualizacion hecha con el % anterior ya no
+           se puede confirmar. */
+        case 'savePorcExcedenteProvLocal':
+            $data = bodyJson();
+
+            if (!array_key_exists('porc', $data)) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Proveedores.php';
+
+            $porc = (new Proveedores())->guardarPorcExcedente($data['porc'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($porc == 0
+                    ? 'Guardado: la planilla de pagos no acepta excedente.'
+                    : 'Guardado: la planilla de pagos acepta hasta un '
+                        . number_format($porc, 2, ',', '.') . '% más que el neto a pagar.')
+                    . ' Rige desde ahora: una previsualización hecha antes ya no se puede confirmar.',
+                'data' => ['porc' => $porc]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'bajaAlicuotaProvLocal':
             $data = bodyJson();
 

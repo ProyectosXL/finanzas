@@ -57,6 +57,13 @@
      */
     var ret = null;
 
+    /**
+     * El bloque 'prov_locales_importacion': el % de excedente permitido de la
+     * planilla de pagos, con quién lo cambió por última vez. Ver
+     * Proveedores::getPorcExcedente().
+     */
+    var imp = null;
+
     function inicializar() {
         /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
            si es la primera que se ve. Ver Js/parametros-carga.js. */
@@ -89,10 +96,12 @@
                     || { tipos: {}, listas: {}, usos: {}, tabla_creada: false };
                 ret = modulo.prov_locales_retenciones
                     || { disponible: false, impuestos: [], generales: [], alcances: {} };
+                imp = modulo.prov_locales_importacion || { disponible: false, porc: null };
 
                 pintarDescripcion();
                 pintarAvisos();
                 pintarRetenciones();
+                pintarImportacion();
                 pintarListas();
 
                 Cargando.ocultar('loadingParamPplo');
@@ -595,6 +604,98 @@
         var p = String(v || '').split('-');
 
         return (p.length === 3) ? p[2].substring(0, 2) + '/' + p[1] + '/' + p[0] : (v || '');
+    }
+
+    /* ================================================================
+       IMPORTACIÓN DE PAGOS: EL % DE EXCEDENTE PERMITIDO
+       ================================================================ */
+
+    /**
+     * Uno solo, general. Se calcula sobre el NETO A PAGAR: con neto $1.000.000
+     * y 5% se acepta hasta $1.050.000. Cero es válido —no se acepta
+     * excedente—; vacío no se puede guardar.
+     *
+     * Rige desde que se guarda, sin vigencias. Por eso la sección dice quién lo
+     * cambió por última vez y cuándo, y que una previsualización hecha antes ya
+     * no se puede confirmar.
+     *
+     * Si falta o está roto, la planilla no acepta ningún excedente y el aviso
+     * crítico lo dice arriba: no se muestra un 5 que nadie cargó.
+     */
+    function pintarImportacion() {
+        var cont = document.getElementById('importacionPplo');
+
+        if (!cont) {
+            return;
+        }
+
+        var cab = '<div class="card mb-4" id="cardImportacionPplo"><div class="card-header">'
+            + '<h5 class="mb-0">Importación de pagos</h5>'
+            + '<small class="text-muted">Cómo se valida el IMPORTE de la planilla de pagos de '
+            + 'Proveedores Locales.</small></div>';
+
+        if (!imp.disponible) {
+            cont.innerHTML = cab + '<div class="card-body text-muted">Falta correr <code>'
+                + escapar(imp.script || 'sql/cashflow_prov_locales_excedente_parcial.sql')
+                + '</code> contra la base central. Mientras tanto el IMPORTE de la planilla tiene que '
+                + 'ser el neto a pagar, con $1 de tolerancia.</div></div>';
+            return;
+        }
+
+        var p = imp.porc || {};
+        var valor = (p.porc === null || p.porc === undefined) ? '' : String(p.porc).replace('.', ',');
+        var quien = Auditoria.texto({ usuario: p.usuario, fecha: p.fecha });
+
+        cont.innerHTML = cab + '<div class="card-body">'
+            + '<div class="row g-2 align-items-end">'
+            +   '<div class="col-md-3"><label class="form-label form-label-sm" for="porcExcedentePplo">'
+            +     '% de excedente permitido</label>'
+            +     '<div class="input-group input-group-sm">'
+            +       '<input type="text" inputmode="decimal" class="form-control" id="porcExcedentePplo"'
+            +       ' value="' + escapar(valor) + '" data-previo="' + escapar(valor) + '"'
+            +       ' placeholder="Ej: 5">'
+            +       '<span class="input-group-text">%</span>'
+            +     '</div></div>'
+            +   '<div class="col-md-2"><button class="btn btn-sm btn-primary" id="btnGuardarPorcPplo">'
+            +     '<i class="fas fa-check me-1"></i> Guardar</button></div>'
+            + '</div>'
+            + '<small class="text-muted d-block mt-2">Cuánto más que el neto a pagar se acepta en la '
+            +   'planilla de pagos. El excedente queda a cuenta del proveedor en Tango. Se calcula '
+            +   'sobre el neto —lo que sale de la caja—: con un neto de $ 1.000.000 y 5%, se acepta '
+            +   'hasta $ 1.050.000. 0 quiere decir que no se acepta excedente.</small>'
+            + (p.porc === null || p.porc === undefined
+                ? '<div class="alert alert-danger py-2 px-3 small mt-2 mb-0">' + escapar(p.error || '')
+                  + '</div>'
+                : '')
+            + (quien ? '<small class="text-muted d-block mt-1" title="' + escapar(quien) + '">'
+                + '<i class="fas fa-user-pen me-1"></i>' + escapar(quien.split('\n').pop()) + '</small>'
+                : '')
+            + '</div></div>';
+
+        Permisos.soloLectura(cont);
+        conectarBoton('btnGuardarPorcPplo', guardarPorcExcedente);
+    }
+
+    /** Espejo de Proveedores::validarPorcExcedente(), sólo para no mandar algo que el servidor rechaza */
+    function guardarPorcExcedente() {
+        var input = document.getElementById('porcExcedentePplo');
+        var texto = String(input.value || '').trim().replace(',', '.');
+
+        if (!/^\d+(\.\d{1,2})?$/.test(texto) || parseFloat(texto) >= 100) {
+            Notificacion.campoInvalido(input, 'Un número de 0 a 99,99, con hasta dos decimales. 0 quiere '
+                + 'decir que no se acepta excedente.');
+            return;
+        }
+
+        pedirAccion('savePorcExcedenteProvLocal', { porc: texto })
+            .then(function(res) {
+                Notificacion.exito(res.message);
+                cargar();
+            })
+            .catch(function(error) {
+                input.value = input.getAttribute('data-previo');
+                Notificacion.error('No se pudo guardar: ' + error.message);
+            });
     }
 
     /* ================================================================

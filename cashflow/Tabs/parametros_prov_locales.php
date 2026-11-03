@@ -1,9 +1,10 @@
 <!--
     Parámetros → Prov. Locales.
 
-    DOS SECCIONES: las RETENCIONES (qué impuestos se descuentan de una factura
-    que se paga por orden de pago, y sus alícuotas generales) y las cinco
-    LISTAS con las que se clasifica a cada proveedor. Ver
+    TRES SECCIONES: las RETENCIONES (qué impuestos se descuentan de una factura
+    que se paga por orden de pago, y sus alícuotas generales), la IMPORTACIÓN
+    DE PAGOS (el % de excedente permitido) y las cinco LISTAS con las que se
+    clasifica a cada proveedor. Ver
     Class/ProveedoresRetenciones.php y README-proveedores-locales.md.
 
     Va en su propio archivo y con su propio JS, igual que Saldos,
@@ -51,6 +52,13 @@
              alícuotas de cada proveedor se cargan desde el Maestro de
              Proveedores Locales. Lo dibuja el JS. -->
         <div id="retencionesPplo"></div>
+
+        <!-- IMPORTACIÓN DE PAGOS. El % de excedente permitido: cuánto más que el
+             neto a pagar se acepta en la planilla de pagos. Va DESPUÉS de las
+             retenciones porque se mide contra el neto que ellas dejan. Es uno
+             solo, general, y tiene su propio guardado
+             (Proveedores::guardarPorcExcedente()). Lo dibuja el JS. -->
+        <div id="importacionPplo"></div>
 
         <div class="alert alert-secondary d-flex align-items-start gap-2 py-2 px-3 mb-3">
             <i class="fas fa-circle-info mt-1"></i>

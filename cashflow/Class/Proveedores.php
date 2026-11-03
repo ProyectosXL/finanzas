@@ -126,11 +126,33 @@ class Proveedores {
     const MAX_MEDIOS = 2;
 
     /**
-     * Cuanto se tolera entre un IMPORTE de la planilla y el pendiente de Tango:
-     * un peso. Es el redondeo de quien arma la planilla a mano, no un descuento;
-     * mas que eso es otro numero y la fila queda en error con la diferencia.
+     * Cuanto se tolera entre un IMPORTE de la planilla y el neto a pagar para
+     * que siga siendo "el neto": un peso. Es el redondeo de quien arma la
+     * planilla a mano, no un descuento. Mas que eso ya no es un error: es un
+     * pago con EXCEDENTE -hasta el % permitido, con el mismo peso sobre el
+     * maximo- o un pago PARCIAL. Ver clasificarImporte().
      */
     const TOLERANCIA_IMPORTE = 1.0;
+
+    /**
+     * Lo que puede decir clasificarImporte() de un importe. Las tres primeras
+     * se guardan tal cual en CLASIFICACION de la tabla de medios.
+     */
+    const CLASIF_NETO = 'NETO';
+    const CLASIF_EXCEDENTE = 'EXCEDENTE';
+    const CLASIF_PARCIAL = 'PARCIAL';
+    const CLASIF_ERROR = 'ERROR';
+
+    /**
+     * El % de excedente permitido, en RO_T_CASHFLOW_PARAMETROS. Tiene su propio
+     * camino de guardado (guardarPorcExcedente()): Parametros::saveParametro()
+     * guarda cualquier texto y rechaza esta clave. Parametros la repite, igual
+     * que las de Echeqs, y una prueba las ata.
+     */
+    const CLAVE_PORC_EXCEDENTE = 'prov_locales_pct_excedente';
+
+    /** El script que agrega el excedente y el pago parcial, y siembra el % */
+    const SCRIPT_EXCEDENTE = 'sql/cashflow_prov_locales_excedente_parcial.sql';
 
     /** @var Conexion */
     private $conn;
@@ -143,6 +165,12 @@ class Proveedores {
 
     /** @var bool|null Cache del chequeo de existencia de la tabla de medios */
     private $tablaMedio = null;
+
+    /** @var bool|null Cache de si la tabla de medios ya tiene las columnas del excedente */
+    private $conExcedente = null;
+
+    /** @var array|null Cache del % de excedente de este pedido. Ver getPorcExcedente() */
+    private $porcExcedente = null;
 
     /** @var array Cache de que columnas de override tiene la tabla de pagos */
     private $columnasPago = [];
@@ -255,6 +283,220 @@ class Proveedores {
         return $this->tablaMedio;
     }
 
+    /**
+     * Si ya se corrio sql/cashflow_prov_locales_excedente_parcial.sql: la tabla
+     * de medios tiene CLASIFICACION y lo que se guarda al importar.
+     *
+     * SIN EL, LA IMPORTACION ES LA DE ANTES: el importe tiene que ser el neto a
+     * pagar con un peso de tolerancia, porque un excedente o un pago parcial no
+     * tendrian donde guardarse y el eje proyectaria el neto calculado.
+     *
+     * @return bool
+     */
+    public function tablaExcedenteCreada() {
+        if ($this->conExcedente !== null) {
+            return $this->conExcedente;
+        }
+
+        if (!$this->tablaMedioCreada()) {
+            $this->conExcedente = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COL_LENGTH('dbo." . self::TABLA_MEDIO . "', 'CLASIFICACION') AS C");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar las columnas del pago con excedente'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->conExcedente = ($row && $row['C'] !== null);
+
+        return $this->conExcedente;
+    }
+
+    /* ====================================================================
+       EL % DE EXCEDENTE PERMITIDO
+       ==================================================================== */
+
+    /**
+     * Valida un % de excedente que alguien quiere guardar. ES LA REGLA, escrita
+     * una vez: la usan el guardado y la lectura (porcExcedenteDesdeValor()).
+     *
+     * Un numero >= 0 y < 100, con hasta dos decimales. CERO ES VALIDO y quiere
+     * decir "no se acepta excedente": es una decision, no un dato que falta.
+     * 100 o mas no: aceptaria pagar el doble de una factura y dejar la mitad a
+     * cuenta, que no es un redondeo de nadie. Acepta la coma decimal, porque es
+     * como se tipea aca.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $valor
+     * @return float
+     * @throws Exception Con el motivo, para mostrarlo tal cual
+     */
+    public static function validarPorcExcedente($valor) {
+        $texto = str_replace(',', '.', trim((string) $valor));
+
+        if ($texto === '' || !preg_match('/^\d+(\.\d{1,2})?$/', $texto)) {
+            throw new Exception('El % de excedente es un número de 0 a 99,99, con hasta dos decimales '
+                . '(por ejemplo 5 o 12,5). 0 quiere decir que no se acepta excedente.');
+        }
+
+        $n = round(floatval($texto), 2);
+
+        if ($n >= 100) {
+            throw new Exception('El % de excedente tiene que ser menor a 100: con 100 se aceptaría '
+                . 'pagar el doble del neto a pagar.');
+        }
+
+        return $n;
+    }
+
+    /**
+     * Lo que vale el % guardado: el numero si sirve, o null con el motivo.
+     *
+     * NULL NO ES CERO. Cero es "no se acepta excedente", una decision; null es
+     * que el dato falta o esta roto, y entonces tampoco se acepta ninguno, pero
+     * se avisa en critico diciendo donde cargarlo. Nunca se asume el 5 de la
+     * semilla: un respaldo inventado haria aceptar pagos que nadie autorizo.
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $valor Lo que dice VALOR, o null si la clave no esta
+     * @return array ['porc' => float|null, 'error' => string|null]
+     */
+    public static function porcExcedenteDesdeValor($valor) {
+        if ($valor === null) {
+            return ['porc' => null, 'error' => 'Falta el % de excedente permitido ('
+                . self::CLAVE_PORC_EXCEDENTE . '): corré ' . self::SCRIPT_EXCEDENTE
+                . ' contra la base central, o cargalo en Parámetros › Prov. Locales › Importación de pagos.'];
+        }
+
+        try {
+            return ['porc' => self::validarPorcExcedente($valor), 'error' => null];
+        } catch (Exception $e) {
+            return ['porc' => null, 'error' => 'El % de excedente permitido guardado («' . trim((string) $valor)
+                . '») no sirve: ' . $e->getMessage() . ' Corregilo en Parámetros › Prov. Locales › '
+                . 'Importación de pagos.'];
+        }
+    }
+
+    /**
+     * El % de excedente permitido de hoy, con quien lo toco por ultima vez. Se
+     * lee una vez por pedido: la previsualizacion y la confirmacion lo leen
+     * cada una el suyo, y si difieren la confirmacion se frena.
+     *
+     * @return array ['porc' => float|null, 'error' => string|null,
+     *                'valor' => string|null, 'usuario' => string|null, 'fecha' => string|null]
+     */
+    public function getPorcExcedente() {
+        if ($this->porcExcedente !== null) {
+            return $this->porcExcedente;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT VALOR, USUARIO_MODIF, FECHA_MODIF
+             FROM dbo.RO_T_CASHFLOW_PARAMETROS
+             WHERE CLAVE = ?", [self::CLAVE_PORC_EXCEDENTE]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el % de excedente permitido'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $r = self::porcExcedenteDesdeValor($row ? $row['VALOR'] : null);
+
+        $r['valor'] = $row ? trim((string) $row['VALOR']) : null;
+        $r['usuario'] = $row ? $row['USUARIO_MODIF'] : null;
+        $r['fecha'] = ($row && $row['FECHA_MODIF'] instanceof DateTime)
+            ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : null;
+
+        $this->porcExcedente = $r;
+
+        return $r;
+    }
+
+    /**
+     * Guarda el % de excedente permitido. Rige desde ahora: no tiene
+     * vigencias. Queda con quien y cuando en USUARIO_MODIF / FECHA_MODIF.
+     *
+     * Un UPDATE y no un INSERT: la clave la siembra el script, y si no esta se
+     * dice cual correr en vez de crearla aca con datos a medias.
+     *
+     * @param mixed $valor
+     * @param string $usuario
+     * @return float El % guardado
+     */
+    public function guardarPorcExcedente($valor, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $porc = self::validarPorcExcedente($valor);
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "UPDATE dbo.RO_T_CASHFLOW_PARAMETROS
+             SET VALOR = ?, " . Auditoria::SET_MODIF . "
+             WHERE CLAVE = ?",
+            [self::textoPorc($porc), $usuario, self::CLAVE_PORC_EXCEDENTE]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar el % de excedente permitido'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas < 1) {
+            throw new Exception('Falta el parámetro ' . self::CLAVE_PORC_EXCEDENTE . ': corré '
+                . self::SCRIPT_EXCEDENTE . ' contra la base central.');
+        }
+
+        $this->porcExcedente = null;
+
+        return $porc;
+    }
+
+    /** 12.5 => '12.5', 5.0 => '5': como se guarda en VALOR */
+    private static function textoPorc($porc) {
+        return rtrim(rtrim(number_format(floatval($porc), 2, '.', ''), '0'), '.');
+    }
+
+    /**
+     * El aviso del % de excedente, para la pestaña y la previsualizacion. NO
+     * VA AL TABLERO: el tablero no usa el %, solo lo que ya se importo.
+     *
+     * CRITICO si falta o esta roto, porque la importacion rechaza cualquier
+     * excedente hasta que alguien lo cargue. Sin el script no dice nada aca: de
+     * eso avisa getAvisosConNivel(), y el % sin sus columnas no sirve de nada.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosPorcExcedente() {
+        if (!$this->tablaExcedenteCreada()) {
+            return [];
+        }
+
+        try {
+            $p = $this->getPorcExcedente();
+        } catch (Throwable $e) {
+            $p = ['porc' => null, 'error' => 'No se pudo leer el % de excedente permitido ('
+                . $e->getMessage() . ').'];
+        }
+
+        if ($p['porc'] !== null) {
+            return [];
+        }
+
+        return [Aviso::nuevo(Aviso::DANGER, $p['error'] . ' Mientras tanto la planilla de pagos no '
+            . 'acepta ningún pago con excedente; los pagos parciales y los netos se cargan igual.',
+            'Importación de pagos')];
+    }
+
     /** @return array Avisos de configuracion pendiente (textos) */
     public function getAvisos() {
         return Aviso::textos($this->getAvisosConNivel());
@@ -298,6 +540,14 @@ class Proveedores {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_MEDIO . '. Mientras '
                 . 'tanto un comprobante no se puede pagar con dos medios: la importación rechaza '
                 . 'las filas de dos medios, y todo lo demás funciona igual.');
+        }
+
+        /* Sin las columnas del excedente tampoco cambia ningun numero de hoy:
+           la planilla sigue exigiendo el neto a pagar, como antes. Atencion. */
+        if ($this->tablaMedioCreada() && !$this->tablaExcedenteCreada()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_EXCEDENTE . '. Mientras '
+                . 'tanto la planilla de pagos no acepta pagos con excedente ni pagos parciales: el '
+                . 'IMPORTE tiene que ser el neto a pagar, como antes, y todo lo demás funciona igual.');
         }
 
         $sinExclusion = $this->exclusion->avisoSinTabla();

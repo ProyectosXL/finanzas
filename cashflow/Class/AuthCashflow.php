@@ -211,6 +211,8 @@ class AuthCashflow {
             'activarImpuestoProvLocal' => [['parametros', 'PROV_LOCALES']],
             'addAlicuotaProvLocal' => [['parametros', 'PROV_LOCALES']],
             'bajaAlicuotaProvLocal' => [['parametros', 'PROV_LOCALES']],
+            // El % de excedente permitido de la planilla de pagos.
+            'savePorcExcedenteProvLocal' => [['parametros', 'PROV_LOCALES']],
             /* El % importado por rubro de Compras Exterior, y el recalculo del
                presupuesto que lo aplica. El recalculo pide el permiso de esta
                sub-pestaña y no el de la pestaña Proyección: es el boton de

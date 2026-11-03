@@ -1712,8 +1712,8 @@ chequear('y va arriba de las listas: deciden cuánta plata sale de la caja', tru
     strpos($tabPplo, 'id="retencionesPplo"') < strpos($tabPplo, 'id="listasPplo"'));
 chequear('el JS lee el bloque prov_locales_retenciones del módulo', true,
     strpos($jsPplo, 'modulo.prov_locales_retenciones') !== false);
-chequear('y lo pinta antes que las listas', true,
-    strpos($jsPplo, "pintarRetenciones();\n                pintarListas();") !== false);
+chequear('y lo pinta antes que las listas, con la importación de pagos en el medio', true,
+    strpos($jsPplo, "pintarRetenciones();\n                pintarImportacion();\n                pintarListas();") !== false);
 
 foreach (['addImpuestoProvLocal', 'saveImpuestoProvLocal', 'activarImpuestoProvLocal',
           'addAlicuotaProvLocal', 'bajaAlicuotaProvLocal'] as $accion) {
@@ -1732,6 +1732,42 @@ chequear('sin el script, la seccion dice cual falta', true,
 chequear('las tablas tienen id, para ordenarlas y exportarlas', [true, true],
     [strpos($jsPplo, 'id="tablaImpuestosPplo"') !== false,
      strpos($jsPplo, 'id="tablaGeneralesPplo"') !== false]);
+
+seccion('Parametros -> Prov. Locales: la seccion Importación de pagos esta enganchada');
+
+require_once __DIR__ . '/../Class/Parametros.php';
+
+$modPplo = null;
+
+foreach (Parametros::getModulos() as $m) {
+    if ($m['codigo'] === 'PROV_LOCALES') { $modPplo = $m; }
+}
+
+chequear('el módulo declara la sección, entre las retenciones y las listas',
+    ['prov_locales_retenciones', 'prov_locales_importacion', 'prov_locales_opciones'],
+    $modPplo['secciones']);
+chequear('la pestaña tiene su contenedor, después de las retenciones', true,
+    strpos($tabPplo, 'id="importacionPplo"') !== false
+    && strpos($tabPplo, 'id="retencionesPplo"') < strpos($tabPplo, 'id="importacionPplo"')
+    && strpos($tabPplo, 'id="importacionPplo"') < strpos($tabPplo, 'id="listasPplo"'));
+chequear('el JS lee el bloque prov_locales_importacion', true,
+    strpos($jsPplo, 'modulo.prov_locales_importacion') !== false);
+chequear('el rótulo es el de la especificación', true,
+    strpos($jsPplo, '% de excedente permitido') !== false
+    && strpos($jsPplo, 'El excedente queda a cuenta del proveedor en Tango') !== false);
+chequear('el JS llama a savePorcExcedenteProvLocal', true,
+    strpos($jsPplo, "'savePorcExcedenteProvLocal'") !== false);
+chequear('el controller la atiende y guarda por Proveedores::guardarPorcExcedente()', true,
+    strpos($ctrlParam, "case 'savePorcExcedenteProvLocal':") !== false
+    && strpos($ctrlParam, '->guardarPorcExcedente(') !== false);
+chequear('y pide el permiso de Parametros > Prov. Locales', [['parametros', 'PROV_LOCALES']],
+    AuthCashflow::ESCRITURAS['Parametros']['savePorcExcedenteProvLocal']);
+chequear('sin permiso de edición el campo y el botón no quedan', true,
+    preg_match('/function pintarImportacion\(\)[\s\S]*?Permisos\.soloLectura\(cont\);/', $jsPplo) === 1);
+chequear('dice quién lo cambió por última vez', true,
+    preg_match('/function pintarImportacion\(\)[\s\S]*?Auditoria\.texto\(/', $jsPplo) === 1);
+chequear('sin el script, la sección dice cuál falta', true,
+    strpos($jsPplo, 'sql/cashflow_prov_locales_excedente_parcial.sql') !== false);
 
 // ============================================================================
 // Proveedores Locales > Maestro: las retenciones de cada proveedor

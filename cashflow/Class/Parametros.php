@@ -65,6 +65,14 @@ class Parametros {
     const CLAVE_PLAZO_PRESENTACION_ECHEQS = 'echeqs_dias_vencidos_cartera';
 
     /**
+     * La clave del % de excedente permitido de la planilla de pagos de
+     * Proveedores Locales. Es Proveedores::CLAVE_PORC_EXCEDENTE, repetida por
+     * el mismo motivo que las de Echeqs: esta clase no carga Proveedores para
+     * guardar un parametro cualquiera. Una prueba las ata.
+     */
+    const CLAVE_PORC_EXCEDENTE_PROV = 'prov_locales_pct_excedente';
+
+    /**
      * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.
      *
      * Cada parametro declara a que MODULO pertenece, asi se ve de un vistazo que
@@ -191,8 +199,10 @@ class Parametros {
                 . 'distribución. Alimentan el neto a pagar de Proveedores Locales, el alta manual '
                 . 'de su maestro y la validación de su importación',
             /* LAS RETENCIONES VAN PRIMERO: deciden cuánta plata sale de la caja;
-               las listas sólo clasifican. */
-            'secciones' => ['prov_locales_retenciones', 'prov_locales_opciones']
+               las listas sólo clasifican. La importación de pagos va entre las
+               dos: su % se mide contra el neto que dejan las retenciones. */
+            'secciones' => ['prov_locales_retenciones', 'prov_locales_importacion',
+                            'prov_locales_opciones']
         ],
         /* VA PEGADA A PROV. LOCALES, igual que Logistica y por el mismo motivo:
            las facturas de Tarjetas Pagos Corporativos son facturas pendientes de
@@ -684,6 +694,22 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudieron leer las retenciones de '
                             . 'Proveedores Locales: ' . $e->getMessage();
                     }
+                } elseif ($seccion === 'prov_locales_importacion') {
+                    /* EL % DE EXCEDENTE. Mismo criterio que las retenciones: lo
+                       lee la clase del modulo, y un script sin correr no tumba
+                       la pestaña. Si el % falta o esta roto, la seccion lo dice
+                       en critico y la planilla no acepta excedentes. */
+                    try {
+                        $modulo[$seccion] = $this->provLocalesImportacion();
+
+                        foreach ($modulo[$seccion]['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = ['disponible' => false, 'porc' => null, 'avisos' => []];
+                        $modulo['avisos'][] = 'No se pudo leer el % de excedente permitido de '
+                            . 'Proveedores Locales: ' . $e->getMessage();
+                    }
                 } elseif ($seccion === 'compras_proy_rubros') {
                     /* El % importado por rubro. Mismo criterio que las
                        retenciones: lo lee la clase del modulo, y un script sin
@@ -1020,6 +1046,28 @@ class Parametros {
     }
 
     /**
+     * La seccion Importacion de pagos de Prov. Locales: el % de excedente
+     * permitido, con quien lo cambio por ultima vez. Sin el script, la seccion
+     * dice cual correr en vez de dibujar un campo que fallaria al guardar.
+     *
+     * @return array ['disponible', 'porc' => lo de Proveedores::getPorcExcedente(),
+     *                'script', 'avisos']
+     */
+    private function provLocalesImportacion() {
+        require_once __DIR__ . '/Proveedores.php';
+
+        $prov = new Proveedores();
+        $disponible = $prov->tablaExcedenteCreada();
+
+        return [
+            'disponible' => $disponible,
+            'porc' => $disponible ? $prov->getPorcExcedente() : null,
+            'script' => Proveedores::SCRIPT_EXCEDENTE,
+            'avisos' => $prov->avisosPorcExcedente()
+        ];
+    }
+
+    /**
      * El % importado por rubro de Compras Exterior, para su sección.
      *
      * UN RENGLON POR RUBRO, venga del presupuesto, de la tabla del %, o de
@@ -1348,6 +1396,14 @@ class Parametros {
         if ($clave === self::CLAVE_PLAZO_PRESENTACION_ECHEQS) {
             throw new Exception('El plazo de presentación de los cheques se guarda desde '
                 . 'Parámetros → Cheques, que valida que sea un entero de 1 a 30.');
+        }
+
+        /* EL % DE EXCEDENTE DE PROVEEDORES LOCALES, TAMBIEN: "cinco" o 150
+           dejarian a la planilla de pagos aceptando cualquier importe -o
+           ninguno-. La regla vive en Proveedores::validarPorcExcedente(). */
+        if ($clave === self::CLAVE_PORC_EXCEDENTE_PROV) {
+            throw new Exception('El % de excedente permitido se guarda desde Parámetros → Prov. '
+                . 'Locales → Importación de pagos, que valida que sea un número de 0 a 99,99.');
         }
 
         /* LA FECHA DESDE LA QUE SE CONSIDERAN LOS CONTENEDORES SE VALIDA ACA, y
