@@ -978,7 +978,7 @@ La pestaña suma el de *falta `sql/cashflow_comex_nac_pago.sql`* (warning), como
 
 | Pago | Cotización |
 | --- | --- |
-| Fecha entre hoy y hoy + N días | BCRA vendedor, última cotización publicada hasta hoy |
+| Fecha entre hoy y hoy + N días | BCRA vendedor, última cotización publicada hasta hoy. **En Crono Nacionalización, la del día anterior**: la última publicada antes de hoy |
 | Fecha **vencida** | BCRA vendedor: si todavía no se pagó, se paga ya |
 | Fecha posterior a hoy + N | Curva ROFEX del mes de pago (sin cambios) |
 | Con cotización corregida a mano (`COTIZ_USD_EDIT`) | **El override gana siempre** |
@@ -986,6 +986,7 @@ La pestaña suma el de *falta `sql/cashflow_comex_nac_pago.sql`* (warning), como
 
 - **N** es *Días con dólar BCRA* (`comex_dias_bcra`, 7 por defecto). **Con 0, nadie usa BCRA**, tampoco lo vencido: todo va con la curva, como antes de esta rama.
 - **Última cotización publicada** es `Cotizacion::ultimaHasta(hoy, VENDEDOR)`: la más reciente con fecha anterior o igual a hoy. Un lunes usa la del viernes.
+- **Las nacionalizaciones van con la del día anterior** (desde `fix/correcciones-cashflow`, 03/11/2026): `getCronoNacionalizacion()` pide `bcra($hoy, true)`, que busca `ultimaHasta(ayer, VENDEDOR)`, y una nacionalización se liquida con el BCRA vendedor de ayer. Un lunes usa la del viernes, igual que antes, y un martes la del lunes. La línea de la regla al pie de la pestaña nombra esa cotización. **Proveedores Exterior y Compras Proyectadas siguen con la de hoy**, y lo mismo el aviso de antigüedad, que es común a las tres. Medido el 03/11/2026: hoy $ 1.565,00, del día anterior (02/11) $ 1.560,00.
 - **Si tiene más de M días corridos** —*Antigüedad máxima del dólar BCRA*, `comex_bcra_antiguedad_max`, 3 por defecto— se usa igual y va un aviso de **atención**: *"La última cotización del dólar BCRA es del dd/mm/aaaa; se usa ésa para los pagos de los próximos N días."*
 - **Sin ninguna cotización BCRA** esos importes quedan en `null` con un aviso **crítico** que dice cuántos son y cuánto suman en dólares. **Nunca se valúan con la curva en silencio**: sería aplicarles justo el criterio que esta regla dice que no corresponde.
 - **La fecha que decide es la misma que elige el mes de la curva**: la de pago en Proveedores Exterior y en el FOB de Compras Proyectadas, la de nacionalización en Crono Nacionalización y en la nacionalización proyectada. En Crono, la fecha del saldo de un pago parcial **sigue sin cambiar la cotización** (sección 13): sólo decide la columna.
