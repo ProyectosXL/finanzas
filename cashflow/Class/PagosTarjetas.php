@@ -292,6 +292,14 @@ class PagosTarjetas {
         $faltanCalendario = [];
 
         foreach ($estimado as $nombre => $fila) {
+            /* UNA SUPERVISORA INACTIVA EN EL MAESTRO NO SE MUESTRA (desde
+               fix/correcciones-cashflow, 03/11/2026): no proyecta nada -dejo de
+               trabajar- y eso ya lo informan los parametros. Sin fila tampoco va
+               en el aviso de las que no proyectan, ni en ninguna suma. */
+            if ($fila['motivo'] === TarjetasSupervisoras::INACTIVA) {
+                continue;
+            }
+
             $clave = GastosSupervision::clave($nombre);
             $tarjetasDe = isset($porSupervisora[$clave]) ? $porSupervisora[$clave] : [];
 
@@ -433,8 +441,8 @@ class PagosTarjetas {
         }
 
         $textos = [
+            // INACTIVA no llega: esas no tienen fila (ver supervisoras()).
             TarjetasSupervisoras::SIN_SUPERVISORA => 'no están en el maestro de supervisoras',
-            TarjetasSupervisoras::INACTIVA => 'están inactivas en el maestro',
             TarjetasSupervisoras::SIN_IMPORTE => 'tienen gastos autorizados que suman cero'
         ];
 

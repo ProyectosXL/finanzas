@@ -307,6 +307,8 @@ Quien **no está** en `RO_T_SUPERVISORAS_COMERCIAL` pero tiene una tarjeta Super
 
 **Quien sí está en el maestro sigue su estado de allá**: una inactiva en el maestro dejó de trabajar, aunque su tarjeta siga activa.
 
+**Una supervisora inactiva en el maestro no aparece en la sub-pestaña** (desde `fix/correcciones-cashflow`, 03/11/2026): ni fila, ni aviso de *"inactivas en el maestro"*. No proyecta nada, y eso ya lo informan los parámetros. El motivo `INACTIVA` sigue existiendo en `TarjetasSupervisoras::estimar()`; es `PagosTarjetas::supervisoras()` el que no la lista. Al 03/11/2026 es ELINA COSTAMAGNA.
+
 El aviso de *"supervisoras activas sin gastos en la ventana"* ya no nombra a quien tiene fila por su tarjeta: su fila dice qué hacer.
 
 ---
