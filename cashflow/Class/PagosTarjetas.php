@@ -711,7 +711,7 @@ class PagosTarjetas {
         }
 
         $ep = TarjetasCorporativas::estimacionesPorProveedor($marcados, $r['filas'], $tarjetas,
-            $resumenes, $habiles, $meses, $hoy);
+            $resumenes, $habiles, $meses, $hoy, $inflacion);
         $salida['estimaciones'] = $ep['estimaciones'];
         $salida['proveedores_proyectan'] = array_values($marcados);
 
@@ -723,6 +723,14 @@ class PagosTarjetas {
 
         foreach (TarjetasCorporativas::avisosEstimaciones($salida['estimaciones']) as $a) {
             $salida['avisos'][] = $a;
+        }
+
+        /* LAS ESTIMACIONES SE AJUSTAN POR INFLACION: un mes sin el % cargado no
+           proyecta, y se avisa una sola vez con todos los meses que faltan. */
+        $avisoInfEst = Inflacion::avisoFaltan($ep['faltan_inflacion'], $hoy);
+
+        if ($avisoInfEst !== '') {
+            $salida['avisos'][] = 'Estimaciones mensuales: ' . $avisoInfEst;
         }
 
         foreach (TarjetasCorporativas::avisosPorProveedor($marcados, $r['filas']) as $a) {
