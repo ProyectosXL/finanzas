@@ -502,9 +502,20 @@ seccion('la escritura de la apertura pasa por un solo lugar');
 
 $escriturasMedio = '/(INSERT INTO|UPDATE|DELETE FROM) dbo\." \. self::TABLA_MEDIO/';
 
-chequear('solo guardarApertura() escribe la tabla de medios: todas sus escrituras estan ahi',
-    preg_match_all($escriturasMedio, $fuente), preg_match_all($escriturasMedio, $apert));
-chequear('y son dos: la baja y el alta', 2, preg_match_all($escriturasMedio, $apert));
+/* DOS LUGARES Y NINGUNO MAS: guardarApertura() escribe lo IMPORTADO -la baja y
+   el alta de las partes- y escribirRegistroPagos() solo anota que Tango ya
+   registro un pago parcial, como escribirConciliacion() con la tabla de pagos.
+   Una tercera escritura seria un camino que cambia lo importado sin pasar por
+   la importacion. */
+$registro = $cuerpoDe('escribirRegistroPagos');
+
+chequear('solo guardarApertura() y la marca de Tango escriben la tabla de medios',
+    preg_match_all($escriturasMedio, $fuente),
+    preg_match_all($escriturasMedio, $apert) + preg_match_all($escriturasMedio, $registro));
+chequear('guardarApertura() son dos: la baja y el alta', 2, preg_match_all($escriturasMedio, $apert));
+chequear('la marca es una, y no toca lo importado: sólo el estado en Tango', [1, 1], [
+    preg_match_all($escriturasMedio, $registro),
+    preg_match('/SET ESTADO_TANGO = \'REGISTRADO\', FECHA_REAL = \?, PENDIENTE_REAL = \?,\s*FECHA_REGISTRO = GETDATE\(\), " \. Auditoria::SET_MODIF/', $registro)]);
 chequear('aplicarImportacion() la escribe en su transaccion, junto con la fila de pagos', true,
     strpos($cuerpoDe('aplicarImportacion'), 'sqlsrv_begin_transaction')
         < strpos($cuerpoDe('aplicarImportacion'), '$this->guardarApertura(')
