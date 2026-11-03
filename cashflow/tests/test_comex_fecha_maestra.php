@@ -920,7 +920,7 @@ chequear('la fila se valua con la fecha de nacionalizacion', true,
    del dolar BCRA, igual: va justo despues. */
 chequear('la curva se lee antes del while', true,
     (bool) preg_match('/\$curva = \$this->dolarFuturo\(\)->curva\(\);\s*\n\s*'
-        . '\$bcra = \$this->dolarFuturo\(\)->bcra\(\$hoy(, true)?\);\s*\n\s*while/', $codigoComex));
+        . '\$bcra = \$this->dolarFuturo\(\)->bcra\(\$hoy\);\s*\n\s*while/', $codigoComex));
 chequear('y una sola vez en cada getter', 2,
     substr_count($codigoComex, '$curva = $this->dolarFuturo()->curva();'));
 

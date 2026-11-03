@@ -277,9 +277,8 @@ chequear('Compras Proyectadas, el FOB: Comex::valuar() con la regla', true,
     strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO', \$bcra)") !== false);
 chequear('Compras Proyectadas, la nacionalizacion: Comex::valuar() con la regla', true,
     strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC', \$bcra)") !== false);
-chequear('las dos regla salen de DolarFuturo::bcra(): la de hoy y la del dia anterior', [1, 1],
-    [substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy);'),
-     substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy, true);')]);
+chequear('las dos regla salen de DolarFuturo::bcra()', 2,
+    substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy);'));
 chequear('y la de Compras tambien', 1, substr_count($srcCompras, '$bcra = $dolar->bcra($h->hoy());'));
 
 /* Fuera de DolarFuturo, solo Comex::valuar() resuelve con la regla: nadie
@@ -296,7 +295,7 @@ foreach (glob(__DIR__ . '/../Class/{,Providers/}*.php', GLOB_BRACE) as $archivo)
 chequear('solo Comex.php resuelve con la regla', ['Comex.php'], $conRegla);
 
 chequear('bcra() pide la punta VENDEDORA al leer la cotizacion', 1,
-    preg_match('/ultimaHasta\(\s*\$delDiaAnterior \?[^;]*: \$hoy,\s*Cotizacion::VENDEDOR\)/', $srcDolar));
+    preg_match('/ultimaHasta\(self::diaAnterior\(\$hoy\),\s*Cotizacion::VENDEDOR\)/', $srcDolar));
 
 chequear('los avisos del dolar salen en las dos pestanas de Comex', 2,
     substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel()'));
@@ -342,23 +341,14 @@ chequear('la fila valuada con BCRA lleva su fecha para la marca', '2026-10-28',
     $fila['COTIZ_BCRA_FECHA']);
 chequear('y su importe en pesos', 1480000.0, $fila['IMPORTE_ARS']);
 
-seccion('Crono Nacionalizacion usa el dolar BCRA vendedor del dia anterior');
+seccion('el dolar BCRA es el vendedor del dia anterior, en las tres pantallas');
 
-/* Una nacionalizacion de los proximos dias se liquida con el BCRA vendedor de
-   AYER, no el de hoy. Las otras dos pantallas siguen con el de hoy. */
-$fuenteCxN = file_get_contents(__DIR__ . '/../Class/Comex.php');
-$fuenteDfN = file_get_contents(__DIR__ . '/../Class/DolarFuturo.php');
-$cuerpoNac = substr($fuenteCxN, strpos($fuenteCxN, 'public function getCronoNacionalizacion('));
-$cuerpoNac = substr($cuerpoNac, 0, strpos($cuerpoNac, 'while ($row'));
-
-chequear('la nacionalizacion pide la del dia anterior', true,
-    strpos($cuerpoNac, '->bcra($hoy, true)') !== false);
-chequear('Proveedores Exterior sigue con la de hoy', true,
-    strpos($fuenteCxN, '$bcra = $this->dolarFuturo()->bcra($hoy);') !== false);
-chequear('la del dia anterior se busca hasta ayer, no hasta hoy', true,
-    strpos($fuenteDfN, "\$delDiaAnterior ? date('Y-m-d', strtotime(\$hoy . ' -1 day')) : \$hoy") !== false);
-chequear('y se cachea aparte de la de hoy', true,
-    strpos($fuenteDfN, "\$clave = \$hoy . (\$delDiaAnterior ? '|anterior' : '');") !== false);
-chequear('la pestana explica la regla con la misma cotizacion', true,
-    strpos(file_get_contents(__DIR__ . '/../Controller/ComexController.php'),
-        'explicarRegla($comex->dolarFuturo()->bcra(null, true))') !== false);
+/* Los pagos al exterior y las nacionalizaciones de los proximos dias se liquidan
+   con el BCRA vendedor de AYER, no el de hoy: se busca la ultima publicada hasta
+   el dia anterior. Un lunes da la del viernes; un martes, la del lunes. */
+chequear('un martes busca hasta el lunes', '2026-11-02', DolarFuturo::diaAnterior('2026-11-03'));
+chequear('un lunes busca hasta el domingo, y ultimaHasta() da la del viernes', '2026-11-01',
+    DolarFuturo::diaAnterior('2026-11-02'));
+chequear('cruza el mes y el anio', '2026-12-31', DolarFuturo::diaAnterior('2027-01-01'));
+chequear('nadie arma una regla BCRA con la cotizacion de hoy', 0,
+    preg_match('/ultimaHasta\(\$hoy,/', $srcDolar));

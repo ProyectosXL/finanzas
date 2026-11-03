@@ -3351,11 +3351,9 @@ class Comex {
         $v = [];
 
         // La curva se lee UNA vez para todo el listado, no una por fila, igual
-        // que en getProveedoresExterior(). La regla del dolar BCRA, igual, pero
-        // con la cotizacion DEL DIA ANTERIOR: una nacionalizacion se liquida con
-        // el BCRA vendedor de ayer, no el de hoy. Ver DolarFuturo::bcra().
+        // que en getProveedoresExterior(). La regla del dolar BCRA, igual.
         $curva = $this->dolarFuturo()->curva();
-        $bcra = $this->dolarFuturo()->bcra($hoy, true);
+        $bcra = $this->dolarFuturo()->bcra($hoy);
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',

@@ -386,8 +386,7 @@ try {
                 'disponible' => $comex->dolarFuturo()->disponible(),
                 'ultimo_mes' => $comex->dolarFuturo()->ultimoMes(),
                 'actualizada' => $comex->dolarFuturo()->actualizada(),
-                // La del dia anterior: la misma con la que se valua esta pestana.
-                'regla' => DolarFuturo::explicarRegla($comex->dolarFuturo()->bcra(null, true))
+                'regla' => DolarFuturo::explicarRegla($comex->dolarFuturo()->bcra())
             ];
 
             $payload['fechas_editables'] = $comex->tieneHistorial();

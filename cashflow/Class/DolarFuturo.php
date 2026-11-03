@@ -321,7 +321,7 @@ class DolarFuturo {
 
     /**
      * La regla del dolar BCRA de hoy: los dos parametros y la ultima
-     * cotizacion BCRA VENDEDORA publicada hasta hoy. Es lo que reciben
+     * cotizacion BCRA VENDEDORA publicada ANTES de hoy. Es lo que reciben
      * resolver() y Comex::valuar().
      *
      * UNA LECTURA POR PEDIDO, cacheada por dia: la usan las filas de las dos
@@ -333,22 +333,21 @@ class DolarFuturo {
      * de los proximos dias quedan sin valuar con su aviso. Con N = 0 ni
      * siquiera se pide la cotizacion: nadie la usa.
      *
-     * DEL DIA ANTERIOR, si se pide ($delDiaAnterior): la ultima cotizacion
-     * publicada ANTES de hoy, sin la de hoy. Lo pide Crono Nacionalizacion
-     * (fix/correcciones-cashflow, 03/11/2026): una nacionalizacion se liquida
-     * con el BCRA vendedor del dia anterior. Un lunes da la del viernes. Las
-     * otras dos pantallas siguen con la de hoy.
+     * DEL DIA ANTERIOR, Y NO LA DE HOY (fix/correcciones-cashflow, 03/11/2026):
+     * los pagos al exterior y las nacionalizaciones se liquidan con el BCRA
+     * vendedor del dia anterior. Se busca la ultima publicada hasta AYER, asi
+     * que un lunes da la del viernes y un martes la del lunes. Vale para las
+     * tres pantallas -Proveedores Exterior, Crono Nacionalizacion y Compras
+     * Proyectadas- y para el aviso de antiguedad, que leen esta misma regla.
      *
      * @param string|null $hoy 'Y-m-d'. Por defecto, hoy.
-     * @param bool $delDiaAnterior
      * @return array Lo que devuelve reglaBcra()
      */
-    public function bcra($hoy = null, $delDiaAnterior = false) {
+    public function bcra($hoy = null) {
         $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
-        $clave = $hoy . ($delDiaAnterior ? '|anterior' : '');
 
-        if (isset($this->reglas[$clave])) {
-            return $this->reglas[$clave];
+        if (isset($this->reglas[$hoy])) {
+            return $this->reglas[$hoy];
         }
 
         $params = $this->parametrosBcra();
@@ -360,18 +359,29 @@ class DolarFuturo {
             try {
                 require_once __DIR__ . '/Cotizacion.php';
 
-                $cotizacion = (new Cotizacion())->ultimaHasta(
-                    $delDiaAnterior ? date('Y-m-d', strtotime($hoy . ' -1 day')) : $hoy,
+                $cotizacion = (new Cotizacion())->ultimaHasta(self::diaAnterior($hoy),
                     Cotizacion::VENDEDOR);
             } catch (Throwable $e) {
                 $error = $e->getMessage();
             }
         }
 
-        $this->reglas[$clave] = self::reglaBcra($hoy, $dias,
+        $this->reglas[$hoy] = self::reglaBcra($hoy, $dias,
             $params[self::PARAM_ANTIGUEDAD_BCRA], $cotizacion, $error);
 
-        return $this->reglas[$clave];
+        return $this->reglas[$hoy];
+    }
+
+    /**
+     * Hasta que dia se busca la cotizacion BCRA: el anterior a hoy. Ver bcra().
+     *
+     * Estatica y pura.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return string 'Y-m-d'
+     */
+    public static function diaAnterior($hoy) {
+        return date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -1 day'));
     }
 
     /**
