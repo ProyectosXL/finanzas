@@ -152,6 +152,12 @@ GO
 
    QUIEN LO CARGO: 'SISTEMA:' + el nombre del script, no NULL: NULL quiere
    decir "fila historica, de antes de la auditoria" (AuthCashflow::ORIGEN_SISTEMA).
+   VA SIN EL ".sql": USUARIO_ALTA y USUARIO_MODIF son VARCHAR(50), y con la
+   extension son 51 caracteres. La primera version lo llevaba, el INSERT fallo
+   por truncado y el parametro no se sembro.
+
+   EL MENSAJE SALE DE LO QUE QUEDO EN LA TABLA, no de haber llegado a esta
+   linea: si el INSERT falla, el lote sigue, y antes decia "sembrado" igual.
    ---------------------------------------------------------------------------- */
 IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_PARAMETROS
                WHERE CLAVE = 'prov_locales_pct_excedente')
@@ -168,10 +174,13 @@ BEGIN
             VALUES (''prov_locales_pct_excedente'', ''5'', ''DECIMAL'',
                     ''Cuanto mas que el neto a pagar se acepta en la planilla de pagos, en %'',
                     ''IMPORTACION'', ''PROV_LOCALES'',
-                    ''SISTEMA:cashflow_prov_locales_excedente_parcial.sql'',
-                    ''SISTEMA:cashflow_prov_locales_excedente_parcial.sql'');';
+                    ''SISTEMA:cashflow_prov_locales_excedente_parcial'',
+                    ''SISTEMA:cashflow_prov_locales_excedente_parcial'');';
 
-    PRINT 'Parametro prov_locales_pct_excedente sembrado en 5%.';
+    IF EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_PARAMETROS WHERE CLAVE = 'prov_locales_pct_excedente')
+        PRINT 'Parametro prov_locales_pct_excedente sembrado en 5%.';
+    ELSE
+        RAISERROR('No se pudo sembrar prov_locales_pct_excedente: mira el error de arriba. Mientras falte, la planilla no acepta ningun excedente.', 16, 1);
 END
 ELSE
 BEGIN

@@ -108,6 +108,15 @@ chequear('lo siembra en 5', true,
     strpos($sql, "VALUES (''prov_locales_pct_excedente'', ''5''") !== false);
 chequear('sólo si no existe', true,
     strpos($sql, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_PARAMETROS\n               WHERE CLAVE = 'prov_locales_pct_excedente')") !== false);
+/* USUARIO_ALTA y USUARIO_MODIF son VARCHAR(50): con ".sql" la firma tenía 51
+   caracteres, el INSERT falló por truncado y el parámetro no se sembró. */
+preg_match_all("/''(SISTEMA:[^']*)''/", $sql, $firmas);
+chequear('la firma del sistema entra en VARCHAR(50)', [true],
+    array_values(array_unique(array_map(function ($f) { return mb_strlen($f) <= 50; }, $firmas[1]))));
+chequear('y hay alguna que medir', true, count($firmas[1]) > 0);
+chequear('si el INSERT falla, no dice "sembrado": lo verifica y avisa', true,
+    strpos($sql, "IF EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_PARAMETROS WHERE CLAVE = 'prov_locales_pct_excedente')\n        PRINT 'Parametro prov_locales_pct_excedente sembrado en 5%.';") !== false);
+
 chequear('las aperturas que ya están quedan como NETO', true,
     strpos($sql, "DEFAULT ('NETO')") !== false);
 chequear('la clasificación es una de tres', true,
