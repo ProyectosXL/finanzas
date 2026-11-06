@@ -157,6 +157,9 @@ class DolarFuturo {
     /** @var array Cache de ultimoHabil(), indexado por hoy */
     private $habiles = [];
 
+    /** @var array Cache de calendario(), indexado por hoy */
+    private $calendarios = [];
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -340,6 +343,15 @@ class DolarFuturo {
      * tres pantallas -Proveedores Exterior, Crono Nacionalizacion y Compras
      * Proyectadas- y para el aviso de antiguedad, que leen esta misma regla.
      *
+     * EL DIA ANTERIOR ES EL ULTIMO HABIL ANTES DE HOY, no el dia corrido de
+     * ayer (feature/crono-nacionalizacion-dolar-divisas, 06/11/2026). Desde
+     * septiembre de 2026 el origen RELLENA los sabados, domingos y feriados con
+     * la cotizacion del habil SIGUIENTE: el domingo 01/11 vale lo del lunes
+     * 02/11. "La ultima hasta ayer" daba entonces, un lunes ya cargado, la
+     * cotizacion del mismo lunes, y la del viernes si el proceso todavia no
+     * habia corrido. Buscando hasta el habil anterior -diaAnterior() con el
+     * calendario- el resultado no depende ni del relleno ni de la hora.
+     *
      * @param string|null $hoy 'Y-m-d'. Por defecto, hoy.
      * @return array Lo que devuelve reglaBcra()
      */
@@ -359,8 +371,8 @@ class DolarFuturo {
             try {
                 require_once __DIR__ . '/Cotizacion.php';
 
-                $cotizacion = (new Cotizacion())->ultimaHasta(self::diaAnterior($hoy),
-                    Cotizacion::VENDEDOR);
+                $cotizacion = (new Cotizacion())->ultimaHasta(
+                    self::diaAnterior($hoy, $this->calendario($hoy)), Cotizacion::VENDEDOR);
             } catch (Throwable $e) {
                 $error = $e->getMessage();
             }
@@ -373,15 +385,65 @@ class DolarFuturo {
     }
 
     /**
-     * Hasta que dia se busca la cotizacion BCRA: el anterior a hoy. Ver bcra().
+     * Hasta que dia se busca la cotizacion del dia anterior: el ULTIMO HABIL
+     * ANTES DE HOY. Un lunes da el viernes; un martes despues de un lunes
+     * feriado, el viernes tambien. Ver bcra().
+     *
+     * Con el calendario de RO_T_CALENDARIO, y lo que no esta en el mapa con el
+     * respaldo de lunes a viernes: es CronogramaPagos::habilAnterior(), la misma
+     * mecanica que ultimoHabil(). Sin mapa queda solo el respaldo, asi que un
+     * fin de semana se saltea igual y un feriado no.
+     *
+     * Si ni asi aparece un habil -treinta dias seguidos no habiles, un mapa
+     * roto- cae al dia corrido anterior: es lo que hacia antes, y no deja la
+     * regla sin fecha.
      *
      * Estatica y pura.
      *
      * @param string $hoy 'Y-m-d'
+     * @param array $habiles Mapa 'Y-m-d' => bool, el de Ventas::getDiasHabiles()
      * @return string 'Y-m-d'
      */
-    public static function diaAnterior($hoy) {
-        return date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -1 day'));
+    public static function diaAnterior($hoy, $habiles = []) {
+        require_once __DIR__ . '/CronogramaPagos.php';
+
+        $ayer = date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -1 day'));
+
+        try {
+            return CronogramaPagos::habilAnterior($ayer, is_array($habiles) ? $habiles : [])['fecha'];
+        } catch (Throwable $e) {
+            return $ayer;
+        }
+    }
+
+    /**
+     * El calendario de los ultimos treinta dias hasta hoy, para ultimoHabil()
+     * y diaAnterior(). Una lectura por dia pedido.
+     *
+     * NO LANZA: sin calendario, el mapa vacio deja solo el respaldo de lunes a
+     * viernes.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return array Mapa 'Y-m-d' => bool
+     */
+    private function calendario($hoy) {
+        if (array_key_exists($hoy, $this->calendarios)) {
+            return $this->calendarios[$hoy];
+        }
+
+        require_once __DIR__ . '/CronogramaPagos.php';
+
+        try {
+            require_once __DIR__ . '/Ventas.php';
+
+            $this->calendarios[$hoy] = (new Ventas())->getDiasHabiles(
+                date('Y-m-d', strtotime($hoy . ' -' . CronogramaPagos::MAX_CORRIMIENTO . ' days')),
+                $hoy);
+        } catch (Throwable $e) {
+            $this->calendarios[$hoy] = [];
+        }
+
+        return $this->calendarios[$hoy];
     }
 
     /**
@@ -407,20 +469,8 @@ class DolarFuturo {
 
         require_once __DIR__ . '/CronogramaPagos.php';
 
-        $mapa = [];
-
         try {
-            require_once __DIR__ . '/Ventas.php';
-
-            $mapa = (new Ventas())->getDiasHabiles(
-                date('Y-m-d', strtotime($hoy . ' -' . CronogramaPagos::MAX_CORRIMIENTO . ' days')),
-                $hoy);
-        } catch (Throwable $e) {
-            $mapa = [];
-        }
-
-        try {
-            $this->habiles[$hoy] = CronogramaPagos::habilAnterior($hoy, $mapa)['fecha'];
+            $this->habiles[$hoy] = CronogramaPagos::habilAnterior($hoy, $this->calendario($hoy))['fecha'];
         } catch (Throwable $e) {
             $this->habiles[$hoy] = null;
         }
