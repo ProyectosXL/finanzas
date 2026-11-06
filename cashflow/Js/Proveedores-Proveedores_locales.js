@@ -343,9 +343,15 @@
 
         /* Cuánto del total es EXCEDENTE: sale de la caja y por eso suma, pero
            no es deuda de Tango —queda a cuenta del proveedor—. */
-        texto('excedenteProv', k.excedente
+        /* CON SIGNO: una factura compensada en el total de su proveedor que
+           se pagó de menos resta. Con un filtro que muestra sólo ésa, el
+           total puede quedar negativo, y se dice distinto. */
+        texto('excedenteProv', k.excedente >= 0.005
             ? 'Incluye ' + plata(k.excedente) + ' de excedente, a cuenta de los proveedores'
-            : '');
+            : (k.excedente <= -0.005
+                ? 'Incluye ' + plata(k.excedente) + ' de facturas pagadas de menos, compensadas en el '
+                  + 'total de su proveedor'
+                : ''));
 
         texto('vencidoProv', plata(k.vencido_sin_fecha));
         texto('detalleVencidoProv', (k.n_vencido_sin_fecha
@@ -740,6 +746,22 @@
         }
 
         var p = f.PAGO_IMPORTADO;
+
+        /* UNA FACTURA COMPENSADA EN EL TOTAL DEL PROVEEDOR: la diferencia
+           puede ser negativa —se pagó de menos— y no es un excedente suyo,
+           sino su parte del excedente del proveedor. */
+        if (p.clasificacion === 'COMPENSADA') {
+            var tituloComp = 'Pagada — compensada en el total del proveedor: se paga ' + plata(aPagar(f))
+                + (Number(p.de) > 1 ? ' en esta parte' : '') + ' contra un neto de ' + plata(aPagar(f) - exc)
+                + ' (' + (exc >= 0 ? '+' : '−') + plata(Math.abs(exc)) + ').'
+                + '\nNo queda saldo pendiente: lo que se paga de más o de menos se compensa con las otras '
+                + 'facturas del proveedor en la misma planilla.'
+                + '\n' + Auditoria.texto({ usuario: p.usuario, fecha: p.fecha_modif });
+
+            return '<td class="currency fw-bold" title="' + escapar(tituloComp) + '">' + plata(aPagar(f))
+                + '<span class="prov-marca-excedente" data-etiqueta="compensada"></span></td>';
+        }
+
         var titulo = 'Neto ' + plata(aPagar(f) - exc) + ' + excedente ' + plata(exc) + ' = '
             + plata(aPagar(f)) + (Number(p.de) > 1 ? ' en esta parte' : '') + '.'
             + '\nTotal pagado: ' + plata(p.pagado) + ', sobre un neto de ' + plata(p.neto)
@@ -1185,7 +1207,9 @@
         var p = f.PAGO_IMPORTADO;
 
         if (!p) { return ''; }
-        if (p.estado === 'REGISTRADO') { return 'parcial en Tango'; }
+        if (p.estado === 'REGISTRADO') {
+            return p.clasificacion === 'COMPENSADA' ? 'registrada en Tango' : 'parcial en Tango';
+        }
         if (p.estado === 'DESCUADRADO') { return 'no coincide'; }
         if (p.tipo === 'SALDO') { return 'saldo'; }
 
@@ -1193,6 +1217,10 @@
 
         if (p.clasificacion === 'PARCIAL') {
             return dos ? dos + ' · parcial' : 'pago parcial';
+        }
+
+        if (p.clasificacion === 'COMPENSADA') {
+            return (dos ? dos + ' · ' : '') + 'compensada';
         }
 
         return (dos ? dos + ' · ' : '') + (Number(f.EXCEDENTE) ? '+ excedente' : 'con excedente');
@@ -1205,14 +1233,16 @@
     function textoImportado(f) {
         var p = f.PAGO_IMPORTADO;
         var lineas = [];
+        var nombre = { PARCIAL: 'parcial', COMPENSADA: 'compensado en el total del proveedor' }[p.clasificacion]
+            || 'con excedente';
 
         if (p.estado === 'REGISTRADO') {
-            lineas.push('Se importó un pago ' + (p.clasificacion === 'PARCIAL' ? 'parcial' : 'con excedente')
+            lineas.push('Se importó un pago ' + nombre
                 + ' de ' + plata(p.pagado) + ' y Tango ya lo registró'
                 + (p.fecha_real ? ' (pagado el ' + fechaCorta(p.fecha_real) + ')' : '') + ': se proyecta '
                 + 'sólo lo que quedó pendiente en Tango, con su vencimiento o el próximo día de pago.');
         } else if (p.estado === 'DESCUADRADO') {
-            lineas.push('Se importó un pago ' + (p.clasificacion === 'PARCIAL' ? 'parcial' : 'con excedente')
+            lineas.push('Se importó un pago ' + nombre
                 + ' de ' + plata(p.pagado) + ' sobre un pendiente de ' + plata(p.pendiente_import)
                 + ', pero en Tango el pendiente subió a ' + plata(p.pendiente) + ': se proyecta el '
                 + 'pendiente de Tango. Reimportá para corregirlo.');
@@ -1221,6 +1251,11 @@
                 + ' + excedente ' + plata(p.excedente)
                 + (p.porc_excedente !== null ? ' (' + String(p.porc_excedente).replace('.', ',') + '%)' : '')
                 + '. El excedente queda a cuenta del proveedor en Tango.');
+        } else if (p.clasificacion === 'COMPENSADA') {
+            lineas.push('Pagada — compensada en el total del proveedor: se paga ' + plata(p.pagado)
+                + ' contra un neto de ' + plata(p.neto) + ' (' + (p.excedente >= 0 ? '+' : '−')
+                + plata(Math.abs(p.excedente)) + '). No queda saldo pendiente: la diferencia se compensa '
+                + 'con las otras facturas del proveedor en la misma planilla.');
         } else {
             lineas.push('Pago parcial: se paga ' + plata(p.pagado) + ' de un neto de ' + plata(p.neto)
                 + '. Saldo ' + plata(p.saldo)
@@ -2192,9 +2227,21 @@
         var chips = que === 'Pagos'
             ? [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
                ['sin_cambios', 'Sin cambios', 'secondary'], ['dos_medios', 'En dos medios', 'info'],
-               ['con_excedente', 'Con excedente', 'primary', 'importe_excedente',
-                'Comprobantes que se pagan con más que su neto a pagar. El importe es el excedente, '
-                + 'que queda a cuenta del proveedor en Tango.'],
+               /* EL EXCEDENTE SE VALIDA POR PROVEEDOR: los chips cuentan
+                  proveedores, no facturas. Ver Proveedores::clasificarProveedor(). */
+               ['proveedores_con_excedente', 'Proveedores con excedente', 'primary', 'importe_excedente',
+                'Proveedores que se pagan con más que el neto de sus facturas en la planilla. El importe es '
+                + 'el excedente, que queda a cuenta del proveedor en Tango.'],
+               ['compensadas', 'Compensadas', 'primary', null,
+                'Facturas que se pagan de más o de menos y se compensan en el total de su proveedor: '
+                + 'quedan pagadas, sin saldo pendiente.', true],
+               ['proveedores_rechazados', 'Proveedores que superan el máximo', 'danger', null,
+                'Proveedores cuyo total pagado supera el neto de sus facturas más el % permitido: no se '
+                + 'carga ninguna de sus filas.', true],
+               ['proveedores_sin_script', 'Proveedores sin compensar', 'warning text-dark', null,
+                'Proveedores dentro del máximo que pagan una factura de más y otra de menos: para '
+                + 'compensarlas falta correr sql/cashflow_prov_locales_excedente_por_proveedor.sql. '
+                + 'Mientras tanto sus filas no se cargan.', true],
                ['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',
                 'Comprobantes que se pagan con menos que su neto a pagar. El importe es lo que se paga; '
                 + 'el saldo sigue con su vencimiento o el próximo día de pago.'],
@@ -2237,8 +2284,9 @@
 
         html += '<div class="d-flex gap-2 flex-wrap mb-3">';
         chips.forEach(function(c) {
-            // Los chips con importe se dibujan sólo si hay alguno: en cero no dicen nada.
-            if (c[3] && !r[c[0]]) { return; }
+            // Los chips con importe —o marcados así— se dibujan sólo si hay
+            // alguno: en cero no dicen nada.
+            if ((c[3] || c[5]) && !r[c[0]]) { return; }
 
             html += '<span class="badge bg-' + c[2] + ' prov-chip-' + c[0] + '"'
                 + (c[4] ? ' title="' + escapar(c[4]) + '"' : '') + '>' + c[1] + ': ' + (r[c[0]] || 0)
@@ -2333,12 +2381,38 @@
         // no frenan nada, pero conviene leerlas antes que lo que sí se carga.
         var orden = { ERROR: 0, YA_PAGADA: 1, CAMBIO: 2, ALTA: 3, SIN_CAMBIOS: 4 };
 
+        /* EN PAGOS, LAS FILAS DE UN PROVEEDOR VAN JUNTAS, con su subtotal
+           arriba: el excedente se valida sobre su total. Los proveedores se
+           ordenan por su fila más urgente —con errores primero— y, dentro de
+           cada uno, como siempre. Una fila sin proveedor va sola. */
+        var subtotales = {};
+
+        (d.proveedores || []).forEach(function(p) { subtotales[p.cod_provee] = p; });
+
+        var porProv = (que === 'Pagos');
+        var claveProv = function(f) { return f.cod_provee ? 'P|' + f.cod_provee : 'L|' + f.linea; };
+        var rango = {};
+
+        if (porProv) {
+            filas.forEach(function(f) {
+                var k = claveProv(f);
+
+                rango[k] = Math.min(rango[k] === undefined ? 9 : rango[k], orden[f.estado]);
+            });
+        }
+
         filas = filas.slice().sort(function(a, b) {
-            return (orden[a.estado] - orden[b.estado])
+            var ka = claveProv(a);
+            var kb = claveProv(b);
+
+            return (porProv ? (rango[ka] - rango[kb]) || (ka < kb ? -1 : (ka > kb ? 1 : 0)) : 0)
+                || (orden[a.estado] - orden[b.estado])
                 || ((a.grupo || a.linea) - (b.grupo || b.linea))
                 || ((a.parte || 0) - (b.parte || 0))
                 || (a.linea - b.linea);
         });
+
+        var provAnterior = null;
 
         /* EN PAGOS, CADA FILA DICE CONTRA QUÉ SE COMPARÓ: el total del
            comprobante, sus retenciones y el neto a pagar. El IMPORTE de la
@@ -2370,13 +2444,24 @@
                     + fechaCorta(f.fecha_pago)) + '</strong> — ' + detalle;
             }
 
-            /* CON EXCEDENTE O PARCIAL: la marca va adelante del motivo, que dice
-               cuánto es cada cosa. Sólo una vez por comprobante. */
-            if (que === 'Pagos' && f.estado !== 'ERROR' && (f.parte || 1) <= 1
-                && (f.clasificacion === 'EXCEDENTE' || f.clasificacion === 'PARCIAL')) {
+            /* CON EXCEDENTE, PARCIAL O COMPENSADA: la marca va adelante del
+               motivo, que dice cuánto es cada cosa. Sólo una vez por
+               comprobante. */
+            var marcas = { EXCEDENTE: '+ excedente', PARCIAL: 'pago parcial',
+                           COMPENSADA: 'pagada — compensada en el total del proveedor' };
+
+            if (que === 'Pagos' && f.estado !== 'ERROR' && (f.parte || 1) <= 1 && marcas[f.clasificacion]) {
                 detalle = '<span class="badge bg-primary me-1 prov-preview-clasif">'
-                    + (f.clasificacion === 'EXCEDENTE' ? '+ excedente' : 'pago parcial') + '</span>'
-                    + detalle;
+                    + marcas[f.clasificacion] + '</span>' + detalle;
+            }
+
+            /* LO QUE NO ENTRÓ EN EL TOTAL DE SU PROVEEDOR se dice: tiene un
+               error propio o ya está pagado, y el resto se evaluó sin esa fila. */
+            if (que === 'Pagos' && f.fuera_del_total && f.cod_provee && subtotales[f.cod_provee]
+                && subtotales[f.cod_provee].comprobantes > 0) {
+                detalle += ' <span class="badge bg-light text-dark border" title="'
+                    + escapar('El resto de las facturas del proveedor se evaluó sin esta fila.')
+                    + '">fuera del total del proveedor</span>';
             }
 
             /* LA FORMA VIGENTE NO ES DEL CRONOGRAMA: se acepta, y se dice que
@@ -2439,6 +2524,14 @@
                     + '">fuera de lista (' + fuera.length + ')</span>';
             }
 
+            if (porProv && claveProv(f) !== provAnterior) {
+                provAnterior = claveProv(f);
+
+                if (f.cod_provee && subtotales[f.cod_provee]) {
+                    html += filaSubtotalProveedor(subtotales[f.cod_provee]);
+                }
+            }
+
             html += '<tr class="prov-pre-' + f.estado.toLowerCase() + '">'
                 + '<td>' + f.linea + '</td>'
                 + '<td><code>' + escapar(clave) + '</code></td>'
@@ -2484,6 +2577,49 @@
             + '<td class="text-end small"' + (desglose ? ' title="' + escapar(desglose) + '"' : '') + '>'
             +   (segunda || !f.retenido ? '' : plata(f.retenido)) + '</td>'
             + '<td class="text-end small fw-semibold">' + (segunda ? '' : plata(f.neto)) + '</td>';
+    }
+
+    /**
+     * La fila de subtotal de un proveedor en la previsualización: total neto,
+     * total pagado, diferencia en $ y %, el máximo y qué se decidió. Ver
+     * Proveedores::clasificarProveedor().
+     */
+    function filaSubtotalProveedor(p) {
+        var partes = ['<strong>' + escapar(p.cod_provee + (p.razon_social ? ' — ' + p.razon_social : ''))
+            + '</strong>', p.filas + (p.filas === 1 ? ' fila' : ' filas')];
+
+        if (p.comprobantes > 0) {
+            partes.push('Neto ' + plata(p.total_neto));
+            partes.push('Pagado ' + plata(p.total_pagado));
+            partes.push('Diferencia ' + (p.diferencia >= 0 ? '+' : '−') + plata(Math.abs(p.diferencia))
+                + (p.porc !== null ? ' (' + String(Math.abs(p.porc)).replace('.', ',') + '%)' : ''));
+            partes.push('Máximo ' + plata(p.maximo)
+                + (p.porc_permitido !== null ? ' (' + String(p.porc_permitido).replace('.', ',') + '%)'
+                                             : ' (sin % cargado)'));
+        }
+
+        var resultado = {
+            TOTAL: ['success', 'Se acepta por el total'
+                + (p.excedente > 0 ? ': excedente del proveedor ' + plata(p.excedente) : '')
+                + (p.compensa ? ', sin saldo pendiente' : '')],
+            POR_FACTURA: ['secondary', 'Paga menos que el total: cada factura se evalúa sola'],
+            ERROR: p.falta_script
+                ? ['warning text-dark', 'Dentro del máximo, pero falta un script para compensar: no se carga '
+                    + 'ninguna de sus filas']
+                : ['danger', 'Supera el máximo: no se carga ninguna de sus filas']
+        }[p.resultado];
+
+        if (resultado) {
+            partes.push('<span class="badge bg-' + resultado[0] + '"'
+                + (p.motivo ? ' title="' + escapar(p.motivo) + '"' : '') + '>' + escapar(resultado[1]) + '</span>');
+        }
+
+        if (p.fuera > 0) {
+            partes.push('<span class="text-muted">' + p.fuera + (p.fuera === 1 ? ' fila' : ' filas')
+                + ' fuera del total</span>');
+        }
+
+        return '<tr class="prov-pre-subtotal"><td colspan="7" class="small">' + partes.join(' · ') + '</td></tr>';
     }
 
     function colorEstado(e) {

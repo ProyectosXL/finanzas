@@ -1885,8 +1885,16 @@ chequear('la previsualizacion muestra total, retenciones y neto por fila', true,
 
 seccion('Importar: los chips de excedente y de pago parcial');
 
-chequear('el chip Con excedente cuenta comprobantes y dice el excedente', true,
-    strpos($jsProv, "['con_excedente', 'Con excedente', 'primary', 'importe_excedente',") !== false);
+/* EL EXCEDENTE SE VALIDA POR PROVEEDOR: el chip cuenta proveedores, y hay
+   uno para las compensadas y otro para los que superan el maximo. */
+chequear('el chip del excedente cuenta proveedores y dice el excedente', true,
+    strpos($jsProv, "['proveedores_con_excedente', 'Proveedores con excedente', 'primary', 'importe_excedente',") !== false);
+chequear('y hay chips de compensadas y de proveedores que superan el máximo', [true, true], [
+    strpos($jsProv, "['compensadas', 'Compensadas', 'primary', null,") !== false,
+    strpos($jsProv, "['proveedores_rechazados', 'Proveedores que superan el máximo', 'danger', null,") !== false]);
+chequear('y uno para los que no se pueden compensar porque falta el script', true,
+    strpos($jsProv, "['proveedores_sin_script', 'Proveedores sin compensar', 'warning text-dark', null,") !== false
+    && strpos($jsProv, "ERROR: p.falta_script") !== false);
 chequear('el chip Pago parcial cuenta comprobantes y dice lo que se paga', true,
     strpos($jsProv, "['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',") !== false);
 chequear('y el importe se dibuja al lado de la cantidad', true,
@@ -1894,8 +1902,19 @@ chequear('y el importe se dibuja al lado de la cantidad', true,
 chequear('el aviso crítico del % va en rojo', true,
     strpos($jsProv, "(d.criticos || []).forEach(function(t) {") !== false
     && strpos($jsProv, 'alert alert-danger py-2 px-3 small mb-2 prov-preview-critico') !== false);
-chequear('cada fila dice si es excedente o parcial', true,
-    strpos($jsProv, "(f.clasificacion === 'EXCEDENTE' ? '+ excedente' : 'pago parcial')") !== false);
+chequear('cada fila dice si es excedente, parcial o compensada', true,
+    strpos($jsProv, "var marcas = { EXCEDENTE: '+ excedente', PARCIAL: 'pago parcial',") !== false
+    && strpos($jsProv, "COMPENSADA: 'pagada — compensada en el total del proveedor' };") !== false);
+chequear('las filas de un proveedor van juntas, con su subtotal arriba', true,
+    strpos($jsProv, 'html += filaSubtotalProveedor(subtotales[f.cod_provee]);') !== false
+    && strpos($jsProv, "(d.proveedores || []).forEach(function(p) { subtotales[p.cod_provee] = p; });") !== false
+    && strpos($cssProvPre = file_get_contents(__DIR__ . '/../Css/Proveedores-Proveedores_locales.css'),
+        '.prov-pre-subtotal td') !== false);
+chequear('el subtotal dice neto, pagado, diferencia, máximo y las filas fuera del total', true,
+    strpos($jsProv, "partes.push('Neto ' + plata(p.total_neto));") !== false
+    && strpos($jsProv, "partes.push('Pagado ' + plata(p.total_pagado));") !== false
+    && strpos($jsProv, "partes.push('Máximo ' + plata(p.maximo)") !== false
+    && strpos($jsProv, "' fuera del total</span>'") !== false);
 chequear('el controller clasifica con el % y el cronograma de ahora', true,
     strpos($ctrlProv, '$enTango, $prov->opcionesExcedente($h));') !== false);
 
@@ -1907,6 +1926,9 @@ $cssProv = file_get_contents(__DIR__ . '/../Css/Proveedores-Proveedores_locales.
 chequear('el neto lleva "+ excedente" en data-etiqueta, no como texto de la celda', true,
     strpos($jsProv, '<span class="prov-marca-excedente" data-etiqueta="+ excedente"></span>') !== false
     && strpos($cssProv, '.prov-marca-excedente::after') !== false);
+chequear('una compensada lleva "compensada" en data-etiqueta, y su etiqueta de fecha', [true, true], [
+    strpos($jsProv, '<span class="prov-marca-excedente" data-etiqueta="compensada"></span>') !== false,
+    strpos($jsProv, "return (dos ? dos + ' · ' : '') + 'compensada';") !== false]);
 chequear('las etiquetas de la fecha: pago parcial, saldo, 1/2 · parcial', [true, true, true], [
     strpos($jsProv, "'pago parcial'") !== false,
     strpos($jsProv, "return 'saldo';") !== false,

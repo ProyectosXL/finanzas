@@ -144,6 +144,23 @@ class Proveedores {
     const CLASIF_ERROR = 'ERROR';
 
     /**
+     * Una factura que se paga de mas o de menos y se COMPENSA EN EL TOTAL DEL
+     * PROVEEDOR: queda pagada, sin saldo, y la diferencia -con signo- es su
+     * parte del excedente del proveedor. La decide clasificarProveedor(). Se
+     * guarda en CLASIFICACION con
+     * sql/cashflow_prov_locales_excedente_por_proveedor.sql.
+     */
+    const CLASIF_COMPENSADA = 'COMPENSADA';
+
+    /** Lo que dice clasificarProveedor() del total de un proveedor */
+    const PROV_TOTAL = 'TOTAL';
+    const PROV_POR_FACTURA = 'POR_FACTURA';
+    const PROV_ERROR = 'ERROR';
+
+    /** El script que agrega COMPENSADA a las clasificaciones de la tabla de medios */
+    const SCRIPT_COMPENSADA = 'sql/cashflow_prov_locales_excedente_por_proveedor.sql';
+
+    /**
      * El % de excedente permitido, en RO_T_CASHFLOW_PARAMETROS. Tiene su propio
      * camino de guardado (guardarPorcExcedente()): Parametros::saveParametro()
      * guarda cualquier texto y rechaza esta clave. Parametros la repite, igual
@@ -168,6 +185,9 @@ class Proveedores {
 
     /** @var bool|null Cache de si la tabla de medios ya tiene las columnas del excedente */
     private $conExcedente = null;
+
+    /** @var bool|null Cache de si CLASIFICACION ya acepta COMPENSADA */
+    private $conCompensada = null;
 
     /** @var array|null Cache del % de excedente de este pedido. Ver getPorcExcedente() */
     private $porcExcedente = null;
@@ -321,6 +341,43 @@ class Proveedores {
         $this->conExcedente = ($row && $row['C'] !== null);
 
         return $this->conExcedente;
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_prov_locales_excedente_por_proveedor.sql:
+     * CLASIFICACION acepta COMPENSADA.
+     *
+     * SIN EL, EL EXCEDENTE SE VALIDA IGUAL POR PROVEEDOR, pero un proveedor
+     * que necesita compensar una factura con otra queda en error con un motivo
+     * que nombra el script: no hay donde guardar la compensacion.
+     *
+     * @return bool
+     */
+    public function tablaCompensadaCreada() {
+        if ($this->conCompensada !== null) {
+            return $this->conCompensada;
+        }
+
+        if (!$this->tablaExcedenteCreada()) {
+            $this->conCompensada = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COUNT(*) AS N FROM sys.check_constraints
+             WHERE name = 'CK_RO_T_CF_PLMED_CLASIF' AND definition LIKE '%COMPENSADA%'");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar las clasificaciones del pago importado'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->conCompensada = ($row && intval($row['N']) > 0);
+
+        return $this->conCompensada;
     }
 
     /* ====================================================================
@@ -497,7 +554,9 @@ class Proveedores {
         return [
             'porc' => $p['porc'],
             'error' => $p['error'],
-            'pagos_crono' => ($h === null) ? null : $this->leerCronograma($h)
+            'pagos_crono' => ($h === null) ? null : $this->leerCronograma($h),
+            // Si se puede guardar una factura COMPENSADA en el total del proveedor.
+            'compensada' => $this->tablaCompensadaCreada()
         ];
     }
 
@@ -583,6 +642,15 @@ class Proveedores {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_EXCEDENTE . '. Mientras '
                 . 'tanto la planilla de pagos no acepta pagos con excedente ni pagos parciales: el '
                 . 'IMPORTE tiene que ser el neto a pagar, como antes, y todo lo demás funciona igual.');
+        }
+
+        /* Sin COMPENSADA el excedente se valida igual por proveedor; lo que no
+           se puede es compensar una factura con otra. Atencion. */
+        if ($this->tablaExcedenteCreada() && !$this->tablaCompensadaCreada()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_COMPENSADA . '. Mientras '
+                . 'tanto, un proveedor que paga una factura de más y otra de menos no se puede compensar '
+                . 'en su total: la planilla deja sus filas en error, nombrando el script, y todo lo demás '
+                . 'funciona igual.');
         }
 
         $sinExclusion = $this->exclusion->avisoSinTabla();
@@ -1279,7 +1347,11 @@ class Proveedores {
      *     retencion;
      *   - el SALDO va con la jerarquia de siempre COMO SI NO TUVIERA FECHA
      *     CARGADA: vencimiento, emision + plazo, y si es del cronograma el
-     *     proximo dia de pago.
+     *     proximo dia de pago;
+     *   - una COMPENSADA en el total del proveedor no tiene saldo: cubre todo
+     *     el neto, proyecta exactamente lo pagado, y la diferencia va en
+     *     EXCEDENTE CON SIGNO -repartida entre las cuotas en proporcion a su
+     *     neto, para que ninguna quede en negativo-.
      *
      * LA RETENCION SE CALCULA UNA VEZ, sobre el comprobante entero, a la fecha
      * mas tardia de la planilla, y se REPARTE EN PROPORCION AL NETO de cada
@@ -1391,9 +1463,18 @@ class Proveedores {
         $excedente = ($clasif === self::CLASIF_EXCEDENTE) ? max(0.0, round($pagado - $neto, 2)) : 0.0;
         $pagadoNeto = min($neto, round($pagado - $excedente, 2));
 
+        /* UNA COMPENSADA EN EL TOTAL DEL PROVEEDOR queda pagada entera, sin
+           saldo, y proyecta exactamente lo de la planilla: la diferencia con
+           su neto va en EXCEDENTE CON SIGNO -negativa si se pago de menos-.
+           Sumadas, las del proveedor son su excedente, contado una vez. */
+        if ($clasif === self::CLASIF_COMPENSADA) {
+            $excedente = round($pagado - $neto, 2);
+            $pagadoNeto = $neto;
+        }
+
         $info['neto'] = $neto;
         $info['excedente'] = $excedente;
-        $info['porc_excedente'] = ($excedente > 0 && $neto > 0) ? round($excedente / $neto * 100, 2) : null;
+        $info['porc_excedente'] = ($excedente != 0 && $neto > 0) ? round($excedente / $neto * 100, 2) : null;
         $info['saldo'] = round($neto - $pagadoNeto, 2);
         $info['estado'] = 'PARTIDO';
 
@@ -1442,7 +1523,19 @@ class Proveedores {
                 }
             }
 
-            if ($ultimaCubierta !== null) {
+            if ($clasif === self::CLASIF_COMPENSADA) {
+                /* Con signo, la diferencia de una compensada se reparte entre
+                   las cuotas en proporcion a su neto: en la ultima sola podria
+                   dejarla en negativo. Van todas a la fecha de la planilla. */
+                $pagadas = array_keys(array_filter($tramos, function ($tr) { return $tr['tipo'] === 'PAGADO'; }));
+                $partes = self::repartir($excedente, array_map(function ($t) use ($tramos) {
+                    return $tramos[$t]['neto'];
+                }, $pagadas));
+
+                foreach (array_values($pagadas) as $j => $t) {
+                    $tramos[$t]['excedente'] = $partes[$j];
+                }
+            } elseif ($ultimaCubierta !== null) {
                 $tramos[$ultimaCubierta]['excedente'] = $excedente;
             }
         }
@@ -2649,8 +2742,17 @@ class Proveedores {
             /* Comprobantes que se pagan con excedente -y cuanto es el excedente-
                y con un pago parcial -y cuanto se paga-. Son los chips nuevos. */
             'con_excedente' => 0, 'importe_excedente' => 0.0,
-            'pagos_parciales' => 0, 'importe_parcial' => 0.0
+            'pagos_parciales' => 0, 'importe_parcial' => 0.0,
+            /* EL EXCEDENTE SE VALIDA POR PROVEEDOR: cuantos proveedores pagan
+               de mas -y cuanto, en total-, cuantos superan el maximo, y cuantas
+               facturas quedan compensadas en el total de su proveedor. */
+            'proveedores_con_excedente' => 0, 'proveedores_rechazados' => 0, 'compensadas' => 0,
+            // Los que se aceptarian compensando, pero falta el script de COMPENSADA.
+            'proveedores_sin_script' => 0
         ];
+
+        /* 1. CADA COMPROBANTE POR SU CUENTA, como siempre. */
+        $procesados = [];
 
         foreach ($grupos as $grupo) {
             /* UN COMPROBANTE YA PAGADO EN TANGO ES ADVERTENCIA EN TODAS SUS
@@ -2658,8 +2760,28 @@ class Proveedores {
                comprobante -no hay nada que cargar-, y cada una se cuenta. */
             $yaPagadas = array_filter($grupo, function ($f) { return $f['estado'] === 'YA_PAGADA'; });
 
-            if (count($yaPagadas) === count($grupo)) {
-                foreach ($grupo as $fila) {
+            $procesados[] = [
+                'orig' => $grupo,
+                'ya_pagada' => (count($yaPagadas) === count($grupo)),
+                'filas' => (count($yaPagadas) === count($grupo)) ? $grupo
+                    : self::unComprobante($grupo, $pagos, $aperturas, $conMedios, $retCfg, $excedente, $hoyStr)
+            ];
+        }
+
+        /* 2. CADA PROVEEDOR ENTERO: el excedente se valida sobre su total. Sin
+              el script del excedente, no: la importacion es la de antes. */
+        $proveedores = [];
+
+        if ($excedente !== null) {
+            $proveedores = self::porProveedor($procesados, $pagos, $aperturas, $conMedios, $retCfg,
+                $excedente, $hoyStr);
+        }
+
+        $excPorProv = [];
+
+        foreach ($procesados as $p) {
+            if ($p['ya_pagada']) {
+                foreach ($p['filas'] as $fila) {
                     $filas[] = $fila;
                     $resumen['ya_pagadas']++;
                 }
@@ -2667,15 +2789,7 @@ class Proveedores {
                 continue;
             }
 
-            if (count($grupo) === 1) {
-                $grupo = [self::unMedio($grupo[0], $pagos, $aperturas, $retCfg, $excedente, $hoyStr)];
-            } elseif (count($grupo) === self::MAX_MEDIOS) {
-                $grupo = self::dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg, $excedente, $hoyStr);
-            } else {
-                $grupo = self::demasiadasFilas($grupo);
-            }
-
-            foreach ($grupo as $fila) {
+            foreach ($p['filas'] as $fila) {
                 $filas[] = $fila;
 
                 if ($fila['estado'] === 'ERROR') {
@@ -2703,9 +2817,19 @@ class Proveedores {
                     $resumen['importe_con_fecha'] += $fila['pagado'];
                 }
 
+                /* EL EXCEDENTE ES DEL PROVEEDOR: se suma con signo -una
+                   compensada de menos resta- y se cuenta despues, una vez por
+                   proveedor. */
+                if ($fila['clasificacion'] === self::CLASIF_EXCEDENTE
+                    || $fila['clasificacion'] === self::CLASIF_COMPENSADA) {
+                    $excPorProv[$fila['cod_provee']] = (isset($excPorProv[$fila['cod_provee']])
+                        ? $excPorProv[$fila['cod_provee']] : 0.0) + $fila['excedente'];
+                }
+
                 if ($fila['clasificacion'] === self::CLASIF_EXCEDENTE) {
                     $resumen['con_excedente']++;
-                    $resumen['importe_excedente'] += $fila['excedente'];
+                } elseif ($fila['clasificacion'] === self::CLASIF_COMPENSADA) {
+                    $resumen['compensadas']++;
                 } elseif ($fila['clasificacion'] === self::CLASIF_PARCIAL) {
                     $resumen['pagos_parciales']++;
                     $resumen['importe_parcial'] += $fila['pagado'];
@@ -2736,7 +2860,22 @@ class Proveedores {
         // Las cuotas del comprobante sirvieron para proyectar el saldo; al
         // navegador no le hacen falta.
         foreach ($filas as $i => $f) {
-            unset($filas[$i]['_vtos']);
+            unset($filas[$i]['_vtos'], $filas[$i]['para_proveedor']);
+        }
+
+        foreach ($excPorProv as $exc) {
+            if (round($exc, 2) > 0.004) {
+                $resumen['proveedores_con_excedente']++;
+                $resumen['importe_excedente'] += $exc;
+            }
+        }
+
+        foreach ($proveedores as $p) {
+            if ($p['falta_script']) {
+                $resumen['proveedores_sin_script']++;
+            } elseif ($p['resultado'] === self::PROV_ERROR) {
+                $resumen['proveedores_rechazados']++;
+            }
         }
 
         $resumen['importe_excedente'] = round($resumen['importe_excedente'], 2);
@@ -2761,8 +2900,185 @@ class Proveedores {
                de ese momento es otro no se aplica nada: ver
                diferenciasConLoVisto(). */
             'con_excedente' => ($excedente !== null),
-            'porc_excedente' => ($excedente === null) ? null : $excedente['porc']
+            'porc_excedente' => ($excedente === null) ? null : $excedente['porc'],
+            /* EL SUBTOTAL DE CADA PROVEEDOR, para la previsualizacion: total
+               neto, total pagado, diferencia, maximo, resultado y cuantas filas
+               quedaron fuera del total. Vacio sin el script del excedente. */
+            'proveedores' => array_values($proveedores)
         ];
+    }
+
+    /**
+     * Un comprobante, con sus filas: uno o dos medios, o demasiadas filas.
+     *
+     * @param array $grupo Las filas del comprobante, de filaPago()
+     * @param array|null $forzada La clasificacion que decidio el total del
+     *        proveedor (COMPENSADA), o null para clasificar el comprobante solo
+     * @return array Las filas, con su estado y su motivo
+     */
+    private static function unComprobante($grupo, $pagos, $aperturas, $conMedios, $retCfg, $excedente,
+                                          $hoy, $forzada = null) {
+        if (count($grupo) === 1) {
+            return [self::unMedio($grupo[0], $pagos, $aperturas, $retCfg, $excedente, $hoy, $forzada)];
+        }
+
+        if (count($grupo) === self::MAX_MEDIOS) {
+            return self::dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg, $excedente, $hoy, $forzada);
+        }
+
+        return self::demasiadasFilas($grupo);
+    }
+
+    /**
+     * La segunda pasada de compararImportacion(): EL EXCEDENTE POR PROVEEDOR.
+     * Junta los comprobantes de cada proveedor -aunque tengan fechas de pago
+     * distintas-, les aplica clasificarProveedor() y deja en las filas lo que
+     * dice:
+     *
+     *   ERROR        todas las filas que entraron en el total, en error, con el
+     *                motivo del proveedor
+     *   TOTAL        las que hay que compensar se vuelven a armar COMPENSADAS
+     *                (sin el script de COMPENSADA, en error, nombrandolo)
+     *   POR_FACTURA  queda lo de la primera pasada: cada una sola
+     *
+     * FUERA DEL TOTAL quedan los comprobantes ya pagados en Tango y los que
+     * tienen un error propio -no existe, no esta en cuenta corriente, mas de
+     * dos medios, dos medios mal armados, un importe cero-: el resto se evalua
+     * sin ellos. Un comprobante cuyo unico problema es superar su propio
+     * maximo SI entra (para_proveedor): otra factura puede compensarlo.
+     *
+     * Con un solo comprobante en el total no se toca nada: da lo mismo que
+     * clasificarImporte(), y el motivo de siempre ayuda mas.
+     *
+     * Modifica $procesados.
+     *
+     * @return array Un subtotal por proveedor
+     */
+    private static function porProveedor(&$procesados, $pagos, $aperturas, $conMedios, $retCfg, $excedente,
+                                         $hoy) {
+        $porProv = [];
+
+        foreach ($procesados as $k => $p) {
+            $cod = $p['filas'][0]['cod_provee'];
+
+            if ($cod !== '') {
+                $porProv[$cod][] = $k;
+            }
+        }
+
+        $conCompensada = !array_key_exists('compensada', $excedente) || $excedente['compensada'];
+        $subtotales = [];
+
+        foreach ($porProv as $cod => $ks) {
+            $comps = [];
+            $sub = ['cod_provee' => (string) $cod, 'razon_social' => '', 'filas' => 0, 'fuera' => 0,
+                    'comprobantes' => 0, 'resultado' => null, 'total_neto' => 0.0, 'total_pagado' => 0.0,
+                    'diferencia' => 0.0, 'porc' => null, 'maximo' => null, 'porc_permitido' => $excedente['porc'],
+                    'excedente' => 0.0, 'compensa' => false, 'motivo' => null, 'falta_script' => false];
+
+            foreach ($ks as $k) {
+                $f0 = $procesados[$k]['filas'][0];
+                $sub['filas'] += count($procesados[$k]['filas']);
+
+                if ($sub['razon_social'] === '' && $f0['razon_social'] !== '') {
+                    $sub['razon_social'] = $f0['razon_social'];
+                }
+
+                if (!$procesados[$k]['ya_pagada'] && isset($f0['para_proveedor'])) {
+                    $comps[] = ['clave' => $k, 'neto' => $f0['para_proveedor']['neto'],
+                                'pagado' => $f0['para_proveedor']['pagado']];
+                } else {
+                    $sub['fuera'] += count($procesados[$k]['filas']);
+                }
+            }
+
+            $sub['comprobantes'] = count($comps);
+
+            if (empty($comps)) {
+                $subtotales[$cod] = $sub;
+                continue;
+            }
+
+            $r = self::clasificarProveedor($comps, $excedente['porc'], $excedente['error']);
+
+            foreach (['resultado', 'total_neto', 'total_pagado', 'diferencia', 'porc', 'maximo', 'excedente',
+                      'compensa', 'motivo'] as $campo) {
+                $sub[$campo] = $r[$campo];
+            }
+
+            if (count($comps) > 1) {
+                if ($r['resultado'] === self::PROV_ERROR) {
+                    foreach ($comps as $c) {
+                        $procesados[$c['clave']]['filas'] = self::enErrorPorProveedor(
+                            $procesados[$c['clave']]['filas'], $r['motivo']);
+                    }
+                } elseif ($r['resultado'] === self::PROV_TOTAL && $r['compensa'] && !$conCompensada) {
+                    /* SIN EL SCRIPT NO HAY DONDE GUARDAR LA COMPENSACION. Se
+                       dice cual correr: es lo unico que hay que arreglar fuera
+                       de la planilla. */
+                    $sub['motivo'] = 'El total del proveedor (' . self::plata($r['total_pagado'])
+                        . ' contra un neto de ' . self::plata($r['total_neto']) . ') está dentro del máximo, '
+                        . 'pero para dar por pagadas facturas que se pagan de más o de menos compensándolas '
+                        . 'en el total hace falta correr ' . self::SCRIPT_COMPENSADA . ' contra la base '
+                        . 'central. Mientras tanto no se carga ninguna de sus filas.';
+                    $sub['resultado'] = self::PROV_ERROR;
+                    // No supera el maximo: no se cuenta con los rechazados.
+                    $sub['falta_script'] = true;
+
+                    foreach ($comps as $c) {
+                        $procesados[$c['clave']]['filas'] = self::enErrorPorProveedor(
+                            $procesados[$c['clave']]['filas'], $sub['motivo']);
+                    }
+                } elseif ($r['resultado'] === self::PROV_TOTAL && $r['compensa']) {
+                    foreach ($comps as $c) {
+                        $cl = $r['comprobantes'][$c['clave']];
+
+                        if ($cl['clasificacion'] === self::CLASIF_COMPENSADA) {
+                            $procesados[$c['clave']]['filas'] = self::unComprobante(
+                                $procesados[$c['clave']]['orig'], $pagos, $aperturas, $conMedios, $retCfg,
+                                $excedente, $hoy, $cl);
+                        }
+                    }
+                }
+            }
+
+            /* CADA FILA DICE QUE DIJO EL TOTAL DE SU PROVEEDOR: es lo que la
+               confirmacion compara contra lo que se vio. */
+            $dentro = array_flip(array_column($comps, 'clave'));
+
+            foreach ($ks as $k) {
+                foreach ($procesados[$k]['filas'] as $i => $f) {
+                    $procesados[$k]['filas'][$i]['regla_proveedor'] = isset($dentro[$k]) ? $sub['resultado'] : null;
+                    $procesados[$k]['filas'][$i]['fuera_del_total'] = !isset($dentro[$k]);
+                }
+            }
+
+            $subtotales[$cod] = $sub;
+        }
+
+        return $subtotales;
+    }
+
+    /** 'aceptarse por el total', para los motivos de la confirmacion */
+    private static function textoReglaProveedor($regla) {
+        switch ($regla) {
+            case self::PROV_TOTAL: return 'aceptarse por el total';
+            case self::PROV_POR_FACTURA: return 'evaluarse factura por factura';
+            case self::PROV_ERROR: return 'superar el máximo';
+            default: return 'quedar fuera del total';
+        }
+    }
+
+    /** Las filas de un comprobante, en error por el total de su proveedor */
+    private static function enErrorPorProveedor($filas, $motivo) {
+        foreach ($filas as $i => $f) {
+            $filas[$i]['estado'] = 'ERROR';
+            $filas[$i]['motivo'] = $motivo;
+            $filas[$i]['parte'] = 0;
+            $filas[$i]['error_proveedor'] = true;
+        }
+
+        return $filas;
     }
 
     /**
@@ -2816,7 +3132,7 @@ class Proveedores {
      * @return array La fila, con su estado y su motivo
      */
     private static function unMedio($fila, $pagos, $aperturas, $retCfg = null, $excedente = null,
-                                    $hoy = null) {
+                                    $hoy = null, $forzada = null) {
         if ($fila['estado'] === 'ERROR') {
             return $fila;
         }
@@ -2824,6 +3140,14 @@ class Proveedores {
         /* EL NETO A PAGAR, a la fecha de pago de la planilla: es la que va a
            quedar cargada, y con la que la grilla va a resolver la alicuota. */
         $fila = self::conNeto($fila, $retCfg, $fila['fecha_pago']);
+
+        /* ENTRA EN EL TOTAL DEL PROVEEDOR si no tiene un error propio: un
+           importe cero o negativo lo es; uno que supera su propio maximo no,
+           porque otra factura puede compensarlo. Sin importe cuenta su neto. */
+        if ($excedente !== null && ($fila['importe'] === null || $fila['importe'] > 0)) {
+            $fila['para_proveedor'] = ['neto' => $fila['neto'],
+                                       'pagado' => ($fila['importe'] === null) ? $fila['neto'] : $fila['importe']];
+        }
 
         if ($excedente === null) {
             /* SIN EL SCRIPT DEL EXCEDENTE, EL IMPORTE TIENE QUE SER EL NETO A
@@ -2843,8 +3167,11 @@ class Proveedores {
             /* CON EL SCRIPT, EL IMPORTE SE CLASIFICA: neto, excedente hasta el
                %, o parcial. Lo que no es neto se guarda, porque es lo que se va
                a proyectar. */
-            $c = self::clasificarImporte($fila['importe'], $fila['neto'], $excedente['porc'],
-                $excedente['error']);
+            /* LA CLASIFICACION FORZADA es la que decidio el total del
+               proveedor (clasificarProveedor()): COMPENSADA. */
+            $c = ($forzada !== null) ? $forzada
+                : self::clasificarImporte($fila['importe'], $fila['neto'], $excedente['porc'],
+                    $excedente['error']);
 
             if ($c['clasificacion'] === self::CLASIF_ERROR) {
                 return self::enErrorPorImporte($fila, $c,
@@ -3093,6 +3420,121 @@ class Proveedores {
     }
 
     /**
+     * EL EXCEDENTE SE VALIDA POR PROVEEDOR, no factura por factura: la orden
+     * de pago se arma por proveedor, y el redondeo o el excedente se pone en
+     * una factura mientras otra va de menos. ES LA REGLA, escrita una vez: la
+     * usan la previsualizacion y la confirmacion, las dos por
+     * compararImportacion().
+     *
+     * Sobre los comprobantes del proveedor QUE VIENEN EN EL ARCHIVO -no toda
+     * su deuda-, aunque tengan fechas de pago distintas, y sin los que tienen
+     * un error propio o ya estan pagados en Tango (esos los saca quien llama).
+     * Con maximo = total neto × (1 + %/100):
+     *
+     *   total pagado > maximo + $1          ERROR: todas sus filas, no se carga
+     *                                       ninguna. Sin % el maximo es el total
+     *                                       neto: no se acepta excedente
+     *   total neto − $1 <= pagado <= max+$1 TOTAL: se acepta, y ninguna factura
+     *                                       queda con saldo. Si alguna se paga de
+     *                                       menos o supera su propio %, las que
+     *                                       se apartan de su neto en mas de $1
+     *                                       quedan COMPENSADAS -diferencia con
+     *                                       signo, sin saldo-; si no, cada una
+     *                                       es lo de siempre (NETO o EXCEDENTE)
+     *   total pagado < total neto − $1      POR_FACTURA: cada una sola, con
+     *                                       clasificarImporte(), como hasta ahora
+     *
+     * Con un solo comprobante da exactamente lo de clasificarImporte().
+     *
+     * Estatica y pura.
+     *
+     * @param array $comprobantes Lista de ['clave', 'neto', 'pagado'], con
+     *        pagado > 0 (una fila sin importe cuenta su neto)
+     * @param float|null $porc El % de excedente permitido; null = no se sabe
+     * @param string|null $sinPorc El motivo por el que no hay %, para el error
+     * @return array ['resultado', 'total_neto', 'total_pagado', 'diferencia',
+     *                'porc', 'maximo', 'excedente', 'compensa', 'motivo',
+     *                'comprobantes' => clave => lo de clasificarImporte()]
+     */
+    public static function clasificarProveedor($comprobantes, $porc, $sinPorc = null) {
+        $neto = 0.0;
+        $pagado = 0.0;
+        $propias = [];
+
+        foreach ($comprobantes as $c) {
+            $neto += floatval($c['neto']);
+            $pagado += floatval($c['pagado']);
+            $propias[$c['clave']] = self::clasificarImporte($c['pagado'], $c['neto'], $porc, $sinPorc);
+        }
+
+        $neto = round($neto, 2);
+        $pagado = round($pagado, 2);
+        $dif = round($pagado - $neto, 2);
+        $maximo = ($porc === null) ? $neto : round($neto * (1 + floatval($porc) / 100), 2);
+
+        $r = [
+            'resultado' => self::PROV_TOTAL, 'total_neto' => $neto, 'total_pagado' => $pagado,
+            'diferencia' => $dif, 'porc' => ($neto > 0) ? round($dif / $neto * 100, 2) : null,
+            'maximo' => $maximo, 'porc_permitido' => $porc, 'excedente' => 0.0, 'compensa' => false,
+            'motivo' => null, 'comprobantes' => $propias
+        ];
+
+        if ($pagado > $maximo + self::TOLERANCIA_IMPORTE) {
+            $r['resultado'] = self::PROV_ERROR;
+            $r['motivo'] = 'El proveedor paga ' . self::plata($pagado) . ' por facturas que suman un neto de '
+                . self::plata($neto) . ': lo supera en ' . self::plata($dif)
+                . ($r['porc'] === null ? '' : ' (' . self::textoPorcentaje($r['porc']) . ')')
+                . ($porc === null
+                    ? ', y no se puede aceptar excedente: ' . ($sinPorc !== null ? $sinPorc
+                        : 'falta el % de excedente permitido.')
+                    : '. El máximo permitido es ' . self::plata($maximo) . ' (' . self::textoPorcentaje($porc)
+                        . ').')
+                . ' No se carga ninguna de sus filas.';
+
+            return $r;
+        }
+
+        if ($pagado < $neto - self::TOLERANCIA_IMPORTE) {
+            $r['resultado'] = self::PROV_POR_FACTURA;
+
+            return $r;
+        }
+
+        $r['excedente'] = ($dif > self::TOLERANCIA_IMPORTE) ? $dif : 0.0;
+
+        /* ¿HACE FALTA COMPENSAR? Solo si alguna, sola, no se podria aceptar
+           como pagada: va de menos, o supera su propio maximo. Si no, cada
+           una es lo de siempre y no se guarda nada nuevo. */
+        foreach ($propias as $p) {
+            if ($p['clasificacion'] === self::CLASIF_PARCIAL || $p['clasificacion'] === self::CLASIF_ERROR) {
+                $r['compensa'] = true;
+            }
+        }
+
+        if (!$r['compensa']) {
+            return $r;
+        }
+
+        foreach ($comprobantes as $c) {
+            $p = $propias[$c['clave']];
+
+            if ($p['clasificacion'] === self::CLASIF_NETO) {
+                continue;
+            }
+
+            $n = round(floatval($c['neto']), 2);
+            $d = round(floatval($c['pagado']) - $n, 2);
+
+            $r['comprobantes'][$c['clave']] = [
+                'clasificacion' => self::CLASIF_COMPENSADA, 'maximo' => $p['maximo'], 'excedente' => $d,
+                'saldo' => 0.0, 'porc' => ($n > 0) ? round($d / $n * 100, 2) : null, 'motivo' => null
+            ];
+        }
+
+        return $r;
+    }
+
+    /**
      * Una fila cuyo importe no se puede aceptar. Si supera el maximo y ademas
      * coincide con el total de la factura sin retenciones, el motivo lo dice
      * como siempre: es el error del primer dia, y motivoImporte() sabe
@@ -3179,7 +3621,8 @@ class Proveedores {
         $c = isset($medio['clasificacion']) ? $medio['clasificacion'] : self::CLASIF_NETO;
 
         return ($c === self::CLASIF_EXCEDENTE) ? 'con excedente'
-            : (($c === self::CLASIF_PARCIAL) ? 'parcial' : 'por el neto');
+            : (($c === self::CLASIF_PARCIAL) ? 'parcial'
+                : (($c === self::CLASIF_COMPENSADA) ? 'compensado en el total del proveedor' : 'por el neto'));
     }
 
     /** 5 => '5%', 12.5 => '12,5%', 2.94 => '2,94%' */
@@ -3204,6 +3647,12 @@ class Proveedores {
             return 'Se paga ' . self::plata($pagado) . ': neto ' . self::plata($neto) . ' + excedente '
                 . self::plata($c['excedente']) . ' (' . self::textoPorcentaje($c['porc'])
                 . '), que queda a cuenta del proveedor en Tango.';
+        }
+
+        if ($c['clasificacion'] === self::CLASIF_COMPENSADA) {
+            return 'Pagada — compensada en el total del proveedor: se paga ' . self::plata($pagado)
+                . ' contra un neto de ' . self::plata($neto) . ' (' . ($c['excedente'] >= 0 ? '+' : '−')
+                . self::plata(abs($c['excedente'])) . '). No queda saldo pendiente.';
         }
 
         $texto = 'Se paga ' . self::plata($pagado) . ' de un neto de ' . self::plata($neto) . '. El saldo de '
@@ -3237,7 +3686,7 @@ class Proveedores {
      * @return array Las dos filas, con el mismo estado y el mismo motivo
      */
     private static function dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg = null,
-                                      $excedente = null, $hoy = null) {
+                                      $excedente = null, $hoy = null, $forzada = null) {
         $lineas = 'líneas ' . $grupo[0]['linea'] . ' y ' . $grupo[1]['linea'];
 
         foreach ($grupo as $i => $f) {
@@ -3332,12 +3781,25 @@ class Proveedores {
            teniendo que ser mayor a cero, y eso ya se miro arriba. */
         $c = null;
 
+        /* ENTRA EN EL TOTAL DEL PROVEEDOR si el unico problema es que la suma
+           supera su propio maximo: otra factura del proveedor puede
+           compensarlo. Cualquier otro problema es propio y la deja afuera. */
+        $propios = count($problemas);
+
         if ($importesOk && $excedente !== null) {
-            $c = self::clasificarImporte($suma, $base['neto'], $excedente['porc'], $excedente['error']);
+            /* La forzada es la que decidio el total del proveedor. */
+            $c = ($forzada !== null) ? $forzada
+                : self::clasificarImporte($suma, $base['neto'], $excedente['porc'], $excedente['error']);
 
             if ($c['clasificacion'] === self::CLASIF_ERROR) {
                 $problemas[] = lcfirst(rtrim(str_replace('El importe (' . self::plata($suma) . ')',
                     'Los importes suman ' . self::plata($suma), $c['motivo']), '.'));
+            }
+
+            if ($propios === 0) {
+                foreach ($grupo as $i => $f) {
+                    $grupo[$i]['para_proveedor'] = ['neto' => $base['neto'], 'pagado' => round($suma, 2)];
+                }
             }
         } elseif ($importesOk) {
             $dif = round($suma - $base['neto'], 2);
@@ -4026,10 +4488,29 @@ class Proveedores {
                     : '');
         }
 
-        if ($resumen['con_excedente'] > 0) {
-            $avisos[] = $resumen['con_excedente'] . ' comprobante(s) se pagan con excedente: '
-                . self::plata($resumen['importe_excedente']) . ' más que su neto a pagar, que quedan a '
-                . 'cuenta de los proveedores en Tango. El cashflow proyecta el importe pagado completo.';
+        if ($resumen['proveedores_rechazados'] > 0) {
+            $avisos[] = $resumen['proveedores_rechazados'] . ' proveedor(es) pagan más que el máximo '
+                . 'permitido sobre el total de sus facturas: no se carga ninguna de sus filas. El motivo '
+                . 'dice cuánto pagan, el neto de sus facturas y el máximo.';
+        }
+
+        if ($resumen['proveedores_sin_script'] > 0) {
+            $avisos[] = $resumen['proveedores_sin_script'] . ' proveedor(es) están dentro del máximo pero '
+                . 'pagan una factura de más y otra de menos, y para compensarlas en su total hace falta '
+                . 'correr ' . self::SCRIPT_COMPENSADA . ' contra la base central. Mientras tanto sus filas '
+                . 'no se cargan.';
+        }
+
+        if ($resumen['proveedores_con_excedente'] > 0) {
+            $avisos[] = $resumen['proveedores_con_excedente'] . ' proveedor(es) se pagan con excedente: '
+                . self::plata($resumen['importe_excedente']) . ' más que el neto de sus facturas, que queda '
+                . 'a cuenta de los proveedores en Tango. El cashflow proyecta el importe pagado completo.';
+        }
+
+        if ($resumen['compensadas'] > 0) {
+            $avisos[] = $resumen['compensadas'] . ' factura(s) se pagan de más o de menos y se compensan '
+                . 'en el total de su proveedor: quedan pagadas, sin saldo pendiente, y cada una se '
+                . 'proyecta con el importe de la planilla.';
         }
 
         if ($resumen['pagos_parciales'] > 0) {
@@ -4245,6 +4726,7 @@ class Proveedores {
         $ahora = [];
         $netoAntes = [];
         $clasifAntes = [];
+        $reglaAntes = [];
         $difs = [];
 
         if ($porcActual !== false) {
@@ -4264,6 +4746,11 @@ class Proveedores {
             $antes[$l] = isset($f['estado']) ? $f['estado'] : '';
             $netoAntes[$l] = isset($f['neto']) ? $f['neto'] : null;
             $clasifAntes[$l] = isset($f['clasificacion']) ? $f['clasificacion'] : self::CLASIF_NETO;
+
+            // Una previsualizacion de antes de esta regla no lo trae: no se compara.
+            if (array_key_exists('regla_proveedor', $f)) {
+                $reglaAntes[$l] = $f['regla_proveedor'];
+            }
         }
 
         foreach ($actuales as $f) {
@@ -4289,6 +4776,18 @@ class Proveedores {
                 && abs(round(floatval($na) - floatval($f['neto']), 2)) > 0.004) {
                 $difs[] = 'línea ' . $linea . ': el neto a pagar pasó de ' . self::plata($na) . ' a '
                     . self::plata($f['neto']) . ' (cambió una alícuota de retención o el pendiente)';
+                continue;
+            }
+
+            /* EL TOTAL DEL PROVEEDOR TAMBIEN SE MIRO: si paso de aceptarse por
+               el total a evaluarse factura por factura -o al reves-, lo que
+               se confirmaria no es lo que se vio. */
+            $ra = isset($reglaAntes[$linea]) ? $reglaAntes[$linea] : null;
+            $rn = isset($f['regla_proveedor']) ? $f['regla_proveedor'] : null;
+
+            if ($f['estado'] !== 'ERROR' && array_key_exists($linea, $reglaAntes) && $ra !== $rn) {
+                $difs[] = 'línea ' . $linea . ': el total del proveedor pasó de '
+                    . self::textoReglaProveedor($ra) . ' a ' . self::textoReglaProveedor($rn);
                 continue;
             }
 
@@ -4471,6 +4970,17 @@ class Proveedores {
            PARCIAL- y el pendiente y el neto del comprobante al importar: con
            eso se sabe despues si Tango ya registro el pago. */
         $conExcedente = $this->tablaExcedenteCreada();
+
+        /* UNA COMPENSADA SIN SU SCRIPT NO SE ESCRIBE: el CHECK la rechazaria a
+           mitad de la transaccion. La importacion ya la deja en error; esto es
+           por si se llega por otro camino. */
+        foreach (is_array($medios) ? $medios : [] as $m) {
+            if (isset($m['clasificacion']) && $m['clasificacion'] === self::CLASIF_COMPENSADA
+                && !$this->tablaCompensadaCreada()) {
+                throw new Exception('Para guardar una factura compensada en el total del proveedor hace falta '
+                    . 'correr ' . self::SCRIPT_COMPENSADA . ' contra la base central.');
+            }
+        }
 
         foreach (is_array($medios) ? $medios : [] as $m) {
             $cols = 'COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG, IMPORTE, '
