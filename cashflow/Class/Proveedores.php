@@ -144,6 +144,23 @@ class Proveedores {
     const CLASIF_ERROR = 'ERROR';
 
     /**
+     * Una factura que se paga de mas o de menos y se COMPENSA EN EL TOTAL DEL
+     * PROVEEDOR: queda pagada, sin saldo, y la diferencia -con signo- es su
+     * parte del excedente del proveedor. La decide clasificarProveedor(). Se
+     * guarda en CLASIFICACION con
+     * sql/cashflow_prov_locales_excedente_por_proveedor.sql.
+     */
+    const CLASIF_COMPENSADA = 'COMPENSADA';
+
+    /** Lo que dice clasificarProveedor() del total de un proveedor */
+    const PROV_TOTAL = 'TOTAL';
+    const PROV_POR_FACTURA = 'POR_FACTURA';
+    const PROV_ERROR = 'ERROR';
+
+    /** El script que agrega COMPENSADA a las clasificaciones de la tabla de medios */
+    const SCRIPT_COMPENSADA = 'sql/cashflow_prov_locales_excedente_por_proveedor.sql';
+
+    /**
      * El % de excedente permitido, en RO_T_CASHFLOW_PARAMETROS. Tiene su propio
      * camino de guardado (guardarPorcExcedente()): Parametros::saveParametro()
      * guarda cualquier texto y rechaza esta clave. Parametros la repite, igual
@@ -3088,6 +3105,121 @@ class Proveedores {
         }
 
         $r['clasificacion'] = self::CLASIF_EXCEDENTE;
+
+        return $r;
+    }
+
+    /**
+     * EL EXCEDENTE SE VALIDA POR PROVEEDOR, no factura por factura: la orden
+     * de pago se arma por proveedor, y el redondeo o el excedente se pone en
+     * una factura mientras otra va de menos. ES LA REGLA, escrita una vez: la
+     * usan la previsualizacion y la confirmacion, las dos por
+     * compararImportacion().
+     *
+     * Sobre los comprobantes del proveedor QUE VIENEN EN EL ARCHIVO -no toda
+     * su deuda-, aunque tengan fechas de pago distintas, y sin los que tienen
+     * un error propio o ya estan pagados en Tango (esos los saca quien llama).
+     * Con maximo = total neto × (1 + %/100):
+     *
+     *   total pagado > maximo + $1          ERROR: todas sus filas, no se carga
+     *                                       ninguna. Sin % el maximo es el total
+     *                                       neto: no se acepta excedente
+     *   total neto − $1 <= pagado <= max+$1 TOTAL: se acepta, y ninguna factura
+     *                                       queda con saldo. Si alguna se paga de
+     *                                       menos o supera su propio %, las que
+     *                                       se apartan de su neto en mas de $1
+     *                                       quedan COMPENSADAS -diferencia con
+     *                                       signo, sin saldo-; si no, cada una
+     *                                       es lo de siempre (NETO o EXCEDENTE)
+     *   total pagado < total neto − $1      POR_FACTURA: cada una sola, con
+     *                                       clasificarImporte(), como hasta ahora
+     *
+     * Con un solo comprobante da exactamente lo de clasificarImporte().
+     *
+     * Estatica y pura.
+     *
+     * @param array $comprobantes Lista de ['clave', 'neto', 'pagado'], con
+     *        pagado > 0 (una fila sin importe cuenta su neto)
+     * @param float|null $porc El % de excedente permitido; null = no se sabe
+     * @param string|null $sinPorc El motivo por el que no hay %, para el error
+     * @return array ['resultado', 'total_neto', 'total_pagado', 'diferencia',
+     *                'porc', 'maximo', 'excedente', 'compensa', 'motivo',
+     *                'comprobantes' => clave => lo de clasificarImporte()]
+     */
+    public static function clasificarProveedor($comprobantes, $porc, $sinPorc = null) {
+        $neto = 0.0;
+        $pagado = 0.0;
+        $propias = [];
+
+        foreach ($comprobantes as $c) {
+            $neto += floatval($c['neto']);
+            $pagado += floatval($c['pagado']);
+            $propias[$c['clave']] = self::clasificarImporte($c['pagado'], $c['neto'], $porc, $sinPorc);
+        }
+
+        $neto = round($neto, 2);
+        $pagado = round($pagado, 2);
+        $dif = round($pagado - $neto, 2);
+        $maximo = ($porc === null) ? $neto : round($neto * (1 + floatval($porc) / 100), 2);
+
+        $r = [
+            'resultado' => self::PROV_TOTAL, 'total_neto' => $neto, 'total_pagado' => $pagado,
+            'diferencia' => $dif, 'porc' => ($neto > 0) ? round($dif / $neto * 100, 2) : null,
+            'maximo' => $maximo, 'porc_permitido' => $porc, 'excedente' => 0.0, 'compensa' => false,
+            'motivo' => null, 'comprobantes' => $propias
+        ];
+
+        if ($pagado > $maximo + self::TOLERANCIA_IMPORTE) {
+            $r['resultado'] = self::PROV_ERROR;
+            $r['motivo'] = 'El proveedor paga ' . self::plata($pagado) . ' por facturas que suman un neto de '
+                . self::plata($neto) . ': lo supera en ' . self::plata($dif)
+                . ($r['porc'] === null ? '' : ' (' . self::textoPorcentaje($r['porc']) . ')')
+                . ($porc === null
+                    ? ', y no se puede aceptar excedente: ' . ($sinPorc !== null ? $sinPorc
+                        : 'falta el % de excedente permitido.')
+                    : '. El máximo permitido es ' . self::plata($maximo) . ' (' . self::textoPorcentaje($porc)
+                        . ').')
+                . ' No se carga ninguna de sus filas.';
+
+            return $r;
+        }
+
+        if ($pagado < $neto - self::TOLERANCIA_IMPORTE) {
+            $r['resultado'] = self::PROV_POR_FACTURA;
+
+            return $r;
+        }
+
+        $r['excedente'] = ($dif > self::TOLERANCIA_IMPORTE) ? $dif : 0.0;
+
+        /* ¿HACE FALTA COMPENSAR? Solo si alguna, sola, no se podria aceptar
+           como pagada: va de menos, o supera su propio maximo. Si no, cada
+           una es lo de siempre y no se guarda nada nuevo. */
+        foreach ($propias as $p) {
+            if ($p['clasificacion'] === self::CLASIF_PARCIAL || $p['clasificacion'] === self::CLASIF_ERROR) {
+                $r['compensa'] = true;
+            }
+        }
+
+        if (!$r['compensa']) {
+            return $r;
+        }
+
+        foreach ($comprobantes as $c) {
+            $p = $propias[$c['clave']];
+
+            if ($p['clasificacion'] === self::CLASIF_NETO) {
+                continue;
+            }
+
+            $n = round(floatval($c['neto']), 2);
+            $d = round(floatval($c['pagado']) - $n, 2);
+
+            $r['comprobantes'][$c['clave']] = [
+                'clasificacion' => self::CLASIF_COMPENSADA, 'maximo' => $p['maximo'], 'excedente' => $d,
+                'saldo' => 0.0, 'porc' => ($n > 0) ? round($d / $n * 100, 2) : null, 'motivo' => null
+            ];
+        }
 
         return $r;
     }
