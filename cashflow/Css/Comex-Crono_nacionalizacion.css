@@ -102,6 +102,12 @@
     border-left: 3px solid #26a69a;
 }
 
+/* El dolar divisa de los proximos dias: el mismo borde lleno que el BCRA,
+   en azul, para que las dos no se confundan. */
+.tab-crono_nacionalizacion .cotiz-divisa {
+    border-left: 3px solid #1e88e5;
+}
+
 .tab-crono_nacionalizacion .cotiz-marca {
     font-size: 9px;
     opacity: 0.7;

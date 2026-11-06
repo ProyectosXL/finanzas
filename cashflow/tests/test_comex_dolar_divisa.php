@@ -275,3 +275,25 @@ chequear('y se lee con el nombre de cuatro partes, en una constante', true,
         "const ORIGEN_DIVISAS = '[XL-APPS].sistemas.dbo.FP_DOLAR_DIVISAS';") !== false);
 chequear('y nadie le escribe', 0, preg_match('/(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+"\s*\.\s*self::ORIGEN_DIVISAS/i',
     file_get_contents(__DIR__ . '/../Class/DolarFuturo.php')));
+
+/* ================================================================
+   EN PANTALLA
+   ================================================================ */
+seccion('la grilla distingue divisa de BCRA, curva, aproximada y override');
+
+$srcFechasJs = file_get_contents(__DIR__ . '/../Js/Comex-fechas.js');
+$srcCronoCss = file_get_contents(__DIR__ . '/../Css/Comex-Crono_nacionalizacion.css');
+$srcAyuda = file_get_contents(__DIR__ . '/../Components/help_modal_comex.php');
+
+chequear('la celda marca la divisa con su clase', true,
+    strpos($srcFechasJs, "clases.push('cotiz-divisa')") !== false);
+chequear('con su icono, distinto del banco del BCRA', true,
+    (bool) preg_match('/=== \'DIVISA\'\) \{\s*cuerpo \+= \'<i class="fas fa-money-bill-transfer/',
+        $srcFechasJs));
+chequear('y con el dia de la cotizacion debajo del valor', true,
+    strpos($srcFechasJs, "'Divisa ' + fecha(item.COTIZ_BCRA_FECHA)") !== false);
+chequear('Crono Nacionalizacion tiene el estilo, con otro color que el BCRA', true,
+    (bool) preg_match('/\.cotiz-divisa \{\s*border-left: 3px solid #1e88e5;/', $srcCronoCss));
+chequear('la ayuda de Comex nombra el dolar divisa para Crono Nacionalizacion', true,
+    strpos($srcAyuda, 'En Crono Nacionalización, al dólar divisa') !== false
+    && strpos($srcAyuda, 'fa-money-bill-transfer me-1"></i> Dólar divisa') !== false);
