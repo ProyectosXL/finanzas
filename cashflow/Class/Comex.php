@@ -2532,6 +2532,8 @@ class Comex {
         $usdSinValuar = 0.0;
         $sinBcra = 0;
         $usdSinBcra = 0.0;
+        $sinDivisa = 0;
+        $usdSinDivisa = 0.0;
         $aproximadas = 0;
         $overrides = 0;
         $avisos = [];
@@ -2543,6 +2545,14 @@ class Comex {
             if (isset($f['COTIZ_MOTIVO']) && $f['COTIZ_MOTIVO'] === DolarFuturo::SIN_BCRA) {
                 $sinBcra++;
                 $usdSinBcra += isset($f[$campoImporte]) ? floatval($f[$campoImporte]) : 0;
+                continue;
+            }
+
+            /* Lo mismo con el dolar divisa de Crono Nacionalizacion: aparte,
+               porque el aviso tiene que nombrar el dolar que falta. */
+            if (isset($f['COTIZ_MOTIVO']) && $f['COTIZ_MOTIVO'] === DolarFuturo::SIN_DIVISA) {
+                $sinDivisa++;
+                $usdSinDivisa += isset($f[$campoImporte]) ? floatval($f[$campoImporte]) : 0;
                 continue;
             }
 
@@ -2568,6 +2578,14 @@ class Comex {
                 . 'a dólar BCRA vendedor, pero no hay ninguna cotización publicada, así que no se '
                 . 'pueden valuar en pesos y quedan fuera del tablero. No se usa la curva en su '
                 . 'lugar.');
+        }
+
+        if ($sinDivisa > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $sinDivisa . ' ' . $queSon . ' por U$S '
+                . number_format($usdSinDivisa, 2, ',', '.') . ' caen en los próximos días o ya '
+                . 'vencieron y van a dólar divisa vendedor, pero no hay ninguna cotización '
+                . 'publicada, así que no se pueden valuar en pesos y quedan fuera del tablero. No '
+                . 'se usa el dólar BCRA ni la curva en su lugar.');
         }
 
         if ($sinValuar > 0) {

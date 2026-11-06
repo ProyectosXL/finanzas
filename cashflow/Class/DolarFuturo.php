@@ -99,6 +99,17 @@
  *
  * La regla se arma con reglaBcra() -pura- y la lectura de los parametros y de
  * la cotizacion vive en bcra(), igual que curva() y resolver().
+ *
+ * CRONO NACIONALIZACION VA A DOLAR DIVISA, NO A BCRA
+ * --------------------------------------------------
+ * Desde feature/crono-nacionalizacion-dolar-divisas. Las nacionalizaciones de
+ * los proximos N dias -y las vencidas- se valuan con el dolar DIVISA vendedor
+ * del dia habil anterior (FP_DOLAR_DIVISAS, ORIGEN_DIVISAS); Proveedores
+ * Exterior y Compras Proyectadas -incluida su nacionalizacion proyectada-
+ * siguen con el BCRA. La regla es la MISMA: la pantalla elige la fuente al
+ * pedirla -bcra($hoy, FUENTE_DIVISA)- y la regla la lleva adentro, asi que
+ * resolver(), explicar() y los avisos la leen de ahi sin una copia por
+ * fuente. Sin divisa no se cae al BCRA: null y SIN_DIVISA.
  */
 class DolarFuturo {
 
@@ -117,11 +128,41 @@ class DolarFuturo {
     const ORIGEN_APROXIMADA = 'APROXIMADA'; /* se uso el mes mas cercano */
     const ORIGEN_OVERRIDE = 'OVERRIDE';     /* la cargo una persona */
     const ORIGEN_BCRA = 'BCRA';             /* se paga en los proximos dias */
+    const ORIGEN_DIVISA = 'DIVISA';         /* idem, en Crono Nacionalizacion */
 
     /* Por que NO se pudo valuar una fila. Tambien viaja al front. */
     const SIN_FECHA = 'SIN_FECHA';
     const SIN_CURVA = 'SIN_CURVA';
     const SIN_BCRA = 'SIN_BCRA';
+    const SIN_DIVISA = 'SIN_DIVISA';
+
+    /**
+     * El dolar divisa, de solo lectura como la curva: se lee con el nombre de
+     * cuatro partes desde 'central', igual que ORIGEN. Una fila por dia
+     * corrido desde 2011, con Comprador y Vendedor separados.
+     *
+     * LOS DIAS NO HABILES ESTAN RELLENADOS con la cotizacion del habil
+     * siguiente (desde septiembre de 2026), igual que la vista diaria del BCRA.
+     * Por eso se busca hasta diaAnterior(), que es un habil. Ver bcra().
+     */
+    const ORIGEN_DIVISAS = '[XL-APPS].sistemas.dbo.FP_DOLAR_DIVISAS';
+
+    /**
+     * De donde sale el dolar de los pagos de los proximos N dias. Lo elige la
+     * PANTALLA al pedir la regla -bcra($hoy, $fuente)-, y la regla lo lleva
+     * adentro: resolver(), explicar() y los avisos lo leen de ahi. Asi la regla
+     * sigue escrita una sola vez y cada pantalla dice que dolar usa.
+     *
+     *   BCRA    Proveedores Exterior y Compras Proyectadas (las dos filas, FOB
+     *           y nacionalizacion): el oficial BCRA vendedor.
+     *   DIVISA  Crono Nacionalizacion: el dolar divisa vendedor, de
+     *           ORIGEN_DIVISAS (feature/crono-nacionalizacion-dolar-divisas).
+     */
+    const FUENTE_BCRA = 'BCRA';
+    const FUENTE_DIVISA = 'DIVISA';
+
+    /** Como se nombra cada fuente de cara al usuario */
+    const NOMBRES_FUENTE = [self::FUENTE_BCRA => 'dólar BCRA', self::FUENTE_DIVISA => 'dólar divisa'];
 
     /**
      * Los dos parametros de la regla del dolar BCRA, en
@@ -352,14 +393,23 @@ class DolarFuturo {
      * habia corrido. Buscando hasta el habil anterior -diaAnterior() con el
      * calendario- el resultado no depende ni del relleno ni de la hora.
      *
+     * LA FUENTE LA ELIGE LA PANTALLA: FUENTE_BCRA por defecto, FUENTE_DIVISA
+     * en Crono Nacionalizacion. Los dos parametros y el dia son los mismos; lo
+     * unico que cambia es de que tabla sale la cotizacion. SIN DIVISA NO SE CAE
+     * AL BCRA: la cotizacion queda en null con su error, igual que sin BCRA no
+     * se cae a la curva. El cache es por fuente y dia.
+     *
      * @param string|null $hoy 'Y-m-d'. Por defecto, hoy.
+     * @param string $fuente FUENTE_BCRA (default) o FUENTE_DIVISA
      * @return array Lo que devuelve reglaBcra()
      */
-    public function bcra($hoy = null) {
+    public function bcra($hoy = null, $fuente = self::FUENTE_BCRA) {
         $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $fuente = self::fuente($fuente);
+        $clave = $fuente . '|' . $hoy;
 
-        if (isset($this->reglas[$hoy])) {
-            return $this->reglas[$hoy];
+        if (isset($this->reglas[$clave])) {
+            return $this->reglas[$clave];
         }
 
         $params = $this->parametrosBcra();
@@ -369,19 +419,113 @@ class DolarFuturo {
 
         if ($dias > 0) {
             try {
-                require_once __DIR__ . '/Cotizacion.php';
+                $hasta = self::diaAnterior($hoy, $this->calendario($hoy));
 
-                $cotizacion = (new Cotizacion())->ultimaHasta(
-                    self::diaAnterior($hoy, $this->calendario($hoy)), Cotizacion::VENDEDOR);
+                if ($fuente === self::FUENTE_DIVISA) {
+                    $cotizacion = $this->divisaHasta($hasta);
+                } else {
+                    require_once __DIR__ . '/Cotizacion.php';
+
+                    $cotizacion = (new Cotizacion())->ultimaHasta($hasta, Cotizacion::VENDEDOR);
+                }
             } catch (Throwable $e) {
                 $error = $e->getMessage();
             }
         }
 
-        $this->reglas[$hoy] = self::reglaBcra($hoy, $dias,
-            $params[self::PARAM_ANTIGUEDAD_BCRA], $cotizacion, $error);
+        $this->reglas[$clave] = self::reglaBcra($hoy, $dias,
+            $params[self::PARAM_ANTIGUEDAD_BCRA], $cotizacion, $error, $fuente);
 
-        return $this->reglas[$hoy];
+        return $this->reglas[$clave];
+    }
+
+    /**
+     * El dolar divisa VENDEDOR de un dia o, si ese dia no tiene, el ultimo
+     * anterior. La misma forma que Cotizacion::ultimaHasta(), con la punta
+     * vendedora, para que resolver() y explicar() no distingan de donde vino.
+     *
+     * UNA COTIZACION NO POSITIVA ES AUSENTE, como en Cotizacion::valor(): se
+     * filtra en la consulta, asi que se toma la ultima valida anterior. Al
+     * 06/11/2026 no hay ninguna.
+     *
+     * LANZA si no se puede leer: bcra() lo atrapa y lo deja en 'error'.
+     *
+     * @param string $fecha 'Y-m-d'
+     * @return array|null ['fecha', 'valor', 'punta'], o null si no hay ninguna
+     * @throws Exception Si no se puede conectar o leer el origen
+     */
+    public function divisaHasta($fecha) {
+        require_once __DIR__ . '/Cotizacion.php';
+
+        $f = Cotizacion::dia($fecha);
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base central para leer el dólar divisa ('
+                . self::ORIGEN_DIVISAS . ').');
+        }
+
+        $sql = "SELECT TOP 1 Fecha, Vendedor
+                FROM " . self::ORIGEN_DIVISAS . "
+                WHERE Fecha <= ? AND Vendedor > 0
+                ORDER BY Fecha DESC";
+
+        $stmt = sqlsrv_query($cid, $sql, [$f]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('No se pudo leer el dólar divisa', self::ORIGEN_DIVISAS));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $valor = $row ? self::valor($row['Vendedor']) : null;
+
+        if ($valor === null) {
+            return null;
+        }
+
+        return [
+            'fecha' => ($row['Fecha'] instanceof DateTime)
+                ? $row['Fecha']->format('Y-m-d')
+                : substr((string) $row['Fecha'], 0, 10),
+            'valor' => $valor,
+            'punta' => Cotizacion::VENDEDOR
+        ];
+    }
+
+    /**
+     * Valida una fuente. LANZA en vez de caer en BCRA, por el mismo motivo que
+     * Cotizacion::punta(): una fuente mal escrita valuaria con el otro dolar
+     * en silencio.
+     *
+     * Estatica y pura.
+     *
+     * @param string $fuente
+     * @return string
+     */
+    public static function fuente($fuente) {
+        if (!isset(self::NOMBRES_FUENTE[$fuente])) {
+            throw new Exception("Fuente del dólar inválida: '$fuente'. Se espera "
+                . self::FUENTE_BCRA . ' o ' . self::FUENTE_DIVISA);
+        }
+
+        return $fuente;
+    }
+
+    /**
+     * La fuente de una regla, BCRA si la regla no dice: una regla armada antes
+     * de que existiera la fuente es BCRA.
+     *
+     * Estatica y pura.
+     *
+     * @param array|null $regla
+     * @return string
+     */
+    public static function fuenteDe($regla) {
+        return (is_array($regla) && isset($regla['fuente'])
+                && $regla['fuente'] === self::FUENTE_DIVISA)
+            ? self::FUENTE_DIVISA : self::FUENTE_BCRA;
     }
 
     /**
@@ -491,13 +635,18 @@ class DolarFuturo {
      * Comex::avisoSinCurva(). Cuantos pagos quedaron sin BCRA tampoco: eso es
      * de las filas, y lo cuenta Comex::avisosValuacionConNivel().
      *
+     * CON LA FUENTE DE LA PANTALLA: Crono Nacionalizacion pide los de la
+     * divisa, y el texto lo nombra. Asi el panel del tablero no los toma como
+     * repetidos de los de Proveedores Exterior.
+     *
      * @param string|null $hoy 'Y-m-d'
+     * @param string $fuente FUENTE_BCRA (default) o FUENTE_DIVISA
      * @return array Lista de ['nivel', 'texto', 'seccion']
      */
-    public function avisosDolarConNivel($hoy = null) {
+    public function avisosDolarConNivel($hoy = null, $fuente = self::FUENTE_BCRA) {
         require_once __DIR__ . '/Aviso.php';
 
-        $regla = $this->bcra($hoy);
+        $regla = $this->bcra($hoy, $fuente);
         $avisos = [];
 
         if ($this->disponible()) {
@@ -506,15 +655,43 @@ class DolarFuturo {
         }
 
         $avisos[] = self::avisoBcraVieja($regla);
-
-        /* El motivo tecnico va aparte y en atencion: lo que no se pudo valuar
-           por esto ya lo cuenta, critico, el aviso de las filas. */
-        if ($regla['error'] !== null) {
-            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer el dólar BCRA para los pagos '
-                . 'de los próximos ' . $regla['dias'] . ' días: ' . $regla['error']);
-        }
+        $avisos[] = self::avisoSinLeer($regla);
 
         return array_values(array_filter($avisos));
+    }
+
+    /**
+     * El aviso de que no se pudo leer el dolar de los proximos dias, o null.
+     *
+     * EL BCRA VA EN ATENCION: el motivo tecnico va aparte, y lo que no se pudo
+     * valuar por esto ya lo cuenta, critico, el aviso de las filas.
+     *
+     * LA DIVISA VA EN CRITICO, como pide su especificacion: la tabla esta en
+     * otro servidor y que no se pueda leer deja sin valuar los pagos mas
+     * cercanos de Crono Nacionalizacion aunque hoy ninguno caiga en la ventana.
+     *
+     * Estatica y pura.
+     *
+     * @param array|null $regla
+     * @return array|null ['nivel', 'texto', 'seccion']
+     */
+    public static function avisoSinLeer($regla) {
+        require_once __DIR__ . '/Aviso.php';
+
+        if (!is_array($regla) || !isset($regla['error']) || $regla['error'] === null) {
+            return null;
+        }
+
+        if (self::fuenteDe($regla) === self::FUENTE_DIVISA) {
+            return Aviso::nuevo(Aviso::DANGER, 'No se pudo leer el dólar divisa ('
+                . self::ORIGEN_DIVISAS . '), así que las nacionalizaciones de los próximos '
+                . $regla['dias'] . ' días y las vencidas no se pueden pasar a pesos y quedan '
+                . 'fuera del tablero. No se usa el dólar BCRA ni la curva en su lugar. '
+                . $regla['error']);
+        }
+
+        return Aviso::nuevo(Aviso::WARNING, 'No se pudo leer el dólar BCRA para los pagos '
+            . 'de los próximos ' . $regla['dias'] . ' días: ' . $regla['error']);
     }
 
     /**
@@ -567,8 +744,10 @@ class DolarFuturo {
      *   1. El override manual de la fila, si tiene uno valido. Manda sobre todo:
      *      lo cargo una persona que sabe algo que la curva no sabe.
      *   2. Si se paga dentro de los proximos N dias -o ya vencio-, el dolar
-     *      oficial BCRA vendedor de la regla. Sin esa cotizacion, null con
-     *      SIN_BCRA: NO se cae a la curva. Ver el encabezado de la clase.
+     *      vendedor de la regla: el oficial BCRA, o el divisa si la regla es
+     *      de FUENTE_DIVISA (Crono Nacionalizacion). Sin esa cotizacion, null
+     *      con SIN_BCRA o SIN_DIVISA: NO se cae a la curva ni a la otra
+     *      fuente. Ver el encabezado de la clase.
      *   3. La cotizacion del mes de la fecha efectiva de pago.
      *   4. La del mes mas cercano de la curva, marcada como aproximada.
      *
@@ -591,7 +770,7 @@ class DolarFuturo {
      * @param mixed $override Cotizacion cargada a mano para esta fila, o null
      * @param array|null $bcra Lo que devolvio reglaBcra(), o null sin regla
      * @return array ['cotizacion', 'simbolo', 'origen', 'mes_pago', 'mes_curva', 'motivo',
-     *                'bcra_fecha', 'bcra_punta', 'bcra_dias']
+     *                'bcra_fecha', 'bcra_punta', 'bcra_dias', 'bcra_fuente']
      */
     public static function resolver($curva, $fechaPago, $override = null, $bcra = null) {
         $r = [
@@ -603,7 +782,12 @@ class DolarFuturo {
             'motivo' => null,
             'bcra_fecha' => null,
             'bcra_punta' => null,
-            'bcra_dias' => null
+            'bcra_dias' => null,
+            /* De que fuente es el dolar de los proximos dias: FUENTE_BCRA o
+               FUENTE_DIVISA. null si la fila no cayo en la ventana. Las
+               claves bcra_* nombran al dolar de los proximos dias, sea cual
+               sea su fuente. */
+            'bcra_fuente' => null
         ];
 
         $curva = is_array($curva) ? $curva : [];
@@ -636,17 +820,23 @@ class DolarFuturo {
             return $r;
         }
 
+        /* LA FUENTE LA TRAE LA REGLA: con la divisa, el origen y el motivo
+           son los suyos. La ventana, la precedencia y el "sin cotizacion no se
+           cae a nada" son los mismos. */
         if (self::usaBcra($bcra, $fechaPago)) {
+            $divisa = (self::fuenteDe($bcra) === self::FUENTE_DIVISA);
+
             $r['bcra_dias'] = $bcra['dias'];
+            $r['bcra_fuente'] = self::fuenteDe($bcra);
 
             if (empty($bcra['cotizacion'])) {
-                $r['motivo'] = self::SIN_BCRA;
+                $r['motivo'] = $divisa ? self::SIN_DIVISA : self::SIN_BCRA;
 
                 return $r;
             }
 
             $r['cotizacion'] = floatval($bcra['cotizacion']['valor']);
-            $r['origen'] = self::ORIGEN_BCRA;
+            $r['origen'] = $divisa ? self::ORIGEN_DIVISA : self::ORIGEN_BCRA;
             $r['bcra_fecha'] = $bcra['cotizacion']['fecha'];
             $r['bcra_punta'] = $bcra['cotizacion']['punta'];
 
@@ -684,17 +874,20 @@ class DolarFuturo {
      * @param string $hoy 'Y-m-d'
      * @param mixed $dias N, el parametro comex_dias_bcra
      * @param mixed $antiguedad M, el parametro comex_bcra_antiguedad_max
-     * @param array|null $cotizacion Lo que devolvio Cotizacion::ultimaHasta()
+     * @param array|null $cotizacion Lo que devolvio Cotizacion::ultimaHasta() o divisaHasta()
      * @param string|null $error Por que no se pudo leer la cotizacion, si no se pudo
-     * @return array ['hoy', 'dias', 'hasta', 'antiguedad_max', 'cotizacion', 'error']
+     * @param string $fuente FUENTE_BCRA (default) o FUENTE_DIVISA
+     * @return array ['hoy', 'dias', 'hasta', 'antiguedad_max', 'cotizacion', 'error', 'fuente']
      */
-    public static function reglaBcra($hoy, $dias, $antiguedad, $cotizacion, $error = null) {
+    public static function reglaBcra($hoy, $dias, $antiguedad, $cotizacion, $error = null,
+                                     $fuente = self::FUENTE_BCRA) {
         require_once __DIR__ . '/Horizonte.php';
 
         $hoy = Horizonte::normalizarFecha($hoy);
         $dias = self::diasBcra($dias);
 
         return [
+            'fuente' => self::fuente($fuente),
             'hoy' => $hoy,
             'dias' => $dias,
             /* Con N = 0 no hay ventana: nadie va a BCRA. hasta en null lo dice
@@ -990,6 +1183,13 @@ class DolarFuturo {
      */
     public static function explicar($resuelto) {
         if (empty($resuelto['origen'])) {
+            if ($resuelto['motivo'] === self::SIN_DIVISA) {
+                return 'Se nacionaliza en los próximos ' . $resuelto['bcra_dias'] . ' días —o ya '
+                    . 'venció—, así que va a dólar divisa vendedor, pero no hay ninguna cotización '
+                    . 'publicada: este importe no se puede valuar. No se usa el dólar BCRA ni la '
+                    . 'curva en su lugar.';
+            }
+
             if ($resuelto['motivo'] === self::SIN_BCRA) {
                 return 'Se paga en los próximos ' . $resuelto['bcra_dias'] . ' días, así que va '
                     . 'a dólar BCRA vendedor, pero no hay ninguna cotización publicada: este pago '
@@ -1024,6 +1224,18 @@ class DolarFuturo {
                 . 'de hoy y no a la curva de futuros.';
         }
 
+        /* La divisa, con el mismo orden: el dolar, su fecha y su valor
+           primero, que es lo que se compara contra lo publicado. */
+        if ($resuelto['origen'] === self::ORIGEN_DIVISA) {
+            require_once __DIR__ . '/Cotizacion.php';
+
+            return 'Dólar divisa ' . Cotizacion::nombrePunta($resuelto['bcra_punta']) . ' del '
+                . self::fechaCorta($resuelto['bcra_fecha']) . ': $ '
+                . number_format($resuelto['cotizacion'], 2, ',', '.') . '. Se nacionaliza en los '
+                . 'próximos ' . $resuelto['bcra_dias'] . ' días —o ya venció—, así que va a dólar '
+                . 'divisa del día hábil anterior y no a la curva de futuros.';
+        }
+
         if ($resuelto['origen'] === self::ORIGEN_APROXIMADA) {
             return 'El mes de pago (' . self::mesCorto($resuelto['mes_pago']) . ') no está en la '
                 . 'curva, así que se usó el mes más cercano que hay: '
@@ -1047,17 +1259,27 @@ class DolarFuturo {
     public static function explicarRegla($regla) {
         if (!is_array($regla) || empty($regla['hasta'])) {
             return 'Todos los pagos se valúan con dólar futuro ROFEX del mes de pago: los días '
-                . 'con dólar BCRA están en 0.';
+                . 'con dólar del día anterior están en 0.';
         }
 
+        $nombre = self::NOMBRES_FUENTE[self::fuenteDe($regla)];
+
         $bcra = empty($regla['cotizacion'])
-            ? 'dólar BCRA vendedor —que hoy no se puede leer, así que quedan sin valuar—'
-            : 'dólar BCRA vendedor del ' . self::fechaCorta($regla['cotizacion']['fecha']) . ' ($ '
+            ? $nombre . ' vendedor —que hoy no se puede leer, así que quedan sin valuar—'
+            : $nombre . ' vendedor del ' . self::fechaCorta($regla['cotizacion']['fecha']) . ' ($ '
               . number_format($regla['cotizacion']['valor'], 2, ',', '.') . ')';
 
-        return 'Los pagos de los próximos ' . $regla['dias'] . ' días —hasta el '
-            . self::fechaCorta($regla['hasta']) . '— y los vencidos van a ' . $bcra
-            . '; los posteriores, a dólar futuro ROFEX del mes de pago.';
+        /* En Crono Nacionalizacion lo que cae en la fecha es la nacionalizacion,
+           no un pago: el texto lo dice con su palabra. */
+        $queSon = (self::fuenteDe($regla) === self::FUENTE_DIVISA)
+            ? 'Las nacionalizaciones' : 'Los pagos';
+
+        return $queSon . ' de los próximos ' . $regla['dias'] . ' días —hasta el '
+            . self::fechaCorta($regla['hasta']) . '— y '
+            . ($queSon === 'Los pagos' ? 'los vencidos' : 'las vencidas') . ' van a ' . $bcra
+            . '; ' . ($queSon === 'Los pagos' ? 'los posteriores' : 'las posteriores')
+            . ', a dólar futuro ROFEX del mes ' . ($queSon === 'Los pagos' ? 'de pago' : 'en que caen')
+            . '.';
     }
 
     /**
@@ -1078,9 +1300,13 @@ class DolarFuturo {
             return null;
         }
 
-        return Aviso::nuevo(Aviso::WARNING, 'La última cotización del dólar BCRA es del '
-            . self::fechaCorta($regla['cotizacion']['fecha']) . '; se usa ésa para los pagos de '
-            . 'los próximos ' . $regla['dias'] . ' días.');
+        $divisa = (self::fuenteDe($regla) === self::FUENTE_DIVISA);
+
+        return Aviso::nuevo(Aviso::WARNING, 'La última cotización del '
+            . self::NOMBRES_FUENTE[self::fuenteDe($regla)] . ' es del '
+            . self::fechaCorta($regla['cotizacion']['fecha']) . '; se usa ésa para '
+            . ($divisa ? 'las nacionalizaciones' : 'los pagos') . ' de los próximos '
+            . $regla['dias'] . ' días.');
     }
 
     /**
@@ -1175,9 +1401,9 @@ class DolarFuturo {
      * @param string $contexto
      * @return string
      */
-    private function errorSql($contexto) {
+    private function errorSql($contexto, $origen = self::ORIGEN) {
         $errores = sqlsrv_errors();
-        $msg = $contexto . ' (' . self::ORIGEN . '): ';
+        $msg = $contexto . ' (' . $origen . '): ';
 
         if ($errores) {
             foreach ($errores as $e) {

@@ -294,9 +294,12 @@ foreach (glob(__DIR__ . '/../Class/{,Providers/}*.php', GLOB_BRACE) as $archivo)
 
 chequear('solo Comex.php resuelve con la regla', ['Comex.php'], $conRegla);
 
-chequear('bcra() pide la punta VENDEDORA al leer la cotizacion', 1,
-    preg_match('/ultimaHasta\(\s*self::diaAnterior\(\$hoy, \$this->calendario\(\$hoy\)\),\s*'
-        . 'Cotizacion::VENDEDOR\)/', $srcDolar));
+chequear('bcra() busca hasta el habil anterior, con el calendario', 1,
+    substr_count($srcDolar, '$hasta = self::diaAnterior($hoy, $this->calendario($hoy));'));
+chequear('bcra() pide la punta VENDEDORA al leer la cotizacion BCRA', 1,
+    substr_count($srcDolar, 'ultimaHasta($hasta, Cotizacion::VENDEDOR)'));
+chequear('y la divisa lee la columna Vendedor', 1,
+    preg_match('/SELECT TOP 1 Fecha, Vendedor\s+FROM " \. self::ORIGEN_DIVISAS/', $srcDolar));
 
 chequear('los avisos del dolar salen en las dos pestanas de Comex', 2,
     substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel()'));
