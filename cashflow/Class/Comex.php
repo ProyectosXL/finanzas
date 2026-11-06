@@ -694,7 +694,9 @@ class Comex {
         }
 
         return array_merge(
-            $this->dolarFuturo()->avisosDolarConNivel(),
+            /* Con la fuente de esta pestana: la divisa vieja o que no se puede
+               leer, no el BCRA. */
+            $this->dolarFuturo()->avisosDolarConNivel(null, DolarFuturo::FUENTE_DIVISA),
             self::avisosValuacionConNivel($estimadas, $this->dolarFuturo()->ultimoMes(),
                 'IMPORTE_EST', 'fecha de nacionalización'),
             self::avisosVencidosConNivel($proyectables, 'FECHA_SALDO_EFECTIVA', 'SALDO_ARS',
@@ -2424,6 +2426,10 @@ class Comex {
      * parcial sigue sin cambiar la cotizacion. Sin $bcra, todo va con la curva
      * como antes. Ver el encabezado de DolarFuturo.
      *
+     * DE QUE DOLAR ES LA REGLA LO DECIDE QUIEN LA PIDE, no esta funcion:
+     * Crono Nacionalizacion pasa una regla de FUENTE_DIVISA y las otras dos
+     * pantallas una de BCRA. valuar() no distingue.
+     *
      * @param array $row Fila cruda, con su fecha efectiva ya resuelta
      * @param array $curva Lo que devolvio DolarFuturo::curva()
      * @param string $campoImporte De donde sale el importe EN DOLARES
@@ -3369,9 +3375,12 @@ class Comex {
         $v = [];
 
         // La curva se lee UNA vez para todo el listado, no una por fila, igual
-        // que en getProveedoresExterior(). La regla del dolar BCRA, igual.
+        // que en getProveedoresExterior(). La regla de los proximos dias,
+        // igual, pero con el DOLAR DIVISA: las nacionalizaciones de los
+        // proximos N dias van al divisa vendedor del dia habil anterior, no al
+        // BCRA (feature/crono-nacionalizacion-dolar-divisas). Ver DolarFuturo.
         $curva = $this->dolarFuturo()->curva();
-        $bcra = $this->dolarFuturo()->bcra($hoy);
+        $bcra = $this->dolarFuturo()->bcra($hoy, DolarFuturo::FUENTE_DIVISA);
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',

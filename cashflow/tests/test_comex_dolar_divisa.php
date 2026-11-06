@@ -208,3 +208,70 @@ if (!Pruebas::hayBase()) {
 
     chequear('antes de 2011 no hay divisa: null, no cero', null, $dolar->divisaHasta('2010-12-31'));
 }
+
+/* ================================================================
+   QUIEN USA CADA DOLAR
+   Leyendo el codigo sin comentarios, como test_comex_dolar_bcra.php.
+   ================================================================ */
+seccion('solo Crono Nacionalizacion pide la divisa; las otras dos siguen con BCRA');
+
+$sinComentarios = function ($archivo) {
+    $src = file_get_contents($archivo);
+    $src = preg_replace('#/\*.*?\*/#s', '', $src);
+
+    return preg_replace('#^\s*//.*$#m', '', $src);
+};
+
+$srcComex = $sinComentarios(__DIR__ . '/../Class/Comex.php');
+$srcCompras = $sinComentarios(__DIR__ . '/../Class/Providers/ComprasProyectadasProvider.php');
+$srcComprasCtl = $sinComentarios(__DIR__ . '/../Controller/ComprasProyectadasController.php');
+$srcCtl = $sinComentarios(__DIR__ . '/../Controller/ComexController.php');
+
+/* Los dos listados de Comex, por su firma, para no confundir uno con otro */
+$cuerpo = function ($src, $funcion) {
+    $ini = strpos($src, 'function ' . $funcion . '(');
+    $fin = strpos($src, "\n    public ", $ini + 1);
+
+    return substr($src, $ini, ($fin === false ? strlen($src) : $fin) - $ini);
+};
+
+$crono = $cuerpo($srcComex, 'getCronoNacionalizacion');
+$prov = $cuerpo($srcComex, 'getProveedoresExterior');
+
+chequear('Crono Nacionalizacion valua con la regla divisa', 1,
+    substr_count($crono, 'bcra($hoy, DolarFuturo::FUENTE_DIVISA)'));
+chequear('Proveedores Exterior no pide la divisa', 0, substr_count($prov, 'FUENTE_DIVISA'));
+chequear('Proveedores Exterior sigue con la regla por defecto, BCRA', 1,
+    substr_count($prov, '$bcra = $this->dolarFuturo()->bcra($hoy);'));
+chequear('Compras Proyectadas, FOB y nacionalizacion, no piden la divisa', 0,
+    substr_count($srcCompras . $srcComprasCtl, 'FUENTE_DIVISA'));
+chequear('Compras Proyectadas sigue con la regla BCRA', 1,
+    substr_count($srcCompras, '$bcra = $dolar->bcra($h->hoy());'));
+
+chequear('los avisos de Crono Nacionalizacion son los de la divisa', 1,
+    substr_count($cuerpo($srcComex, 'avisosNacionalizacionConNivel'),
+        'avisosDolarConNivel(null, DolarFuturo::FUENTE_DIVISA)'));
+chequear('y los de Proveedores Exterior, los del BCRA', 1,
+    substr_count($cuerpo($srcComex, 'avisosExteriorConNivel'), 'avisosDolarConNivel()'));
+
+chequear('la linea de la regla de Crono nombra la divisa; la de Proveedores, el BCRA',
+    [1, 1], [substr_count($srcCtl, 'bcra(null, DolarFuturo::FUENTE_DIVISA)'),
+             substr_count($srcCtl, 'explicarRegla($comex->dolarFuturo()->bcra())')]);
+
+/* Nadie fuera de DolarFuturo arma su propio "si es divisa": la decision de
+   fuente vive en resolver(). */
+$propias = [];
+
+foreach (glob(__DIR__ . '/../Class/{,Providers/}*.php', GLOB_BRACE) as $archivo) {
+    if (basename($archivo) !== 'DolarFuturo.php'
+        && preg_match('/ORIGEN_DIVISAS|divisaHasta\(/', $sinComentarios($archivo))) {
+        $propias[] = basename($archivo);
+    }
+}
+
+chequear('solo DolarFuturo lee FP_DOLAR_DIVISAS', [], $propias);
+chequear('y se lee con el nombre de cuatro partes, en una constante', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/DolarFuturo.php'),
+        "const ORIGEN_DIVISAS = '[XL-APPS].sistemas.dbo.FP_DOLAR_DIVISAS';") !== false);
+chequear('y nadie le escribe', 0, preg_match('/(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+"\s*\.\s*self::ORIGEN_DIVISAS/i',
+    file_get_contents(__DIR__ . '/../Class/DolarFuturo.php')));

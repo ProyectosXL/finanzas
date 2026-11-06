@@ -277,8 +277,12 @@ chequear('Compras Proyectadas, el FOB: Comex::valuar() con la regla', true,
     strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO', \$bcra)") !== false);
 chequear('Compras Proyectadas, la nacionalizacion: Comex::valuar() con la regla', true,
     strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC', \$bcra)") !== false);
-chequear('las dos regla salen de DolarFuturo::bcra()', 2,
+/* Proveedores Exterior con BCRA; Crono Nacionalizacion con la divisa, que se
+   prueba en test_comex_dolar_divisa.php. Las dos de la misma bcra(). */
+chequear('Proveedores Exterior pide la regla BCRA a DolarFuturo::bcra()', 1,
     substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy);'));
+chequear('Crono Nacionalizacion tambien sale de DolarFuturo::bcra(), con la divisa', 1,
+    substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy, DolarFuturo::FUENTE_DIVISA);'));
 chequear('y la de Compras tambien', 1, substr_count($srcCompras, '$bcra = $dolar->bcra($h->hoy());'));
 
 /* Fuera de DolarFuturo, solo Comex::valuar() resuelve con la regla: nadie
@@ -301,8 +305,10 @@ chequear('bcra() pide la punta VENDEDORA al leer la cotizacion BCRA', 1,
 chequear('y la divisa lee la columna Vendedor', 1,
     preg_match('/SELECT TOP 1 Fecha, Vendedor\s+FROM " \. self::ORIGEN_DIVISAS/', $srcDolar));
 
-chequear('los avisos del dolar salen en las dos pestanas de Comex', 2,
+chequear('los avisos del dolar BCRA salen en Proveedores Exterior', 1,
     substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel()'));
+chequear('y los de la divisa en Crono Nacionalizacion', 1,
+    substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel(null, DolarFuturo::FUENTE_DIVISA)'));
 chequear('y en Compras Proyectadas', 1,
     substr_count($srcCompras, '$dolar->avisosDolarConNivel($h->hoy())'));
 
