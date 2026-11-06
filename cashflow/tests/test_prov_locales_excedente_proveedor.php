@@ -340,6 +340,12 @@ $c = $comparar([$fila(2, 'P1', 'A1', '20/10/2026', '110000'), $fila(3, 'P1', 'B1
 chequear('las dos en error', ['ERROR', 'ERROR'], array_column($c['filas'], 'estado'));
 chequear('y el motivo nombra el script', true,
     strpos($c['filas'][0]['motivo'], 'sql/cashflow_prov_locales_excedente_por_proveedor.sql') !== false);
+chequear('no se cuenta como que supera el máximo, sino aparte', [0, 1, true],
+    [$c['resumen']['proveedores_rechazados'], $c['resumen']['proveedores_sin_script'],
+     $subtotal($c, 'P1')['falta_script']]);
+chequear('y hay un aviso que lo dice', 1, count(array_filter($c['avisos'], function ($a) {
+    return strpos($a, 'para compensarlas en su total hace falta correr') !== false;
+})));
 
 $c = $comparar([$fila(2, 'P5', 'A5', '20/10/2026', '104000'), $fila(3, 'P5', 'B5', '20/10/2026', '50000')],
     $con5 + ['compensada' => false]);

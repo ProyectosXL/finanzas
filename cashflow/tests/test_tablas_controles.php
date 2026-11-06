@@ -1892,6 +1892,9 @@ chequear('el chip del excedente cuenta proveedores y dice el excedente', true,
 chequear('y hay chips de compensadas y de proveedores que superan el máximo', [true, true], [
     strpos($jsProv, "['compensadas', 'Compensadas', 'primary', null,") !== false,
     strpos($jsProv, "['proveedores_rechazados', 'Proveedores que superan el máximo', 'danger', null,") !== false]);
+chequear('y uno para los que no se pueden compensar porque falta el script', true,
+    strpos($jsProv, "['proveedores_sin_script', 'Proveedores sin compensar', 'warning text-dark', null,") !== false
+    && strpos($jsProv, "ERROR: p.falta_script") !== false);
 chequear('el chip Pago parcial cuenta comprobantes y dice lo que se paga', true,
     strpos($jsProv, "['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',") !== false);
 chequear('y el importe se dibuja al lado de la cantidad', true,

@@ -2238,6 +2238,10 @@
                ['proveedores_rechazados', 'Proveedores que superan el máximo', 'danger', null,
                 'Proveedores cuyo total pagado supera el neto de sus facturas más el % permitido: no se '
                 + 'carga ninguna de sus filas.', true],
+               ['proveedores_sin_script', 'Proveedores sin compensar', 'warning text-dark', null,
+                'Proveedores dentro del máximo que pagan una factura de más y otra de menos: para '
+                + 'compensarlas falta correr sql/cashflow_prov_locales_excedente_por_proveedor.sql. '
+                + 'Mientras tanto sus filas no se cargan.', true],
                ['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',
                 'Comprobantes que se pagan con menos que su neto a pagar. El importe es lo que se paga; '
                 + 'el saldo sigue con su vencimiento o el próximo día de pago.'],
@@ -2599,7 +2603,10 @@
                 + (p.excedente > 0 ? ': excedente del proveedor ' + plata(p.excedente) : '')
                 + (p.compensa ? ', sin saldo pendiente' : '')],
             POR_FACTURA: ['secondary', 'Paga menos que el total: cada factura se evalúa sola'],
-            ERROR: ['danger', 'No se carga ninguna de sus filas']
+            ERROR: p.falta_script
+                ? ['warning text-dark', 'Dentro del máximo, pero falta un script para compensar: no se carga '
+                    + 'ninguna de sus filas']
+                : ['danger', 'Supera el máximo: no se carga ninguna de sus filas']
         }[p.resultado];
 
         if (resultado) {

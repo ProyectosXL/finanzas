@@ -2746,7 +2746,9 @@ class Proveedores {
             /* EL EXCEDENTE SE VALIDA POR PROVEEDOR: cuantos proveedores pagan
                de mas -y cuanto, en total-, cuantos superan el maximo, y cuantas
                facturas quedan compensadas en el total de su proveedor. */
-            'proveedores_con_excedente' => 0, 'proveedores_rechazados' => 0, 'compensadas' => 0
+            'proveedores_con_excedente' => 0, 'proveedores_rechazados' => 0, 'compensadas' => 0,
+            // Los que se aceptarian compensando, pero falta el script de COMPENSADA.
+            'proveedores_sin_script' => 0
         ];
 
         /* 1. CADA COMPROBANTE POR SU CUENTA, como siempre. */
@@ -2869,7 +2871,9 @@ class Proveedores {
         }
 
         foreach ($proveedores as $p) {
-            if ($p['resultado'] === self::PROV_ERROR) {
+            if ($p['falta_script']) {
+                $resumen['proveedores_sin_script']++;
+            } elseif ($p['resultado'] === self::PROV_ERROR) {
                 $resumen['proveedores_rechazados']++;
             }
         }
@@ -2970,7 +2974,7 @@ class Proveedores {
             $sub = ['cod_provee' => (string) $cod, 'razon_social' => '', 'filas' => 0, 'fuera' => 0,
                     'comprobantes' => 0, 'resultado' => null, 'total_neto' => 0.0, 'total_pagado' => 0.0,
                     'diferencia' => 0.0, 'porc' => null, 'maximo' => null, 'porc_permitido' => $excedente['porc'],
-                    'excedente' => 0.0, 'compensa' => false, 'motivo' => null];
+                    'excedente' => 0.0, 'compensa' => false, 'motivo' => null, 'falta_script' => false];
 
             foreach ($ks as $k) {
                 $f0 = $procesados[$k]['filas'][0];
@@ -3018,6 +3022,8 @@ class Proveedores {
                         . 'en el total hace falta correr ' . self::SCRIPT_COMPENSADA . ' contra la base '
                         . 'central. Mientras tanto no se carga ninguna de sus filas.';
                     $sub['resultado'] = self::PROV_ERROR;
+                    // No supera el maximo: no se cuenta con los rechazados.
+                    $sub['falta_script'] = true;
 
                     foreach ($comps as $c) {
                         $procesados[$c['clave']]['filas'] = self::enErrorPorProveedor(
@@ -4486,6 +4492,13 @@ class Proveedores {
             $avisos[] = $resumen['proveedores_rechazados'] . ' proveedor(es) pagan más que el máximo '
                 . 'permitido sobre el total de sus facturas: no se carga ninguna de sus filas. El motivo '
                 . 'dice cuánto pagan, el neto de sus facturas y el máximo.';
+        }
+
+        if ($resumen['proveedores_sin_script'] > 0) {
+            $avisos[] = $resumen['proveedores_sin_script'] . ' proveedor(es) están dentro del máximo pero '
+                . 'pagan una factura de más y otra de menos, y para compensarlas en su total hace falta '
+                . 'correr ' . self::SCRIPT_COMPENSADA . ' contra la base central. Mientras tanto sus filas '
+                . 'no se cargan.';
         }
 
         if ($resumen['proveedores_con_excedente'] > 0) {
