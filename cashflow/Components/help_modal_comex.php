@@ -443,9 +443,18 @@
                             <p class="mb-2">
                                 <strong>Los pagos de los próximos días van a dólar BCRA</strong>:
                                 si un contenedor se paga dentro de los próximos días —7 por
-                                defecto— o ya venció, se valúa con el dólar oficial BCRA vendedor, la última
-                                cotización publicada, porque se paga al tipo de cambio de hoy. Los
-                                días se cambian en <em>Parámetros › Compras Exterior</em>.
+                                defecto— o ya venció, se valúa con el dólar oficial BCRA vendedor
+                                del día hábil anterior (un lunes, el del viernes), porque se paga
+                                al tipo de cambio del momento. Los días se cambian en
+                                <em>Parámetros › Compras Exterior</em>.
+                            </p>
+                            <p class="mb-2">
+                                <strong>En Crono Nacionalización, al dólar divisa</strong>: una
+                                nacionalización de los próximos días —o vencida— se valúa con el
+                                <strong>dólar divisa vendedor</strong> del día hábil anterior, no
+                                con el BCRA. Los días son los mismos. Si no hay cotización divisa,
+                                esos importes quedan sin valuar y la pantalla avisa: no se usa el
+                                BCRA en su lugar.
                             </p>
                             <div class="alert alert-secondary mb-0 py-2">
                                 <small>
@@ -494,6 +503,17 @@
                                             dólar oficial BCRA vendedor de la fecha que dice debajo
                                             del valor, no a la curva. Una cotización corregida a
                                             mano manda igual.
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-2 border rounded" style="border-left: 3px solid #1e88e5 !important;">
+                                        <strong><i class="fas fa-money-bill-transfer me-1"></i> Dólar divisa</strong>
+                                        <br><small class="text-muted">
+                                            Sólo en Crono Nacionalización: se nacionaliza en los
+                                            próximos días, o ya venció, así que va al dólar divisa
+                                            vendedor de la fecha que dice debajo del valor, no a la
+                                            curva ni al BCRA.
                                         </small>
                                     </div>
                                 </div>

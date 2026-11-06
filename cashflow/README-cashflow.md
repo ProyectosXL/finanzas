@@ -364,6 +364,16 @@ Proveedores Exterior, Crono Nacionalización y Compras Proyectadas pasan a pesos
 
 **No depende de ninguno.** El día que se publica el tablero se mueve sin correr nada —la regla rige con los valores iniciales—: al 31/10/2026, −$ 127.217 en Nacionalizaciones y nada en las otras filas.
 
+### Comex: Crono Nacionalización a dólar divisa (`feature/crono-nacionalizacion-dolar-divisas`)
+
+Crono Nacionalización pasa a pesos las nacionalizaciones de los próximos N días —y las vencidas— con el **dólar divisa vendedor** del día hábil anterior (`FP_DOLAR_DIVISAS`), no con el BCRA. Proveedores Exterior y Compras Proyectadas siguen con el BCRA, que ahora también es el del **día hábil** anterior. Ver `README-comex.md`, secciones 14 y 15.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 50 | `sql/cashflow_comex_dolar_divisa.sql` | Reescribe la descripción de *Días con dólar del día anterior* y *Antigüedad máxima del dólar del día anterior* (las claves `comex_dias_bcra` y `comex_bcra_antiguedad_max` no cambian), sólo si todavía es la que sembró el 45 | **Todo funciona igual.** Lo único que queda viejo es la línea de descripción debajo de cada campo en Parámetros › Compras Exterior, que sigue diciendo "dólar BCRA" |
+
+**Va después del 45**, que siembra las dos filas. El día que se publica el tablero se mueve sin correr nada: al 06/11/2026, −$ 3.469.089,12 en Nacionalizaciones y nada en las otras filas.
+
 ### Gastos Locales y fleteros no habituales (`feature/gastos-locales-fleteros-no-habituales`)
 
 Pestaña nueva *Proveedores › Gastos Locales* (el promedio de 90 días de la caja de los locales propios, cuentas 5) con su fila en *Costos Indirectos*; en Logística Local, fleteros no habituales con pagos puntuales y el importe editable del próximo pago. Ver `README-gastos-locales.md` y `README-logistica-local.md` (secciones 14 y 15).
@@ -440,6 +450,7 @@ En este orden, contra `central`:
 -- 47. sql/cashflow_logistica_no_habituales.sql      (Logistica: fleteros no habituales)
 -- 48. sql/cashflow_estructura_gastos_locales.sql    (la fila Gastos Locales)
 -- 49. sql/cashflow_prov_locales_excedente_parcial.sql  (Prov. Locales: pago con excedente y pago parcial)
+-- 50. sql/cashflow_comex_dolar_divisa.sql          (Comex: la descripcion de los parametros del dolar del dia anterior)
 ```
 
 **El 49 va después del 37**, al que le agrega columnas, y del de la forma por factura de Proveedores Locales. Ver *Proveedores Locales: pago con excedente y pago parcial*, más arriba.

@@ -654,6 +654,11 @@
             clases.push('cotiz-aproximada');
         } else if (item.COTIZ_ORIGEN === 'BCRA') {
             clases.push('cotiz-bcra');
+        } else if (item.COTIZ_ORIGEN === 'DIVISA') {
+            /* El dólar divisa de Crono Nacionalización: los próximos días,
+               como el BCRA, pero de otra tabla. Su propia marca, para que no
+               se confunda con el BCRA de Proveedores Exterior. */
+            clases.push('cotiz-divisa');
         }
 
         if (editable) {
@@ -666,13 +671,15 @@
             cuerpo = '<span class="cotiz-sin">—</span>';
         } else {
             /* Debajo del valor, DE DÓNDE SALE: el contrato de la curva, "a
-               mano" o el BCRA con su día —la fecha es lo que se compara contra
-               lo publicado—. */
+               mano" o el BCRA o la divisa con su día —la fecha es lo que se
+               compara contra lo publicado—. */
             var origen = item.COTIZ_ORIGEN === 'OVERRIDE'
                 ? 'a mano'
                 : (item.COTIZ_ORIGEN === 'BCRA'
                     ? 'BCRA ' + fecha(item.COTIZ_BCRA_FECHA).substring(0, 5)
-                    : (item.COTIZ_SIMBOLO || item.COTIZ_MES || ''));
+                    : (item.COTIZ_ORIGEN === 'DIVISA'
+                        ? 'Divisa ' + fecha(item.COTIZ_BCRA_FECHA).substring(0, 5)
+                        : (item.COTIZ_SIMBOLO || item.COTIZ_MES || '')));
 
             cuerpo = '<span class="cotiz-valor">' + cotiz(item.COTIZ_USD) + '</span>'
                 + '<span class="cotiz-simbolo">' + escapar(origen) + '</span>';
@@ -683,6 +690,8 @@
                 cuerpo += '<i class="fas fa-pen cotiz-marca" aria-hidden="true"></i>';
             } else if (item.COTIZ_ORIGEN === 'BCRA') {
                 cuerpo += '<i class="fas fa-building-columns cotiz-marca" aria-hidden="true"></i>';
+            } else if (item.COTIZ_ORIGEN === 'DIVISA') {
+                cuerpo += '<i class="fas fa-money-bill-transfer cotiz-marca" aria-hidden="true"></i>';
             }
         }
 

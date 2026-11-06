@@ -46,9 +46,10 @@
 
     /**
      * Los dos de la valuación de Comercio Exterior: hasta cuántos días se paga
-     * con dólar BCRA y desde cuántos días se avisa que esa cotización es vieja.
-     * Valen para las tres pantallas —Proveedores Exterior, Crono
-     * Nacionalización y Proyección—, así que se miran acá. Van aparte porque
+     * con el dólar del día anterior y desde cuántos días se avisa que esa
+     * cotización es vieja. Valen para las tres pantallas —Proveedores Exterior
+     * y Proyección con el BCRA, Crono Nacionalización con el divisa—, así que
+     * se miran acá. Las claves siguen diciendo "bcra": son las de la base. Van aparte porque
      * los siembra otro script (sql/cashflow_comex_dolar_bcra.sql).
      */
     var CLAVES_BCRA = ['comex_dias_bcra', 'comex_bcra_antiguedad_max'];
@@ -77,8 +78,8 @@
         compras_proy_dias_pago: 'Días entre el pago del FOB y la recepción',
         compras_proy_dias_nac: 'Días entre la nacionalización y la recepción',
         comex_fecha_mov_desde: 'Contenedores desde (fecha de movimiento)',
-        comex_dias_bcra: 'Días con dólar BCRA',
-        comex_bcra_antiguedad_max: 'Antigüedad máxima del dólar BCRA'
+        comex_dias_bcra: 'Días con dólar del día anterior',
+        comex_bcra_antiguedad_max: 'Antigüedad máxima del dólar del día anterior'
     };
 
     /**
@@ -114,14 +115,15 @@
             'cargado que descuenta la proyección. Lo anterior no se muestra ni se avisa. No puede ' +
             'ser una fecha futura.',
         comex_dias_bcra:
-            'Un pago en dólares que sale dentro de estos días —o que ya venció— se pasa a pesos ' +
-            'con el dólar oficial BCRA vendedor, la última cotización publicada: es un pago ' +
-            'inminente. Los posteriores, con la curva ROFEX del mes de pago. Con 0, todo va con ' +
-            'la curva. Vale para Proveedores Exterior, Crono Nacionalización y Proyección, y ' +
-            'mueve el tablero.',
+            'Un importe en dólares que se paga dentro de estos días —o que ya venció— se pasa a ' +
+            'pesos con el dólar vendedor del día hábil anterior: es un pago inminente. Los ' +
+            'posteriores, con la curva ROFEX del mes. Qué dólar depende de la pantalla: dólar ' +
+            'oficial BCRA en Proveedores Exterior y en Proyección —también para su ' +
+            'nacionalización proyectada—, y dólar divisa en Crono Nacionalización. Con 0, todo va ' +
+            'con la curva. Mueve el tablero.',
         comex_bcra_antiguedad_max:
-            'Si la última cotización del BCRA tiene más de estos días corridos, se usa igual y ' +
-            'las tres pantallas avisan. No cambia ningún número.',
+            'Si la última cotización del dólar de la pantalla —BCRA o divisa— tiene más de estos ' +
+            'días corridos, se usa igual y la pantalla avisa. No cambia ningún número.',
         compras_proy_dias_nac:
             'Es el más chico de los dos, así que los últimos meses de la ventana aportan su FOB ' +
             'y no su nacionalización: ésa cae fuera del horizonte. El tablero lo avisa con su ' +
@@ -190,9 +192,10 @@
                 /* LO MISMO CON LOS DOS DEL DÓLAR BCRA: la regla se aplica igual,
                    con 7 y 3 (DolarFuturo::DIAS_BCRA_INICIAL). */
                 if (CLAVES_BCRA.some(function(c) { return !valores[c]; })) {
-                    avisos.push('Faltan "Días con dólar BCRA" y "Antigüedad máxima del dólar ' +
-                        'BCRA". Corré sql/cashflow_comex_dolar_bcra.sql contra la base central. ' +
-                        'Mientras tanto los pagos de los próximos 7 días van a dólar BCRA y se ' +
+                    avisos.push('Faltan "Días con dólar del día anterior" y "Antigüedad máxima ' +
+                        'del dólar del día anterior". Corré sql/cashflow_comex_dolar_bcra.sql contra ' +
+                        'la base central. Mientras tanto los pagos de los próximos 7 días van al ' +
+                        'dólar del día anterior —BCRA, o divisa en Crono Nacionalización— y se ' +
                         'avisa si la cotización tiene más de 3 días, y no se puede cambiar.');
                 }
 

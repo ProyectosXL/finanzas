@@ -694,7 +694,9 @@ class Comex {
         }
 
         return array_merge(
-            $this->dolarFuturo()->avisosDolarConNivel(),
+            /* Con la fuente de esta pestana: la divisa vieja o que no se puede
+               leer, no el BCRA. */
+            $this->dolarFuturo()->avisosDolarConNivel(null, DolarFuturo::FUENTE_DIVISA),
             self::avisosValuacionConNivel($estimadas, $this->dolarFuturo()->ultimoMes(),
                 'IMPORTE_EST', 'fecha de nacionalización'),
             self::avisosVencidosConNivel($proyectables, 'FECHA_SALDO_EFECTIVA', 'SALDO_ARS',
@@ -2424,6 +2426,10 @@ class Comex {
      * parcial sigue sin cambiar la cotizacion. Sin $bcra, todo va con la curva
      * como antes. Ver el encabezado de DolarFuturo.
      *
+     * DE QUE DOLAR ES LA REGLA LO DECIDE QUIEN LA PIDE, no esta funcion:
+     * Crono Nacionalizacion pasa una regla de FUENTE_DIVISA y las otras dos
+     * pantallas una de BCRA. valuar() no distingue.
+     *
      * @param array $row Fila cruda, con su fecha efectiva ya resuelta
      * @param array $curva Lo que devolvio DolarFuturo::curva()
      * @param string $campoImporte De donde sale el importe EN DOLARES
@@ -2532,6 +2538,8 @@ class Comex {
         $usdSinValuar = 0.0;
         $sinBcra = 0;
         $usdSinBcra = 0.0;
+        $sinDivisa = 0;
+        $usdSinDivisa = 0.0;
         $aproximadas = 0;
         $overrides = 0;
         $avisos = [];
@@ -2543,6 +2551,14 @@ class Comex {
             if (isset($f['COTIZ_MOTIVO']) && $f['COTIZ_MOTIVO'] === DolarFuturo::SIN_BCRA) {
                 $sinBcra++;
                 $usdSinBcra += isset($f[$campoImporte]) ? floatval($f[$campoImporte]) : 0;
+                continue;
+            }
+
+            /* Lo mismo con el dolar divisa de Crono Nacionalizacion: aparte,
+               porque el aviso tiene que nombrar el dolar que falta. */
+            if (isset($f['COTIZ_MOTIVO']) && $f['COTIZ_MOTIVO'] === DolarFuturo::SIN_DIVISA) {
+                $sinDivisa++;
+                $usdSinDivisa += isset($f[$campoImporte]) ? floatval($f[$campoImporte]) : 0;
                 continue;
             }
 
@@ -2568,6 +2584,14 @@ class Comex {
                 . 'a dólar BCRA vendedor, pero no hay ninguna cotización publicada, así que no se '
                 . 'pueden valuar en pesos y quedan fuera del tablero. No se usa la curva en su '
                 . 'lugar.');
+        }
+
+        if ($sinDivisa > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $sinDivisa . ' ' . $queSon . ' por U$S '
+                . number_format($usdSinDivisa, 2, ',', '.') . ' caen en los próximos días o ya '
+                . 'vencieron y van a dólar divisa vendedor, pero no hay ninguna cotización '
+                . 'publicada, así que no se pueden valuar en pesos y quedan fuera del tablero. No '
+                . 'se usa el dólar BCRA ni la curva en su lugar.');
         }
 
         if ($sinValuar > 0) {
@@ -3351,9 +3375,12 @@ class Comex {
         $v = [];
 
         // La curva se lee UNA vez para todo el listado, no una por fila, igual
-        // que en getProveedoresExterior(). La regla del dolar BCRA, igual.
+        // que en getProveedoresExterior(). La regla de los proximos dias,
+        // igual, pero con el DOLAR DIVISA: las nacionalizaciones de los
+        // proximos N dias van al divisa vendedor del dia habil anterior, no al
+        // BCRA (feature/crono-nacionalizacion-dolar-divisas). Ver DolarFuturo.
         $curva = $this->dolarFuturo()->curva();
-        $bcra = $this->dolarFuturo()->bcra($hoy);
+        $bcra = $this->dolarFuturo()->bcra($hoy, DolarFuturo::FUENTE_DIVISA);
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',

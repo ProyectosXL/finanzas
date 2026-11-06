@@ -201,7 +201,8 @@ chequearLanza('guardar N por encima del tope: no', function () {
 });
 chequearLanza('guardar M vacio: no, y el mensaje nombra el campo', function () {
     DolarFuturo::validarParametro(DolarFuturo::PARAM_ANTIGUEDAD_BCRA, '');
-}, '"Antigüedad máxima del dólar BCRA" tiene que ser un número entero de días entre 0 y 30.');
+}, '"Antigüedad máxima del dólar del día anterior" tiene que ser un número entero de días entre 0 '
+    . 'y 30.');
 
 /* ================================================================
    LA CURVA DESACTUALIZADA, CONTANDO SOLO DIAS HABILES
@@ -277,8 +278,12 @@ chequear('Compras Proyectadas, el FOB: Comex::valuar() con la regla', true,
     strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'FOB_USD', 'FECHA_PAGO', \$bcra)") !== false);
 chequear('Compras Proyectadas, la nacionalizacion: Comex::valuar() con la regla', true,
     strpos($srcCompras, "Comex::valuar(\$fila, \$curva, 'NAC_USD', 'FECHA_NAC', \$bcra)") !== false);
-chequear('las dos regla salen de DolarFuturo::bcra()', 2,
+/* Proveedores Exterior con BCRA; Crono Nacionalizacion con la divisa, que se
+   prueba en test_comex_dolar_divisa.php. Las dos de la misma bcra(). */
+chequear('Proveedores Exterior pide la regla BCRA a DolarFuturo::bcra()', 1,
     substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy);'));
+chequear('Crono Nacionalizacion tambien sale de DolarFuturo::bcra(), con la divisa', 1,
+    substr_count($srcComex, '$bcra = $this->dolarFuturo()->bcra($hoy, DolarFuturo::FUENTE_DIVISA);'));
 chequear('y la de Compras tambien', 1, substr_count($srcCompras, '$bcra = $dolar->bcra($h->hoy());'));
 
 /* Fuera de DolarFuturo, solo Comex::valuar() resuelve con la regla: nadie
@@ -294,11 +299,17 @@ foreach (glob(__DIR__ . '/../Class/{,Providers/}*.php', GLOB_BRACE) as $archivo)
 
 chequear('solo Comex.php resuelve con la regla', ['Comex.php'], $conRegla);
 
-chequear('bcra() pide la punta VENDEDORA al leer la cotizacion', 1,
-    preg_match('/ultimaHasta\(self::diaAnterior\(\$hoy\),\s*Cotizacion::VENDEDOR\)/', $srcDolar));
+chequear('bcra() busca hasta el habil anterior, con el calendario', 1,
+    substr_count($srcDolar, '$hasta = self::diaAnterior($hoy, $this->calendario($hoy));'));
+chequear('bcra() pide la punta VENDEDORA al leer la cotizacion BCRA', 1,
+    substr_count($srcDolar, 'ultimaHasta($hasta, Cotizacion::VENDEDOR)'));
+chequear('y la divisa lee la columna Vendedor', 1,
+    preg_match('/SELECT TOP 1 Fecha, Vendedor\s+FROM " \. self::ORIGEN_DIVISAS/', $srcDolar));
 
-chequear('los avisos del dolar salen en las dos pestanas de Comex', 2,
+chequear('los avisos del dolar BCRA salen en Proveedores Exterior', 1,
     substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel()'));
+chequear('y los de la divisa en Crono Nacionalizacion', 1,
+    substr_count($srcComex, '$this->dolarFuturo()->avisosDolarConNivel(null, DolarFuturo::FUENTE_DIVISA)'));
 chequear('y en Compras Proyectadas', 1,
     substr_count($srcCompras, '$dolar->avisosDolarConNivel($h->hoy())'));
 
@@ -344,11 +355,31 @@ chequear('y su importe en pesos', 1480000.0, $fila['IMPORTE_ARS']);
 seccion('el dolar BCRA es el vendedor del dia anterior, en las tres pantallas');
 
 /* Los pagos al exterior y las nacionalizaciones de los proximos dias se liquidan
-   con el BCRA vendedor de AYER, no el de hoy: se busca la ultima publicada hasta
-   el dia anterior. Un lunes da la del viernes; un martes, la del lunes. */
+   con el dolar vendedor del DIA HABIL ANTERIOR, no el de hoy. No alcanza con
+   el dia corrido: desde septiembre de 2026 el origen rellena sabados, domingos
+   y feriados con la cotizacion del habil SIGUIENTE, asi que "la ultima hasta
+   el domingo" un lunes es la del mismo lunes. */
 chequear('un martes busca hasta el lunes', '2026-11-02', DolarFuturo::diaAnterior('2026-11-03'));
-chequear('un lunes busca hasta el domingo, y ultimaHasta() da la del viernes', '2026-11-01',
+chequear('un lunes busca hasta el viernes, no hasta el domingo rellenado', '2026-10-30',
     DolarFuturo::diaAnterior('2026-11-02'));
+chequear('un sabado busca hasta el viernes', '2026-10-30', DolarFuturo::diaAnterior('2026-10-31'));
+chequear('un domingo, tambien', '2026-10-30', DolarFuturo::diaAnterior('2026-11-01'));
 chequear('cruza el mes y el anio', '2026-12-31', DolarFuturo::diaAnterior('2027-01-01'));
+
+/* El lunes 12/10/2026 es feriado: el martes 13 busca hasta el viernes 09. Sin
+   calendario, el respaldo de lunes a viernes no sabe del feriado. */
+$calFeriado = ['2026-10-12' => false, '2026-10-09' => true];
+chequear('el martes despues de un lunes feriado busca hasta el viernes', '2026-10-09',
+    DolarFuturo::diaAnterior('2026-10-13', $calFeriado));
+chequear('sin calendario, el respaldo de lunes a viernes no ve el feriado', '2026-10-12',
+    DolarFuturo::diaAnterior('2026-10-13'));
+chequear('un habil del calendario que cae en sabado se respeta', '2026-10-31',
+    DolarFuturo::diaAnterior('2026-11-02', ['2026-11-01' => false, '2026-10-31' => true]));
+chequear('un calendario sin ningun habil en treinta dias cae al dia corrido', '2026-11-02',
+    DolarFuturo::diaAnterior('2026-11-03', array_fill_keys(array_map(function ($i) {
+        return date('Y-m-d', strtotime('2026-11-02 -' . $i . ' days'));
+    }, range(0, 40)), false)));
+chequear('ultimoHabil() y diaAnterior() leen el mismo calendario', 2,
+    substr_count($srcDolar, '$this->calendario($hoy)'));
 chequear('nadie arma una regla BCRA con la cotizacion de hoy', 0,
     preg_match('/ultimaHasta\(\$hoy,/', $srcDolar));

@@ -386,7 +386,10 @@ try {
                 'disponible' => $comex->dolarFuturo()->disponible(),
                 'ultimo_mes' => $comex->dolarFuturo()->ultimoMes(),
                 'actualizada' => $comex->dolarFuturo()->actualizada(),
-                'regla' => DolarFuturo::explicarRegla($comex->dolarFuturo()->bcra())
+                /* La de esta pestana: con el dolar divisa, la misma con la que
+                   valua getCronoNacionalizacion(). */
+                'regla' => DolarFuturo::explicarRegla(
+                    $comex->dolarFuturo()->bcra(null, DolarFuturo::FUENTE_DIVISA))
             ];
 
             $payload['fechas_editables'] = $comex->tieneHistorial();
