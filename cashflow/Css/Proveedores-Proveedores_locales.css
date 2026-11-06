@@ -385,6 +385,13 @@
     overflow-y: auto;
 }
 
+/* El subtotal de cada proveedor, arriba de sus filas: el excedente se valida
+   sobre su total. */
+.tab-proveedores_locales .prov-pre-subtotal td {
+    background-color: #eef2f7;
+    border-top: 2px solid #c9d3df;
+}
+
 .tab-proveedores_locales .prov-pre-error {
     background-color: #fdf3f2;
 }
