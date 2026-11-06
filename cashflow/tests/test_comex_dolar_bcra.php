@@ -201,7 +201,8 @@ chequearLanza('guardar N por encima del tope: no', function () {
 });
 chequearLanza('guardar M vacio: no, y el mensaje nombra el campo', function () {
     DolarFuturo::validarParametro(DolarFuturo::PARAM_ANTIGUEDAD_BCRA, '');
-}, '"Antigüedad máxima del dólar BCRA" tiene que ser un número entero de días entre 0 y 30.');
+}, '"Antigüedad máxima del dólar del día anterior" tiene que ser un número entero de días entre 0 '
+    . 'y 30.');
 
 /* ================================================================
    LA CURVA DESACTUALIZADA, CONTANDO SOLO DIAS HABILES

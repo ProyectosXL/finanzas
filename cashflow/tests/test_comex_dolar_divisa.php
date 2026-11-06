@@ -297,3 +297,32 @@ chequear('Crono Nacionalizacion tiene el estilo, con otro color que el BCRA', tr
 chequear('la ayuda de Comex nombra el dolar divisa para Crono Nacionalizacion', true,
     strpos($srcAyuda, 'En Crono Nacionalización, al dólar divisa') !== false
     && strpos($srcAyuda, 'fa-money-bill-transfer me-1"></i> Dólar divisa') !== false);
+
+/* ================================================================
+   PARAMETROS: LAS CLAVES SE QUEDAN, LOS ROTULOS CAMBIAN
+   ================================================================ */
+seccion('los parametros mantienen sus claves y nombran el dolar del dia anterior');
+
+$srcParamJs = file_get_contents(__DIR__ . '/../Js/Parametros-Compras_proy.js');
+
+chequear('las claves no cambian', ['comex_dias_bcra', 'comex_bcra_antiguedad_max'],
+    [DolarFuturo::PARAM_DIAS_BCRA, DolarFuturo::PARAM_ANTIGUEDAD_BCRA]);
+chequear('los rotulos nuevos', true,
+    strpos($srcParamJs, "comex_dias_bcra: 'Días con dólar del día anterior'") !== false
+    && strpos($srcParamJs, "comex_bcra_antiguedad_max: 'Antigüedad máxima del dólar del día anterior'") !== false);
+chequear('la ayuda dice que dolar usa cada pantalla, con la nacionalizacion de Compras en BCRA', true,
+    (bool) preg_match('/oficial BCRA en Proveedores Exterior y en Proyección —también para su \' \+\s*'
+        . '\'nacionalización proyectada—, y dólar divisa en Crono Nacionalización/', $srcParamJs));
+chequearLanza('el servidor valida con el rotulo nuevo', function () {
+    DolarFuturo::validarParametro(DolarFuturo::PARAM_DIAS_BCRA, '61');
+}, '"Días con dólar del día anterior" tiene que ser un número entero de días entre 0 y 60.');
+
+$srcSqlDiv = file_get_contents(__DIR__ . '/../sql/cashflow_comex_dolar_divisa.sql');
+preg_match_all("/SET DESCRIPCION = '([^']*)'/", $srcSqlDiv, $m);
+chequear('el script reescribe las dos descripciones', 2, count($m[1]));
+chequear('y las dos entran en VARCHAR(200)', true,
+    count($m[1]) === 2 && max(array_map('strlen', $m[1])) <= 200);
+chequear('el script no toca el VALOR ni las claves', 0,
+    preg_match('/SET\s+(VALOR|CLAVE)\b/i', $srcSqlDiv));
+chequear('y solo pisa la descripcion que sembro el 45', 2,
+    substr_count($srcSqlDiv, "AND DESCRIPCION = '"));

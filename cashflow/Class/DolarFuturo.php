@@ -1013,8 +1013,11 @@ class DolarFuturo {
         $n = self::enteroEntre($valor, $max);
 
         if ($n === null) {
-            throw new Exception('"' . ($esDias ? 'Días con dólar BCRA' : 'Antigüedad máxima del '
-                . 'dólar BCRA') . '" tiene que ser un número entero de días entre 0 y ' . $max . '.');
+            /* Con el rotulo de Parametros: las claves dicen "bcra", pero el
+               dolar es el del dia anterior de cada pantalla (BCRA o divisa). */
+            throw new Exception('"' . ($esDias ? 'Días con dólar del día anterior' : 'Antigüedad '
+                . 'máxima del dólar del día anterior') . '" tiene que ser un número entero de días '
+                . 'entre 0 y ' . $max . '.');
         }
 
         return (string) $n;
