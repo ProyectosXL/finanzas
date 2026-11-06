@@ -392,3 +392,166 @@ $visto = $vistas;
 $visto[1]['clasificacion'] = 'PARCIAL';
 chequear('y la misma fila con otra clasificación, también', ['línea 3: pasó de PARCIAL a COMPENSADA'],
     Proveedores::diferenciasConLoVisto($visto, $comparar($dos)['filas']));
+
+/* ================================================================
+   QUE SE GUARDA: camposDeImportacion()
+   ================================================================ */
+seccion('qué se guarda: una compensada, como un excedente');
+
+$c = $comparar([$fila(2, 'P1', 'A1', '20/10/2026', '110000'), $fila(3, 'P1', 'B1', '27/10/2026', '95000')]);
+$l = $porLinea($c);
+$cA = Proveedores::camposDeImportacion([$l[2]]);
+$cB = Proveedores::camposDeImportacion([$l[3]]);
+
+chequear('la fecha de la planilla en la tabla de pagos: la factura queda pagada', ['2026-10-20', '2026-10-27'],
+    [$cA['pago']['FECHA_PAGO'], $cB['pago']['FECHA_PAGO']]);
+chequear('un medio, con el importe de la planilla, COMPENSADA, y el pendiente y el neto al importar',
+    [[1, '2026-10-27', null, 95000.0, 'COMPENSADA', 100000.0, 100000.0]],
+    array_map(function ($m) {
+        return [$m['orden'], $m['fecha'], $m['forma'], $m['importe'], $m['clasificacion'], $m['pendiente_import'],
+                $m['neto_import']];
+    }, $cB['medios']));
+
+$c = $comparar([
+    $fila(2, 'DM', 'D1', '20/10/2026', '70000', 'ECHEQ'),
+    $fila(3, 'DM', 'D1', '27/10/2026', '60000', 'TRANSFERENCIA'),
+    $fila(4, 'DM', 'D2', '20/10/2026', '75000')
+]);
+$cD = Proveedores::camposDeImportacion(array_slice($c['filas'], 0, 2));
+chequear('dos medios: la fecha más tardía, y cada medio con su forma', ['2026-10-27', ['ECHEQ', 'TRANSFERENCIA'],
+    ['COMPENSADA', 'COMPENSADA']],
+    [$cD['pago']['FECHA_PAGO'], array_column($cD['medios'], 'forma'), array_column($cD['medios'], 'clasificacion')]);
+
+seccion('qué se guarda: sin el script, guardarApertura() no escribe una compensada');
+
+$guardar = $cuerpo('Proveedores.php', 'private function guardarApertura(');
+chequear('pregunta por el script antes de insertar', true,
+    strpos($guardar, 'tablaCompensadaCreada()') !== false
+    && strpos($guardar, 'tablaCompensadaCreada()') < strpos($guardar, 'INSERT INTO'));
+
+$tabla = $cuerpo('Proveedores.php', 'public function tablaCompensadaCreada(');
+chequear('y para saberlo sólo lee el CHECK', true,
+    strpos($tabla, 'SELECT COUNT(*) AS N FROM sys.check_constraints') !== false
+    && stripos($tabla, 'ALTER') === false && stripos($tabla, 'UPDATE') === false);
+
+$script = file_get_contents(__DIR__ . '/../sql/cashflow_prov_locales_excedente_por_proveedor.sql');
+chequear('el script acepta las cuatro clasificaciones', true,
+    strpos($script, "CHECK (CLASIFICACION IN ('NETO', 'EXCEDENTE', 'PARCIAL', 'COMPENSADA'))") !== false);
+chequear('y COMPENSADA entra en VARCHAR(10)', 10, strlen(Proveedores::CLASIF_COMPENSADA));
+
+/* ================================================================
+   COMO ENTRA AL EJE: proyectarPagoImportado()
+   ================================================================ */
+
+/** Una fila de getPendientes() con horizonte, sin fecha cargada y con su retención */
+$item = function ($cod, $n, $importe, $vto, $retCfg = null, $extra = []) use ($pend, $hoy) {
+    $r = Proveedores::resolverFechaPago(null, $vto, '2026-09-01', null, $hoy, null, true);
+
+    return Proveedores::conRetencion(array_merge($pend($cod, $n, $importe, $vto), [
+        'Pago' => $r['fecha'], 'ORIGEN_FECHA' => $r['origen'], 'FUENTE_FECHA' => $r['origen'],
+        'FECHA_PAGO' => null, 'SIN_FECHA_CARGADA' => $r['sin_fecha_cargada'], 'VENCIDA' => $r['vencida'],
+        'EXCLUIDO' => false, 'EXCLUIDA_MANUAL' => false, 'EXCLUIDO_PROVEEDOR' => false,
+        'EN_MAESTRO' => true, 'SERIE' => 'SIN_RUBRO', 'APERTURA' => null, 'APERTURA_DESCUADRADA' => null,
+        'PAGO_IMPORTADO' => null, 'EXCEDENTE' => 0.0, 'PARTE_EXTRA' => false
+    ], $extra), $retCfg, $hoy);
+};
+
+/** Una parte guardada, como la devuelve getAperturas() */
+$medio = function ($orden, $fecha, $importe, $pendImport, $netoImport, $forma = null, $extra = []) {
+    return array_merge(['orden' => $orden, 'fecha' => $fecha, 'forma' => $forma, 'forma_orig' => null,
+        'importe' => $importe, 'usuario' => 'jperez', 'fecha_modif' => '2026-10-13 10:00:00',
+        'clasificacion' => 'COMPENSADA', 'pendiente_import' => $pendImport, 'neto_import' => $netoImport,
+        'estado_tango' => 'PREVISTO', 'fecha_real' => null, 'pendiente_real' => null], $extra);
+};
+
+$suma = function ($filas, $campo) {
+    return round(array_sum(array_map(function ($f) use ($campo) { return floatval($f[$campo]); }, $filas)), 2);
+};
+
+$ver = function ($p) {
+    return array_map(function ($f) {
+        return [$f['Pago'], $f['IMPORTE_A_PAGAR'], $f['EXCEDENTE'], $f['PAGO_IMPORTADO']['tipo']];
+    }, $p);
+};
+
+seccion('proyección: el ejemplo 2, cada una con el importe de la planilla y sin saldo');
+
+$items = [$item('P2', 'A2', 100000.0, '2026-11-20'), $item('P2', 'B2', 100000.0, '2026-11-20')];
+$ap = ['P2|FAC|A2' => [$medio(1, '2026-10-20', 140000.0, 100000.0, 100000.0)],
+       'P2|FAC|B2' => [$medio(1, '2026-10-27', 70000.0, 100000.0, 100000.0)]];
+$p = Proveedores::abrirEnMedios($items, $ap, $hoy);
+
+chequear('dos filas, en su fecha, con lo de la planilla, sin saldo',
+    [['2026-10-20', 140000.0, 40000.0, 'PAGADO'], ['2026-10-27', 70000.0, -30000.0, 'PAGADO']], $ver($p));
+chequear('el tablero suma lo mismo que la planilla', 210000.0, $suma($p, 'IMPORTE_A_PAGAR'));
+chequear('el excedente del proveedor, una vez', 10000.0, $suma($p, 'EXCEDENTE'));
+chequear('los pendientes siguen siendo los de Tango', 200000.0, $suma($p, 'IMPORTE_PENDIENTE'));
+chequear('B dice que es una compensada, sin saldo', ['COMPENSADA', 0.0, -30.0],
+    [$p[1]['PAGO_IMPORTADO']['clasificacion'], $p[1]['PAGO_IMPORTADO']['saldo'],
+     $p[1]['PAGO_IMPORTADO']['porc_excedente']]);
+
+seccion('proyección: la auditoría del tablero sigue cerrando');
+
+require_once __DIR__ . '/../Class/Providers/ProveedoresProvider.php';
+
+$serie = [];
+foreach ($p as $f) {
+    ProveedoresProvider::sumarAuditoria($serie, $f);
+}
+chequear('bruto + excedente = lo que suma la serie', $suma($p, 'IMPORTE_A_PAGAR'),
+    round($serie['auditoria']['bruto'] + $serie['auditoria']['excedente'], 2));
+
+seccion('proyección: con dos medios, cada parte su importe');
+
+$ap = ['DM|FAC|D1' => [$medio(1, '2026-10-20', 70000.0, 100000.0, 100000.0, 'ECHEQ'),
+                       $medio(2, '2026-10-27', 60000.0, 100000.0, 100000.0, 'TRANSFERENCIA')]];
+$p = Proveedores::abrirEnMedios([$item('DM', 'D1', 100000.0, '2026-11-20')], $ap, $hoy);
+chequear('las dos partes, sin saldo', [['2026-10-20', 70000.0, 'PAGADO'], ['2026-10-27', 60000.0, 'PAGADO']],
+    array_map(function ($f) { return [$f['Pago'], $f['IMPORTE_A_PAGAR'], $f['PAGO_IMPORTADO']['tipo']]; }, $p));
+chequear('la diferencia repartida en proporción', [30000.0, 16153.85],
+    [$suma($p, 'EXCEDENTE'), $p[0]['EXCEDENTE']]);
+
+seccion('proyección: pagada de menos con cuotas, ninguna cuota en negativo');
+
+$cuotas = [$item('PC', 'C1', 100000.0, '2026-10-01'), $item('PC', 'C1', 100000.0, '2026-11-01'),
+           $item('PC', 'C1', 10000.0, '2026-12-01')];
+$ap = ['PC|FAC|C1' => [$medio(1, '2026-10-20', 105000.0, 210000.0, 210000.0)]];
+$p = Proveedores::abrirEnMedios($cuotas, $ap, $hoy);
+
+chequear('todas en la fecha de la planilla, la mitad de cada una',
+    [['2026-10-20', 50000.0, -50000.0, 'PAGADO'], ['2026-10-20', 50000.0, -50000.0, 'PAGADO'],
+     ['2026-10-20', 5000.0, -5000.0, 'PAGADO']], $ver($p));
+chequear('suman lo de la planilla', 105000.0, $suma($p, 'IMPORTE_A_PAGAR'));
+
+seccion('proyección: con retenciones, el neto y la diferencia');
+
+$cfgRet = [
+    'disponible' => true, 'error' => null,
+    'impuestos' => ['IIBB' => ['ID' => 1, 'CODIGO' => 'IIBB', 'NOMBRE' => 'Iibb', 'ALCANCE' => 'TODOS',
+                               'ORDEN' => 1, 'ACTIVO' => 1]],
+    'generales' => [['ID' => 10, 'CONCEPTO' => 'IIBB', 'ALICUOTA' => 0.05, 'VIGENCIA_DESDE' => '2026-10-01',
+                     'ACTIVO' => 1]],
+    'por_proveedor' => [], 'credito' => []
+];
+$ap = ['P2|FAC|B2' => [$medio(1, '2026-10-27', 70000.0, 100000.0, 95000.0)]];
+$p = Proveedores::abrirEnMedios([$item('P2', 'B2', 100000.0, '2026-11-20', $cfgRet)], $ap, $hoy, null, $cfgRet);
+chequear('se paga lo de la planilla; la retención entera, el pendiente el de Tango',
+    [70000.0, -25000.0, 5000.0, 100000.0],
+    [$p[0]['IMPORTE_A_PAGAR'], $p[0]['EXCEDENTE'], $p[0]['RETENIDO'], $p[0]['IMPORTE_PENDIENTE']]);
+
+seccion('proyección: cuando Tango registra el pago');
+
+// B se importó compensada por $70.000 sobre $100.000. Si la O/P no la
+// compensó y dejó $30.000 pendientes, Tango lo registró: se proyecta lo suyo.
+$ap = ['P2|FAC|B2' => [$medio(1, '2026-10-27', 70000.0, 100000.0, 100000.0)]];
+$quedo = [$item('P2', 'B2', 30000.0, '2026-11-20', null, ['FECHA_PAGO' => '2026-10-27'])];
+$p = Proveedores::abrirEnMedios($quedo, $ap, $hoy);
+chequear('deja de proyectarse lo pagado: queda el pendiente de Tango', [1, 30000.0, 'REGISTRADO', true],
+    [count($p), $p[0]['IMPORTE_A_PAGAR'], $p[0]['PAGO_IMPORTADO']['estado'],
+     $p[0]['PAGO_IMPORTADO']['por_registrar']]);
+chequear('y la pestaña lo anota', [['P2', 'B2', 30000.0, 'COMPENSADA']], array_map(function ($r) {
+    return [$r['cod_provee'], $r['n_comp'], $r['pendiente'], $r['clasificacion']];
+}, Proveedores::planRegistroPagos($p)));
+
+$p = Proveedores::abrirEnMedios([], $ap, $hoy);
+chequear('si la canceló, salió de pendientes y no se proyecta nada', [], $p);

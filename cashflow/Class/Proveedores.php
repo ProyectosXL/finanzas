@@ -186,6 +186,9 @@ class Proveedores {
     /** @var bool|null Cache de si la tabla de medios ya tiene las columnas del excedente */
     private $conExcedente = null;
 
+    /** @var bool|null Cache de si CLASIFICACION ya acepta COMPENSADA */
+    private $conCompensada = null;
+
     /** @var array|null Cache del % de excedente de este pedido. Ver getPorcExcedente() */
     private $porcExcedente = null;
 
@@ -338,6 +341,43 @@ class Proveedores {
         $this->conExcedente = ($row && $row['C'] !== null);
 
         return $this->conExcedente;
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_prov_locales_excedente_por_proveedor.sql:
+     * CLASIFICACION acepta COMPENSADA.
+     *
+     * SIN EL, EL EXCEDENTE SE VALIDA IGUAL POR PROVEEDOR, pero un proveedor
+     * que necesita compensar una factura con otra queda en error con un motivo
+     * que nombra el script: no hay donde guardar la compensacion.
+     *
+     * @return bool
+     */
+    public function tablaCompensadaCreada() {
+        if ($this->conCompensada !== null) {
+            return $this->conCompensada;
+        }
+
+        if (!$this->tablaExcedenteCreada()) {
+            $this->conCompensada = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COUNT(*) AS N FROM sys.check_constraints
+             WHERE name = 'CK_RO_T_CF_PLMED_CLASIF' AND definition LIKE '%COMPENSADA%'");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar las clasificaciones del pago importado'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->conCompensada = ($row && intval($row['N']) > 0);
+
+        return $this->conCompensada;
     }
 
     /* ====================================================================
@@ -514,7 +554,9 @@ class Proveedores {
         return [
             'porc' => $p['porc'],
             'error' => $p['error'],
-            'pagos_crono' => ($h === null) ? null : $this->leerCronograma($h)
+            'pagos_crono' => ($h === null) ? null : $this->leerCronograma($h),
+            // Si se puede guardar una factura COMPENSADA en el total del proveedor.
+            'compensada' => $this->tablaCompensadaCreada()
         ];
     }
 
@@ -600,6 +642,15 @@ class Proveedores {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_EXCEDENTE . '. Mientras '
                 . 'tanto la planilla de pagos no acepta pagos con excedente ni pagos parciales: el '
                 . 'IMPORTE tiene que ser el neto a pagar, como antes, y todo lo demás funciona igual.');
+        }
+
+        /* Sin COMPENSADA el excedente se valida igual por proveedor; lo que no
+           se puede es compensar una factura con otra. Atencion. */
+        if ($this->tablaExcedenteCreada() && !$this->tablaCompensadaCreada()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_COMPENSADA . '. Mientras '
+                . 'tanto, un proveedor que paga una factura de más y otra de menos no se puede compensar '
+                . 'en su total: la planilla deja sus filas en error, nombrando el script, y todo lo demás '
+                . 'funciona igual.');
         }
 
         $sinExclusion = $this->exclusion->avisoSinTabla();
@@ -1296,7 +1347,11 @@ class Proveedores {
      *     retencion;
      *   - el SALDO va con la jerarquia de siempre COMO SI NO TUVIERA FECHA
      *     CARGADA: vencimiento, emision + plazo, y si es del cronograma el
-     *     proximo dia de pago.
+     *     proximo dia de pago;
+     *   - una COMPENSADA en el total del proveedor no tiene saldo: cubre todo
+     *     el neto, proyecta exactamente lo pagado, y la diferencia va en
+     *     EXCEDENTE CON SIGNO -repartida entre las cuotas en proporcion a su
+     *     neto, para que ninguna quede en negativo-.
      *
      * LA RETENCION SE CALCULA UNA VEZ, sobre el comprobante entero, a la fecha
      * mas tardia de la planilla, y se REPARTE EN PROPORCION AL NETO de cada
@@ -1408,9 +1463,18 @@ class Proveedores {
         $excedente = ($clasif === self::CLASIF_EXCEDENTE) ? max(0.0, round($pagado - $neto, 2)) : 0.0;
         $pagadoNeto = min($neto, round($pagado - $excedente, 2));
 
+        /* UNA COMPENSADA EN EL TOTAL DEL PROVEEDOR queda pagada entera, sin
+           saldo, y proyecta exactamente lo de la planilla: la diferencia con
+           su neto va en EXCEDENTE CON SIGNO -negativa si se pago de menos-.
+           Sumadas, las del proveedor son su excedente, contado una vez. */
+        if ($clasif === self::CLASIF_COMPENSADA) {
+            $excedente = round($pagado - $neto, 2);
+            $pagadoNeto = $neto;
+        }
+
         $info['neto'] = $neto;
         $info['excedente'] = $excedente;
-        $info['porc_excedente'] = ($excedente > 0 && $neto > 0) ? round($excedente / $neto * 100, 2) : null;
+        $info['porc_excedente'] = ($excedente != 0 && $neto > 0) ? round($excedente / $neto * 100, 2) : null;
         $info['saldo'] = round($neto - $pagadoNeto, 2);
         $info['estado'] = 'PARTIDO';
 
@@ -1459,7 +1523,19 @@ class Proveedores {
                 }
             }
 
-            if ($ultimaCubierta !== null) {
+            if ($clasif === self::CLASIF_COMPENSADA) {
+                /* Con signo, la diferencia de una compensada se reparte entre
+                   las cuotas en proporcion a su neto: en la ultima sola podria
+                   dejarla en negativo. Van todas a la fecha de la planilla. */
+                $pagadas = array_keys(array_filter($tramos, function ($tr) { return $tr['tipo'] === 'PAGADO'; }));
+                $partes = self::repartir($excedente, array_map(function ($t) use ($tramos) {
+                    return $tramos[$t]['neto'];
+                }, $pagadas));
+
+                foreach (array_values($pagadas) as $j => $t) {
+                    $tramos[$t]['excedente'] = $partes[$j];
+                }
+            } elseif ($ultimaCubierta !== null) {
                 $tramos[$ultimaCubierta]['excedente'] = $excedente;
             }
         }
@@ -4881,6 +4957,17 @@ class Proveedores {
            PARCIAL- y el pendiente y el neto del comprobante al importar: con
            eso se sabe despues si Tango ya registro el pago. */
         $conExcedente = $this->tablaExcedenteCreada();
+
+        /* UNA COMPENSADA SIN SU SCRIPT NO SE ESCRIBE: el CHECK la rechazaria a
+           mitad de la transaccion. La importacion ya la deja en error; esto es
+           por si se llega por otro camino. */
+        foreach (is_array($medios) ? $medios : [] as $m) {
+            if (isset($m['clasificacion']) && $m['clasificacion'] === self::CLASIF_COMPENSADA
+                && !$this->tablaCompensadaCreada()) {
+                throw new Exception('Para guardar una factura compensada en el total del proveedor hace falta '
+                    . 'correr ' . self::SCRIPT_COMPENSADA . ' contra la base central.');
+            }
+        }
 
         foreach (is_array($medios) ? $medios : [] as $m) {
             $cols = 'COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG, IMPORTE, '
