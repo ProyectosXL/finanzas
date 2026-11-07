@@ -38,6 +38,12 @@ chequear('Sin nombre en el maestro lo dice', '9.1. Rubro sin nombre en el maestr
 $sinNada = EstructuraFilas::expandir($config, Rubros::clasificar(['1.5.'], $maestro), $maestro);
 chequear('Sin rubros huerfanos no hay bloque', false, in_array('TIT_SIN_SECCION', array_column($sinNada['filas'], 'id'), true));
 
+seccion('Un rubro dado de alta entra solo en la fila RUBROS_DE_SECCION');
+$conAlta = $maestro + ['7.12.' => ['nombre' => 'Seguros', 'cat' => 'Gastos de Estructura', 'activo' => 1]];
+$y = EstructuraFilas::expandir($config, Rubros::clasificar(['1.5.', '7.10.'], $conAlta), $conAlta);
+chequear('Aparece en su seccion, en orden, sin tocar la estructura', ['TIT_VENTAS', 'R_1.5.', 'V_1_9', 'R_7.9.', 'R_7.10.', 'R_7.12.'], array_column($y['filas'], 'id'));
+chequear('Con el nombre del maestro como etiqueta', '7.12. Seguros', $y['filas'][5]['etiqueta']);
+
 seccion('Cotizacion de cierre de cada mes');
 chequear('El cierre de cada mes, sin promediar', ['tcc' => ['1-2026' => 1400.0, '2-2026' => 1500.0], 'faltantes' => []], Cotizacion::completar(['1-2026', '2-2026'], ['1-2026' => 1400.0, '2-2026' => 1500.0]));
 chequear('Si falta un mes no hay USD', ['tcc' => null, 'faltantes' => ['2-2026']], Cotizacion::completar(['1-2026', '2-2026'], ['1-2026' => 1400.0]));

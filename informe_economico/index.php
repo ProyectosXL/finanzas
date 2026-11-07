@@ -80,6 +80,7 @@ $urlHub = '/sistemas/hub/index.php';
 
 <?php include __DIR__ . '/Components/modal_info.php'; ?>
 <?php include __DIR__ . '/Components/modal_edicion.php'; ?>
+<?php include __DIR__ . '/Components/modal_rubro.php'; ?>
 
 <?php if (!$uruguay && $pestanas): ?>
 <script>

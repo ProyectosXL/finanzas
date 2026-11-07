@@ -18,8 +18,11 @@ Todos son reejecutables y ninguno borra nada. Si no se corren, la pantalla **no 
 | 2 | `sql/ie_resumen_edicion.sql` | central (y `TASKY_SA`) | Crea `RO_T_IE_RESUMEN_EDICION` (historial de ediciones, solo inserción, con trigger) y `RO_T_IE_RUBRO_CAT_AUDITORIA` | **Se ve todo, pero no se edita nada**: ni importes ni la categoría de los rubros. Un aviso lo dice |
 | 3 | `sql/ie_umbrales.sql` | central (y `TASKY_SA`) | Crea `RO_T_IE_UMBRAL` con la semilla del Excel y `RO_T_IE_PARAMETRO` con `alerta_caida_rentabilidad_pp = 3` | **Ranking sin colores**, sin la alerta de "dos o más en rojo" ni la de caída de rentabilidad. Avisa |
 | 4 | `sql/ie_permisos.sql` | apps | Alta del módulo `INFORME_ECONOMICO` en `FP_MODULOS`, el permiso de HUB, los seis permisos internos y la asignación a RESPONSABLE, DIRECCION2 y DIRECTOR | **No aparece en el HUB y solo entra el administrador** |
+| 5 | `sql/ie_rubros_auditoria.sql` | central, **solo Argentina** | Crea `RO_T_IE_RUBRO_AUDITORIA` (alta, nombre, baja y reactivación de rubros; solo inserción, con trigger) | **Parámetros › Rubros se ve y la categoría se cambia, pero no se puede dar de alta, renombrar, dar de baja ni reactivar un rubro.** Los botones aparecen deshabilitados, un aviso nombra el script y el servidor rechaza igual cualquier intento |
 
-Los tres primeros se corren **también en la base de Uruguay (`TASKY_SA`)**, para que quede lista el día que se habilite. Hoy, con `$_SESSION['entorno'] = 'uy'`, la pantalla dice "no disponible para Uruguay" y no consulta nada (ver *Pendientes*).
+Los scripts 1 a 3 se corren **también en la base de Uruguay (`TASKY_SA`)**, para que quede lista el día que se habilite. Hoy, con `$_SESSION['entorno'] = 'uy'`, la pantalla dice "no disponible para Uruguay" y no consulta nada (ver *Pendientes*).
+
+El script 5 **no se corre en `TASKY_SA`**. Habilita escribir en el maestro de rubros, y en Uruguay el informe no está disponible. Sin esa tabla, la escritura queda bloqueada también por ese lado.
 
 ### Estado real al 28/09/2026: los scripts ya se corrieron en producción
 
@@ -36,6 +39,8 @@ UPDATE dbo.FP_MODULOS SET activo = 1 WHERE codigo = 'INFORME_ECONOMICO';
 ```
 
 El script avisa con un PRINT mientras el módulo siga apagado.
+
+El script 5 (`ie_rubros_auditoria.sql`) es posterior y **no se corrió en ninguna base**.
 
 ### La tarjeta del HUB está fuera de este repo
 
@@ -54,7 +59,7 @@ Tener la clave `hub.app.informe_economico` no alcanza para que la tarjeta aparez
 | --- | --- | --- |
 | Cálculo (puro) | `Class/Periodo.php` | Períodos `M-AAAA`, rango, año anterior, meses con resumen |
 | | `Class/Canales.php` | El **único** mapeo canal ↔ sucursal, nombres por defecto, estado de un local |
-| | `Class/Rubros.php` | Orden natural de `COD_RUBRO`, secciones, rubros sin sección; lectura y edición de la categoría |
+| | `Class/Rubros.php` | Orden natural de `COD_RUBRO`, secciones, rubros sin sección. Reglas de alta, nombre y baja: código propuesto, validaciones y avisos. Lectura y escritura del maestro, con auditoría |
 | | `Class/Formulas.php` | El catálogo cerrado de fórmulas de la cascada |
 | | `Class/Cascada.php` | Índice, agregado por columna, % y variación |
 | | `Class/Columnas.php` | Qué columnas tiene cada pestaña |
@@ -126,7 +131,8 @@ Nunca un 0 inventado. Una suma es `null` solo si todos sus términos lo son: un 
 - **Relación arancel sobre venta en TJ = 4.1.1 / 1.9.** La etiqueta dice "TJ", pero la cuenta del Excel es sobre la venta total, y se mantuvo así.
 - **RESULTADO COMERCIAL es un %**: (2 + total comercialización) / 1.9.
 - **El 1.8 va en ventas y el 4.1.2 en gastos, tal como vienen.** No se netea nada.
-- **Rubros sin sección.** Un rubro presente en la tabla sin fila en el maestro, o sin categoría, se muestra en el bloque "SIN SECCIÓN" al final, con un aviso que manda a Parámetros. **No suma a ningún total**: no se sabe a cuál pertenece. Los rubros 1.1 a 2 tienen la categoría en NULL a propósito, y la estructura los ubica por su código.
+- **Rubros sin sección.** Un rubro presente en la tabla sin fila en el maestro, o sin categoría, se muestra en el bloque "SIN SECCIÓN" al final, con un aviso que manda a Parámetros. **No suma a ningún total**: no se sabe a cuál pertenece. Se resuelve en Parámetros › Rubros: si no tiene categoría, se le asigna una; si no está en el maestro, se lo da de alta. Los rubros 1.1 a 2 tienen la categoría en NULL a propósito, y la estructura los ubica por su código.
+- **Un rubro nuevo entra solo en su sección.** La fila `RUBROS_DE_SECCION` se expande en todos los rubros de su categoría, así que un rubro dado de alta con categoría aparece en su lugar, en orden natural, sin tocar la estructura, las fórmulas ni los totales. Está probado.
 
 ### Columnas de cada pestaña
 
@@ -195,11 +201,97 @@ Deshacer y restaurar:
 ## Parámetros
 
 - **Estructura**: orden, etiqueta, visible y activa de cada fila. Las fórmulas no se editan.
-- **Rubros**: el maestro `RO_T_RUBROS_CONTABLES`, con los rubros sin sección arriba de todo. La categoría se elige de un desplegable con las categorías que ya existen. Los rubros 1.x y 2 no se editan. **Esa columna la usa también rentabilidad_rubro** (en `getGastosPorCategoria`): cambiarla mueve los dos informes, y la pantalla lo avisa. La auditoría va en `RO_T_IE_RUBRO_CAT_AUDITORIA`; al maestro no se le agregó ninguna columna.
+- **Rubros**: el maestro `RO_T_RUBROS_CONTABLES`, con los rubros sin sección arriba de todo. Ahí se da de alta un rubro, se le cambia el nombre o la categoría, y se lo da de baja o se lo reactiva (ver abajo).
 - **Umbrales del semáforo** (`RO_T_IE_UMBRAL`): por indicador, con su sentido y las bandas verde, amarillo, naranja y rojo. Los límites se cargan en %. Un valor fuera de toda banda queda sin color.
 - **Alerta**: la caída de rentabilidad, en puntos porcentuales enteros. Hoy es 3.
 
 Ver la pestaña pide `ie.tab.parametros`; guardar, además, `ie.editar`. Cada cambio guarda usuario y fecha.
+
+### Rubros
+
+**El maestro es compartido.** `RO_T_RUBROS_CONTABLES` es de Control de Gastos (repo `administracion`), y lo que se cambia acá impacta en tres lugares:
+
+| Quién | Qué usa | Qué cambia |
+| --- | --- | --- |
+| **Control de Gastos** | El maestro entero, **sin filtrar `ACTIVO`**: `rubroContable.php` hace `SELECT *`. Lo leen los desplegables de Gestión de Relaciones Cuenta-Rubro, Carga, Control y Consulta de Gastos | Un rubro nuevo aparece en sus desplegables. Un cambio de nombre también. **Un rubro dado de baja sigue apareciendo**, y las cuentas relacionadas le siguen imputando gastos |
+| **El proceso del período** | Al clasificar, copia `COD_RUBRO` y `RUBRO_CONTABLE` a `RO_T_INTEGRAL_TANGO_2` (los SP `RO_SP_INTEGRAL*` y `update.php`), y de ahí al resumen | Los gastos ya clasificados **conservan el nombre anterior**: el cambio vale para lo que se clasifique después |
+| **Rentabilidad por Rubro** | `CAT_RUBRO_CONTABLE`, en `getGastosPorCategoria` (JOIN por `COD_RUBRO`) | Un cambio de categoría mueve los dos informes. Un rubro nuevo entra en su categoría cuando tenga importes |
+| **Este informe** | Nombre, categoría y `ACTIVO` | El nombre que se ve es siempre el del maestro, en todos los meses |
+
+Al maestro no se le agregó ninguna columna. La auditoría vive aparte:
+- `RO_T_IE_RUBRO_CAT_AUDITORIA` (script 2): los cambios de categoría, como hasta ahora;
+- `RO_T_IE_RUBRO_AUDITORIA` (script 5): alta, nombre, baja y reactivación, con valor anterior, valor nuevo, motivo, usuario y fecha. En el alta, el valor nuevo es un JSON con código, nombre y categoría.
+
+La columna "Último cambio" muestra el movimiento más reciente de las dos tablas.
+
+**Alta.** El botón "Nuevo rubro" abre un modal donde se completan estos datos:
+1. **Categoría** (obligatoria). Es una de las que ya existen: desde acá no se crean categorías. Se elige primero porque de ella sale el código propuesto, y el modal muestra los rubros que ya tiene, activos y dados de baja.
+2. **Código** (obligatorio). Se completa solo con el propuesto, y se puede cambiar.
+3. **Nombre** (obligatorio).
+
+El **código propuesto** se arma así:
+- Se toma el último rubro de la categoría en orden natural, contando también los dados de baja, y se le suma 1 al último segmento: `7.18.` → `7.19.`, `4.6.` → `4.7.`, `5.2.1.5.` → `5.2.1.6.`.
+- Si ese código ya está en el maestro o en el resumen, se sigue sumando.
+- **No se propone nada** en tres casos:
+  - si la categoría no tiene rubros;
+  - si el último tiene un solo segmento. Es el caso de Bienes de Uso, que tiene solo `6.`: sumarle 1 daría `7.`, el prefijo de Gastos de Estructura;
+  - si el código se pasa de 8 caracteres.
+
+Validaciones del código (las aplica el servidor y el modal muestra lo que contesta):
+- Formato: números separados por punto, con punto final. Si falta el punto final se agrega, y se quitan los espacios. No se aceptan letras, puntos dobles, ceros a la izquierda ni segmentos en cero: `7.09.` y `7.9.` se ordenan igual y se leen igual, pero la base los toma como dos rubros distintos.
+- No puede empezar con `1.` ni con `2.`: ventas y costo son fijos, y la estructura los ubica por código.
+- No puede existir ya en el maestro.
+- **Hasta 8 caracteres, aunque la columna admite 10.** El proceso de Control de Gastos copia el código a `RO_T_INTEGRAL_TANGO_2` (y a `_FINAL`, `_CUENTAS_2`, `_PRORRATEOS` y `_AMORTIZACIONES`), donde la columna mide 8. Un código de 9 se grabaría en el maestro y después rompería (o truncaría) el proceso del período. Hoy el más largo, `5.2.1.5.`, mide 8 justo.
+- **Coherencia con la categoría.** Es un aviso que pide confirmar, no un bloqueo: salta si el código no empieza con el **prefijo común** de los rubros de la categoría:
+
+  | Categoría | Prefijo |
+  | --- | --- |
+  | Gastos de Personal | `5.1.` |
+  | Gastos de Ocupación | `5.2.1.` |
+  | Otros Gastos Operativos | `5.3.` |
+  | Gastos de Comercialización | `4.` |
+  | Gastos de Estructura | `7.` |
+  | Bienes de Uso | `6.` |
+
+  Se compara contra el prefijo y no contra el primer segmento porque Personal, Ocupación y Otros empiezan todos con 5.
+
+Validaciones del nombre:
+- Es obligatorio y se le quitan los espacios de los bordes.
+- **Hasta 50 caracteres, aunque la columna admite 60**, por el mismo motivo que el código.
+- No acepta caracteres que una columna `VARCHAR` no puede guardar, como los emojis.
+- Si otro rubro ya tiene el mismo nombre (sin distinguir mayúsculas), avisa y pide confirmar. No bloquea: hoy ya hay dos "Provision SAC", el 5.1.3. y el 7.5.
+
+El alta va en una transacción: vuelve a verificar que el código no exista, inserta el rubro con `ACTIVO = 1` y graba la auditoría. El maestro **no tiene UNIQUE sobre `COD_RUBRO`** (su PK es un `ID` identity), así que el control lo hace el `SELECT` con `UPDLOCK, HOLDLOCK`. Ese `SELECT` bloquea también la *ausencia* del código: si dos usuarios dan de alta el mismo código a la vez, el segundo espera, lo encuentra y no se escribe nada. Después del alta la lista se recarga con el rubro resaltado.
+
+**Rubros del resumen que no están en el maestro.** Su fila tiene el botón "Dar de alta", que abre el mismo modal:
+- el código viene cargado y no se puede editar;
+- el nombre sugerido es el `RUBRO_CONTABLE` del período más reciente en el resumen;
+- el usuario elige la categoría.
+
+Al darlo de alta deja de estar "sin sección" y suma en su sección.
+
+**Cómo llega a tener importes un rubro nuevo.** El alta lo hace aparecer en el informe, en su sección, pero vacío. Los importes llegan cuando se cumplen dos pasos en Control de Gastos:
+1. se le relacionan cuentas en Gestión de Relaciones Cuenta-Rubro;
+2. se procesa el período.
+
+El resumen toma el rubro según esas relaciones. La pantalla lo dice después de cada alta.
+
+**Cambio de nombre.** El nombre es un campo editable en cada fila, con su botón de guardar, y tiene las mismas validaciones que en el alta. Antes de guardar, la pantalla pide confirmar: el nombre se usa en el informe y en los desplegables de Control de Gastos, y los gastos ya clasificados conservan el anterior. Va en una transacción, con auditoría.
+
+**Baja y reactivación.** Se hacen con el botón "Dar de baja" o "Reactivar" de cada fila, y el motivo es obligatorio. Antes de confirmar, el modal muestra dos datos:
+- cuántas cuentas tiene relacionadas;
+- cuántos registros tiene en el resumen, y de qué último período.
+
+La baja **no se bloquea** por tener relaciones o datos, y solo pone `ACTIVO = 0`: no borra nada. La reactivación vuelve a `ACTIVO = 1`. En el informe rige la regla de siempre: un rubro inactivo sin datos en el rango no se muestra; si tiene datos, se sigue mostrando y sumando. **Control de Gastos no filtra los inactivos**, y la pantalla avisa antes de confirmar la baja: el rubro sigue en sus desplegables y las cuentas relacionadas le siguen imputando gastos. Para que no reciba más importes, hay que quitar o cambiar sus relaciones allá.
+
+Los rubros 1.x y 2 no se dan de alta, no se renombran y no se dan de baja.
+
+**Sin el script 5**, la lista y el cambio de categoría siguen funcionando. Alta, nombre, baja y reactivación quedan deshabilitados, con un aviso que nombra `sql/ie_rubros_auditoria.sql`, y el servidor rechaza igual cualquier escritura: un cambio sin auditoría no puede pasar.
+
+**Uruguay.** Ninguna acción escribe con `$_SESSION['entorno'] = 'uy'`, por tres barreras:
+- `ieConexion()` corta antes de cualquier acción;
+- `Rubros` lo vuelve a chequear antes de escribir;
+- el script 5 no se corre en `TASKY_SA`, así que allá la tabla de auditoría no existe.
 
 ### Los bordes del semáforo van a la banda peor
 
@@ -240,6 +332,7 @@ Son funciones puras, sin base. Cubren:
 - los bordes del semáforo;
 - la marca de editado, el pisado por reproceso, deshacer y restaurar;
 - los rubros sin sección;
+- el código propuesto de un rubro nuevo, la validación del código (formato, 1.x y 2, repetido, largo) y del nombre, el aviso de coherencia con la categoría, que los fijos no se dan de alta, ni se renombran, ni se dan de baja, y que un rubro dado de alta entra solo en su sección;
 - la consistencia entre el Menu, los archivos, los permisos del script y el catálogo de fórmulas.
 
 La suite de cashflow tiene que seguir pasando: `php cashflow/tests/run.php`.
