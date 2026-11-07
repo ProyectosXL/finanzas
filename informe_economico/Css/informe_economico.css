@@ -340,6 +340,18 @@ body {
 .ie-tabla-simple input[type="text"], .ie-tabla-simple input[type="number"] { font-family: var(--ie-mono); }
 .ie-fila-sin-seccion td { background: #fdf0ef; }
 .ie-fila-inactiva td { color: var(--ie-dim); }
+/* El rubro recien guardado: verde suave para encontrarlo en una lista de ~55 */
+.ie-fila-resaltada td { background: #e6f4ea; }
+.ie-tabla-simple td.ie-izq { text-align: left; }
+.ie-celda-edit { display: flex; gap: 6px; align-items: center; }
+
+/* Formulario del modal de rubros */
+.ie-form-rubro label { display: block; font-size: 12px; font-weight: 600; color: var(--ie-muted); margin: 12px 0 4px; font-family: var(--ie-sans); }
+.ie-form-rubro label:first-child { margin-top: 0; }
+.ie-form-rubro .ie-input, .ie-form-rubro .ie-select { width: 100%; }
+.ie-form-rubro textarea.ie-input { min-height: 70px; resize: vertical; font-family: var(--ie-sans); }
+.ie-form-rubro .ie-nota { margin-top: 4px; }
+.ie-form-rubro .ie-aviso { margin-top: 12px; }
 
 /* ── Modales ── */
 .ie-overlay {

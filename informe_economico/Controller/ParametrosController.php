@@ -7,7 +7,20 @@
  *   action=listar             estructura, rubros, categorias, umbrales y X
  *   action=guardar_fila       orden, etiqueta, visible y activo de una fila
  *   action=guardar_categoria  CAT_RUBRO_CONTABLE de un rubro (con auditoria)
+ *   action=proponer_codigo    categoria -> codigo propuesto y sus rubros
+ *   action=alta_rubro         alta en el maestro (con auditoria)
+ *   action=guardar_nombre     RUBRO_CONTABLE de un rubro (con auditoria)
+ *   action=info_baja          cuentas relacionadas y registros, para el modal
+ *   action=cambiar_estado     baja / reactivacion, con motivo (con auditoria)
  *   action=guardar_umbral     bandas de un indicador
+ *
+ * Alta y nombre: si hay avisos (codigo fuera de la numeracion, nombre
+ * repetido) y no viene confirmar=1, no se escribe nada y se responde
+ * {ok:false, confirmar:true, avisos}; la pantalla pregunta y reenvia. Asi
+ * las reglas viven en un solo lugar (Rubros) y no duplicadas en el JS.
+ *
+ * Uruguay: ieConexion() corta antes del switch, asi que ninguna accion llega
+ * a escribir; Rubros vuelve a chequearlo (ver exigirEscritura).
  *   action=guardar_caida      el X de la alerta de caida de rentabilidad
  */
 require_once __DIR__ . '/comun.php';
@@ -56,18 +69,24 @@ try {
 
             $clasif = Rubros::clasificar(array_keys($presentes), $maestro);
             $sinSec = array_flip($clasif['sinSeccion']);
+            $ultimos = Rubros::ultimosCambios($cid);
+            $sugeridos = Rubros::nombresSugeridos($cid, array_values(array_map('strval', array_diff(array_keys($presentes), array_keys($maestro)))));
             $rubros = [];
 
             foreach (array_unique(array_merge(array_keys($maestro), array_keys($presentes))) as $cod) {
+                $cod = (string) $cod;
                 $rubros[] = [
-                    'cod' => (string) $cod,
+                    'cod' => $cod,
                     'nombre' => $maestro[$cod]['nombre'] ?? null,
                     'cat' => $maestro[$cod]['cat'] ?? null,
                     'enMaestro' => isset($maestro[$cod]),
-                    'activo' => isset($maestro[$cod]) ? (int) $maestro[$cod]['activo'] : null,
+                    'activo' => isset($maestro[$cod]) ? (Rubros::esActivo($maestro[$cod]) ? 1 : 0) : null,
                     'registros' => $presentes[$cod] ?? 0,
-                    'fijo' => Rubros::esFijo((string) $cod),
-                    'sinSeccion' => isset($sinSec[$cod])
+                    // fijo = 1.x y 2: ni categoria, ni nombre, ni baja
+                    'fijo' => Rubros::errorNoEditable($cod) !== null,
+                    'sinSeccion' => isset($sinSec[$cod]),
+                    'ultimo' => $ultimos[$cod] ?? null,
+                    'nombreSugerido' => $sugeridos[$cod] ?? null
                 ];
             }
 
@@ -86,12 +105,22 @@ try {
                 $avisos[] = 'Falta correr sql/ie_resumen_edicion.sql: la categoría de los rubros se ve, pero no se puede cambiar (no habría auditoría).';
             }
 
+            $auditoriaRubros = Rubros::hayAuditoriaRubros($cid);
+
+            if (!$auditoriaRubros) {
+                $avisos[] = 'Falta correr ' . Rubros::SCRIPT_AUDITORIA_RUBRO . ': los rubros se ven y se les puede cambiar la categoría, '
+                    . 'pero no se pueden dar de alta, renombrar, dar de baja ni reactivar (no habría auditoría).';
+            }
+
             ieResponder([
                 'ok' => true,
                 'estructura' => $estructura,
                 'catalogo' => Formulas::catalogo(),
                 'rubros' => $rubros,
                 'categorias' => Rubros::categorias($cid),
+                'auditoriaRubros' => $auditoriaRubros,
+                'scriptAuditoriaRubros' => Rubros::SCRIPT_AUDITORIA_RUBRO,
+                'largos' => ['codigo' => Rubros::LARGO_CODIGO, 'nombre' => Rubros::LARGO_NOMBRE, 'motivo' => Rubros::LARGO_MOTIVO],
                 'umbrales' => $umbrales,
                 'caidaPp' => $caida,
                 'puedeEditar' => AuthInformeEconomico::puedeEditar(),
@@ -108,6 +137,33 @@ try {
         case 'guardar_categoria':
             $cambio = Rubros::guardarCategoria($cid, trim(iePost('cod')), iePost('cat'), $usuario);
             ieResponder(['ok' => true, 'cambio' => $cambio]);
+            break;
+
+        case 'proponer_codigo':
+            ieResponder(['ok' => true] + Rubros::proponer($cid, iePost('cat')));
+            break;
+
+        case 'alta_rubro':
+            ieResponder(Rubros::alta($cid, iePost('cod'), iePost('nombre'), iePost('cat'), iePost('confirmar') === '1', $usuario));
+            break;
+
+        case 'guardar_nombre':
+            ieResponder(Rubros::guardarNombre($cid, trim(iePost('cod')), iePost('nombre'), iePost('confirmar') === '1', $usuario));
+            break;
+
+        case 'info_baja':
+            ieResponder(['ok' => true] + Rubros::infoBaja($cid, trim(iePost('cod'))));
+            break;
+
+        case 'cambiar_estado':
+            $activo = iePost('activo');
+
+            if ($activo !== '0' && $activo !== '1') {
+                ieError('Estado inválido.', 422);
+            }
+
+            Rubros::cambiarEstado($cid, trim(iePost('cod')), $activo === '1', iePost('motivo'), $usuario);
+            ieResponder(['ok' => true]);
             break;
 
         case 'guardar_umbral':
