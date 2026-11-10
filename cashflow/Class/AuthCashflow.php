@@ -104,6 +104,15 @@ class AuthCashflow {
      * tests/test_auth_cashflow.php falla si alguien lo agrega sin declararlo.
      */
     const ESCRITURAS = [
+        'Alquileres' => [
+            'guardarGeneral' => [['parametros', 'ALQUILERES']],
+            'altaRazon' => [['parametros', 'ALQUILERES']],
+            'guardarRazon' => [['parametros', 'ALQUILERES']],
+            'bajaRazon' => [['parametros', 'ALQUILERES']],
+            'guardarLocal' => [['parametros', 'ALQUILERES']],
+            'altaExtra' => [['parametros', 'ALQUILERES']],
+            'bajaExtra' => [['parametros', 'ALQUILERES']]
+        ],
         'CashflowEstructura' => [
             'saveEstructura' => [['parametros', 'CASHFLOW']],
             'addFila' => [['parametros', 'CASHFLOW']],
@@ -282,8 +291,21 @@ class AuthCashflow {
         ]
     ];
 
+    /**
+     * Claves de edicion que se dan de alta ANTES de que exista su escritura.
+     *
+     * cashflow.editar.alquileres va a habilitar la imputacion de facturas de
+     * alquiler, que llega en la entrega siguiente. Se crea ya
+     * (sql/cashflow_alquileres_permisos.sql) para no volver a la base de apps
+     * cuando llegue, y se declara aca para que tests/test_auth_cashflow.php
+     * la reconozca: una clave en un script que el codigo no pide es un error,
+     * salvo que este en esta lista.
+     */
+    const CLAVES_RESERVADAS = ['cashflow.editar.alquileres'];
+
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
+        'Alquileres' => ['getParametros'],
         'Cashflow' => ['getTablero', 'getAvisosPestana'],
         'CashflowEstructura' => ['getEstructura'],
         'CobElectronicos' => ['getPestana'],

@@ -199,7 +199,7 @@ foreach (glob(__DIR__ . '/../Controller/*Controller.php') as $archivo) {
     }
 }
 
-chequear('se leyeron los quince controllers', 15, count($controllers));
+chequear('se leyeron los dieciseis controllers', 16, count($controllers));
 chequear('ninguna accion sin declarar como lectura o escritura', [], $sinMapear);
 chequear('ninguna accion declarada que ya no exista', [], $sobrantes);
 
@@ -265,15 +265,35 @@ foreach ($subs as $s) {
     $esperadas[] = AuthCashflow::claveEdicion('parametros', $s);
 }
 
-$esperadas = array_values(array_unique($esperadas));
+/* Mas las reservadas: claves que se crean antes que su escritura (ver
+   AuthCashflow::CLAVES_RESERVADAS). */
+$esperadas = array_values(array_unique(array_merge($esperadas, AuthCashflow::CLAVES_RESERVADAS)));
 sort($esperadas);
 
-preg_match_all("/\('(cashflow\.editar\.[a-z_.]+)'/",
-    file_get_contents(__DIR__ . '/../sql/cashflow_permisos_edicion.sql'), $m);
-$enScript = array_values(array_unique($m[1]));
+/* DOS SCRIPTS. Las de Alquileres van en el suyo y no en
+   cashflow_permisos_edicion.sql, porque ese le da la edicion a todo rol que ve
+   la pestaña; el de Alquileres no asigna ningun rol. Entre los dos tienen que
+   dar exactamente las claves del codigo, y ninguna puede estar en los dos. */
+$claves = function ($archivo) {
+    preg_match_all("/\('(cashflow\.editar\.[a-z_.]+)'/", file_get_contents(__DIR__ . '/../sql/' . $archivo), $m);
+    return array_values(array_unique($m[1]));
+};
+$enEdicion = $claves('cashflow_permisos_edicion.sql');
+$enAlquileres = $claves('cashflow_alquileres_permisos.sql');
+$enScript = array_values(array_unique(array_merge($enEdicion, $enAlquileres)));
 sort($enScript);
 
-chequear('las mismas claves en el script y en el codigo', $esperadas, $enScript);
+chequear('las mismas claves en los scripts y en el codigo', $esperadas, $enScript);
+chequear('ninguna clave en los dos scripts', [], array_values(array_intersect($enEdicion, $enAlquileres)));
+
+sort($enAlquileres);
+chequear('el de Alquileres trae sus dos claves de edicion',
+    ['cashflow.editar.alquileres', 'cashflow.editar.parametros.alquileres'], $enAlquileres);
+$scriptAlq = file_get_contents(__DIR__ . '/../sql/cashflow_alquileres_permisos.sql');
+chequear('y la de lectura de la pestaña, la que pide el menu', true,
+    strpos($scriptAlq, "('cashflow.tab.alquileres'") !== false);
+chequear('y no asigna ningun rol', false,
+    (bool) preg_match('/INSERT\s+INTO\s+dbo\.FP_ROL_PERMISO/i', $scriptAlq));
 chequear('ninguna pestaña de solo lectura lleva clave', false,
     in_array('cashflow.editar.dashboard', $enScript, true));
 
