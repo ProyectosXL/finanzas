@@ -44,6 +44,33 @@ function bodyJson() {
     return $data;
 }
 
+/**
+ * Frena una escritura sobre una factura de alquiler.
+ *
+ * LA GRILLA YA NO LAS MUESTRA, pero el endpoint es alcanzable sin pasar por
+ * ella: una fecha, una forma o una exclusion cargadas aca sobre una factura de
+ * alquiler quedarian guardadas sin que nadie las lea, porque la unica fecha de
+ * pago de esas facturas es el vencimiento a considerar de la pestaña
+ * Alquileres. Misma regla que la grilla y la planilla: AlquileresFacturas.
+ *
+ * @param string[] $codigos Codigos de proveedor de los comprobantes
+ */
+function rechazarAlquiler($codigos) {
+    $ctx = AlquileresUniverso::delPedido();
+
+    foreach ($codigos as $cod) {
+        if (AlquileresFacturas::destino(['COD_PROVEE' => $cod], $ctx) !== AlquileresFacturas::A_PROV_LOCALES) {
+            throw new Exception(Proveedores::MOTIVO_ALQUILER . ' (' . $cod . '). No se guardó nada.');
+        }
+    }
+}
+
+/** Los codigos de proveedor de una lista de comprobantes del pedido */
+function codigosDe($comprobantes) {
+    return array_map(function ($c) { return is_array($c) && isset($c['cod_provee']) ? $c['cod_provee'] : ''; },
+        is_array($comprobantes) ? $comprobantes : []);
+}
+
 /* La lectura de lo subido y la respuesta de las plantillas son las mismas que
    las de Cob. Electronicos: viven en un solo lugar. */
 require_once __DIR__ . '/planilla_subida.php';
@@ -127,6 +154,19 @@ try {
                lectura falla la pestaña carga igual. */
             $avisosSaldos = $prov->avisosSaldosConNivel($h->hoy());
 
+            /* LAS FACTURAS DE ALQUILER NO SON DE ESTA PESTAÑA: las de las razones
+               sociales dadas de alta en Parametros -> Alquileres se gestionan en
+               Alquileres, si se cumple la condicion de seguridad
+               (AlquileresFacturas). Salen DESPUES de la conciliacion, que mira lo
+               que dice Tango de todo el universo, y ANTES de armar el eje: la
+               grilla, sus tarjetas, el pie y exportar ven lo mismo que la fila
+               del tablero. */
+            $ctxAlq = AlquileresUniverso::delPedido();
+            $partesAlq = AlquileresFacturas::partir($items, $ctxAlq);
+            $avisosAlq = array_merge($ctxAlq['avisos'], AlquileresFacturas::avisoCondicion($ctxAlq, $items),
+                AlquileresFacturas::avisoFueraDeProvLocales($partesAlq));
+            $items = $partesAlq[AlquileresFacturas::A_PROV_LOCALES];
+
             /* EL EJE VA EN NETO: cada comprobante cae en su fecha por lo que sale
                de la caja -el neto de retenciones donde las hay-, igual que la
                fila del tablero. El pendiente sigue en su columna. */
@@ -143,6 +183,7 @@ try {
             $payload['avisos_con_nivel'] = array_merge(
                 $prov->getAvisosConNivel(),
                 $avisosConciliacion,
+                $avisosAlq,
                 $prov->avisosCronogramaConNivel(),
                 Proveedores::avisosPendientesConNivel($items),
                 $avisosSaldos,
@@ -192,6 +233,8 @@ try {
                 }
             }
 
+            rechazarAlquiler([$data['cod_provee']]);
+
             $r = $prov->savePago(
                 $data['cod_provee'], $data['t_comp'], $data['n_comp'], $data['fecha_pago'],
                 isset($data['forma_pago']) ? $data['forma_pago'] : null,
@@ -227,6 +270,8 @@ try {
             if (!is_array($comprobantes) || empty($comprobantes)) {
                 throw new Exception('No llegó ninguna factura para fechar.');
             }
+
+            rechazarAlquiler(codigosDe($comprobantes));
 
             if (!isset($data['fecha_pago']) || $data['fecha_pago'] === '') {
                 throw new Exception('Falta la fecha de pago que hay que ponerles.');
@@ -272,6 +317,8 @@ try {
                 }
             }
 
+            rechazarAlquiler([$data['cod_provee']]);
+
             $r = $prov->saveFormaCronograma(
                 $data['cod_provee'], $data['t_comp'], $data['n_comp'],
                 isset($data['forma']) ? $data['forma'] : '',
@@ -315,6 +362,8 @@ try {
             if (!is_array($comprobantes) || empty($comprobantes)) {
                 throw new Exception('No llegó ninguna factura para excluir.');
             }
+
+            rechazarAlquiler(codigosDe($comprobantes));
 
             $r = $prov->saveExclusionMasiva(
                 $comprobantes,
@@ -391,7 +440,7 @@ try {
             $comp = Proveedores::compararImportacion(
                 $parse['filas'], $pendientes, $prov->getPagos(), $h->hoy(),
                 $prov->getAperturas(), $prov->tablaMedioCreada(), $prov->retenciones()->config(),
-                $enTango, $prov->opcionesExcedente($h));
+                $enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido());
 
             $comp['separador'] = $parse['separador'];
 

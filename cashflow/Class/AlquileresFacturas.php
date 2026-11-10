@@ -254,8 +254,47 @@ class AlquileresFacturas {
     }
 
     /* ====================================================================
-       EL AVISO
+       LOS AVISOS
        ==================================================================== */
+
+    /**
+     * El aviso de Proveedores Locales -la pestaña y su proveedor del tablero-
+     * por lo que ya no muestra: las facturas de alquiler, y aparte las de un
+     * proveedor excluido de Alquileres, que no estan en ningun lado a proposito.
+     *
+     * INFORMATIVO: no es plata que falte, es plata que se cuenta en otra
+     * pestaña. Sin el, quien compara el total de hoy con el de ayer no sabe por
+     * que bajo.
+     *
+     * Estatica y pura.
+     *
+     * @param array $partes Lo de partir()
+     * @return array Lista de avisos
+     */
+    public static function avisoFueraDeProvLocales($partes) {
+        $suma = function ($items) {
+            return array_sum(array_map(function ($i) { return floatval($i['IMPORTE_PENDIENTE']); }, $items));
+        };
+        $plata = function ($n) { return '$ ' . number_format($n, 2, ',', '.'); };
+
+        $alq = $partes[self::A_ALQUILERES];
+        $exc = $partes[self::A_EXCLUIDA];
+
+        if (empty($alq) && empty($exc)) {
+            return [];
+        }
+
+        $texto = (count($alq) + count($exc)) . ' factura(s) de alquiler por ' . $plata($suma($alq) + $suma($exc))
+            . ' no se muestran acá ni suman en Cuentas a Pagar Locales: son de razones sociales dadas de alta '
+            . 'en Parámetros › Alquileres y se gestionan en la pestaña Alquileres.';
+
+        if (!empty($exc)) {
+            $texto .= ' De esas, ' . count($exc) . ' por ' . $plata($suma($exc)) . ' son de proveedores '
+                . 'excluidos de Alquileres y no suman en ningún lado, a propósito.';
+        }
+
+        return [Aviso::nuevo(Aviso::INFO, $texto)];
+    }
 
     /**
      * El aviso critico de una condicion de seguridad que no se cumple, si hay

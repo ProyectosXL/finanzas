@@ -138,3 +138,120 @@ if (!Pruebas::hayBase()) {
     });
     chequear('el neto nunca supera al total del comprobante', 0, count($raros));
 }
+
+/* ======================================================================
+   SALEN DE PROVEEDORES LOCALES Y DE TARJETAS
+   ====================================================================== */
+
+require_once __DIR__ . '/../Class/Proveedores.php';
+require_once __DIR__ . '/../Class/Providers/ProveedoresProvider.php';
+require_once __DIR__ . '/../Class/TarjetasCorporativas.php';
+
+$pend = function ($cod, $n, $importe, $extra = []) {
+    return array_merge([
+        'COD_PROVEE' => $cod, 'T_COMP' => 'FAC', 'N_COMP' => $n, 'RAZON_SOC' => 'N ' . $cod,
+        'IMPORTE_PENDIENTE' => $importe, 'IMPORTE_A_PAGAR' => $importe, 'IMPORTE_VTO' => $importe,
+        'IMPUTACIONES' => 0.0, 'FECHA_VTO' => '2026-11-20', 'FECHA_EMIS' => '2026-11-01',
+        'PLAZO_DIAS' => null, 'SIN_FECHA_CARGADA' => false, 'FORMA_PAGO' => 'TRANSFERENCIA',
+        'FORMA_PAGO_VIGENTE' => 'TRANSFERENCIA', 'FORMA_PAGO_MAESTRO' => 'TRANSFERENCIA',
+        'CRONOGRAMA' => true, 'EN_MAESTRO' => true, 'EXCLUIDO' => false, 'EXCLUIDA_MANUAL' => false,
+        'EXCLUIDO_PROVEEDOR' => false, 'SERIE' => 'PAGOS_RUBRO_X'
+    ], $extra);
+};
+
+$universo = [
+    $pend('SAPALA', 'A1', 1000.0),
+    $pend('SAUNIC', 'A2', 500.0, ['EXCLUIDO_PROVEEDOR' => true, 'EXCLUIDO' => true]),
+    $pend('SAARCO', 'A3', 300.0),
+    $pend('OGMERC', 'M1', 70.0, ['RUBRO' => 'ALQUILER', 'CRONOGRAMA' => false,
+                                 'FORMA_PAGO_VIGENTE' => 'DEBITO']),
+    $pend('OGXXXX', 'X1', 20.0, ['EXCLUIDA_MANUAL' => true, 'EXCLUIDO' => true]),
+    $pend('SAPALA', 'T1', 40.0, ['FORMA_PAGO_VIGENTE' => TarjetasCorporativas::FORMA, 'CRONOGRAMA' => false]),
+    $pend('OGTARJ', 'T2', 9.0, ['FORMA_PAGO_VIGENTE' => TarjetasCorporativas::FORMA, 'CRONOGRAMA' => false])
+];
+
+/** Lo que hace ProveedoresProvider::calcular(): marcar lo de alquiler y sumar por serie */
+$series = function ($items, $ctx) {
+    $p = AlquileresFacturas::partir($items, $ctx);
+    $todos = array_merge($p[AlquileresFacturas::A_PROV_LOCALES],
+        array_map(function ($i) { return ['ALQUILER' => true] + $i; },
+            array_merge($p[AlquileresFacturas::A_ALQUILERES], $p[AlquileresFacturas::A_EXCLUIDA])));
+    $s = [];
+    foreach ($todos as $i) {
+        foreach (ProveedoresProvider::seriesDeItem($i) as $d) {
+            $s[$d] = ($s[$d] ?? 0.0) + ProveedoresProvider::importeAPagar($i);
+        }
+    }
+    return $s;
+};
+$corte = function ($s) {
+    return ($s['PAGOS'] ?? 0) + ($s['PAGOS_FUERA_CRONOGRAMA'] ?? 0) + ($s['PAGOS_EXCLUIDOS_FACTURA'] ?? 0)
+        + ($s['PAGOS_EXCLUIDOS_PROVEEDOR'] ?? 0);
+};
+
+seccion('Proveedores Locales: las series y sus particiones');
+
+$s = $series($universo, $ctx);
+chequear('una factura de alquiler va SOLO a PAGOS_ALQUILERES', [ProveedoresProvider::SERIE_ALQUILERES],
+    ProveedoresProvider::seriesDeItem(['ALQUILER' => true] + $universo[0]));
+chequear('PAGOS_ALQUILERES: IRSA, Cencosud, la excluida y la de tarjeta', 1840.0, $s['PAGOS_ALQUILERES']);
+chequear('PAGOS_TODO queda sin ellas', 99.0, $s['PAGOS_TODO']);
+chequear('IRSA no suma en PAGOS (Cuentas a Pagar Locales)', 0.0, $s['PAGOS'] ?? 0.0);
+chequear('por como se paga sigue cerrando', $s['PAGOS_TODO'], $corte($s));
+chequear('por si esta excluido sigue cerrando', $s['PAGOS_TODO'],
+    ($s['PAGOS_OPERATIVOS'] ?? 0) + ($s['PAGOS_EXCLUIDOS'] ?? 0));
+chequear('Mercado Libre (RUBRO = ALQUILER, sin alta) sigue en PAGOS_FUERA_CRONOGRAMA, con la de tarjeta', 79.0,
+    $s['PAGOS_FUERA_CRONOGRAMA']);
+
+$sc = $series($universo, $cerrada);
+chequear('sin la condicion, todo queda como antes: nada en PAGOS_ALQUILERES', 0.0, $sc['PAGOS_ALQUILERES'] ?? 0.0);
+chequear('y PAGOS trae otra vez a IRSA y a Arcos', 1300.0, $sc['PAGOS']);
+chequear('con las particiones cerrando igual', $sc['PAGOS_TODO'], $corte($sc));
+
+$baja2 = AlquileresFacturas::contexto(['SAUNIC'], [], $abierta);
+chequear('dar de baja a IRSA (y Arcos, que no esta en este contexto): vuelven a PAGOS', 1300.0, $series($universo, $baja2)['PAGOS']);
+
+$av = AlquileresFacturas::avisoFueraDeProvLocales(AlquileresFacturas::partir($universo, $ctx));
+chequear('el aviso de Proveedores Locales: informativo, con cuantas y cuanto', [Aviso::INFO, true],
+    [$av[0]['nivel'], strpos($av[0]['texto'], '4 factura(s) de alquiler por $ 1.840,00') === 0]);
+chequear('y separa la excluida de Alquileres', true, strpos($av[0]['texto'], '1 por $ 300,00') !== false);
+
+seccion('La planilla de pagos');
+
+$filaPl = function ($linea, $cod, $n) {
+    return ['linea' => $linea, 'cod_provee' => $cod, 'n_comp' => $n, 'fecha_pago' => '20/11/2026',
+            'forma_pago' => '', 'importe' => '', 't_comp' => '', 'observacion' => ''];
+};
+$c = Proveedores::compararImportacion([$filaPl(2, 'SAPALA', 'A1'), $filaPl(3, 'OGMERC', 'M1'),
+    $filaPl(4, 'SAARCO', 'A3')], $universo, [], '2026-11-10', [], true, null, [], null, $ctx);
+$porLinea = array_column($c['filas'], null, 'linea');
+chequear('la de IRSA queda en error', 'ERROR', $porLinea[2]['estado']);
+chequear('con el motivo', Proveedores::MOTIVO_ALQUILER, $porLinea[2]['motivo']);
+chequear('la de un excluido de Alquileres tambien', 'ERROR', $porLinea[4]['estado']);
+chequear('la de Mercado Libre (rubro ALQUILER sin alta) no', true, $porLinea[3]['estado'] !== 'ERROR');
+$c0 = Proveedores::compararImportacion([$filaPl(2, 'SAPALA', 'A1')], $universo, [], '2026-11-10',
+    [], true, null, [], null, $cerrada);
+chequear('sin la condicion de seguridad, la de IRSA se carga como siempre', true,
+    $c0['filas'][0]['estado'] !== 'ERROR');
+
+seccion('Tarjetas Pagos Corporativos');
+
+$tu = TarjetasCorporativas::universo($universo, $ctx);
+chequear('la de alquiler con TARJETA CORP no entra; la otra si', ['OGTARJ'], array_column($tu, 'COD_PROVEE'));
+chequear('sin la condicion, entra como siempre', ['SAPALA', 'OGTARJ'],
+    array_column(TarjetasCorporativas::universo($universo, $cerrada), 'COD_PROVEE'));
+
+seccion('Una sola regla: todos dicen lo mismo');
+
+$enPl = array_column(AlquileresFacturas::deProveedoresLocales($universo, $ctx), 'N_COMP');
+$enSeriesPl = [];
+foreach ($universo as $i) {
+    $marcado = (AlquileresFacturas::destino($i, $ctx) === AlquileresFacturas::A_PROV_LOCALES) ? $i : ['ALQUILER' => true] + $i;
+    if (in_array('PAGOS_TODO', ProveedoresProvider::seriesDeItem($marcado), true)) {
+        $enSeriesPl[] = $i['N_COMP'];
+    }
+}
+chequear('la grilla de Proveedores Locales y el universo de su proveedor ven las mismas facturas', $enPl, $enSeriesPl);
+chequear('el universo de Tarjetas sale de esas mismas', [], array_values(array_diff(array_column($tu, 'N_COMP'), $enPl)));
+chequear('y ninguna de alquiler esta en las dos', [], array_values(array_intersect($enPl,
+    array_column(AlquileresFacturas::partir($universo, $ctx)[AlquileresFacturas::A_ALQUILERES], 'N_COMP'))));

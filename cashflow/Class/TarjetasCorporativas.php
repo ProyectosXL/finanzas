@@ -137,13 +137,25 @@ class TarjetasCorporativas {
      * null. Normalizar de nuevo aca seria una tercera normalizacion del mismo
      * valor, que es exactamente como se separan dos criterios.
      *
+     * UNA FACTURA DE ALQUILER NO ENTRA, aunque tenga TARJETA CORP: la gestiona la
+     * pestaña Alquileres y alla suma. Es la misma regla que saca esas facturas de
+     * Proveedores Locales (AlquileresFacturas::deProveedoresLocales()), asi que
+     * una factura esta en un solo lado. Al 10/11/2026 no hay ninguna asi.
+     *
      * Estatica y pura.
      *
      * @param array $pendientes Lo que devolvio Proveedores::getPendientes()
+     * @param array|null $ctxAlquiler De AlquileresUniverso::delPedido(); null =
+     *        sin separar las de alquiler (solo para pruebas viejas)
      * @return array Las filas de tarjeta corporativa, tal como venian
      */
-    public static function universo($pendientes) {
+    public static function universo($pendientes, $ctxAlquiler = null) {
         $v = [];
+
+        if ($ctxAlquiler !== null) {
+            require_once __DIR__ . '/AlquileresFacturas.php';
+            $pendientes = AlquileresFacturas::deProveedoresLocales($pendientes, $ctxAlquiler);
+        }
 
         foreach (is_array($pendientes) ? $pendientes : [] as $p) {
             $forma = isset($p['FORMA_PAGO_VIGENTE']) ? trim((string) $p['FORMA_PAGO_VIGENTE']) : '';

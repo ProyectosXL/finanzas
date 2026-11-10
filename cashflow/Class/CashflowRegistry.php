@@ -468,7 +468,13 @@ class CashflowRegistry {
                 'PAGOS_SIN_RUBRO' => 'Solo los proveedores que no estan en el maestro',
                 'PAGOS_EXCLUIDOS_FACTURA' => 'Solo las facturas excluidas a mano, una por una',
                 'PAGOS_EXCLUIDOS_PROVEEDOR' => 'Solo los proveedores excluidos de Proveedores '
-                    . 'Locales porque ya se consideran en otra pestaña'
+                    . 'Locales porque ya se consideran en otra pestaña',
+                /* INFORMATIVA y fuera de PAGOS_TODO: son las facturas que se
+                   cuentan en Alquileres. No es componente ni parte de ningun
+                   corte, porque no es parte del universo de este modulo. Ver
+                   ProveedoresProvider::SERIE_ALQUILERES. */
+                'PAGOS_ALQUILERES' => 'Las facturas de alquiler, que se cuentan en Alquileres '
+                    . '(informativa: no la uses en una fila, contaria dos veces)'
             ],
             'series_extra' => ['ProveedoresProvider', 'seriesDeRubro'],
             /* EL TOTAL ES 'PAGOS_TODO', NO 'PAGOS'. La fila del tablero usa

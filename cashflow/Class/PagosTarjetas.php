@@ -645,7 +645,11 @@ class PagosTarjetas {
         }
 
         $salida['disponible'] = true;
-        $facturas = TarjetasCorporativas::universo($pendientes);
+        /* Sin las facturas de alquiler: se cuentan en Alquileres. La misma regla
+           que en Proveedores Locales, AlquileresFacturas. */
+        $ctxAlq = AlquileresUniverso::delPedido();
+        $salida['avisos'] = array_merge($salida['avisos'], $ctxAlq['avisos']);
+        $facturas = TarjetasCorporativas::universo($pendientes, $ctxAlq);
 
         /* LAS FACTURAS DE LOS SEGUROS QUEDAN AFUERA: de la grilla, del total y de
            la serie. Un seguro se proyecta SOLO CON SUS POLIZAS; sus facturas en

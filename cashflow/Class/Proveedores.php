@@ -10,6 +10,8 @@ require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 require_once __DIR__ . '/CronogramaPagos.php';
 require_once __DIR__ . '/ProveedoresRetenciones.php';
+require_once __DIR__ . '/AlquileresFacturas.php';
+require_once __DIR__ . '/AlquileresUniverso.php';
 
 /**
  * Proveedores
@@ -170,6 +172,12 @@ class Proveedores {
 
     /** El script que agrega el excedente y el pago parcial, y siembra el % */
     const SCRIPT_EXCEDENTE = 'sql/cashflow_prov_locales_excedente_parcial.sql';
+
+    /**
+     * El motivo de una fila de la planilla de pagos que trae una factura de
+     * alquiler. Ver compararImportacion() y AlquileresFacturas.
+     */
+    const MOTIVO_ALQUILER = 'Factura de alquiler: se gestiona en la pestaña Alquileres';
 
     /** @var Conexion */
     private $conn;
@@ -2712,11 +2720,17 @@ class Proveedores {
      *        el neto con $1 de tolerancia, como antes. Con el script, el importe
      *        se clasifica (clasificarImporte()) y un excedente o un parcial se
      *        aceptan; con 'porc' null, el excedente no
+     * @param array|null $ctxAlquiler De AlquileresUniverso::delPedido(). UNA FILA DE
+     *        UN PROVEEDOR DE ALQUILER QUEDA EN ERROR (MOTIVO_ALQUILER): esas facturas
+     *        se pagan en el vencimiento a considerar de la pestaña Alquileres, y
+     *        cargarles una fecha aca dejaria guardado un dato que nadie lee. Usa la
+     *        misma regla que la grilla, AlquileresFacturas::destino(). null = sin
+     *        el chequeo, como antes
      * @return array ['filas', 'resumen', 'avisos', 'criticos', 'porc_excedente']
      */
     public static function compararImportacion($filasArchivo, $pendientes, $pagos, $hoy = null,
                                                $aperturas = [], $conMedios = true, $retCfg = null,
-                                               $enTango = null, $excedente = null) {
+                                               $enTango = null, $excedente = null, $ctxAlquiler = null) {
         $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
 
         /* Los pendientes, indexados de dos formas: por clave completa -cuando la
@@ -2769,6 +2783,16 @@ class Proveedores {
         $procesados = [];
 
         foreach ($grupos as $grupo) {
+            /* UNA FACTURA DE ALQUILER NO SE CARGA ACA, este pendiente o ya pagada:
+               la gestiona la pestaña Alquileres. Va antes que todo lo demas para
+               que el motivo sea siempre este y no otro. */
+            if ($ctxAlquiler !== null && AlquileresFacturas::destino(
+                    ['COD_PROVEE' => $grupo[0]['cod_provee']], $ctxAlquiler) !== AlquileresFacturas::A_PROV_LOCALES) {
+                $procesados[] = ['orig' => $grupo, 'ya_pagada' => false,
+                                 'filas' => self::enError($grupo, self::MOTIVO_ALQUILER)];
+                continue;
+            }
+
             /* UN COMPROBANTE YA PAGADO EN TANGO ES ADVERTENCIA EN TODAS SUS
                FILAS: dos filas de una factura ya pagada no son un error del
                comprobante -no hay nada que cargar-, y cada una se cuenta. */
@@ -4882,7 +4906,8 @@ class Proveedores {
         $pendientes = $this->getPendientes($hoyStr);
         $actual = self::compararImportacion($crudas, $pendientes, $this->getPagos(),
             $hoyStr, $this->getAperturas(), $conMedios, $this->retenciones->config(),
-            $this->estadoComprobantesEnTango(self::sinCruce($crudas, $pendientes)), $excedente);
+            $this->estadoComprobantesEnTango(self::sinCruce($crudas, $pendientes)), $excedente,
+            AlquileresUniverso::delPedido());
 
         /* EL % SE COMPARA SOLO CON EL SCRIPT CORRIDO: sin el no hay %. Uno que
            no vino del navegador cuenta como distinto, y frena. */
