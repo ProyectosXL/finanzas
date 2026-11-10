@@ -961,6 +961,49 @@ class Ventas {
     }
 
     /**
+     * La venta proyectada de UN canal, por MES COMPLETO y con IVA.
+     *
+     * La usa Alquileres para repartir la venta del canal LOCALES entre los
+     * locales: los porcentajes del alquiler son sobre la venta del mes entero.
+     * Por eso NO es la serie 'venta' de la grilla, que en el mes en curso trae
+     * solo desde hoy y en los primeros 28 dias usa la participacion del tramo.
+     * Es la base mensual (baseMensual()) por la participacion mensual efectiva
+     * del canal, la misma que la pestaña Ventas muestra en su cuadro mensual.
+     *
+     * No recalcula nada: lee la proyeccion ya armada.
+     *
+     * @param string $canal Uno de Parametros::CANALES
+     * @param Horizonte|null $horizonte
+     * @return array 'Y-m' => importe con IVA
+     */
+    public function ventaMensualCanal($canal, $horizonte = null) {
+        return self::ventaMensualDeCanal($this->proyectarVentas($horizonte), $canal);
+    }
+
+    /**
+     * Lo de ventaMensualCanal(), a partir de una proyeccion ya armada.
+     * Estatica y pura, para poder probarla sin la base.
+     *
+     * @param array $proyeccion Lo que devolvio proyectarVentas()
+     * @param string $canal
+     * @return array 'Y-m' => importe con IVA
+     */
+    public static function ventaMensualDeCanal($proyeccion, $canal) {
+        $out = [];
+
+        foreach ($proyeccion['base_mensual'] ?? [] as $base) {
+            $clave = $base['clave'];
+            $part = $proyeccion['participacion']['mensual'][$clave][$canal]['efectivo'] ?? null;
+
+            if ($part !== null) {
+                $out[$clave] = (float) $base['con_iva'] * (float) $part;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Grilla de cobranza proyectada: aplica mix, plazos y corrimiento a dia
      * bancario habil sobre la venta diaria.
      *

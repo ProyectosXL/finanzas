@@ -247,6 +247,14 @@
             <?php include __DIR__ . '/parametros_tarjetas.php'; ?>
         </div>
 
+        <!-- Parámetros de la proyección de alquileres: el vencimiento general,
+             las razones sociales dadas de alta, los datos de cada local de la
+             app de alquileres y los pagos extraordinarios. Mismo criterio que
+             los anteriores: archivo y JS propios, y clases con prefijo palq-. -->
+        <div class="tab-pane fade" id="paneParamAlquileres" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'ALQUILERES'); ?>>
+            <?php include __DIR__ . '/parametros_alquileres.php'; ?>
+        </div>
+
         <!-- Parámetros del módulo Compras Exterior (código COMPRAS_PROY): cuántos meses, cuánta
              historia para la cuota y los tres días de la cadena de fechas.
              Mismo criterio que los anteriores: archivo y JS propios, y clases

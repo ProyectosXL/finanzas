@@ -30,7 +30,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ## Para pasar a producción: los scripts, en orden
 
-**Todos van contra `central`, salvo uno de la sección que sigue**, que va contra `apps`. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
+**Todos van contra `central`, salvo los de permisos**, que van contra `apps`: el de la sección que sigue y el 52, de Alquileres. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
 
 ### Primero que nada: auditoría y permisos de escritura (`feature/cashflow-auditoria-usuario`)
 
@@ -396,6 +396,17 @@ El `IMPORTE` de la planilla de pagos ya no tiene que ser el neto a pagar: puede 
 
 Contra `central`, **después del 37** (`cashflow_prov_locales_pago_medio.sql`): le agrega columnas a su tabla y corta si no está. Necesita también `cashflow_prov_locales_forma_por_factura.sql`, que hace nullable la fecha de la tabla de pagos: sin él la pantalla se comporta como si el 49 no estuviera. **El día que se corre el tablero no se mueve un peso**: las dos aperturas que hay en producción quedan como `NETO` y se proyectan igual. Medido el 03/11/2026 con la planilla vacía: las series, sus ejes y la auditoría dan idénticas al centavo con el código de `develop` y con el de esta rama.
 
+### Alquileres: la proyección por local y Parámetros › Alquileres (`feature/alquileres-proyeccion`)
+
+Pestaña *RRHH y Operativos › Alquileres* —de `PENDIENTE` a `DATOS`— con la proyección por local desde la app de alquileres y la venta por local, y la sub-pestaña *Parámetros › Alquileres*. **No entra al tablero**: el proveedor está escrito, pero el módulo sigue con `'disponible' => false`, porque las facturas de alquiler siguen en Cuentas a Pagar Locales. Ver `README-alquileres.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 51 | `sql/cashflow_alquileres.sql` | Las cinco tablas de Parámetros › Alquileres con historial. Da de alta SAPALA, SAARCO, SAPAMA y SAUNIC con 2 meses de diferimiento, si tienen `RUBRO = ALQUILER` y no existen | La pestaña y Parámetros cargan y avisan nombrando el script; ningún local proyecta |
+| 52 | `sql/cashflow_alquileres_permisos.sql` (**`apps`**) | `cashflow.tab.alquileres`, `cashflow.editar.alquileres` y `cashflow.editar.parametros.alquileres`, si no existen. **No asigna ningún rol** | Sólo el administrador ve la pestaña y edita sus parámetros |
+
+El 51 contra `central`, después de `sql/cashflow_prov_locales.sql`; el 52 contra `apps`, en cualquier momento. **Ninguno mueve el tablero**: la fila *Alquileres* sigue apuntada a `ALQUILERES/PAGOS`, en cero. Después, dar los permisos desde Gestión de Usuarios y cargar Parámetros › Alquileres (ver *Después de correrlos* en `README-alquileres.md`).
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -451,7 +462,10 @@ En este orden, contra `central`:
 -- 48. sql/cashflow_estructura_gastos_locales.sql    (la fila Gastos Locales)
 -- 49. sql/cashflow_prov_locales_excedente_parcial.sql  (Prov. Locales: pago con excedente y pago parcial)
 -- 50. sql/cashflow_comex_dolar_divisa.sql          (Comex: la descripcion de los parametros del dolar del dia anterior)
+-- 51. sql/cashflow_alquileres.sql                  (Alquileres: parametros de la proyeccion por local)
 ```
+
+**El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento.
 
 **El 49 va después del 37**, al que le agrega columnas, y del de la forma por factura de Proveedores Locales. Ver *Proveedores Locales: pago con excedente y pago parcial*, más arriba.
 
@@ -1173,6 +1187,8 @@ Hoy tienen datos reales veinte: **Ventas**, **Cobranzas FR**, **Cobranzas Mayori
 > Logística no necesitó ningún script de estructura: su fila ya existía apuntada a `LOGISTICA/PAGOS`, así que alcanzó con escribir el proveedor y dar vuelta el flag, que es exactamente lo que este diseño promete. Ver `README-logistica-local.md`.
 >
 > Tarjetas sí necesitó uno, y por un motivo que conviene tener presente: **no existía ninguna fila para esa plata**. El Excel original no la tenía, así que la semilla de `cashflow_estructura.sql` no la sembró. Lo que el diseño sigue cumpliendo es lo otro: el motor no se tocó, y la fila se crea con un `INSERT` de tres líneas. **`FINANCIERO` no se tocó** —es otro circuito, préstamos y movimientos financieros, y su fila vive en la sección *Ajustes*, hoy inhabilitada—: meter las tarjetas ahí adentro habría mezclado dos cosas que se cargan y se miran por separado. Ver `README-pagos-tarjetas.md`.
+
+> **Alquileres tiene proveedor y sigue sin estar disponible, a propósito.** `AlquileresProvider` rinde la serie `PROYECTADO` —la proyección de la pestaña, por día de pago—, pero si entrara al tablero cada alquiler se contaría dos veces, porque sus facturas siguen en Cuentas a Pagar Locales. Su fila apunta a `ALQUILERES/PAGOS`, que llega con las facturas reales, y sigue en cero. Ver `README-alquileres.md`.
 
 ### Módulos retirados
 
@@ -2351,7 +2367,7 @@ Los permisos siguen viniendo de `FP_ROL_PERMISO` / `FP_PERMISOS` (módulo 7), co
 ### Para agregar una pestaña o una acción que escribe
 
 1. Declarar la acción en `AuthCashflow::ESCRITURAS` con su (pestaña, sub-pestaña), o en `LECTURAS` si sólo lee. `tests/test_auth_cashflow.php` lee los `case` de los controllers y **falla si alguno no está declarado**.
-2. Si es una pestaña nueva con escrituras, sumar su `cashflow.editar.<pestaña>` a `sql/cashflow_permisos_edicion.sql`, que es reejecutable. La misma prueba verifica que las claves del script sean exactamente las que pide el mapa.
+2. Si es una pestaña nueva con escrituras, sumar su `cashflow.editar.<pestaña>` a `sql/cashflow_permisos_edicion.sql`, que es reejecutable. La misma prueba verifica que las claves de los scripts sean exactamente las que pide el mapa. **Ese script le da la edición a todo rol que ve la pestaña**; una pestaña nueva cuyos permisos se asignan a mano lleva su propio script, sin asignar roles, como `sql/cashflow_alquileres_permisos.sql`, y la prueba lee los dos. Una clave que se crea antes que su escritura va en `AuthCashflow::CLAVES_RESERVADAS` (hoy, `cashflow.editar.alquileres`).
 3. Poner `AuthCashflow::atributoEdicion('<pestaña>')` en la raíz de la pestaña y esconder sus controles con `$edita` y `Js/permisos.js`. La prueba verifica el atributo.
 4. Si la acción escribe una tabla nueva, crearla con las seis columnas y escribirlas con `Class/Auditoria.php`.
 

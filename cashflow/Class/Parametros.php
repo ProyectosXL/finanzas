@@ -227,6 +227,25 @@ class Parametros {
                solo lado. Mismo criterio que LOGISTICA y que CASHFLOW. */
             'endpoint' => 'Controller/TarjetasController.php'
         ],
+        /* VA PEGADA A TARJETAS Y PROV. LOCALES por el mismo motivo que ellas:
+           las razones sociales de alquiler son proveedores del maestro de
+           Proveedores Locales, y dar una de alta aca es lo que (cuando lleguen
+           las facturas) la saca de esa pestaña. */
+        'ALQUILERES' => [
+            'nombre' => 'Alquileres',
+            'icono' => 'fa-building',
+            'descripcion' => 'Lo que la proyección de alquileres necesita y la app de alquileres no '
+                . 'tiene: el día de vencimiento, las razones sociales dadas de alta con su '
+                . 'diferimiento, la razón social, la frecuencia de ajuste y las alícuotas de cada '
+                . 'local, y los pagos extraordinarios. Alimentan la pestaña RRHH y Operativos › '
+                . 'Alquileres. Los importes por concepto, los porcentajes y la venta salen de la '
+                . 'app de alquileres, que el cashflow sólo lee',
+            'secciones' => [],
+            /* Las tablas se leen desde las dos pantallas -esta y la pestaña,
+               que proyecta con ellas- asi que sus endpoints viven en el
+               controller del modulo. Mismo criterio que LOGISTICA y TARJETAS. */
+            'endpoint' => 'Controller/AlquileresController.php'
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',

@@ -84,6 +84,7 @@ $modulosJs = [
     'LOGISTICA' => 'Js/Parametros-Logistica.js',
     'PROV_LOCALES' => 'Js/Parametros-Prov_locales.js',
     'TARJETAS' => 'Js/Parametros-Tarjetas.js',
+    'ALQUILERES' => 'Js/Parametros-Alquileres.js',
     'CASHFLOW' => 'Js/Parametros-Estructura.js'
 ];
 
@@ -104,7 +105,7 @@ foreach ($modulosJs as $codigo => $archivo) {
         preg_match('/^        cargar(PlazosGlobales|Escala|Clientes)?\(\);$/m', $arranque));
 }
 
-chequear('las que leen getTodo piden su modulo con ParametrosCarga.pedir()', 9,
+chequear('las que leen getTodo piden su modulo con ParametrosCarga.pedir()', 10,
     array_sum(array_map(function ($c) use ($modulosJs, $leer) {
         return substr_count($leer($modulosJs[$c]), "ParametrosCarga.pedir('" . $c . "')");
     }, array_keys($modulosJs))));
