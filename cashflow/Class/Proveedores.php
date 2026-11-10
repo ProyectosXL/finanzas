@@ -778,7 +778,9 @@ class Proveedores {
                 CAST(v.FECHA_VTO  AS DATE) AS FECHA_VTO,
                 CAST(v.IMPORT_VTO AS FLOAT) AS IMPORTE_VTO,
                 CAST(ISNULL(im.IMPUTACIONES, 0) AS FLOAT) AS IMPUTACIONES,
-                CAST(v.IMPORT_VTO + ISNULL(im.IMPUTACIONES, 0) AS FLOAT) AS IMPORTE_PENDIENTE
+                CAST(v.IMPORT_VTO + ISNULL(im.IMPUTACIONES, 0) AS FLOAT) AS IMPORTE_PENDIENTE,
+                CAST(a.SUBT_GRAVA AS FLOAT) AS NETO_GRAVADO_COMP,
+                CAST(a.IMPORTE_TO AS FLOAT) AS IMPORTE_COMP
             FROM CPA04 a
             INNER JOIN CPA01 p ON p.COD_PROVEE = a.COD_PROVEE
             INNER JOIN CPA54 v ON v.ID_CPA04   = a.ID_CPA04
@@ -863,6 +865,18 @@ class Proveedores {
                 'IMPORTE_VTO' => round(floatval($row['IMPORTE_VTO']), 2),
                 'IMPUTACIONES' => round(floatval($row['IMPUTACIONES']), 2),
                 'IMPORTE_PENDIENTE' => round(floatval($row['IMPORTE_PENDIENTE']), 2),
+
+                /* EL NETO GRAVADO Y EL TOTAL DEL COMPROBANTE, tal como los guarda
+                   Tango (CPA04.SUBT_GRAVA e IMPORTE_TO), no los de la cuota. Los
+                   usa Alquileres para sugerir la retencion, que es sobre el neto:
+                   la parte de la cuota es AlquileresFacturas::netoDeCuota(). Van
+                   en ESTA consulta y no en una segunda contra CPA04, que es la
+                   regla del modulo: un solo universo de pendientes. Null si Tango
+                   no lo tiene, nunca 0 inventado. */
+                'NETO_GRAVADO_COMP' => ($row['NETO_GRAVADO_COMP'] === null)
+                    ? null : round(floatval($row['NETO_GRAVADO_COMP']), 2),
+                'IMPORTE_COMP' => ($row['IMPORTE_COMP'] === null)
+                    ? null : round(floatval($row['IMPORTE_COMP']), 2),
 
                 // La fecha con la que entra al eje, y de donde salio.
                 'Pago' => $resuelta['fecha'],

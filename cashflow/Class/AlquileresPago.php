@@ -47,8 +47,8 @@ require_once __DIR__ . '/Inflacion.php';
  * ------------------
  * Una razon social es de alquiler porque esta DADA DE ALTA en Parametros ->
  * Alquileres, no por su rubro: el rubro (RUBRO = ALQUILER en el maestro) solo
- * arma la lista desde donde se la da de alta. Es el mismo criterio que, en el
- * prompt B, va a decidir que factura de Proveedores Locales es de alquiler.
+ * arma la lista desde donde se la da de alta. Es el mismo criterio que decide
+ * que factura de Tango es de alquiler: AlquileresFacturas::esDeAlquiler().
  */
 class AlquileresPago {
 
