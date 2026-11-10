@@ -305,7 +305,7 @@ class AuthCashflow {
 
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
-        'Alquileres' => ['getParametros'],
+        'Alquileres' => ['getProyeccion', 'getParametros'],
         'Cashflow' => ['getTablero', 'getAvisosPestana'],
         'CashflowEstructura' => ['getEstructura'],
         'CobElectronicos' => ['getPestana'],

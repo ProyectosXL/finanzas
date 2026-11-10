@@ -128,6 +128,506 @@ class Alquileres {
     }
 
     /* ====================================================================
+       LA PROYECCION
+       ==================================================================== */
+
+    /**
+     * Lo que la pestaña necesita: la grilla de Proyeccion, la de Ventas, las
+     * tarjetas y los avisos.
+     *
+     * @param Horizonte $h
+     * @return array
+     */
+    public function proyeccion($h) {
+        $c = $this->calcular($h, $this->insumos($h));
+
+        return self::armarPestana($c, $h);
+    }
+
+    /**
+     * Los insumos que no son de la app ni de Parametros -> Alquileres: la
+     * inflacion, la venta del canal LOCALES, la alicuota de IVA y el
+     * calendario. Cada uno puede fallar por su lado: queda vacio y avisa.
+     *
+     * @param Horizonte $h
+     * @return array ['inflacion', 'canal', 'iva', 'habiles', 'avisos']
+     */
+    public function insumos($h) {
+        $avisos = [];
+        $ins = ['inflacion' => [], 'canal' => [], 'iva' => null, 'habiles' => [], 'avisos' => []];
+
+        try {
+            $ins['inflacion'] = (new Inflacion())->valores();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer la inflación de Parámetros › Generales ('
+                . $e->getMessage() . '): los fijos no se ajustan.');
+        }
+
+        try {
+            require_once __DIR__ . '/Ventas.php';
+            $ins['canal'] = (new Ventas())->ventaMensualCanal('LOCALES', $h);
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer la venta proyectada del canal LOCALES de la '
+                . 'pestaña Ventas (' . $e->getMessage() . '): sin ella no hay venta estimada por local.');
+        }
+
+        try {
+            $ins['iva'] = $this->ivaGeneral() / 100;
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer la alícuota de IVA de Parámetros › Generales ('
+                . $e->getMessage() . '): sin ella no se puede pasar la venta de bruta a neta.');
+        }
+
+        $meses = $h->meses();
+        $desde = Inflacion::mesMas($meses[0]['clave'], -1) . '-01';
+        $hasta = date('Y-m-t', strtotime(Inflacion::mesMas(end($meses)['clave'], 1) . '-01'));
+
+        require_once __DIR__ . '/CronogramaDatos.php';
+        $crono = new CronogramaDatos();
+        $ins['habiles'] = $crono->habilesEntre($desde, $hasta);
+        $ins['avisos'] = array_merge($avisos, $crono->avisosConNivel());
+
+        return $ins;
+    }
+
+    /**
+     * Los pagos de todos los locales que caen en el horizonte, con todo lo que
+     * explica cada uno. Es lo que leen la pestaña y el proveedor del tablero:
+     * los dos suman ESTA lista, uno por mes y el otro por dia.
+     *
+     * @param Horizonte $h
+     * @param array $ins Lo de insumos()
+     * @return array ['pagos', 'locales', 'ventas', 'meses_pago', 'meses_concepto',
+     *                'faltan_inflacion', 'avisos']
+     */
+    public function calcular($h, $ins) {
+        $avisos = $ins['avisos'] ?? [];
+        $base = $this->leerBase($avisos);
+        $universo = $this->universoRazones($avisos);
+        $hoy = $h->hoy();
+        $mesesPago = array_column($h->meses(), 'clave');
+
+        $out = ['pagos' => [], 'locales' => $base['locales'], 'ventas' => null, 'meses_pago' => $mesesPago,
+                'meses_concepto' => $mesesPago, 'faltan_inflacion' => [], 'avisos' => []];
+
+        foreach ($base['razones'] as $cod => $r) {
+            if ($universo !== null && !isset($universo[$cod])) {
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'La razón social ' . $r['razon'] . ' (' . $cod . ') ya no '
+                    . 'tiene RUBRO = ALQUILER en el maestro de Proveedores Locales. Sigue de alta y sus locales '
+                    . 'proyectan; si ya no es un alquiler, se da de baja en Parámetros › Alquileres.');
+            }
+        }
+
+        if (!$base['app_ok'] || !$base['tablas_ok']) {
+            $out['avisos'] = $avisos;
+            return $out;
+        }
+
+        /* Los meses de concepto: el horizonte y, hacia atras, el mayor
+           diferimiento (variables y extraordinarios). */
+        $maxDifer = 0;
+
+        foreach ($base['razones'] as $r) {
+            $maxDifer = max($maxDifer, $r['diferimiento']);
+        }
+
+        foreach ($base['extras'] as $x) {
+            $maxDifer = max($maxDifer, $x['diferimiento']);
+        }
+
+        $mesesConcepto = AlquileresPago::mesesDeConcepto($mesesPago, $maxDifer);
+        $out['meses_concepto'] = $mesesConcepto;
+
+        $ultimoGlobal = empty($base['cerrados']) ? $mesesConcepto[0] : end($base['cerrados']);
+        $desde = min(Inflacion::mesMas($ultimoGlobal, -AlquileresCalculo::MESES_EXPENSAS), $mesesConcepto[0]);
+
+        try {
+            $detalle = $this->app->detalleCerrados($base['cerrados'], $desde);
+            $pct = $this->app->porcentajes();
+            $desdeVenta = min($base['ventana'][0] ?? $mesesConcepto[0], $mesesConcepto[0]);
+            $netas = $this->app->ventasNetas($desdeVenta);
+            $brutas = $this->app->ventasBrutas($desdeVenta);
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer la app de alquileres: ' . $e->getMessage());
+            $out['avisos'] = $avisos;
+            return $out;
+        }
+
+        /* La venta de cada local. */
+        $entradaVenta = [];
+
+        foreach ($base['locales'] as $nro => $l) {
+            $p = $l['params'];
+            $entradaVenta[$nro] = [
+                'activo' => $l['habilitado'] && $l['estado'] !== AlquileresPago::FINALIZADO,
+                'activo_hasta' => empty($p['fecha_fin']) ? null : substr($p['fecha_fin'], 0, 7),
+                'manual' => $p['venta_mensual_estimada'] ?? null
+            ];
+        }
+
+        $ventas = ($ins['iva'] === null) ? null : AlquileresVenta::calcular([
+            'meses' => $mesesConcepto, 'locales' => $entradaVenta, 'netas' => $netas, 'brutas' => $brutas,
+            'ventana' => $base['ventana'], 'canal' => $ins['canal'], 'iva' => $ins['iva']
+        ]);
+        $out['ventas'] = $ventas;
+
+        foreach ($mesesConcepto as $m) {
+            if (!isset($ins['canal'][$m]) && $ventas !== null) {
+                $sinReal = false;
+
+                foreach ($ventas['ventas'] as $nro => $vm) {
+                    if (($vm[$m] ?? null) === null && $base['locales'][$nro]['estado'] === AlquileresPago::PROYECTA) {
+                        $sinReal = true;
+                    }
+                }
+
+                if ($sinReal) {
+                    $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No hay venta proyectada del canal LOCALES para '
+                        . $m . ' y algún local no tiene venta real: sus conceptos variables de ese mes no se proyectan.');
+                }
+            }
+        }
+
+        /* Las tasas de las expensas: la de cada local y la general. */
+        $tasas = [];
+
+        foreach ($detalle as $nro => $meses) {
+            ksort($meses);
+            $serie = [];
+
+            foreach ($meses as $m => $c) {
+                $serie[$m] = $c[11] ?? 0.0;
+            }
+
+            $tasas[$nro] = AlquileresCalculo::tasaExpensas($serie, array_key_last($meses));
+        }
+
+        $general = AlquileresCalculo::tasaGeneral($tasas);
+
+        /* Los pagos de cada local que proyecta. */
+        $diaGeneral = ($base['general'] === null) ? null : $base['general']['dia'];
+        $faltanInf = [];
+        $sinCerrado = [];
+        $sinVenta = [];
+        $sinPct = [];
+
+        foreach ($base['locales'] as $nro => $l) {
+            if ($l['estado'] !== AlquileresPago::PROYECTA) {
+                continue;
+            }
+
+            $p = $l['params'];
+            $razon = $base['razones'][$p['cod_provee']];
+            $propia = $tasas[$nro] ?? ['tasa' => null, 'meses' => 0, 'variaciones' => 0];
+            $pctLocal = $pct[$nro] ?? [];
+
+            $proy = AlquileresCalculo::proyectarLocal([
+                'meses' => $mesesConcepto,
+                'cerrados' => $detalle[$nro] ?? [],
+                'frecuencia' => $p['frecuencia'],
+                'mes_ajuste' => $p['mes_ajuste'],
+                'pct' => $pctLocal,
+                'inflacion' => $ins['inflacion'],
+                'tasa_expensas' => AlquileresCalculo::tasaDelLocal($propia, $general),
+                'ventas' => ($ventas === null) ? [] : ($ventas['ventas'][$nro] ?? [])
+            ]);
+
+            $faltanInf = array_merge($faltanInf, $proy['faltan_inflacion']);
+
+            if ($proy['ultimo_cerrado'] === null) {
+                $sinCerrado[] = $l['nombre'];
+            }
+
+            $variables = array_intersect_key($pctLocal, array_flip(AlquileresConceptos::delGrupo(AlquileresConceptos::VARIABLES)));
+
+            if (empty($variables)) {
+                $sinPct[] = $l['nombre'];
+            } else {
+                foreach ($proy['meses'] as $m => $pm) {
+                    if ($pm['motivo'] === 'SIN_VENTA') {
+                        $sinVenta[$l['nombre']] = true;
+                    }
+                }
+            }
+
+            $extras = array_values(array_filter($base['extras'], function ($x) use ($nro, $p) {
+                return AlquileresPago::alcanza($x, $nro, $p['cod_provee']);
+            }));
+
+            foreach (AlquileresPago::pagosLocal([
+                'local' => $p,
+                'razon' => $razon,
+                'dia_general' => $diaGeneral,
+                'proyeccion' => $proy,
+                'extras' => $extras,
+                'meses_pago' => $mesesPago,
+                'habiles' => $ins['habiles'],
+                'hoy' => $hoy
+            ]) as $pago) {
+                $out['pagos'][] = ['nro' => $nro] + $pago;
+            }
+        }
+
+        $faltanInf = array_values(array_unique($faltanInf));
+        sort($faltanInf);
+        $out['faltan_inflacion'] = $faltanInf;
+
+        if (!empty($faltanInf)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, Inflacion::avisoFaltan($faltanInf, $hoy)
+                . ' En Alquileres los fijos se ajustan con lo que hay: el ajuste de esos meses queda corto.');
+        }
+
+        if (!empty($sinCerrado)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Sin ningún período cerrado en la app de alquileres: '
+                . implode(', ', $sinCerrado) . '. Los fijos y las expensas recién proyectan cuando tengan uno.');
+        }
+
+        if (!empty($sinVenta)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Sin venta para algún mes: ' . implode(', ', array_keys($sinVenta))
+                . '. Sus conceptos variables de esos meses no se proyectan. Un local nuevo se resuelve cargando '
+                . 'su venta mensual estimada en Parámetros › Alquileres.');
+        }
+
+        if (!empty($sinPct)) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'Sin porcentajes de conceptos variables en la app (no todos los '
+                . 'contratos los tienen): ' . implode(', ', $sinPct) . '.');
+        }
+
+        $incompletos = array_filter($base['locales'], function ($l) {
+            return $l['estado'] === AlquileresPago::INCOMPLETO || !empty($l['faltan']);
+        });
+
+        if (!empty($incompletos)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($incompletos) . ' local(es) no proyectan, o no proyectan '
+                . 'todo, porque les falta algún dato: ' . implode('; ', array_map(function ($l) {
+                    return $l['nombre'] . ' (' . implode(', ', $l['faltan']) . ')';
+                }, $incompletos)) . '. Se completan en Parámetros › Alquileres.');
+        }
+
+        $sinCalendario = [];
+
+        foreach ($out['pagos'] as $p) {
+            $sinCalendario = array_merge($sinCalendario, $p['faltan_calendario']);
+        }
+
+        if (!empty($sinCalendario)) {
+            $sinCalendario = array_values(array_unique($sinCalendario));
+            sort($sinCalendario);
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'El calendario bancario no tiene ' . implode(', ', $sinCalendario)
+                . ': para esos meses se toman hábiles los días de lunes a viernes.');
+        }
+
+        $out['avisos'] = $avisos;
+
+        return $out;
+    }
+
+    /* ====================================================================
+       EL ARMADO DE LA PESTAÑA
+       ==================================================================== */
+
+    /**
+     * La grilla de Proyeccion (local -> grupos -> conceptos, por mes de pago),
+     * la de Ventas, las tarjetas y los avisos, a partir de calcular().
+     *
+     * NO CALCULA NADA: agrupa la lista de pagos. Por eso lo que la pestaña dice
+     * es lo mismo que dice el tablero, que suma la misma lista.
+     *
+     * @param array $c Lo de calcular()
+     * @param Horizonte $h
+     * @return array
+     */
+    public static function armarPestana($c, $h) {
+        $meses = array_map(function ($m) {
+            return ['clave' => $m['clave'], 'label' => $m['label']];
+        }, $h->meses());
+        $mesActual = substr($h->hoy(), 0, 7);
+
+        /* UN CONCEPTO QUE VALE 0 TODO EL HORIZONTE NO SE MUESTRA, salvo los
+           variables: el alquiler, el complementario y la baulera en 0 de un
+           shopping son ruido, pero un 7 en 0 dice algo (la venta no supera el
+           VMA). No cambia ningun total: suman 0. */
+        $totalConcepto = [];
+
+        foreach ($c['pagos'] as $p) {
+            $k = $p['nro'] . '|' . $p['concepto'];
+            $totalConcepto[$k] = ($totalConcepto[$k] ?? 0.0) + abs($p['neto']);
+        }
+
+        $porLocal = [];
+
+        foreach ($c['pagos'] as $p) {
+            if ($totalConcepto[$p['nro'] . '|' . $p['concepto']] == 0 && $p['grupo'] !== AlquileresConceptos::VARIABLES) {
+                continue;
+            }
+
+            $porLocal[$p['nro']][] = $p;
+        }
+
+        $locales = [];
+        $totalHorizonte = 0.0;
+        $totalMesActual = 0.0;
+
+        foreach ($c['locales'] as $nro => $l) {
+            $fila = [
+                'nro' => $nro,
+                'nombre' => $l['nombre'],
+                'cod_provee' => $l['params']['cod_provee'] ?? null,
+                'razon' => $l['razon'],
+                'estado' => $l['estado'],
+                'faltan' => $l['faltan'],
+                'nuevo' => $l['nuevo'],
+                'meses' => [],
+                'total' => self::celdaVacia(),
+                'grupos' => []
+            ];
+
+            foreach ($porLocal[$nro] ?? [] as $p) {
+                $grupo = $p['grupo'];
+                $concepto = (string) $p['concepto'];
+                $mes = $p['mes_pago'];
+
+                if (!isset($fila['grupos'][$grupo])) {
+                    $fila['grupos'][$grupo] = ['grupo' => $grupo, 'nombre' => AlquileresConceptos::NOMBRE_GRUPO[$grupo],
+                                               'meses' => [], 'total' => self::celdaVacia(), 'conceptos' => []];
+                }
+
+                $g = &$fila['grupos'][$grupo];
+
+                if (!isset($g['conceptos'][$concepto])) {
+                    $g['conceptos'][$concepto] = ['id' => $concepto, 'nombre' => self::nombreConcepto($p),
+                                                  'meses' => [], 'total' => self::celdaVacia()];
+                }
+
+                $k = &$g['conceptos'][$concepto];
+                $k['meses'][$mes] = self::sumarCelda($k['meses'][$mes] ?? self::celdaVacia(), $p, true);
+                $k['total'] = self::sumarCelda($k['total'], $p, false);
+                $g['meses'][$mes] = self::sumarCelda($g['meses'][$mes] ?? self::celdaVacia(), $p, false);
+                $g['total'] = self::sumarCelda($g['total'], $p, false);
+                $fila['meses'][$mes] = self::sumarCelda($fila['meses'][$mes] ?? self::celdaVacia(), $p, false);
+                $fila['total'] = self::sumarCelda($fila['total'], $p, false);
+                unset($g, $k);
+
+                $totalHorizonte += $p['a_pagar'];
+
+                if ($mes === $mesActual) {
+                    $totalMesActual += $p['a_pagar'];
+                }
+            }
+
+            /* Los grupos en su orden, y cada uno con sus conceptos en orden. */
+            $ordenados = [];
+
+            foreach (array_keys(AlquileresConceptos::NOMBRE_GRUPO) as $gr) {
+                if (isset($fila['grupos'][$gr])) {
+                    $g = $fila['grupos'][$gr];
+                    ksort($g['conceptos'], SORT_NATURAL);
+                    $g['conceptos'] = array_values($g['conceptos']);
+                    $ordenados[] = $g;
+                }
+            }
+
+            $fila['grupos'] = $ordenados;
+            $locales[] = $fila;
+        }
+
+        $incompletos = count(array_filter($c['locales'], function ($l) {
+            return $l['estado'] === AlquileresPago::INCOMPLETO || !empty($l['faltan']);
+        }));
+        $proyectan = count(array_filter($c['locales'], function ($l) {
+            return $l['estado'] === AlquileresPago::PROYECTA;
+        }));
+
+        return [
+            'meses' => $meses,
+            'mes_actual' => $mesActual,
+            'locales' => $locales,
+            'ventas' => self::armarVentas($c),
+            'kpis' => [
+                'total_horizonte' => round($totalHorizonte, 2),
+                'total_mes_actual' => round($totalMesActual, 2),
+                'locales_proyectan' => $proyectan,
+                'locales_incompletos' => $incompletos
+            ],
+            'origenes' => AlquileresCalculo::NOMBRE_ORIGEN,
+            'estados' => AlquileresPago::NOMBRE_ESTADO,
+            'avisos' => $c['avisos']
+        ];
+    }
+
+    /**
+     * La grilla de Ventas: local x mes de concepto (incluye los anteriores al
+     * horizonte que pagan los variables diferidos), con el canal y la
+     * diferencia al pie.
+     */
+    private static function armarVentas($c) {
+        $v = $c['ventas'];
+        $filas = [];
+
+        foreach ($c['locales'] as $nro => $l) {
+            $meses = [];
+
+            foreach ($c['meses_concepto'] as $m) {
+                $meses[$m] = ($v === null) ? null : ($v['ventas'][$nro][$m] ?? null);
+            }
+
+            $filas[] = ['nro' => $nro, 'nombre' => $l['nombre'], 'estado' => $l['estado'],
+                        'participacion' => ($v === null) ? null : ($v['participacion'][$nro] ?? null),
+                        'nuevo' => $l['nuevo'], 'meses' => $meses];
+        }
+
+        $pie = [];
+
+        foreach ($c['meses_concepto'] as $m) {
+            $canal = ($v === null) ? null : ($v['canal'][$m] ?? null);
+            $estimadaManual = ($v === null) ? 0.0 : ($v['estimada'][$m] ?? 0.0) + ($v['manual'][$m] ?? 0.0);
+            $pie[$m] = [
+                'canal' => $canal,
+                'estimada_manual' => round($estimadaManual, 2),
+                'diferencia' => ($canal === null) ? null : round($canal - $estimadaManual, 2)
+            ];
+        }
+
+        return [
+            'meses' => $c['meses_concepto'],
+            'horizonte_desde' => $c['meses_pago'][0] ?? null,
+            'filas' => $filas,
+            'pie' => $pie,
+            'ventana' => ($v === null) ? [] : $v['ventana'],
+            'origenes' => AlquileresVenta::NOMBRE_ORIGEN
+        ];
+    }
+
+    private static function celdaVacia() {
+        return ['neto' => 0.0, 'iva' => 0.0, 'percepcion' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0];
+    }
+
+    /** Suma un pago a una celda; en la de concepto, ademas guarda el detalle. */
+    private static function sumarCelda($celda, $p, $conDetalle) {
+        foreach (['neto', 'iva', 'percepcion', 'retencion', 'a_pagar'] as $k) {
+            $celda[$k] = round($celda[$k] + $p[$k], 2);
+        }
+
+        if ($conDetalle) {
+            $celda['pagos'][] = array_intersect_key($p, array_flip([
+                'fecha', 'vencimiento', 'corrida', 'vencido', 'nota_dia', 'origen', 'mes_concepto',
+                'neto', 'iva', 'percepcion', 'retencion', 'a_pagar', 'detalle'
+            ]));
+        }
+
+        return $celda;
+    }
+
+    private static function nombreConcepto($p) {
+        if ($p['grupo'] === AlquileresConceptos::EXTRA) {
+            $d = $p['detalle'];
+            return $d['pct'] . ' % s/ ' . implode(' + ', array_keys($d['base']));
+        }
+
+        return $p['concepto'] . ' · ' . (AlquileresConceptos::NOMBRE[$p['concepto']] ?? '');
+    }
+
+    /* ====================================================================
        LECTURA COMUN
        ==================================================================== */
 
@@ -222,6 +722,8 @@ class Alquileres {
                 'nombre' => $l['nombre'],
                 'habilitado' => $l['habilitado'],
                 'params' => $p,
+                'razon' => (isset($p['cod_provee']) && isset($out['razones'][$p['cod_provee']]))
+                    ? $out['razones'][$p['cod_provee']]['razon'] : null,
                 'estado' => $estado['estado'],
                 'faltan' => $estado['faltan'],
                 'nuevo' => $nuevo,

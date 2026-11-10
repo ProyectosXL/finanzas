@@ -1,0 +1,19 @@
+/* RRHH y Operativos › Alquileres */
+
+/* Los niveles de la grilla de Proyeccion: local, grupo y concepto. */
+#tablaAlquileres tr.alq-local td:first-child { font-weight: 600; }
+#tablaAlquileres tr.alq-grupo td:first-child { padding-left: 1.5rem; }
+#tablaAlquileres tr.alq-concepto td:first-child { padding-left: 3rem; font-size: .85em; }
+#tablaAlquileres tr.alq-grupo { background: rgba(0, 0, 0, .02); }
+#tablaAlquileres tr.alq-concepto { font-size: .85em; color: #555; }
+#tablaAlquileres .alq-toggle { cursor: pointer; width: 1rem; display: inline-block; }
+
+/* El origen de cada venta: un chip discreto. */
+.alq-origen-REAL { background: #e7f1ff; color: #0b5ed7; }
+.alq-origen-ESTIMADA { background: #fff3cd; color: #997404; }
+.alq-origen-MANUAL { background: #f3e8ff; color: #6f42c1; }
+#tablaAlqVentas td.alq-celda-REAL { background: rgba(13, 110, 253, .05); }
+#tablaAlqVentas td.alq-celda-ESTIMADA { background: rgba(255, 193, 7, .08); }
+#tablaAlqVentas td.alq-celda-MANUAL { background: rgba(111, 66, 193, .07); }
+#tablaAlqVentas td.alq-antes { border-left: 0; }
+#tablaAlqVentas th.alq-antes { font-style: italic; }

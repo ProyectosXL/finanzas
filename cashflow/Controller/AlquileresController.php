@@ -48,6 +48,22 @@ try {
 
     switch ($action) {
         /* ================================================================
+           LA PESTAÑA: PROYECCION Y VENTAS
+
+           Un solo pedido para las dos sub-pestañas: tienen que describir el
+           mismo estado, y la Proyeccion ya calcula la venta que muestra Ventas.
+           ================================================================ */
+        case 'getProyeccion':
+            autorizarLectura('alquileres');
+
+            require_once __DIR__ . '/../Class/Parametros.php';
+            require_once __DIR__ . '/../Class/Horizonte.php';
+
+            $h = Horizonte::desdeParametros(new Parametros());
+            responder((new Alquileres($h->hoy()))->proyeccion($h));
+            break;
+
+        /* ================================================================
            PARAMETROS -> ALQUILERES
            ================================================================ */
         case 'getParametros':

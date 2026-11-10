@@ -187,7 +187,7 @@ class Menu {
             'items' => [
                 ['tab' => 'haberes',      'nombre' => 'Haberes',                  'icono' => 'fa-users-gear',     'estado' => self::PENDIENTE],
                 ['tab' => 'impuestos',    'nombre' => 'Impuestos',                'icono' => 'fa-file-invoice',   'estado' => self::PENDIENTE],
-                ['tab' => 'alquileres',   'nombre' => 'Alquileres',               'icono' => 'fa-building',       'estado' => self::PENDIENTE],
+                ['tab' => 'alquileres',   'nombre' => 'Alquileres',               'icono' => 'fa-building',       'estado' => self::DATOS],
                 ['tab' => 'llaves_renov', 'nombre' => 'Llaves y Renov. Contratos','icono' => 'fa-key',            'estado' => self::PENDIENTE]
             ]
         ],
