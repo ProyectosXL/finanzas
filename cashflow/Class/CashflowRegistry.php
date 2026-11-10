@@ -533,13 +533,27 @@ class CashflowRegistry {
             'series' => ['PAGOS' => 'Haberes y cargas']
         ],
 
+        /* EL PROVEEDOR YA EXISTE Y EL MODULO SIGUE SIN ESTAR DISPONIBLE, a
+           proposito. PROYECTADO es la proyeccion de la pestaña Alquileres por
+           dia de pago; si entrara al tablero hoy, cada alquiler se contaria dos
+           veces, porque sus facturas siguen en Cuentas a Pagar Locales. La
+           fila del tablero apunta a PAGOS, que llega con las facturas reales y
+           la exclusion de esas facturas de Proveedores Locales: hasta entonces
+           rinde cero y avisa, como cualquier modulo pendiente. Ver
+           Providers/AlquileresProvider.php y README-alquileres.md. */
         'ALQUILERES' => [
             'nombre' => 'Alquileres',
-            'descripcion' => 'Alquileres de locales y depositos',
+            'descripcion' => 'Alquileres de los locales: la proyeccion por local de la app de '
+                . 'alquileres, por dia de pago, con IVA, percepcion y retencion',
+            'archivo' => 'Providers/AlquileresProvider.php',
+            'clase' => 'AlquileresProvider',
             'moneda' => 'ARS',
             'disponible' => false,
             'tab' => 'alquileres',
-            'series' => ['PAGOS' => 'Alquileres']
+            'series' => [
+                'PAGOS' => 'Alquileres (llega con las facturas reales)',
+                'PROYECTADO' => 'Alquileres proyectados por local, por dia de pago'
+            ]
         ],
 
         'LLAVES_RENOV' => [

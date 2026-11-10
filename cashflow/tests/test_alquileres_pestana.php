@@ -206,3 +206,72 @@ chequear('en el menu esta en DATOS', Menu::DATOS, $estadoMenu);
 chequear('getProyeccion es una lectura', true, in_array('getProyeccion', AuthCashflow::LECTURAS['Alquileres'], true));
 $ctrl = file_get_contents(__DIR__ . '/../Controller/AlquileresController.php');
 chequear('y pide ver la pestaña', true, (bool) preg_match("/case 'getProyeccion':\s*autorizarLectura\('alquileres'\);/", $ctrl));
+
+seccion('El tablero: el proveedor listo, sin activar');
+
+require_once __DIR__ . '/../Class/CashflowRegistry.php';
+require_once __DIR__ . '/../Class/Providers/AlquileresProvider.php';
+
+class PestAlquileresConInsumos extends PestAlquileres {
+    public $ins;
+    public function insumos($h) { return $this->ins; }
+}
+
+class PestProveedor extends AlquileresProvider {
+    public $alq;
+    protected function modulo($h) { return $this->alq; }
+}
+
+$hDias = new Horizonte(28, 4, [], '2026-11-10');
+$alqDias = new PestAlquileresConInsumos('2026-11-10', new PestAppDoble(), new PestParDoble());
+$alqDias->ins = $ins;
+$prov = new PestProveedor('ALQUILERES');
+$prov->alq = $alqDias;
+$series = $prov->series($hDias);
+$s = $series[AlquileresProvider::SERIE];
+$pestDias = Alquileres::armarPestana($alqDias->calcular($hDias, $ins), $hDias);
+
+chequear('el proveedor rinde la serie PROYECTADO', true, isset($series['PROYECTADO']));
+chequear('el tablero suma lo mismo que la pestaña, al centavo', $pestDias['kpis']['total_horizonte'],
+    round(array_sum($s['dias']) + array_sum($s['meses']) + $s['fuera_horizonte'], 2));
+chequear('y nada queda fuera del eje', 0.0, (float) $s['fuera_horizonte']);
+chequear('el pago de hoy cae en el dia de hoy', true, $s['dias']['2026-11-10'] > 0);
+
+$movidos = array_filter($alqDias->calcular($hDias, $ins)['pagos'], function ($x) { return $x['nota_dia'] !== ''; });
+chequear('un pago corrido de dia anota su celda con detalle', true,
+    !empty($movidos) && isset($s['detalle'][claveColumna($hDias, array_values($movidos)[0]['fecha'])]));
+
+/** La columna del eje de una fecha: su dia si esta en el tramo, si no su mes */
+function claveColumna($h, $fecha) {
+    return in_array($fecha, array_column($h->dias(), 'fecha'), true) ? 'DIA|' . $fecha : 'MES|' . substr($fecha, 0, 7);
+}
+
+$todos = [];
+foreach (CashflowRegistry::todos() as $m) {
+    $todos[$m['codigo']] = $m;
+}
+chequear('el modulo ALQUILERES esta declarado', true, isset($todos['ALQUILERES']));
+chequear('y NO esta disponible: no entra al tablero', false, CashflowRegistry::disponible('ALQUILERES'));
+chequear('declara la serie PROYECTADO', true, isset($todos['ALQUILERES']['series']['PROYECTADO']));
+chequear('y sigue declarando PAGOS, la que pide la fila del tablero', true, isset($todos['ALQUILERES']['series']['PAGOS']));
+
+/* NINGUNA FILA USA LA PROYECCION. La fila "Alquileres" de la semilla apunta a
+   ALQUILERES/PAGOS y sigue en cero; si alguna apuntara a PROYECTADO, el mismo
+   alquiler se contaria dos veces (sus facturas estan en Cuentas a Pagar
+   Locales). Se mira la semilla y, si hay base, la estructura real. */
+$enSemilla = 0;
+foreach (glob(__DIR__ . '/../sql/cashflow_estructura*.sql') as $archivo) {
+    $enSemilla += preg_match_all("/'ALQUILERES'\s*,\s*'PROYECTADO'/", file_get_contents($archivo));
+}
+chequear('ninguna fila de la semilla usa ALQUILERES/PROYECTADO', 0, $enSemilla);
+
+if (!Pruebas::hayBase()) {
+    Pruebas::saltear('sin conexion a la base: la estructura real no se mira');
+} else {
+    require_once __DIR__ . '/../../class/conexion.php';
+    $cid = (new Conexion())->conectar('central');
+    $st = sqlsrv_query($cid, "SELECT COUNT(*) AS N FROM dbo.RO_T_CASHFLOW_CONF_FILA
+                              WHERE ORIGEN_PROVIDER = 'ALQUILERES' AND ORIGEN_SERIE = 'PROYECTADO'");
+    $row = $st ? sqlsrv_fetch_array($st, SQLSRV_FETCH_ASSOC) : null;
+    chequear('ninguna fila de la estructura real usa ALQUILERES/PROYECTADO', 0, $row ? (int) $row['N'] : -1);
+}
