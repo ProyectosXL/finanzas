@@ -106,7 +106,22 @@ class Alquileres {
                 'Locales');
         }
 
+        /* LOS DE RUBRO ALQUILER FUERA DE TODA FILA, con el pendiente de cada uno:
+           el aviso y la lista con el link al Maestro. */
+        $sinFila = [];
+
+        try {
+            require_once __DIR__ . '/Proveedores.php';
+            $sinFila = $this->rubroSinFila((new Proveedores())->getPendientes($this->hoy), $vigentes, $avisos);
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer las cuentas a pagar de Tango ('
+                . $e->getMessage() . '): no se puede decir qué proveedores de alquiler quedan fuera del tablero.');
+        }
+
+        $avisos = array_merge($avisos, AlquileresFacturas::avisoRubroSinFila($sinFila));
+
         return [
+            'rubro_sin_fila' => $sinFila,
             'tabla_creada' => $this->par->tablaCreada(),
             'script' => AlquileresParametros::SCRIPT,
             'general' => $base['general'],
@@ -222,12 +237,19 @@ class Alquileres {
             $out['ctx'] = $ctx;
             $out['avisos'] = $ctx['avisos'];
 
+            $prov = new Proveedores();
+            $todos = $prov->getPendientes($h->hoy());
+
+            /* LOS DE RUBRO ALQUILER QUE NO ESTAN EN NINGUNA FILA: excluidos de
+               Proveedores Locales y sin dar de alta aca. Va al tablero (por el
+               proveedor) y a la pestaña. */
+            $out['avisos'] = array_merge($out['avisos'], AlquileresFacturas::avisoRubroSinFila(
+                $this->rubroSinFila($todos, $ctx['razones'], $out['avisos'])));
+
             if (empty($ctx['razones'])) {
                 return $out;
             }
 
-            $prov = new Proveedores();
-            $todos = $prov->getPendientes($h->hoy());
             $partes = AlquileresFacturas::partir($todos, $ctx);
             $out['avisos'] = array_merge($out['avisos'], AlquileresFacturas::avisoCondicion($ctx, $todos));
 
@@ -983,6 +1005,36 @@ class Alquileres {
 
             return null;
         }
+    }
+
+    /**
+     * Los proveedores con RUBRO = ALQUILER excluidos de Proveedores Locales y
+     * sin dar de alta: AlquileresFacturas::rubroSinFila() con lo que lee.
+     * Nunca lanza: si algo no se puede leer, lista vacia y aviso.
+     *
+     * @param array $pendientes Filas de getPendientes()
+     * @param array $razones Las dadas de alta: cod => ...
+     * @param array $avisos
+     * @return array
+     */
+    protected function rubroSinFila($pendientes, $razones, &$avisos) {
+        $universo = $this->universoRazones($avisos);
+
+        if ($universo === null) {
+            return [];
+        }
+
+        try {
+            require_once __DIR__ . '/ProveedoresExclusion.php';
+            $excl = (new ProveedoresExclusion())->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los excluidos de Proveedores Locales ('
+                . $e->getMessage() . '): no se puede decir qué proveedores de alquiler quedan fuera del tablero.');
+
+            return [];
+        }
+
+        return AlquileresFacturas::rubroSinFila($universo, $excl, $razones, $pendientes);
     }
 
     /** La alicuota general, en puntos (21, no 0,21) */

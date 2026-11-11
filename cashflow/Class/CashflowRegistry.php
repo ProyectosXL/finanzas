@@ -539,26 +539,40 @@ class CashflowRegistry {
             'series' => ['PAGOS' => 'Haberes y cargas']
         ],
 
-        /* EL PROVEEDOR YA EXISTE Y EL MODULO SIGUE SIN ESTAR DISPONIBLE, a
-           proposito. PROYECTADO es la proyeccion de la pestaña Alquileres por
-           dia de pago; si entrara al tablero hoy, cada alquiler se contaria dos
-           veces, porque sus facturas siguen en Cuentas a Pagar Locales. La
-           fila del tablero apunta a PAGOS, que llega con las facturas reales y
-           la exclusion de esas facturas de Proveedores Locales: hasta entonces
-           rinde cero y avisa, como cualquier modulo pendiente. Ver
-           Providers/AlquileresProvider.php y README-alquileres.md. */
+        /* ---- Alquileres -----------------------------------------------------
+           Dos partes: REAL, las facturas de Tango imputadas en la pestaña, en
+           su fecha de pago y por su a pagar; y PROYECTADO, la proyeccion por
+           local que ninguna factura reemplazo. Las dos salen de UNA lista de
+           pagos (Alquileres::calcular()), la misma que agrupa la pestaña.
+
+           LA FILA DEL TABLERO ES AGRUPADA: dos filas, una por serie, en un
+           renglon que se abre (sql/cashflow_alquileres_fila.sql). PAGOS es el
+           total de las dos y queda para la fila de antes del split, que apunta
+           a ALQUILERES / PAGOS: hasta que se corre el script, esa fila muestra
+           el total sin abrir; despues queda inhabilitada. El total y sus partes
+           no pueden convivir activos ('componentes').
+
+           LAS FACTURAS SIN IMPUTAR NO ESTAN EN NINGUNA SERIE: contarian dos
+           veces contra la proyeccion del local. El proveedor las avisa con su
+           importe. Y las facturas de alquiler salen de Cuentas a Pagar Locales
+           SOLO si hay una fila activa con REAL o PAGOS (AlquileresFacturas). */
         'ALQUILERES' => [
             'nombre' => 'Alquileres',
-            'descripcion' => 'Alquileres de los locales: la proyeccion por local de la app de '
-                . 'alquileres, por dia de pago, con IVA, percepcion y retencion',
+            'descripcion' => 'Alquileres de los locales: las facturas imputadas (real) y la proyeccion '
+                . 'por local que no reemplazaron (proyectado), por dia de pago, con IVA, percepcion y '
+                . 'retencion',
             'archivo' => 'Providers/AlquileresProvider.php',
             'clase' => 'AlquileresProvider',
             'moneda' => 'ARS',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'alquileres',
             'series' => [
-                'PAGOS' => 'Alquileres (llega con las facturas reales)',
-                'PROYECTADO' => 'Alquileres proyectados por local, por dia de pago'
+                'PAGOS' => 'Alquileres, real + proyectado (la fila de antes del split)',
+                'REAL' => 'Facturas de alquiler imputadas, en su fecha de pago',
+                'PROYECTADO' => 'Proyeccion por local que ninguna factura reemplazo'
+            ],
+            'componentes' => [
+                'PAGOS' => ['REAL', 'PROYECTADO']
             ]
         ],
 

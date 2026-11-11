@@ -39,9 +39,9 @@ $disponibles = array_values(array_filter($todos, function ($p) { return $p['disp
 // Compras Proyectadas, Saldos, Caja Locales, Cuentas de inversion, Cuentas
 // comitente, Cobranzas Electronicas, Echeqs, Dolares Cuenta Comitente,
 // Exportaciones Tasky, Saldo de Inversiones, Cobertura, Proveedores Locales,
-// Logistica y Pagos con Tarjetas y Otros. Los dos de Otros Ingresos estan
+// Logistica, Pagos con Tarjetas y Otros y Alquileres. Los dos de Otros Ingresos estan
 // retirados pero siguen disponibles: sirven lo que tienen cargado.
-chequear('hay 20 modulos con datos reales', 20, count($disponibles));
+chequear('hay 21 modulos con datos reales', 21, count($disponibles));
 
 /* TARJETAS es el ultimo en sumarse, y LOGISTICA el anterior: son los dos unicos
    del grupo de egresos pendientes que ya tienen proveedor. Los demas -Haberes,

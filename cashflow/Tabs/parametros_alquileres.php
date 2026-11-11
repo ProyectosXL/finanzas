@@ -34,6 +34,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'ALQUILERES');
     <!-- Avisos: el script sin correr, locales incompletos, razones sociales que
          perdieron el rubro, proveedores con rubro que no están dados de alta. -->
     <div id="palqAvisos"></div>
+    <!-- Los de rubro ALQUILER fuera de toda fila del tablero, con el link al
+         Maestro. Ver Js/Parametros-Alquileres.js, pintarSinFila(). -->
+    <div id="palqSinFila"></div>
     <div class="cargando-slot" id="palqCargando" data-cargando="Cargando los parámetros de Alquileres…"></div>
 
     <!-- ================================================================

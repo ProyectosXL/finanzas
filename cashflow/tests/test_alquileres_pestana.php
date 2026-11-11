@@ -97,7 +97,7 @@ class PestAlquileres extends Alquileres {
     protected function ivaGeneral() { return 21.0; }
 }
 
-$h = new Horizonte(0, 4, [], '2026-11-10');
+$h = new Horizonte(0, 4, [], new DateTime('2026-11-10'));   // DateTime: con un string, Horizonte toma el reloj real y la prueba caduca
 $meses = array_column($h->meses(), 'clave');
 $habiles = [];
 for ($d = '2026-08-01'; $d <= '2027-04-30'; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
@@ -208,9 +208,10 @@ chequear('getProyeccion es una lectura', true, in_array('getProyeccion', AuthCas
 $ctrl = file_get_contents(__DIR__ . '/../Controller/AlquileresController.php');
 chequear('y pide ver la pestaña', true, (bool) preg_match("/case 'getProyeccion':\s*autorizarLectura\('alquileres'\);/", $ctrl));
 
-seccion('El tablero: el proveedor listo, sin activar');
+seccion('El tablero: REAL, PROYECTADO y PAGOS, de la misma lista');
 
 require_once __DIR__ . '/../Class/CashflowRegistry.php';
+require_once __DIR__ . '/../Class/CashflowEstructura.php';
 require_once __DIR__ . '/../Class/Providers/AlquileresProvider.php';
 
 class PestAlquileresConInsumos extends PestAlquileres {
@@ -223,56 +224,118 @@ class PestProveedor extends AlquileresProvider {
     protected function modulo($h) { return $this->alq; }
 }
 
-$hDias = new Horizonte(28, 4, [], '2026-11-10');
+$hDias = new Horizonte(28, 4, [], new DateTime('2026-11-10'));
 $alqDias = new PestAlquileresConInsumos('2026-11-10', new PestAppDoble(), new PestParDoble());
-$alqDias->ins = $ins;
+
+/* Con UNA FACTURA IMPUTADA: tiene que haber de las dos partes. Se arma sobre
+   la proyeccion real de los dobles: el primer pago de noviembre del primer
+   local, reemplazado por una factura que vence el 20/11. */
+$proySola = $alqDias->calcular($hDias, $ins)['pagos'];
+$blanco = array_values(array_filter($proySola, function ($p) { return $p['mes_pago'] === '2026-11'; }))[0];
+$facturaT = ['COD_PROVEE' => 'SAUNIC', 'RAZON_SOC' => 'CENCOSUD', 'T_COMP' => 'FAC', 'N_COMP' => 'A0193000155679',
+             'FECHA_VTO' => '2026-11-20', 'FECHA_EMIS' => '2026-11-02', 'IMPORTE_VTO' => 1000.0,
+             'IMPORTE_PENDIENTE' => 1000.0, 'NETO_GRAVADO_COMP' => null, 'IMPORTE_COMP' => 1000.0, 'LEYENDA' => ''];
+$sinImputarT = $facturaT;
+$sinImputarT['N_COMP'] = 'A0193000155680';
+$insF = $ins + ['facturas' => [
+    'ctx' => AlquileresFacturas::contexto(['SAUNIC'], [], AlquileresFacturas::condicion(true, ['REAL'], true)),
+    'pendientes' => [$facturaT, $sinImputarT], 'excluidas' => [], 'vtos' => [], 'en_tango' => [], 'avisos' => [],
+    'imputaciones' => [['id' => 1, 'usuario' => 'ANA', 'fecha' => '2026-11-09 10:00', 'observacion' => null,
+        'facturas' => [['ID' => 1, 'COD_PROVEE' => 'SAUNIC', 'T_COMP' => 'FAC', 'N_COMP' => 'A0193000155679',
+            'FECHA_VTO_TANGO' => '2026-11-20', 'PENDIENTE' => 1000.0, 'NETO_GRAVADO' => null, 'RETENCION' => 20.0,
+            'RETENCION_SUGERIDA' => null, 'ESTADO' => 'PENDIENTE', 'FECHA_PAGADA' => null]],
+        'renglones' => [['orden' => 1, 'mes' => '2026-11', 'importe' => 1000.0, 'todos_de' => null,
+            'conceptos' => [(string) $blanco['concepto']], 'locales' => [$blanco['nro']]]]]]
+]];
+$alqDias->ins = $insF;
 $prov = new PestProveedor('ALQUILERES');
 $prov->alq = $alqDias;
 $series = $prov->series($hDias);
-$s = $series[AlquileresProvider::SERIE];
-$pestDias = Alquileres::armarPestana($alqDias->calcular($hDias, $ins), $hDias);
+$cF = $alqDias->calcular($hDias, $insF);
+$pestDias = Alquileres::armarPestana($cF, $hDias);
 
-chequear('el proveedor rinde la serie PROYECTADO', true, isset($series['PROYECTADO']));
-chequear('el tablero suma lo mismo que la pestaña, al centavo', $pestDias['kpis']['total_horizonte'],
-    round(array_sum($s['dias']) + array_sum($s['meses']) + $s['fuera_horizonte'], 2));
-chequear('y nada queda fuera del eje', 0.0, (float) $s['fuera_horizonte']);
-chequear('el pago de hoy cae en el dia de hoy', true, $s['dias']['2026-11-10'] > 0);
+chequear('el proveedor rinde REAL, PROYECTADO y PAGOS', [true, true, true],
+    [isset($series['REAL']), isset($series['PROYECTADO']), isset($series['PAGOS'])]);
+chequear('REAL es la factura: pendiente menos retencion, el 20/11', 980.0, $series['REAL']['dias']['2026-11-20']);
+chequear('lo que la factura cubre ya no esta en PROYECTADO', false, (bool) array_filter($cF['pagos'],
+    function ($p) use ($blanco) { return $p['origen'] !== AlquileresCalculo::FACTURA && $p['nro'] === $blanco['nro']
+        && $p['concepto'] === $blanco['concepto'] && $p['mes_pago'] === '2026-11'; }));
+chequear('la factura sin imputar no esta en ninguna serie', 980.0,
+    round(array_sum($series['REAL']['dias']) + array_sum($series['REAL']['meses']), 2));
 
-$movidos = array_filter($alqDias->calcular($hDias, $ins)['pagos'], function ($x) { return $x['nota_dia'] !== ''; });
+$porDia = [];
+foreach ($cF['pagos'] as $p) { $porDia[$p['fecha']] = round(($porDia[$p['fecha']] ?? 0) + $p['a_pagar'], 2); }
+$malDia = [];
+foreach ($hDias->dias() as $d) {
+    $tab = round(($series['REAL']['dias'][$d['fecha']] ?? 0) + ($series['PROYECTADO']['dias'][$d['fecha']] ?? 0), 2);
+    if (abs($tab - ($porDia[$d['fecha']] ?? 0)) > 0.001 || abs($tab - $series['PAGOS']['dias'][$d['fecha']]) > 0.001) {
+        $malDia[] = $d['fecha'];
+    }
+}
+chequear('POR DIA, REAL + PROYECTADO = PAGOS = la lista de pagos de la pestaña', [], $malDia);
+$totalSerie = function ($s) { return round(array_sum($s['dias']) + array_sum($s['meses']) + $s['fuera_horizonte'], 2); };
+chequear('y en total, lo mismo que la pestaña', $pestDias['kpis']['total_horizonte'],
+    round($totalSerie($series['REAL']) + $totalSerie($series['PROYECTADO']), 2));
+chequear('la pestaña dice cuanto sin imputar', [1, 1000.0],
+    [$pestDias['facturas']['kpis']['sin_imputar_n'], $pestDias['facturas']['kpis']['sin_imputar_importe']]);
+
+$movidos = array_filter($cF['pagos'], function ($x) { return $x['nota_dia'] !== ''; });
 chequear('un pago corrido de dia anota su celda con detalle', true,
-    !empty($movidos) && isset($s['detalle'][claveColumna($hDias, array_values($movidos)[0]['fecha'])]));
+    !empty($movidos) && isset($series['PAGOS']['detalle'][claveColumna($hDias, array_values($movidos)[0]['fecha'])]));
 
 /** La columna del eje de una fecha: su dia si esta en el tramo, si no su mes */
 function claveColumna($h, $fecha) {
     return in_array($fecha, array_column($h->dias(), 'fecha'), true) ? 'DIA|' . $fecha : 'MES|' . substr($fecha, 0, 7);
 }
 
-$todos = [];
-foreach (CashflowRegistry::todos() as $m) {
-    $todos[$m['codigo']] = $m;
-}
-chequear('el modulo ALQUILERES esta declarado', true, isset($todos['ALQUILERES']));
-chequear('y NO esta disponible: no entra al tablero', false, CashflowRegistry::disponible('ALQUILERES'));
-chequear('declara la serie PROYECTADO', true, isset($todos['ALQUILERES']['series']['PROYECTADO']));
-chequear('y sigue declarando PAGOS, la que pide la fila del tablero', true, isset($todos['ALQUILERES']['series']['PAGOS']));
+seccion('El tablero: el modulo activo y la fila agrupada');
 
-/* NINGUNA FILA USA LA PROYECCION. La fila "Alquileres" de la semilla apunta a
-   ALQUILERES/PAGOS y sigue en cero; si alguna apuntara a PROYECTADO, el mismo
-   alquiler se contaria dos veces (sus facturas estan en Cuentas a Pagar
-   Locales). Se mira la semilla y, si hay base, la estructura real. */
-$enSemilla = 0;
-foreach (glob(__DIR__ . '/../sql/cashflow_estructura*.sql') as $archivo) {
-    $enSemilla += preg_match_all("/'ALQUILERES'\s*,\s*'PROYECTADO'/", file_get_contents($archivo));
-}
-chequear('ninguna fila de la semilla usa ALQUILERES/PROYECTADO', 0, $enSemilla);
+$meta = CashflowRegistry::meta('ALQUILERES');
+chequear('ALQUILERES esta disponible', true, CashflowRegistry::disponible('ALQUILERES'));
+chequear('PAGOS es el total de REAL y PROYECTADO', ['PAGOS' => ['REAL', 'PROYECTADO']], $meta['componentes']);
+
+$sql55 = file_get_contents(__DIR__ . '/../sql/cashflow_alquileres_fila.sql');
+chequear('el script crea las dos filas, agrupadas', [true, true, true], [
+    (bool) preg_match("/'ALQUILERES_REAL'.*'ALQUILERES', 'REAL'/s", $sql55),
+    (bool) preg_match("/'ALQUILERES_PROY'.*'ALQUILERES', 'PROYECTADO'/s", $sql55),
+    strpos($sql55, "GRUPO = ''ALQUILERES''") !== false]);
+chequear('inhabilita la de PAGOS en la misma transaccion', true,
+    (bool) preg_match("/BEGIN TRANSACTION;.*SET ACTIVO = 0.*ORIGEN_SERIE = 'PAGOS'.*COMMIT TRANSACTION;/s", $sql55));
+chequear('y controla que Cuentas a Pagar Locales no lleve las facturas', true,
+    strpos($sql55, "ORIGEN_SERIE = 'PAGOS_ALQUILERES'") !== false);
+
+/* LA FILA AGRUPADA CON EL VALIDADOR DE VERDAD: las dos nuevas activas y la vieja
+   inhabilitada es valido; las tres activas, doble conteo. */
+$sec = [['CODIGO' => 'COSTOS_INDIRECTOS', 'NOMBRE' => 'CI', 'ROL' => 'MOVIMIENTO', 'ID_PADRE' => null,
+         'ORDEN' => 10, 'ACTIVO' => 1]];
+$filaA = function ($id, $codigo, $serie, $orden, $activo, $extra = []) {
+    return array_merge(['ID' => $id, 'CODIGO' => $codigo, 'NOMBRE' => $codigo, 'SECCION' => 'COSTOS_INDIRECTOS',
+        'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'ALQUILERES', 'ORIGEN_SERIE' => $serie,
+        'ORDEN' => $orden, 'ACTIVO' => $activo, 'GRUPO' => null, 'NATURALEZA' => null, 'GRUPO_NOMBRE' => null], $extra);
+};
+$provs = ['ALQUILERES' => $meta + ['codigo' => 'ALQUILERES']];
+$nuevas = [
+    $filaA(16, 'ALQUILERES', 'PAGOS', 20, 0),
+    $filaA(60, 'ALQUILERES_REAL', 'REAL', 21, 1, ['GRUPO' => 'ALQUILERES', 'NATURALEZA' => 'REAL', 'GRUPO_NOMBRE' => 'Alquileres']),
+    $filaA(61, 'ALQUILERES_PROY', 'PROYECTADO', 22, 1, ['GRUPO' => 'ALQUILERES', 'NATURALEZA' => 'PROYECTADO'])
+];
+$v = CashflowEstructura::validar($sec, $nuevas, $provs);
+chequear('real y proyectado agrupados, la vieja inhabilitada: valido', [], $v['errores']);
+$tres = $nuevas;
+$tres[0]['ACTIVO'] = 1;
+chequear('con la de PAGOS activa tambien: el validador lo rechaza', true,
+    !empty(CashflowEstructura::validar($sec, $tres, $provs)['errores']));
 
 if (!Pruebas::hayBase()) {
     Pruebas::saltear('sin conexion a la base: la estructura real no se mira');
 } else {
     require_once __DIR__ . '/../../class/conexion.php';
     $cid = (new Conexion())->conectar('central');
-    $st = sqlsrv_query($cid, "SELECT COUNT(*) AS N FROM dbo.RO_T_CASHFLOW_CONF_FILA
-                              WHERE ORIGEN_PROVIDER = 'ALQUILERES' AND ORIGEN_SERIE = 'PROYECTADO'");
-    $row = $st ? sqlsrv_fetch_array($st, SQLSRV_FETCH_ASSOC) : null;
-    chequear('ninguna fila de la estructura real usa ALQUILERES/PROYECTADO', 0, $row ? (int) $row['N'] : -1);
+    $st = sqlsrv_query($cid, "SELECT ORIGEN_SERIE FROM dbo.RO_T_CASHFLOW_CONF_FILA
+                              WHERE ORIGEN_PROVIDER = 'ALQUILERES' AND ACTIVO = 1");
+    $activas = [];
+    while ($st && ($row = sqlsrv_fetch_array($st, SQLSRV_FETCH_ASSOC))) { $activas[] = $row['ORIGEN_SERIE']; }
+    chequear('en la estructura real, PROYECTADO activa solo con REAL y sin PAGOS', true,
+        !in_array('PROYECTADO', $activas, true) || (in_array('REAL', $activas, true) && !in_array('PAGOS', $activas, true)));
 }
+

@@ -40,8 +40,8 @@ require_once __DIR__ . '/Inflacion.php';
  *     fin de semana o feriado, el siguiente dia habil (DiasHabiles::siguiente()).
  *   - Si ese dia YA PASO dentro del mes en curso -vencio y no hay factura-, el
  *     pago va al siguiente dia habil desde hoy, nunca apilado en el primer dia
- *     del eje. Es provisorio: cuando lleguen las facturas reales (prompt B), la
- *     factura lo reemplaza.
+ *     del eje. Es provisorio: una factura imputada que cubre ese mes lo
+ *     reemplaza y se paga en su propia fecha (AlquileresImputacion).
  *
  * QUE ES UN ALQUILER
  * ------------------

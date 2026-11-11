@@ -95,6 +95,19 @@
         var soloExclM = document.getElementById('soloExcluidosMaestroProv');
         if (soloExclM) { soloExclM.addEventListener('change', pintarMaestro); }
 
+        /* LLEGAR DESDE OTRA PESTAÑA AL MAESTRO, CON SOLO EXCLUIDOS: es el link
+           del aviso de Parametros -> Alquileres por los proveedores de alquiler
+           excluidos de aca y no dados de alta alla. El destino lo deja quien
+           navega en window.cfSubTabDestino y se consume una vez (ver
+           Js/Cashflow.js, conectarEnlaces()). */
+        if (window.cfSubTabDestino === 'MAESTRO_EXCLUIDOS') {
+            window.cfSubTabDestino = null;
+
+            if (soloExclM) { soloExclM.checked = true; }
+
+            cambiarVista('maestro');
+        }
+
         ['filtroRubroEcoMaestroProv', 'filtroRubroMaestroProv', 'filtroFormaMaestroProv',
          'filtroRetMaestroProv'].forEach(function(id) {
             var sel = document.getElementById(id);

@@ -255,3 +255,56 @@ chequear('la grilla de Proveedores Locales y el universo de su proveedor ven las
 chequear('el universo de Tarjetas sale de esas mismas', [], array_values(array_diff(array_column($tu, 'N_COMP'), $enPl)));
 chequear('y ninguna de alquiler esta en las dos', [], array_values(array_intersect($enPl,
     array_column(AlquileresFacturas::partir($universo, $ctx)[AlquileresFacturas::A_ALQUILERES], 'N_COMP'))));
+
+seccion('El dia del pase: lo que sale de Cuentas a Pagar Locales se explica');
+
+/* Antes (sin la condicion) y despues (con la fila activa y el script): lo que
+   baja PAGOS es lo que pasa a Alquileres; sin imputar no suma, y el aviso lo
+   nombra con su importe. Ninguna factura queda sin explicar. */
+require_once __DIR__ . '/../Class/AlquileresImputacion.php';
+$antes = $series($universo, $cerrada);
+$despues = $series($universo, $ctx);
+$pasan = AlquileresFacturas::partir($universo, $ctx);
+$enAlq = AlquileresImputacion::aplicar(['pagos' => [], 'meses_pago' => ['2026-11'],
+    'pendientes' => $pasan[AlquileresFacturas::A_ALQUILERES], 'excluidas' => $pasan[AlquileresFacturas::A_EXCLUIDA],
+    'vtos' => [], 'imputaciones' => [], 'en_tango' => [], 'ctx' => $ctx, 'habiles' => [], 'hoy' => '2026-11-10']);
+$bajaPagos = round(($antes['PAGOS'] ?? 0) - ($despues['PAGOS'] ?? 0), 2);
+/* Las que estaban en PAGOS: con la regla de siempre (seriesDeItem sin la marca
+   de alquiler). Cencosud estaba excluido de Proveedores Locales: no estaba. */
+$estabanEnPagos = function ($items) {
+    return array_sum(array_map(function ($i) {
+        return in_array('PAGOS', ProveedoresProvider::seriesDeItem($i), true) ? $i['IMPORTE_A_PAGAR'] : 0;
+    }, $items));
+};
+chequear('lo que baja PAGOS = las de alquiler (o excluidas de Alquileres) que estaban en PAGOS', $bajaPagos,
+    round($estabanEnPagos($pasan[AlquileresFacturas::A_ALQUILERES]) + $estabanEnPagos($pasan[AlquileresFacturas::A_EXCLUIDA]), 2));
+chequear('y en Alquileres quedan sin imputar, con su aviso', [true, true],
+    [$enAlq['kpis']['sin_imputar_n'] === count($pasan[AlquileresFacturas::A_ALQUILERES]),
+     strpos($enAlq['avisos'][0]['texto'], 'sin imputar') !== false]);
+chequear('PAGOS_TODO baja exactamente lo que va a PAGOS_ALQUILERES', round($antes['PAGOS_TODO'] - $despues['PAGOS_TODO'], 2),
+    $despues['PAGOS_ALQUILERES']);
+
+seccion('Los de rubro ALQUILER que no estan en ninguna fila');
+
+$univ = ['SAPALA' => ['cod' => 'SAPALA', 'nombre' => 'IRSA'], 'SAGALL' => ['cod' => 'SAGALL', 'nombre' => 'GALLEGOS'],
+         'OGSPLO' => ['cod' => 'OGSPLO', 'nombre' => 'SPLODER'], 'SAROSA' => ['cod' => 'SAROSA', 'nombre' => 'ROSARIO']];
+$exclPl = ['SAPALA' => ['MOTIVO' => 'Alquileres'], 'SAGALL' => ['MOTIVO' => 'Alquileres'],
+           'OGSPLO' => ['MOTIVO' => 'Otra cosa']];
+$lista = AlquileresFacturas::rubroSinFila($univ, $exclPl, ['SAPALA' => true], [
+    ['COD_PROVEE' => 'SAGALL', 'IMPORTE_PENDIENTE' => 100.0], ['COD_PROVEE' => 'OGSPLO', 'IMPORTE_PENDIENTE' => 900.0],
+    ['COD_PROVEE' => 'SAPALA', 'IMPORTE_PENDIENTE' => 50.0], ['COD_PROVEE' => 'SAROSA', 'IMPORTE_PENDIENTE' => 7.0]]);
+chequear('excluidos de Proveedores Locales y sin alta, sin mirar el motivo; de mayor a menor', ['OGSPLO', 'SAGALL'],
+    array_column($lista, 'cod'));
+chequear('IRSA (dada de alta) y Rosario (no excluido) no estan', 2, count($lista));
+$avR = AlquileresFacturas::avisoRubroSinFila($lista);
+chequear('el aviso: atencion, cuantos y cuanto', [Aviso::WARNING, true], [$avR[0]['nivel'],
+    strpos($avR[0]['texto'], '2 proveedores con $ 1.000,00 pendientes no están en ninguna fila del tablero: '
+        . 'dalos de alta en Alquileres o volvé a incluirlos en Proveedores Locales') === 0]);
+chequear('con la lista: codigo, razon social y pendiente', true,
+    strpos($avR[0]['texto'], 'OGSPLO SPLODER $ 900,00') !== false);
+chequear('sin ninguno, sin aviso', [], AlquileresFacturas::avisoRubroSinFila([]));
+$jsPar = file_get_contents(__DIR__ . '/../Js/Parametros-Alquileres.js');
+chequear('Parametros lleva el link al Maestro con Solo excluidos', [true, true],
+    [strpos($jsPar, "window.cfSubTabDestino = 'MAESTRO_EXCLUIDOS'") !== false,
+     strpos(file_get_contents(__DIR__ . '/../Js/Proveedores-Proveedores_locales.js'),
+         "window.cfSubTabDestino === 'MAESTRO_EXCLUIDOS'") !== false]);

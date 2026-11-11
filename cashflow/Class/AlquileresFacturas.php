@@ -254,6 +254,75 @@ class AlquileresFacturas {
     }
 
     /* ====================================================================
+       LOS QUE NO ESTAN EN NINGUNA FILA
+       ==================================================================== */
+
+    /**
+     * Los proveedores con RUBRO = ALQUILER que estan EXCLUIDOS de Proveedores
+     * Locales y NO estan dados de alta en Alquileres: su deuda no esta en
+     * ninguna fila del tablero. Proveedores Locales la saca (la exclusion) y
+     * Alquileres no la toma (no estan dados de alta).
+     *
+     * EL CRITERIO NO MIRA EL MOTIVO de la exclusion, que se escribe a mano: un
+     * proveedor de alquiler excluido "por otra cosa" esta igual fuera del
+     * cuadro.
+     *
+     * Estatica y pura.
+     *
+     * @param array $universo AlquileresParametros::universoDelMaestro(): cod => ['cod', 'nombre']
+     * @param array $excluidosPl ProveedoresExclusion::vigentes('PROV_LOCALES'): cod => [...]
+     * @param array $razones Las dadas de alta: cod => ...
+     * @param array $pendientes Filas de getPendientes() (todas)
+     * @return array Lista de ['cod', 'nombre', 'pendiente', 'motivo'], de mayor a menor pendiente
+     */
+    public static function rubroSinFila($universo, $excluidosPl, $razones, $pendientes) {
+        $out = [];
+
+        foreach (is_array($universo) ? $universo : [] as $cod => $p) {
+            $c = Planilla::codigo($cod);
+
+            if (isset($excluidosPl[$c]) && !isset($razones[$c])) {
+                $out[$c] = ['cod' => $c, 'nombre' => $p['nombre'] ?? $c, 'pendiente' => 0.0,
+                            'motivo' => $excluidosPl[$c]['MOTIVO'] ?? null];
+            }
+        }
+
+        foreach (is_array($pendientes) ? $pendientes : [] as $i) {
+            $c = Planilla::codigo($i['COD_PROVEE'] ?? '');
+
+            if (isset($out[$c])) {
+                $out[$c]['pendiente'] = round($out[$c]['pendiente'] + (float) $i['IMPORTE_PENDIENTE'], 2);
+            }
+        }
+
+        $out = array_values($out);
+        usort($out, function ($a, $b) { return $b['pendiente'] <=> $a['pendiente'] ?: strcmp($a['cod'], $b['cod']); });
+
+        return $out;
+    }
+
+    /**
+     * El aviso de atencion de rubroSinFila(), con la lista. [] si no hay ninguno.
+     *
+     * @param array $lista
+     * @return array
+     */
+    public static function avisoRubroSinFila($lista) {
+        if (empty($lista)) {
+            return [];
+        }
+
+        $plata = function ($n) { return '$ ' . number_format($n, 2, ',', '.'); };
+
+        return [Aviso::nuevo(Aviso::WARNING, count($lista) . ' proveedores con '
+            . $plata(array_sum(array_column($lista, 'pendiente'))) . ' pendientes no están en ninguna fila del '
+            . 'tablero: dalos de alta en Alquileres o volvé a incluirlos en Proveedores Locales. '
+            . implode('; ', array_map(function ($p) use ($plata) {
+                return $p['cod'] . ' ' . $p['nombre'] . ' ' . $plata($p['pendiente']);
+            }, $lista)) . '. Se revisan en Proveedores Locales › Maestro, con «Sólo excluidos».', 'Razones sociales')];
+    }
+
+    /* ====================================================================
        LOS AVISOS
        ==================================================================== */
 

@@ -40,7 +40,9 @@
         pedir(ENDPOINT + '?action=getProyeccion')
             .then(function(d) {
                 datos = d.data;
-                AvisosPanel.pintar('avisosAlquileres', datos.avisos || []);
+                /* Con los del tablero de su seccion: los mismos que el proveedor
+                   ALQUILERES le dice al cuadro. */
+                AvisosPanel.pintarPestana('avisosAlquileres', datos.avisos || [], { tab: 'alquileres' });
                 pintarKpis();
                 dibujar();
                 dibujarVentas();
@@ -488,6 +490,7 @@
             crearColumnasFijas({ tabla: 'tablaAlqVentas', control: 'colFijasAlqVentas', clave: 'alquileres_ventas', porDefecto: [0] });
         }
 
+        AvisosPanel.pedirTablero('alquileres');
         cargar();
     }
 

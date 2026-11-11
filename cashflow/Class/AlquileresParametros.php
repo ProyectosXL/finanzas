@@ -26,8 +26,8 @@ require_once __DIR__ . '/Planilla.php';
  * que un proveedor sea de alquiler lo decide alguien, al darlo de alta: con el
  * rubro aparecen tambien Mercado Libre y Sploder. Un proveedor dado de alta que
  * despues pierde el rubro SIGUE DE ALTA, con un aviso: darlo de baja es una
- * decision. Es el mismo criterio que, en el prompt B, va a decidir que factura
- * de Proveedores Locales es de alquiler.
+ * decision. Es el mismo criterio que decide que factura de Tango es de
+ * alquiler y sale de Proveedores Locales: AlquileresFacturas::esDeAlquiler().
  *
  * LA VALIDACION MANDA ACA. Los validadores son estaticos y puros, y la
  * pantalla solo explica y bloquea botones.
