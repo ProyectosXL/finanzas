@@ -345,10 +345,13 @@ class AlquileresImputacion {
      *     'pagos' => la proyeccion ORIGINAL,
      *     'locales' => nro => ['cod_provee', 'nombre', 'pct_iva', 'pct_percepcion', 'pct_retencion']
      * ]
+     * @param bool $guardar Al guardar, la retencion de cada factura es
+     *        obligatoria (0 es un valor; vacio no): en la previsualizacion todavia
+     *        se esta armando y se sugiere
      * @return array ['ok', 'errores', 'facturas', 'renglones', 'total_facturas', 'total_renglones',
      *                'diferencia', 'reemplaza' => [id], 'avisos']
      */
-    public static function validar($b, $e) {
+    public static function validar($b, $e, $guardar = false) {
         $errores = [];
         $avisos = [];
         $facturas = [];
@@ -385,6 +388,8 @@ class AlquileresImputacion {
 
             if ($ret !== null && ($ret < 0 || $ret > $pend)) {
                 $errores[] = 'La retención de ' . $nombre . ' tiene que estar entre $ 0 y su pendiente.';
+            } elseif ($ret === null && $guardar) {
+                $errores[] = 'Falta la retención de ' . $nombre . ' (0 si no lleva).';
             }
 
             $facturas[$clave] = ['clave' => $clave, 'fila' => $p, 'pendiente' => $pend, 'retencion' => $ret,
@@ -966,6 +971,48 @@ class AlquileresImputacion {
         }
 
         return ['estado' => self::ANULADA, 'fecha' => null, 'cambio' => null];
+    }
+
+    /**
+     * Las imputaciones que impiden dar de baja una razon social en Parametros
+     * -> Alquileres: las vigentes con alguna cuota de ese proveedor que SIGUE
+     * PENDIENTE en Tango. Dar de baja devuelve sus facturas a Proveedores
+     * Locales, y una imputacion de una factura que alli se va a pagar por otro
+     * lado dejaria la plata contada en los dos. Primero se deshacen.
+     *
+     * LAS DE FACTURAS YA PAGADAS NO BLOQUEAN: quedan con su historial.
+     *
+     * @param string $codProvee
+     * @param array $imputaciones Las vigentes
+     * @param array $pendientes Claves de cuota pendientes en Tango (claveCuota => true),
+     *        de TODO el universo, no solo las de alquiler
+     * @return array Lista de ['imputacion', 'factura', 'meses', 'usuario', 'fecha']
+     */
+    public static function bloqueanBaja($codProvee, $imputaciones, $pendientes) {
+        $cod = Planilla::codigo($codProvee);
+        $out = [];
+
+        foreach ($imputaciones as $imp) {
+            foreach ($imp['facturas'] as $f) {
+                if (Planilla::codigo($f['COD_PROVEE']) === $cod && isset($pendientes[self::claveCuota($f)])) {
+                    $out[] = ['imputacion' => $imp['id'], 'factura' => $f['T_COMP'] . ' ' . $f['N_COMP'],
+                              'meses' => array_values(array_unique(array_column($imp['renglones'], 'mes'))),
+                              'usuario' => $imp['usuario'], 'fecha' => $imp['fecha']];
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /** El mensaje de una baja bloqueada: que imputaciones hay que deshacer */
+    public static function mensajeBajaBloqueada($cod, $bloquean) {
+        return 'No se puede dar de baja ' . $cod . ': tiene imputaciones de facturas todavía pendientes, que '
+            . 'volverían a Proveedores Locales. Deshacelas primero en Alquileres › Facturas: '
+            . implode('; ', array_map(function ($b) {
+                return 'imputación ' . $b['imputacion'] . ' — ' . $b['factura'] . ', cubre '
+                    . implode(', ', $b['meses']) . ', la cargó ' . ($b['usuario'] ?: '—') . ' el ' . $b['fecha'];
+            }, $bloquean)) . '.';
     }
 
     /** Las cuotas imputadas que ya no estan pendientes ni marcadas pagadas: las que hay que mirar en Tango */

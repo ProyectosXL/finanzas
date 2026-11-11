@@ -191,7 +191,8 @@ seccion('Alquileres: la pestaña esta cableada');
 
 $tab = file_get_contents(__DIR__ . '/../Tabs/alquileres.php');
 chequear('ya no es un placeholder', false, strpos($tab, 'tab_placeholder') !== false);
-chequear('Facturas queda para la proxima entrega', true, strpos($tab, 'Disponible en la próxima entrega') !== false);
+chequear('Facturas ya no es "la proxima entrega": tiene su grilla', [false, true],
+    [strpos($tab, 'Disponible en la próxima entrega') !== false, strpos($tab, 'id="tablaAlqFact"') !== false]);
 chequear('la raiz lleva el permiso de la pestaña', true, strpos($tab, "AuthCashflow::atributoEdicion('alquileres')") !== false);
 chequear('las tres sub-pestañas', 3, substr_count($tab, 'data-bs-toggle="tab"'));
 $estadoMenu = null;

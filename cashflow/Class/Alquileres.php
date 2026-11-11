@@ -326,6 +326,47 @@ class Alquileres {
     }
 
     /**
+     * Lo que necesita validar o guardar una imputacion, leido AHORA: las cuotas
+     * pendientes de alquiler, las imputaciones vigentes, la proyeccion ORIGINAL
+     * (sin reemplazos: es con lo que se reparte por local) y los locales con sus
+     * alicuotas. Es lo que hace que guardar frene si una factura cambio entre
+     * que se armo y se guardo.
+     *
+     * @param Horizonte $h
+     * @return array El $e de AlquileresImputacion::validar(), + 'avisos'
+     * @throws InvalidArgumentException si la condicion de seguridad no se cumple
+     */
+    public function contextoImputacion($h) {
+        $ins = $this->insumos($h);
+        $f = $ins['facturas'];
+
+        if ($f['ctx'] === null || empty($f['ctx']['condicion']['cumple'])) {
+            throw new InvalidArgumentException('Las facturas de alquiler todavía están en Proveedores Locales: '
+                . 'no se pueden imputar hasta que el tablero tenga la fila de Alquileres y se haya corrido '
+                . AlquileresFacturas::SCRIPT . '. Ver los avisos de la pestaña.');
+        }
+
+        $proy = $this->calcularProyeccion($h, $ins);
+        $pend = [];
+
+        foreach ($f['pendientes'] as $p) {
+            $pend[AlquileresImputacion::claveCuota($p)] = $p;
+        }
+
+        $locales = [];
+
+        foreach ($proy['locales'] as $nro => $l) {
+            $locales[$nro] = ['cod_provee' => $l['params']['cod_provee'] ?? null, 'nombre' => $l['nombre'],
+                              'pct_iva' => $l['params']['pct_iva'] ?? null,
+                              'pct_percepcion' => $l['params']['pct_percepcion'] ?? null,
+                              'pct_retencion' => $l['params']['pct_retencion'] ?? null];
+        }
+
+        return ['pendientes' => $pend, 'imputaciones' => $f['imputaciones'], 'pagos' => $proy['pagos'],
+                'locales' => $locales, 'avisos' => $f['avisos']];
+    }
+
+    /**
      * La proyeccion sola, sin facturas: lo que se calculaba antes de que
      * existieran. Ver calcular().
      */
@@ -668,6 +709,7 @@ class Alquileres {
         }));
 
         return [
+            'hoy' => $h->hoy(),
             'meses' => $meses,
             'mes_actual' => $mesActual,
             'locales' => $locales,

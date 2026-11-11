@@ -310,6 +310,60 @@ $retMal = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA
     ['conceptos' => ['1'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 3000]]], $soloA);
 chequear('la retencion no puede pasar el pendiente', false, $retMal['ok']);
 
+$sinRet = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA', 't_comp' => 'FAC', 'n_comp' => 'C1',
+    'vto_tango' => '2026-11-20', 'pendiente' => 3000, 'retencion' => null]], 'renglones' => [
+    ['conceptos' => ['1'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 3000]]], $soloA, true);
+chequear('al guardar, la retencion es obligatoria (0 es un valor)', [false, true],
+    [$sinRet['ok'], strpos(implode(' ', $sinRet['errores']), 'Falta la retención') !== false]);
+chequear('en la previsualizacion no: se sugiere', true, AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA',
+    't_comp' => 'FAC', 'n_comp' => 'C1', 'vto_tango' => '2026-11-20', 'pendiente' => 3000, 'retencion' => null]],
+    'renglones' => [['conceptos' => ['1'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 3000]]], $soloA)['ok']);
+
+seccion('Dar de baja una razon social con imputaciones de facturas pendientes');
+
+$impBaja = imputacionP(10, [$fa], [['conceptos' => ['1'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 3000.0]]);
+$impBaja['usuario'] = 'ANA';
+$bl = AlquileresImputacion::bloqueanBaja('SAPALA', [$impBaja], [AlquileresImputacion::claveCuota($fa) => true]);
+chequear('la factura sigue pendiente: bloquea', 1, count($bl));
+$msg = AlquileresImputacion::mensajeBajaBloqueada('SAPALA', $bl);
+chequear('el mensaje lista factura, mes que cubre y quien la cargo', [true, true, true],
+    [strpos($msg, 'FAC C1') !== false, strpos($msg, '2026-11') !== false, strpos($msg, 'ANA') !== false]);
+chequear('ya pagada (no esta en pendientes): no bloquea', [], AlquileresImputacion::bloqueanBaja('SAPALA', [$impBaja], []));
+chequear('de otra razon social: no bloquea', [],
+    AlquileresImputacion::bloqueanBaja('SAUNIC', [$impBaja], [AlquileresImputacion::claveCuota($fa) => true]));
+
+seccion('El cableado: permisos, endpoints y pantalla');
+
+require_once __DIR__ . '/../Class/AuthCashflow.php';
+$ctrl = file_get_contents(__DIR__ . '/../Controller/AlquileresController.php');
+$jsF = file_get_contents(__DIR__ . '/../Js/Alquileres-Facturas.js');
+$tabA = file_get_contents(__DIR__ . '/../Tabs/alquileres.php');
+
+foreach (['editarVtoFactura', 'deshacerVtoFactura', 'previsualizarImputacion', 'guardarImputacion',
+          'deshacerImputacion'] as $accion) {
+    chequear($accion . ' pide cashflow.editar.alquileres, el controller la atiende y el JS la pide',
+        [[['alquileres', null]], 1, true],
+        [AuthCashflow::ESCRITURAS['Alquileres'][$accion] ?? null, substr_count($ctrl, "case '" . $accion . "':"),
+         strpos($jsF, $accion) !== false]);
+}
+
+chequear('guardar revalida contra los pendientes de ahora, con la retencion obligatoria', true,
+    strpos($ctrl, 'AlquileresImputacion::validar($data, $e, true)') !== false);
+chequear('la baja de una razon social pasa por el bloqueo', true,
+    strpos($ctrl, 'AlquileresImputacion::bloqueanBaja(') !== false);
+chequear('las pagadas se marcan al cargar, con el usuario del sistema', [true, true],
+    [strpos($ctrl, 'marcarPagadas($c[\'pagadas_nuevas\'])') !== false,
+     strpos(file_get_contents(__DIR__ . '/../Class/AlquileresImputaciones.php'), 'self::usuarioSistema()') !== false]);
+chequear('la sub-pestaña Facturas ya no es un placeholder', [false, true, true],
+    [strpos($tabA, 'Disponible en la próxima entrega') !== false, strpos($tabA, 'id="tablaAlqFact"') !== false,
+     strpos($tabA, 'id="modalAlqImputar"') !== false]);
+chequear('la grilla se exporta y tiene el switch Ver pagadas', [true, true],
+    [strpos($tabA, 'data-exportar="tablaAlqFact"') !== false, strpos($tabA, 'id="alqFactVerPagadas"') !== false]);
+chequear('sin permiso de edicion no se dibujan tildes, vencimiento ni Imputar', true,
+    strpos($jsF, "return Permisos.puedeEditar('alqFactBody') && datos && datos.tablas;") !== false);
+chequear('Guardar exige la misma previsualizacion: cualquier cambio la invalida', true,
+    strpos($jsF, "previsto !== JSON.stringify(b)") !== false);
+
 seccion('La lista de conceptos y el CHECK dicen lo mismo');
 
 preg_match("/CONCEPTO IN \(([^)]*)\)/", file_get_contents(__DIR__ . '/../sql/cashflow_alquileres_facturas.sql'), $m);

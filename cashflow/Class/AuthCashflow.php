@@ -121,7 +121,15 @@ class AuthCashflow {
             'bajaRazon' => [['parametros', 'ALQUILERES']],
             'guardarLocal' => [['parametros', 'ALQUILERES']],
             'altaExtra' => [['parametros', 'ALQUILERES']],
-            'bajaExtra' => [['parametros', 'ALQUILERES']]
+            'bajaExtra' => [['parametros', 'ALQUILERES']],
+            /* La sub-pestaña Facturas: el vencimiento a considerar y la
+               imputacion. La previsualizacion pide edicion como los demas
+               preview: es el primer paso de guardar. */
+            'editarVtoFactura' => [['alquileres', null]],
+            'deshacerVtoFactura' => [['alquileres', null]],
+            'previsualizarImputacion' => [['alquileres', null]],
+            'guardarImputacion' => [['alquileres', null]],
+            'deshacerImputacion' => [['alquileres', null]]
         ],
         'CashflowEstructura' => [
             'saveEstructura' => [['parametros', 'CASHFLOW']],
