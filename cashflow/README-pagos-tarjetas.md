@@ -323,6 +323,11 @@ Las facturas pendientes de Tango cuya **forma de pago vigente** es `TARJETA CORP
 
 Al 26/09/2026 el universo son **135 vencimientos por $ 89.896.563,43 en 94 comprobantes**, de los cuales **90 están vencidos**.
 
+**Del universo salen dos cosas, antes que todo lo demás** (`TarjetasCorporativas::universo()`):
+
+- **Las facturas de alquiler**: las de proveedores dados de alta en Parámetros › Alquileres se gestionan en la pestaña Alquileres, aunque tengan `TARJETA CORP`. Es la misma regla que las saca de Proveedores Locales (`AlquileresFacturas`), con la misma condición de seguridad. Al 10/11/2026 no hay ninguna así.
+- **Los proveedores excluidos de esta pestaña** en la solapa Maestro de Proveedores Locales, columna *TARJETAS* (`ProveedoresExclusion`, módulo `TARJETAS_CORP`), que se edita con `cashflow.editar.pagos_tarjetas`. Un aviso informativo dice cuántos, cuánto y quiénes. Ver la sección de la exclusión, abajo.
+
 ### Sólo las vinculadas entran al flujo
 
 > Esto **cambió** en `feature/cronogramas-tarjetas-corporativas`. Antes las no vinculadas no vencidas entraban por su vencimiento de Tango.
@@ -495,6 +500,8 @@ Proveedor de seguros, número o descripción, tarjeta corporativa activa (de ell
 > Medido el 31/10/2026, con el maestro como está y sin pólizas: **CORPORATIVAS baja $ 75.119.889,45** —las facturas de seguros que salen—. Los avisos lo reparten: **OGRSA $ 72.625.859,49**, **OGLCAJ $ 1.878.283,30**, **OGZURI $ 615.746,66**; OGALLI y OGMESE no tienen facturas pendientes.
 
 ### La exclusión saca de la serie, no del universo
+
+**Esto es la exclusión por FACTURA.** La exclusión por **PROVEEDOR** (solapa Maestro de Proveedores Locales, columna *TARJETAS*) es otra decisión y va antes: las facturas de un proveedor excluido **no entran al universo** de la pestaña —no son filas, ni excluidas ni no—, porque se decidió que su deuda ya se cuenta en otro lado. Las dos conviven: excluir al proveedor no borra los tildes por factura, que vuelven a aplicar si se lo incluye de nuevo.
 
 Mismo patrón que Proveedores Locales: selección múltiple, **un motivo obligatorio** validado en el backend, y **una sola transacción**. Tabla propia con historial (`VIGENTE`, `FECHA_BAJA`, `USUARIO_BAJA`), **sin bajas físicas**.
 

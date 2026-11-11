@@ -1,8 +1,8 @@
 # Módulo Alquileres — cuánto se paga de alquiler por local, y cuándo
 
-Pestaña **RRHH y Operativos → Alquileres** (sub-pestañas *Proyección* y *Ventas*; *Facturas* llega en la próxima entrega), la sub-pestaña **Parámetros › Alquileres** y el proveedor `ALQUILERES` del tablero, **escrito pero todavía sin activar**.
+Pestaña **RRHH y Operativos → Alquileres** (sub-pestañas *Proyección*, *Ventas* y *Facturas*), la sub-pestaña **Parámetros › Alquileres** y el proveedor `ALQUILERES` del tablero, en una fila agrupada en **real** y **proyectado**.
 
-Rama: `feature/alquileres-proyeccion`
+Ramas: `feature/alquileres-proyeccion` (la proyección, partes 1 a 11) y `feature/alquileres-facturas-exclusion` (las facturas reales, la imputación, la exclusión por módulo y el tablero, partes 12 a 15).
 
 ---
 
@@ -29,8 +29,11 @@ App de alquileres (central, SÓLO SE LEE)        Parámetros › Alquileres (cas
         │
   AlquileresPago ───── neto + IVA + percepción − retención, mes y día de pago
         │                         (LA regla: una sola)
+        │
+  AlquileresImputacion ── las facturas imputadas reemplazan lo que cubren   ◄── Tango (getPendientes)
+        │                  (LA regla: una sola)                                   + imputaciones
         ├──► pestaña Alquileres (agrupa por mes)
-        └──► AlquileresProvider / PROYECTADO (acumula por día) ──╳── tablero (todavía no)
+        └──► AlquileresProvider: REAL (facturas) + PROYECTADO (acumula por día) ──► tablero
 ```
 
 **El cashflow no escribe en la app de alquileres.** Sólo la lee, y lo fija una prueba.
@@ -45,12 +48,17 @@ App de alquileres (central, SÓLO SE LEE)        Parámetros › Alquileres (cas
 | --- | --- | --- | --- | --- |
 | 51 | `sql/cashflow_alquileres.sql` | `central` | Crea las cinco tablas de Parámetros › Alquileres (generales, razones sociales, locales, extraordinarios y sus locales) con auditoría e historial. Da de alta **SAPALA, SAARCO, SAPAMA y SAUNIC** con 2 meses de diferimiento, sólo si tienen `RUBRO = ALQUILER` en el maestro y no existen | La pestaña y Parámetros **cargan** y avisan, nombrando el script; ningún local proyecta. El resto del cashflow funciona como hoy |
 | 52 | `sql/cashflow_alquileres_permisos.sql` | `apps` | Crea, si no existen, `cashflow.tab.alquileres`, `cashflow.editar.alquileres` y `cashflow.editar.parametros.alquileres`, colgadas del mismo módulo que el resto de `cashflow.tab.%`. **No asigna ningún rol** | Sólo el administrador ve la pestaña y edita Parámetros › Alquileres |
+| 53 | `sql/cashflow_alquileres_facturas.sql` | `central` | El vencimiento a considerar por cuota y la imputación (cabecera, facturas, renglones, conceptos, locales), con auditoría e historial | Las facturas de alquiler **siguen en Cuentas a Pagar Locales** (condición de seguridad, parte 12) y las pantallas lo avisan en crítico; no se imputa ni se cambia un vencimiento |
+| 54 | `sql/cashflow_prov_exclusion_modulos_ampliar.sql` | `central` | Amplía el `CHECK` de la exclusión por módulo a `TARJETAS_CORP` y `ALQUILERES` | Excluir de Tarjetas o de Alquileres falla con un mensaje que nombra el script |
+| 55 | `sql/cashflow_alquileres_fila.sql` | `central` | Reemplaza la fila *Alquileres* (`ALQUILERES/PAGOS`) por dos filas agrupadas, `REAL` y `PROYECTADO`, en una transacción, con el control de doble conteo al pie | La fila de antes sigue activa y muestra el total, sin abrir |
 
-El 51 va después de `sql/cashflow_prov_locales.sql` (el maestro de proveedores): sin el maestro crea las tablas igual pero no siembra a nadie, y lo dice. El 52 es independiente. Ninguno de los dos mueve el tablero.
+El 51 va después de `sql/cashflow_prov_locales.sql` (el maestro de proveedores): sin el maestro crea las tablas igual pero no siembra a nadie, y lo dice. El 52 es independiente. **53 → 54 → 55**: el 53 después del 51, el 54 después de `sql/cashflow_prov_exclusion_modulo.sql`, el 55 después del 53 y de `sql/cashflow_estructura_grupos.sql`.
+
+**El tablero se mueve con el código, no con los scripts**: con el módulo disponible, la fila de antes (activa, `ALQUILERES/PAGOS`) muestra el total. Ver parte 15.
 
 ### Después de correrlos
 
-1. Dar `cashflow.tab.alquileres` y, a quien corresponda, `cashflow.editar.parametros.alquileres` desde Gestión de Usuarios. `cashflow.editar.alquileres` **no tiene escrituras en esta entrega**: se creó ahora para no volver a la base cuando lleguen las facturas.
+1. Dar `cashflow.tab.alquileres` y, a quien corresponda, `cashflow.editar.parametros.alquileres` (Parámetros › Alquileres) y `cashflow.editar.alquileres` (Facturas: vencimiento e imputación, y la columna *ALQUILERES* del Maestro de Proveedores Locales) desde Gestión de Usuarios.
 2. En *Parámetros › Alquileres*: cargar el **día de vencimiento general**, dar de alta las demás **razones sociales**, completar los **locales** (el filtro *Incompletos* muestra los que faltan) y cargar los **pagos extraordinarios**.
 
 ---
@@ -112,7 +120,9 @@ El **día de vencimiento** por defecto (1 a 28: hasta el 28 para que exista en f
 Al 10/11/2026 el rubro trae **23** proveedores: los 21 del rubro económico *Alquileres* más **Mercado Libre** (OGMERC, rubro económico *Arancel Comisión tarjetas de crédito*, $44,4 M pendientes) y **Sploder Industrial** (OGSPLO, *Alquiler Uruguay Prorrateo*, $555,1 M pendientes). Ninguno de los 21 del rubro económico queda afuera.
 
 - Sólo las dadas de alta tienen **día de vencimiento propio** (vacío = el general) y **meses de diferimiento** de los conceptos variables (arranca en 0), y sólo ellas se eligen como razón social de un local o de un extraordinario.
-- **Esto también decide qué factura es de alquiler** cuando lleguen las facturas de Tango (próxima entrega): la de un proveedor dado de alta acá, no la de un rubro.
+- **Esto también decide qué factura es de alquiler** (`AlquileresFacturas`, parte 12): la de un proveedor dado de alta acá, no la de un rubro.
+- **Dar de baja una razón social con imputaciones de facturas todavía pendientes se bloquea**: el mensaje lista cuáles deshacer (factura, mes que cubre, quién la cargó). Las de facturas ya pagadas no bloquean.
+- Aviso de **atención**, acá y en el tablero, por los proveedores con `RUBRO = ALQUILER` **excluidos de Proveedores Locales y no dados de alta**: su deuda no está en ninguna fila. Lista código, razón social y pendiente, con el link al Maestro con *Sólo excluidos*. No mira el motivo de la exclusión, que es texto libre.
 - Un proveedor dado de alta que **pierde el rubro** en el maestro **sigue de alta**, con un aviso de atención: darlo de baja es una decisión.
 - **Dar de baja** una razón social que tiene locales los deja *Incompletos* ("razón social dada de baja"), con aviso.
 - Aviso informativo: *"N proveedores con rubro ALQUILER no están dados de alta: sus facturas siguen en Proveedores Locales"*, con la lista.
@@ -201,7 +211,7 @@ El VMA y el 9 son los **del mismo mes de la venta**. Un local sin porcentaje par
 
 Por local y por mes, de mayor a menor (`AlquileresCalculo::ORDEN_ORIGEN`):
 
-1. **Factura** — la factura real imputada. **Es de la próxima entrega**: el lugar está previsto en `conceptosDelMes()` y la constante ya existe.
+1. **Factura** — la factura real imputada. **No se resuelve en `conceptosDelMes()`**: una imputación reemplaza por **mes de pago** y con el importe final, y ese cálculo es por mes del concepto y en neto. La aplica `AlquileresImputacion` sobre la lista de pagos (parte 13).
 2. **App cerrada** — el período está cerrado: sus importes por concepto, tal cual, incluidos los variables.
 3. **Venta real** — no está cerrado pero tiene venta: los conceptos los calcula el cashflow con esa venta.
 4. **Estimado** — todo estimado.
@@ -222,7 +232,7 @@ a pagar     = neto + IVA + percepción − retención
 
 - **Mes de pago**: fijos, fondo y expensas, el mismo mes; variables, el mes de la venta + el diferimiento de la razón social; extraordinarios, el mes base + su diferimiento.
 - **Día**: el de la razón social, o el general. Si no es hábil, el siguiente hábil (`DiasHabiles::siguiente()`) y la celda lo anota con `detalle`.
-- **Un vencimiento que ya pasó en el mes en curso** —todavía sin factura— va al **siguiente hábil desde hoy**, nunca apilado en el primer día del eje. Es provisorio: la factura real lo reemplaza en la próxima entrega.
+- **Un vencimiento que ya pasó en el mes en curso** —todavía sin factura— va al **siguiente hábil desde hoy**, nunca apilado en el primer día del eje. Es provisorio: una factura imputada que cubre ese mes lo reemplaza, en su propia fecha.
 - **Fecha de fin**: desde el mes siguiente no se proyectan conceptos del local. Un variable de un mes anterior a la fecha de fin que se paga diferido después sí se paga: la venta existió.
 - Cada parte se redondea a centavos una sola vez. La app trunca a pesos; como los meses cerrados se leen tal cual, eso no cambia nada de lo cerrado.
 
@@ -247,17 +257,91 @@ Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*), 
 
 ### Facturas
 
-*"Disponible en la próxima entrega"*.
+Ver parte 12.
 
 ---
 
-## 11. El tablero: todavía no
+## 11. Las facturas reales y el tablero
 
-**La pestaña no entra al tablero en esta entrega.** Las facturas de alquiler siguen sumando en *Cuentas a Pagar Locales*; si la proyección entrara ahora, el mismo alquiler se contaría dos veces.
+Lo que la parte A dejó pendiente llegó con `feature/alquileres-facturas-exclusion`: las partes 12 a 15.
 
-- `Class/Providers/AlquileresProvider.php` ya existe, con la serie **`PROYECTADO`** por día de pago: acumula **la misma lista de pagos** que agrupa la pestaña, y una prueba fija que los dos suman lo mismo al centavo.
-- El módulo `ALQUILERES` sigue con `'disponible' => false`. La fila *Alquileres* del tablero (la de `sql/cashflow_estructura.sql`, ID 16 en producción) apunta a `ALQUILERES/PAGOS` y **sigue en cero** con su aviso, como cualquier módulo pendiente. **Ninguna fila usa `PROYECTADO`**, y lo fija una prueba contra la semilla y, si hay base, contra la estructura real.
-- La próxima entrega saca de Proveedores Locales las facturas de las razones sociales dadas de alta, arma `PAGOS` con las facturas reales y lo que todavía no se facturó, y da vuelta el flag.
+---
+
+## 12. Las facturas: cuáles son y de dónde salen
+
+`Class/AlquileresFacturas.php` (la regla, pura) y `Class/AlquileresUniverso.php` (lee su contexto, una vez por pedido).
+
+**Una factura es de alquiler si su proveedor está dado de alta (vigente) en Parámetros › Alquileres › Razones sociales.** El rubro `ALQUILER` del maestro no decide nada. `AlquileresFacturas::destino()` dice a dónde va cada fila de `Proveedores::getPendientes()`: a Alquileres, a Proveedores Locales, o a ningún lado (excluida de Alquileres). La usan Proveedores Locales (grilla, tarjetas, exportar, planilla de pagos y su proveedor), Tarjetas, la pestaña y el tablero; una prueba fija que digan lo mismo.
+
+**Una sola consulta a Tango**: el universo sale de `getPendientes()`, que ahora trae también el neto gravado y el total del comprobante (`CPA04.SUBT_GRAVA`, `IMPORTE_TO`) para sugerir la retención. El neto de una cuota es su parte del neto del comprobante (`netoDeCuota()`); sin dato, `null`.
+
+### La condición de seguridad
+
+Las facturas salen de Proveedores Locales **sólo si** el módulo `ALQUILERES` está disponible, hay una **fila activa del tablero con `ALQUILERES` / `REAL` o `PAGOS`** y existen las tablas del script 53. Si falta cualquiera, se quedan en Proveedores Locales **para todos** —tampoco la pestaña Alquileres las toma— y un aviso **crítico** dice qué falta. Sacarlas antes las haría desaparecer del cuadro.
+
+### La grilla
+
+Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, vencimiento de Tango, **vencimiento a considerar**, importe, pendiente, retención, **a pagar** y estado (*Sin imputar*, *Imputada*, *Imputada parcialmente* —otra cuota del comprobante sin imputar—, *Pagada*, *Ya no está en Tango*, *Sin dato de Tango*, *Imputación suspendida*). Filtros por razón social y estado, *Ver pagadas*, totales, exportar y tres tarjetas: **sin imputar** (cantidad e importe: plata que no suma en ningún lado), imputadas a pagar y pagos proyectados reemplazados.
+
+### El vencimiento a considerar
+
+**Es la única fecha de pago** de una factura de alquiler: la planilla de pagos de Proveedores Locales deja estas facturas en error. Mismo patrón que Tarjetas (`AlquileresFacturaVto`, tabla propia): input que guarda al cambiar, fecha mínima hoy (`TarjetasCorporativas::validarVtoEditado()`, la misma regla), **↺ que vuelve al de Tango**, por cuota, con historial y motivo opcional.
+
+**Vencida**: una imputada con vencimiento a considerar anterior a hoy se paga el **siguiente día hábil desde hoy** (`AlquileresImputacion::fechaDePago()`), y la celda lo anota con `detalle`.
+
+---
+
+## 13. La imputación
+
+`Class/AlquileresImputacion.php` es **la** regla de qué reemplaza una imputación, pura; `Class/AlquileresImputaciones.php` lee y escribe.
+
+### Qué se imputa
+
+Una o varias cuotas, **de una o varias razones sociales**, repartidas en **renglones** de **conceptos** (los que se proyectan, *Extraordinario* y *Otros (no proyectados)*, con atajos por grupo) × **locales** (uno, varios, o *todos los de una razón social* de las facturas tildadas) × **mes que cubre** (el mes de pago cuya proyección reemplaza) × **importe** (con IVA y percepciones). Los renglones son **del grupo**, no de una factura.
+
+- **La suma de los renglones tiene que dar el pendiente de las cuotas tildadas (±$ 1).** Si no, no se guarda y se muestra la diferencia.
+- **Retención por factura**, obligatoria al guardar (0 es un valor). Se sugiere con el % de retención de los locales, ponderado por el reparto, sobre el neto de Tango; sin él, sobre el importe sin el IVA ni la percepción de los locales.
+- **Otros (no proyectados)** va solo en su renglón.
+- **Se imputa una sola vez**: reimputar da de baja la anterior (con `ID_REEMPLAZO`) y sus otras facturas vuelven a *Sin imputar*. **Deshacer** devuelve las facturas a *Sin imputar* y la proyección vuelve. Sin bajas físicas.
+- **Guardar revalida contra los pendientes de ahora** (`Alquileres::contextoImputacion()`): si una factura cambió de pendiente o ya no está, frena. La previsualización es la misma validación.
+
+### Qué reemplaza y cuándo se paga
+
+- Cada renglón saca de la proyección **sus conceptos, en sus locales, del mes de pago que cubre**. **Manda lo real**: no queda saldo. **Otros** suma y no reemplaza nada. **Lo no imputado sigue proyectado.**
+- Cada cuota se paga **en su vencimiento a considerar** por **pendiente − retención**. La proyección reemplazada deja de pagarse en su fecha.
+- En la grilla de Proyección cada renglón es **una línea dentro del grupo de sus conceptos** (o en *Facturas de varios grupos* / *Otros*), con origen **Factura**; el tooltip dice qué factura, qué renglón y la parte del local. Un renglón con varios locales se reparte **en proporción a lo proyectado** de esos conceptos en ese mes; si da 0, **en partes iguales**, con aviso. La retención, con los mismos pesos. Los centavos, por resto mayor: cada cuota suma exacto.
+
+### Sin imputar, pagada, cambiada
+
+- **Sin imputar no suma** —ni en la pestaña ni en el tablero—: contaría dos veces contra la proyección. Aviso de atención: *"N factura(s) de alquiler sin imputar por $ X: no suman hasta que se imputen"*.
+- **Pagada en Tango**: sale de pendientes; se marca *Pagada* con la fecha de cancelación al cargar la pestaña (usuario del sistema, como la conciliación de Proveedores Locales, con `Proveedores::estadoComprobantesEnTango()`). **Sigue reemplazando** el mes que cubre. Se ve con *Ver pagadas*.
+- **Desaparecida sin pago** (anulada) o sin dato de Tango: **deja de reemplazar**, la proyección vuelve y se avisa para imputar la nueva. En un grupo de varias facturas, cuando **todas** quedaron así.
+- **Pendiente que cambia sin cancelarse**: se paga el pendiente nuevo menos la retención y se avisa.
+- **Suspendida**: una imputación con una factura de un proveedor excluido de Alquileres o dado de baja no se lee; se avisa para deshacerla.
+
+---
+
+## 14. La exclusión de proveedores por módulo
+
+`ProveedoresExclusion` suma **`TARJETAS_CORP`** y **`ALQUILERES`** a `PROV_LOCALES` (script 54). El alta en Parámetros decide si un proveedor va a Alquileres; la **exclusión** lo saca de esa pestaña y del tablero, a propósito y con motivo. **Excluido de Alquileres**: sus facturas no entran, no se imputan, no suman y **no vuelven a Proveedores Locales**; no toca la proyección de sus locales. Un aviso informativo dice cuántas y cuánto.
+
+Se edita en la solapa **Maestro** de Proveedores Locales, una columna por módulo, **cada una con el permiso de su módulo** (`AuthCashflow::TAB_DEL_MODULO`).
+
+---
+
+## 15. El tablero
+
+`ALQUILERES` disponible, tres series de **la misma lista de pagos** que agrupa la pestaña (`AlquileresProvider::armarSeries()`):
+
+| Serie | Qué es |
+| --- | --- |
+| `REAL` | Las facturas imputadas, en su fecha de pago, por su a pagar |
+| `PROYECTADO` | La proyección que ninguna factura reemplazó |
+| `PAGOS` | Las dos juntas: la fila de antes del split. `componentes` impide que conviva con las partes |
+
+`sql/cashflow_alquileres_fila.sql` reemplaza la fila *Alquileres* de Costos Indirectos por **dos filas agrupadas** (`GRUPO` = ALQUILERES): un renglón que se abre en real y proyectado. **La pestaña y el tablero suman lo mismo, por día**, y lo fija una prueba.
+
+**Antes y después, al 10/11/2026.** *Cuentas a Pagar Locales* (`PAGOS`) no tenía nada de alquiler: las cuatro razones dadas de alta estaban excluidas de Proveedores Locales, en `PAGOS_EXCLUIDOS_PROVEEDOR`. Con el script 53, sus facturas pendientes (3 de Cencosud, $ 43.944.604,50) pasan a `PAGOS_ALQUILERES` y a Alquileres, **sin imputar**: no suman. Lo que mueve el Flujo Neto es la **proyección**, que entra al tablero con el código: a las 21:40 de ese día, $ 310.535.553,98 en el horizonte.
 
 ---
 
@@ -267,9 +351,9 @@ Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*), 
 | --- | --- |
 | `cashflow.tab.alquileres` | Ver la pestaña (`getProyeccion` la pide) |
 | `cashflow.editar.parametros.alquileres` | Todas las escrituras de Parámetros › Alquileres |
-| `cashflow.editar.alquileres` | **Reservada**: no tiene escrituras todavía. Está en `AuthCashflow::CLAVES_RESERVADAS` para que la prueba la acepte |
+| `cashflow.editar.alquileres` | Facturas: el vencimiento a considerar, imputar y deshacer; y la columna *ALQUILERES* de la exclusión en el Maestro de Proveedores Locales |
 
-Las tres van en `sql/cashflow_alquileres_permisos.sql` y **no** en `sql/cashflow_permisos_edicion.sql`, porque ese le da la edición a todo rol que ve la pestaña. Toda escritura pasa por `AuthCashflow::usuarioDeEscritura()`. Sin permiso de edición, los controles no se dibujan.
+Las tres van en `sql/cashflow_alquileres_permisos.sql` y **no** en `sql/cashflow_permisos_edicion.sql`, porque ese le da la edición a todo rol que ve la pestaña. Toda escritura pasa por `AuthCashflow::usuarioDeEscritura()`. Sin permiso de edición, los controles no se dibujan. Marcar *Pagada* lo hace el sistema (`AlquileresImputaciones::usuarioSistema()`).
 
 ---
 
@@ -284,7 +368,10 @@ php tests/run.php alquileres
 - `test_alquileres_venta.php` — real sobre estimada, neta = bruta / 1,21, el reparto al centavo con y sin manuales, el nuevo sin manual, el cerrado fuera del denominador, la fecha de fin, la venta derivada.
 - `test_alquileres_pago.php` — impuestos con retención sobre el neto e IVA de 23 % y 19 %; fin de semana, feriado, vencido en el mes en curso; diferimiento 0 y 2 con venta anterior al horizonte; día de la razón sobre el general; el extraordinario de Cencosud (todos y subconjunto, repetición anual, diciembre cerrado); fecha de fin; cada faltante que deja un local incompleto.
 - `test_alquileres_parametros.php` — validadores, el universo por la columna `RUBRO`, el cableado de la sub-pestaña y su permiso, y que sin el script carga con el aviso que lo nombra.
-- `test_alquileres_pestana.php` — de punta a punta con dobles: el diferido de IRSA, el extraordinario, quién no proyecta, que la pestaña sume la lista de pagos, el pie de Ventas; el proveedor suma lo mismo que la pestaña; el módulo no disponible y ninguna fila con `PROYECTADO`.
+- `test_alquileres_pestana.php` — de punta a punta con dobles: el diferido de IRSA, el extraordinario, quién no proyecta, que la pestaña sume la lista de pagos, el pie de Ventas; **REAL + PROYECTADO = PAGOS = la pestaña, por día**; la fila agrupada contra el validador.
+- `test_alquileres_facturas.php` — qué factura es de alquiler (no el rubro), la condición de seguridad, las series y particiones de Proveedores Locales, la planilla en error, Tarjetas, una sola regla, el día del pase, los de rubro fuera de toda fila.
+- `test_alquileres_imputacion.php` — una factura / N locales / dos razones; suma distinta; reemplazo exacto; reparto proporcional e igual; real menor y mayor; Otros; retención; reimputar y deshacer; factura que cambió; fechas y vencidas; pagada, anulada, sin dato, pendiente cambiado; el bloqueo de la baja; el cableado.
+- `test_alquileres_exclusion.php` — `MODULOS` y los `CHECK`; cada columna con su permiso; Tarjetas sin el proveedor y con la exclusión por factura.
 - Cableado en las existentes: `test_auth_cashflow.php` (los dos scripts de permisos, la clave reservada, 16 controllers), `test_parametros_carga.php`, `test_avisos.php`, `test_cargando.php`, `test_kpis_plegables.php`.
 
 ---
@@ -300,11 +387,17 @@ php tests/run.php alquileres
 | `Class/AlquileresPago.php` | Puro: cuánto y cuándo; el estado de un local |
 | `Class/AlquileresParametros.php` | Parámetros › Alquileres: lectura, escritura y validadores |
 | `Class/Alquileres.php` | Arma Parámetros y la pestaña; la lista de pagos que lee el tablero |
-| `Class/Providers/AlquileresProvider.php` | La serie `PROYECTADO`, sin activar |
+| `Class/Providers/AlquileresProvider.php` | Las series `REAL`, `PROYECTADO` y `PAGOS` |
+| `Class/AlquileresFacturas.php` | Puro: qué factura es de alquiler, la condición de seguridad, los avisos |
+| `Class/AlquileresUniverso.php` | Lee el contexto de esa regla, una vez por pedido |
+| `Class/AlquileresImputacion.php` | Puro: validar, reemplazar, repartir, fechas, pagada |
+| `Class/AlquileresImputaciones.php`, `Class/AlquileresFacturaVto.php` | Leen y escriben las imputaciones y los vencimientos |
+| `Js/Alquileres-Facturas.js` | La sub-pestaña Facturas y el armado de una imputación |
 | `Controller/AlquileresController.php` | Los endpoints de las dos pantallas |
 | `Tabs/alquileres.php`, `Js/Alquileres.js`, `Css/Alquileres.css` | La pestaña |
 | `Tabs/parametros_alquileres.php`, `Js/Parametros-Alquileres.js` | La sub-pestaña de Parámetros |
 | `sql/cashflow_alquileres.sql`, `sql/cashflow_alquileres_permisos.sql` | Los scripts 51 y 52 |
+| `sql/cashflow_alquileres_facturas.sql`, `sql/cashflow_prov_exclusion_modulos_ampliar.sql`, `sql/cashflow_alquileres_fila.sql` | Los scripts 53, 54 y 55 |
 
 ---
 
@@ -313,5 +406,7 @@ php tests/run.php alquileres
 - **La app de alquileres filtra la venta con `LIKE`.** `traerRentabilidadBruta()` busca `PERIODO LIKE '%M-YYYY%'`, así que en **enero** `'%1-2026%'` levanta también noviembre (`'11-2026'`) y en **febrero** `'%2-2026%'` levanta diciembre (`'12-2026'`), y como recorre todas las filas se queda con la última. El cashflow compara exacto. No se toca en esta rama: es de `ProyectosXL/administracion`.
 - **La ayuda de la app dice que el 9 es un importe fijo**, y el código lo calcula como `VMA × %9`. Habría que corregir la ayuda en la app.
 - **Los períodos 6-2022 a 12-2022 nunca se cerraron** en la app. Quedan fuera de las ventanas del cashflow (24 meses), así que no cambian nada.
-- **Mercado Libre y Sploder tienen `RUBRO = ALQUILER`** en el maestro. Aparecen en el buscador pero no están dados de alta; si alguno se diera de alta por error, en la próxima entrega sus facturas saldrían de Proveedores Locales.
+- **Mercado Libre y Sploder tienen `RUBRO = ALQUILER`** en el maestro. Aparecen en el buscador pero no están dados de alta; si alguno se diera de alta por error, sus facturas saldrían de Proveedores Locales.
+- **Al 10/11/2026 hay 13 proveedores de rubro ALQUILER excluidos de Proveedores Locales y sin dar de alta acá** (más Mercado Libre y Sploder): su deuda no está en ninguna fila. Lo avisa la parte 3.b; se resuelven desde la pantalla.
+- **El panel de avisos es texto**: el link al Maestro está en la lista de Parámetros › Alquileres, no adentro del aviso del tablero.
 - **Rural, Flores 2 y Palmas** tienen sus fijos en 0 en el último cierre: proyectan 0.
