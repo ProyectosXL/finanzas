@@ -17,10 +17,13 @@ require_once __DIR__ . '/Inflacion.php';
  * ----------------------------
  * Por local y por mes, de mayor a menor prioridad (ORDEN_ORIGEN):
  *
- *   1. FACTURA      la factura real imputada. ES DEL PROMPT B y no esta
- *                   implementada: el lugar queda en conceptosDelMes(), antes que
- *                   el periodo cerrado, y la constante ya existe para que la
- *                   pestaña y el tablero la conozcan desde ahora.
+ *   1. FACTURA      la factura real imputada. NO SE RESUELVE ACA: una
+ *                   imputacion reemplaza por MES DE PAGO y con el importe final
+ *                   (con IVA, menos retencion), y este calculo es por mes del
+ *                   concepto y en neto. La aplica AlquileresImputacion::aplicar()
+ *                   sobre la lista de pagos, despues de AlquileresPago; esta
+ *                   clase solo declara el origen para que la pestaña y el
+ *                   tablero lo nombren.
  *   2. APP_CERRADA  el periodo esta cerrado en la app: sus importes por
  *                   concepto, tal cual, incluidos los variables que ya calculo
  *                   la app. Un periodo ABIERTO nunca se lee (ver AlquileresApp).
@@ -56,7 +59,7 @@ class AlquileresCalculo {
     const VENTA_REAL = 'VENTA_REAL';
     const ESTIMADO = 'ESTIMADO';
 
-    /** De mayor a menor prioridad. FACTURA es del prompt B. */
+    /** De mayor a menor prioridad. FACTURA la aplica AlquileresImputacion, no este calculo. */
     const ORDEN_ORIGEN = [self::FACTURA, self::APP_CERRADA, self::VENTA_REAL, self::ESTIMADO];
 
     const NOMBRE_ORIGEN = [
@@ -439,8 +442,8 @@ class AlquileresCalculo {
      * Un mes de un local, segun la jerarquia del encabezado.
      */
     private static function conceptosDelMes($mes, $e, $cerrados, $ultimo, $serie) {
-        /* 1. FACTURA (prompt B): aca va la factura real imputada a este local y
-           mes, antes que el periodo cerrado. Todavia no existe. */
+        /* 1. FACTURA no va aca: reemplaza por mes de pago, despues de
+           AlquileresPago (ver AlquileresImputacion::aplicar()). */
 
         /* 2. Periodo cerrado en la app: tal cual. */
         if (isset($cerrados[$mes])) {

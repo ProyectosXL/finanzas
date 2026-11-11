@@ -51,6 +51,7 @@
             .then(function(d) {
                 datos = d.data;
                 AvisosPanel.pintar('palqAvisos', datos.avisos || []);
+                pintarSinFila();
                 pintarTodo();
             })
             .catch(function(e) {
@@ -504,6 +505,46 @@
 
                 return d;
             });
+    }
+
+    /**
+     * Los proveedores de rubro ALQUILER excluidos de Proveedores Locales y sin
+     * dar de alta aca: no estan en ninguna fila del tablero. El aviso ya lo
+     * dice; esto suma el link al Maestro, con "Solo excluidos" puesto
+     * (window.cfSubTabDestino, lo consume Proveedores-Proveedores_locales.js).
+     */
+    function pintarSinFila() {
+        var caja = document.getElementById('palqSinFila');
+        var lista = (datos && datos.rubro_sin_fila) || [];
+
+        if (!caja) { return; }
+
+        if (!lista.length) {
+            caja.innerHTML = '';
+
+            return;
+        }
+
+        caja.innerHTML = '<div class="alert alert-warning small py-2">'
+            + '<strong>' + lista.length + ' proveedor(es) de alquiler no están en ninguna fila del tablero.</strong> '
+            + 'Dalos de alta acá, en Razones sociales, o volvé a incluirlos en Proveedores Locales. '
+            + '<a href="#" id="palqIrMaestro">Abrir el Maestro de Proveedores Locales</a>'
+            + '<ul class="mb-0 mt-1">' + lista.map(function(p) {
+                return '<li>' + esc(p.cod + ' · ' + p.nombre) + ' — $ '
+                    + Number(p.pendiente).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    + (p.motivo ? ' <span class="text-muted">(excluido: ' + esc(p.motivo) + ')</span>' : '') + '</li>';
+            }).join('') + '</ul></div>';
+
+        document.getElementById('palqIrMaestro').addEventListener('click', function(e) {
+            e.preventDefault();
+
+            var item = document.querySelector('.menu-link[data-tab="proveedores_locales"]');
+
+            if (!item) { return; }
+
+            window.cfSubTabDestino = 'MAESTRO_EXCLUIDOS';
+            item.click();
+        });
     }
 
     function esc(t) {

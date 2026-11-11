@@ -784,7 +784,8 @@ En su propia tabla, `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`, con la clave `(COD_PRO
 
 - **No es una columna del maestro** porque el maestro es una copia reimportable de la planilla de administración, y la reimportación propone bajas: la exclusión se perdería. Tampoco es un dato que la planilla tenga.
 - **Un proveedor se puede excluir sin estar en el maestro.** La deuda de un proveedor sin clasificar se proyecta igual, y obligar a clasificarlo para poder excluirlo mezcla dos decisiones. El código **sí** se valida contra `CPA01`, como el alta manual: uno que no existe no tiene deuda que excluir.
-- **Es por módulo y no un bit.** Hoy el único es `PROV_LOCALES`; agregar otro es sumarlo a `ProveedoresExclusion::MODULOS` y al `CHECK` de la tabla —un `ALTER` de una línea— y escribir el código que lo lea. La tabla no cambia. `MODULO` es un `CHECK` y no una lista administrable desde Parámetros porque un módulo nuevo siempre viene con código: no hay nada que un usuario pueda dar de alta sin un despliegue. `tests/test_proveedores.php` fija que las dos listas coincidan.
+- **Es por módulo y no un bit.** Los módulos son tres —`PROV_LOCALES`, `TARJETAS_CORP` (Tarjetas Pagos Corporativos) y `ALQUILERES`—, cada uno con su pestaña (`ProveedoresExclusion::PESTANA`). Agregar otro es sumarlo a `MODULOS`, a `PESTANA` y al `CHECK` de la tabla, y escribir el código que lo lea; así entraron los dos últimos, con `sql/cashflow_prov_exclusion_modulos_ampliar.sql`. La tabla no cambia. `MODULO` es un `CHECK` y no una lista administrable desde Parámetros porque un módulo nuevo siempre viene con código. `tests/test_alquileres_exclusion.php` fija que `MODULOS` y el `CHECK` de los dos scripts coincidan.
+- **Qué módulo recibe una factura no lo decide la exclusión**: lo decide el alta en Parámetros › Alquileres y, en Tarjetas, la forma de pago. La exclusión saca de **ese** módulo, a propósito y con motivo. En Tarjetas, las facturas del proveedor no entran al universo (la exclusión por factura de esa pestaña sigue existiendo); en Alquileres, no entran a la pestaña, no se imputan, no suman y **no vuelven a Proveedores Locales**. Para pasar un proveedor de Alquileres a Proveedores Locales se lo da de baja en Parámetros › Alquileres, no se lo excluye.
 
 #### Motivo obligatorio, y con historial
 
@@ -796,7 +797,7 @@ Como la exclusión de cheques de Echeqs: **sin bajas físicas**. Volver a inclui
 
 #### Cómo se usa
 
-- **Solapa Maestro**, columna *PROV. LOCALES*: el botón *excluir* pide el motivo; un excluido muestra la marca —con motivo, quién y cuándo en el `title`—, el botón para volver a incluirlo y el del historial. El interruptor **Sólo excluidos** los junta, con el conteo al lado.
+- **Solapa Maestro**, una columna por módulo —*PROV. LOCALES*, *TARJETAS* y *ALQUILERES*—, y **cada una se edita con el permiso de su módulo** (`cashflow.editar.proveedores_locales`, `cashflow.editar.pagos_tarjetas`, `cashflow.editar.alquileres`): `excluirProveedor` e `incluirProveedor` piden la pestaña del módulo del pedido (`AuthCashflow::TAB_DEL_MODULO`), y quien ve el Maestro sin ese permiso ve la columna sin botones. El botón *excluir* pide el motivo; un excluido muestra la marca —con motivo, quién y cuándo en el `title`—, el botón para volver a incluirlo y el del historial. El interruptor **Sólo excluidos** los junta, con el conteo al lado.
 - **Los excluidos que no están en el maestro** aparecen al final de la grilla del maestro, con el nombre de Tango, para poder verlos y volver a incluirlos. Y **se excluyen desde el aviso de proveedores con deuda que no están en el maestro**, que es el único lugar donde aparecen: por eso ese aviso ya no se recorta a doce.
 - **En Cuentas a Pagar** los esconde el mismo interruptor **Ver excluidas** que a las facturas: las dos contestan *"¿esto va al cashflow?"* con un no. El cartel del período desglosa cuánto es de cada una.
 
@@ -815,6 +816,21 @@ Por lo mismo que la factura es la tercera: la fila del tablero usa `PAGOS`, y s�
 **Verificado contra la base**, con la tabla todavía sin crear: las 33 series de `PROV_LOCALES` dan idénticas antes y después, y la nueva da cero. Y con una exclusión **simulada en memoria** —sin escribir nada— sobre un proveedor de $ 620.010,00: `PAGOS` bajó exactamente $ 620.010,00, `PAGOS_EXCLUIDOS_PROVEEDOR` subió lo mismo, `PAGOS_TODO` no se movió y el corte de cuatro partes cerró.
 
 > `RO_V_PROVEEDORES_EGRE_DIRECTORES` y el rubro *Excluidos* **no cambiaron**: clasifican y controlan, que es otra cosa. Ver las dos secciones que siguen.
+
+### Las facturas de alquiler ya no están acá
+
+Las facturas pendientes de los proveedores **dados de alta en Parámetros › Alquileres › Razones sociales** se gestionan en la pestaña **Alquileres › Facturas** (ver `README-alquileres.md`). El rubro `ALQUILER` del maestro no decide nada: Mercado Libre, con ese rubro y sin alta, sigue acá. La regla es una sola, `AlquileresFacturas::destino()`, y la usan esta pestaña, su proveedor del tablero, Tarjetas y Alquileres.
+
+- **No se muestran** en la grilla de Cuentas a Pagar, ni en sus tarjetas, ni al exportar, y **no suman** en *Cuentas a Pagar Locales*. Un aviso informativo dice cuántas y cuánto.
+- **`getPendientes()` las sigue trayendo**: es el universo de Alquileres, y la conciliación sigue mirando todo lo que dice Tango.
+- **En el tablero van a `PAGOS_ALQUILERES` y a ninguna otra serie**, ni siquiera a `PAGOS_TODO`: el universo de este módulo queda sin ellas y **las dos particiones siguen cerrando** sin un miembro nuevo. Es informativa, no es componente de nada, y una fila que la leyera contaría dos veces; el control al pie de `sql/cashflow_alquileres_fila.sql` lo verifica.
+- **En la planilla de pagos**, una fila de un proveedor de alquiler queda en error con *"Factura de alquiler: se gestiona en la pestaña Alquileres"*. La única fecha de pago de esas facturas es el vencimiento a considerar de la pestaña Alquileres. Las escrituras de a una o masivas sobre ellas (fecha, forma, exclusión por factura) se rechazan en el servidor.
+- **Lo que tenían cargado acá queda guardado y deja de leerse.** Al 10/11/2026 no había nada: ninguna fecha, planilla, exclusión por factura ni pago con dos medios de esos proveedores.
+- **Dar de baja la razón social en Parámetros › Alquileres** las devuelve acá. Se bloquea mientras tenga imputaciones de facturas todavía pendientes.
+
+**Salen sólo si hay dónde caer.** Mientras no haya una fila activa del tablero con `ALQUILERES` / `REAL` o `PAGOS`, o no se haya corrido `sql/cashflow_alquileres_facturas.sql`, se quedan acá como siempre y un aviso **crítico** dice qué falta: sacarlas antes las haría desaparecer del cuadro.
+
+**Al 10/11/2026 el pase no mueve esta fila:** las cuatro razones dadas de alta (IRSA, Arcos, Panamerican, Cencosud) ya estaban **excluidas de este módulo** con motivo "Alquileres", así que estaban en `PAGOS_EXCLUIDOS_PROVEEDOR` y no en `PAGOS`. Lo que se mueve es `PAGOS_TODO`, que deja de incluirlas. Los demás proveedores de rubro ALQUILER excluidos de acá y sin alta en Alquileres no están en ninguna fila: Parámetros › Alquileres y el tablero lo avisan.
 
 ### El rubro "Excluidos"
 

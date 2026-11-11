@@ -14,9 +14,30 @@ require_once __DIR__ . '/Auditoria.php';
  * Hay proveedores cuya deuda ya se considera en otra pestana -la aduana, por
  * ejemplo, en Crono Nacionalizacion- y que ademas aparecen en las cuentas a
  * pagar de Tango. Si los dos lados los proyectan, el tablero cuenta dos veces
- * la misma plata. Quien maneja Proveedores Locales sabe cuales son: esto es
- * donde lo dice. CUALES excluir es una decision de negocio y no la toma el
- * codigo.
+ * la misma plata. Quien maneja cada modulo sabe cuales son: esto es donde lo
+ * dice. CUALES excluir es una decision de negocio y no la toma el codigo.
+ *
+ * TRES MODULOS LEEN TANGO, Y CADA UNO EXCLUYE POR SU LADO
+ * -------------------------------------------------------
+ *   PROV_LOCALES   Proveedores Locales: la deuda sale de la fila del tablero y
+ *                  va a su serie PAGOS_EXCLUIDOS_PROVEEDOR.
+ *   TARJETAS_CORP  Tarjetas Pagos Corporativos: las facturas no entran a su
+ *                  universo. La exclusion POR FACTURA de esa pestaña sigue
+ *                  existiendo: son dos decisiones distintas ("este proveedor no
+ *                  va" y "esta factura no va").
+ *   ALQUILERES     Alquileres: las facturas no entran a la pestaña, no se
+ *                  imputan, no suman y NO vuelven a Proveedores Locales. No toca
+ *                  la proyeccion de sus locales: eso se decide en Parametros.
+ *
+ * QUE MODULO RECIBE UNA FACTURA NO LO DECIDE LA EXCLUSION: lo decide el alta en
+ * Parametros -> Alquileres (AlquileresFacturas) y, en Tarjetas, la forma de
+ * pago. La exclusion saca de ESE modulo, a proposito y con motivo. Para pasar un
+ * proveedor de Alquileres a Proveedores Locales se lo da de baja en Parametros,
+ * no se lo excluye.
+ *
+ * CADA MODULO SE EDITA CON SU PERMISO (PESTANA, y AuthCashflow::TAB_DEL_MODULO):
+ * las tres columnas viven en la solapa Maestro de Proveedores Locales, pero quien
+ * decide quien sale de Alquileres es quien maneja Alquileres.
  *
  * POR PROVEEDOR, Y ALCANZA A TODA SU DEUDA
  * ----------------------------------------
@@ -26,9 +47,10 @@ require_once __DIR__ . '/Auditoria.php';
  *
  * POR MODULO, Y NO UN BIT DEL MAESTRO
  * -----------------------------------
- * La clave es (COD_PROVEE, MODULO). Hoy el unico modulo es Proveedores Locales;
- * agregar otro es sumarlo a MODULOS y al CHECK de la tabla, y escribir el
- * codigo que lo lea. La tabla no cambia.
+ * La clave es (COD_PROVEE, MODULO). Agregar un modulo es sumarlo a MODULOS, a
+ * PESTANA y al CHECK de la tabla (asi entraron TARJETAS_CORP y ALQUILERES, con
+ * sql/cashflow_prov_exclusion_modulos_ampliar.sql), y escribir el codigo que lo
+ * lea. La tabla no cambia.
  *
  * NO VIVE EN EL MAESTRO porque el maestro es una copia reimportable de la
  * planilla de administracion, y la reimportacion propone bajas: la exclusion
@@ -51,18 +73,34 @@ class ProveedoresExclusion {
 
     const TABLA = 'RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO';
 
-    /** Proveedores Locales: la unica que existe hoy */
     const MODULO_PROV_LOCALES = 'PROV_LOCALES';
+    const MODULO_TARJETAS = 'TARJETAS_CORP';
+    const MODULO_ALQUILERES = 'ALQUILERES';
+
+    /** El script que amplia el CHECK a los tres modulos */
+    const SCRIPT_MODULOS = 'sql/cashflow_prov_exclusion_modulos_ampliar.sql';
 
     /**
      * Los modulos que admiten exclusion, con su nombre para la pantalla.
      *
      * TIENE QUE COINCIDIR CON EL CHECK de la tabla. Un modulo que este aca y no
      * alla lo rechaza la base al guardar; uno que este alla y no aca no lo
-     * puede escribir nadie.
+     * puede escribir nadie. Lo fija tests/test_alquileres_exclusion.php.
      */
     const MODULOS = [
-        self::MODULO_PROV_LOCALES => 'Proveedores Locales'
+        self::MODULO_PROV_LOCALES => 'Proveedores Locales',
+        self::MODULO_TARJETAS => 'Tarjetas Pagos Corporativos',
+        self::MODULO_ALQUILERES => 'Alquileres'
+    ];
+
+    /**
+     * La pestaña de cada modulo: su cashflow.editar.<pestaña> es el permiso que
+     * exige excluir o incluir en ese modulo (AuthCashflow::TAB_DEL_MODULO).
+     */
+    const PESTANA = [
+        self::MODULO_PROV_LOCALES => 'proveedores_locales',
+        self::MODULO_TARJETAS => 'pagos_tarjetas',
+        self::MODULO_ALQUILERES => 'alquileres'
     ];
 
     /** Tope del motivo, el de la columna */
@@ -116,9 +154,19 @@ class ProveedoresExclusion {
             return '';
         }
 
-        return 'Todavía no se puede excluir un proveedor de Proveedores Locales: falta la tabla '
+        return 'Todavía no se puede excluir un proveedor de ningún módulo: falta la tabla '
             . self::TABLA . '. Corré sql/cashflow_prov_exclusion_modulo.sql contra la base '
             . 'central. Mientras tanto no hay ninguno excluido y todo se proyecta como hasta ahora.';
+    }
+
+    /**
+     * La pestaña de un modulo, para el permiso. Estatica y pura.
+     *
+     * @param mixed $modulo
+     * @return string
+     */
+    public static function pestanaDe($modulo) {
+        return self::PESTANA[self::validarModulo($modulo)];
     }
 
     /**
@@ -402,6 +450,16 @@ class ProveedoresExclusion {
 
     private function errorSql($contexto) {
         $errores = sqlsrv_errors();
+
+        /* EL CHECK SIN AMPLIAR: la tabla existe pero todavia admite solo
+           PROV_LOCALES. Se dice que script falta en vez del texto de SQL. */
+        foreach ($errores ?: [] as $e) {
+            if (strpos($e['message'], 'CK_RO_T_CF_PROVEXC_MODULO') !== false) {
+                return 'La base todavía no admite excluir de ese módulo: corré '
+                    . self::SCRIPT_MODULOS . ' contra la base central. No se excluyó nada.';
+            }
+        }
+
         $msg = $contexto . ' (' . self::TABLA . '): ';
 
         if ($errores) {

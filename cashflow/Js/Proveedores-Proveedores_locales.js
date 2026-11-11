@@ -95,6 +95,19 @@
         var soloExclM = document.getElementById('soloExcluidosMaestroProv');
         if (soloExclM) { soloExclM.addEventListener('change', pintarMaestro); }
 
+        /* LLEGAR DESDE OTRA PESTAÑA AL MAESTRO, CON SOLO EXCLUIDOS: es el link
+           del aviso de Parametros -> Alquileres por los proveedores de alquiler
+           excluidos de aca y no dados de alta alla. El destino lo deja quien
+           navega en window.cfSubTabDestino y se consume una vez (ver
+           Js/Cashflow.js, conectarEnlaces()). */
+        if (window.cfSubTabDestino === 'MAESTRO_EXCLUIDOS') {
+            window.cfSubTabDestino = null;
+
+            if (soloExclM) { soloExclM.checked = true; }
+
+            cambiarVista('maestro');
+        }
+
         ['filtroRubroEcoMaestroProv', 'filtroRubroMaestroProv', 'filtroFormaMaestroProv',
          'filtroRetMaestroProv'].forEach(function(id) {
             var sel = document.getElementById(id);
@@ -2757,7 +2770,19 @@
         var q = ((document.getElementById('busquedaMaestroProv') || {}).value || '')
             .trim().toLowerCase();
         var soloExcl = !!(document.getElementById('soloExcluidosMaestroProv') || {}).checked;
-        var excluidos = maestro.excluidos || {};
+
+        /* EXCLUIDO DE CUALQUIER MÓDULO: para "Sólo excluidos", la búsqueda por
+           motivo y las filas de los que no están en el maestro. Cada columna
+           mira después el suyo, en celdasExclusion(). */
+        var excluidos = {};
+
+        modulosExclusion().forEach(function(m) {
+            var vig = excluidosDe(m.modulo);
+
+            Object.keys(vig).forEach(function(cod) {
+                if (!excluidos[cod]) { excluidos[cod] = vig[cod]; }
+            });
+        });
 
         /* LOS EXCLUIDOS QUE NO ESTÁN EN EL MAESTRO TAMBIÉN SON FILAS. Un
            proveedor se puede excluir sin estar clasificado, y si no apareciera
@@ -2828,8 +2853,8 @@
                     +   escapar(f.NOMBRE) + '</td>'
                     + '<td colspan="' + (5 + impuestos.length + 1) + '" class="text-muted small fst-italic">'
                     +   'No está en el maestro: su deuda no se clasifica, pero está excluida de '
-                    +   'Proveedores Locales.</td>'
-                    + '<td class="text-center">' + celdaExclusion(f) + '</td>'
+                    +   'algún módulo.</td>'
+                    + celdasExclusion(f)
                     + '<td></td><td></td>'
                     + '</tr>';
             }
@@ -2855,7 +2880,7 @@
                         + celdaRetMaestro(efectivaDe(ret, f.COD_PROVEE, imp.CODIGO), imp) + '</td>';
                   }).join('')
                 + '<td class="text-center">' + celdaOrigen(f) + '</td>'
-                + '<td class="text-center">' + celdaExclusion(f) + '</td>'
+                + celdasExclusion(f)
                 + '<td class="text-center"><span class="text-muted small">'
                 +   escapar((f.FECHA_IMPORTACION || '').substring(0, 10)) + '</span>'
                 +   Auditoria.icono({ alta: { usuario: f.USUARIO_ALTA, fecha: f.FECHA_IMPORTACION } })
@@ -3462,13 +3487,13 @@
     }
 
     /* ================================================================
-       EXCLUIR UN PROVEEDOR DE PROVEEDORES LOCALES
+       EXCLUIR UN PROVEEDOR DE UN MÓDULO
 
-       Para los proveedores cuya deuda ya se considera en otra pestaña: toda
-       su deuda —la emitida y la que venga— sale de la fila del tablero y va a
-       su propia serie. Cuáles son lo decide quien maneja Proveedores Locales.
-       Para una factura suelta está la exclusión por factura, en Cuentas a
-       Pagar.
+       Para los proveedores cuya deuda ya se considera en otra pestaña. Hay
+       una columna por módulo -Proveedores Locales, Tarjetas Pagos Corporativos
+       y Alquileres- y CADA UNA SE EDITA CON EL PERMISO DE SU MÓDULO: lo decide
+       quien maneja ese módulo. Para una factura suelta está la exclusión por
+       factura, en Cuentas a Pagar o en Tarjetas.
 
        EL MOTIVO ES OBLIGATORIO y se pide en el diálogo del módulo; lo valida
        también el backend. INCLUIR DE NUEVO NO BORRA NADA: la exclusión queda
@@ -3479,35 +3504,87 @@
        sin estar en el maestro. Ver Class/ProveedoresExclusion.php.
        ================================================================ */
 
-    /** La celda de la columna PROV. LOCALES: la marca y las dos acciones */
-    function celdaExclusion(f) {
+    /* LO QUE CADA MÓDULO HACE CON UN EXCLUIDO, para el diálogo y el aviso.
+       Es texto de pantalla: la regla vive en el servidor. */
+    var EFECTO_EXCLUSION = {
+        PROV_LOCALES: 'Toda su deuda —la emitida y la que venga— sale de la fila del tablero y pasa '
+            + 'a su propia serie, porque ya se considera en otra pestaña. Para sacar una factura '
+            + 'suelta está la exclusión por factura, en Cuentas a Pagar.',
+        TARJETAS_CORP: 'Sus facturas no entran a Tarjetas Pagos Corporativos. La exclusión por '
+            + 'factura de esa pestaña sigue existiendo: es otra decisión.',
+        ALQUILERES: 'Sus facturas no entran a Alquileres, no se pueden imputar y no suman en ningún '
+            + 'lado; tampoco vuelven a Proveedores Locales. No cambia la proyección de sus locales. '
+            + 'Para pasarlo a Proveedores Locales se lo da de baja en Parámetros › Alquileres.'
+    };
+
+    /**
+     * Los módulos que admiten exclusión, en el orden de las columnas, con si
+     * quien mira puede editar cada uno. Sin el dato (un servidor de antes),
+     * sólo Proveedores Locales, como era.
+     */
+    function modulosExclusion() {
+        if (maestro && maestro.modulos_exclusion) { return maestro.modulos_exclusion; }
+
+        return [{ modulo: 'PROV_LOCALES', nombre: 'Proveedores Locales',
+                  puede_editar: Permisos.puedeEditar('bodyMaestroProv') }];
+    }
+
+    /** Los excluidos vigentes de un módulo: COD_PROVEE => {MOTIVO, USUARIO, FECHA_ALTA} */
+    function excluidosDe(modulo) {
+        if (maestro && maestro.excluidos_modulos) { return maestro.excluidos_modulos[modulo] || {}; }
+
+        return (modulo === 'PROV_LOCALES' && maestro) ? (maestro.excluidos || {}) : {};
+    }
+
+    function nombreModulo(modulo) {
+        var m = modulosExclusion().filter(function(x) { return x.modulo === modulo; })[0];
+
+        return m ? m.nombre : modulo;
+    }
+
+    /** Las tres celdas de exclusión de una fila, una por módulo */
+    function celdasExclusion(f) {
+        return modulosExclusion().map(function(m) {
+            return '<td class="text-center">' + celdaExclusion(f, m) + '</td>';
+        }).join('');
+    }
+
+    /**
+     * La celda de un módulo: la marca y las acciones.
+     *
+     * LOS BOTONES SE DIBUJAN SÓLO CON EL PERMISO DE ESE MÓDULO, que manda el
+     * servidor en 'puede_editar'. Es comodidad: lo que frena es el 403 de
+     * excluirProveedor, que pide el permiso del módulo del pedido.
+     */
+    function celdaExclusion(f, m) {
         if (!maestro || !maestro.excluir_proveedor) {
             return '<span class="text-muted small" title="Falta '
                 + 'sql/cashflow_prov_exclusion_modulo.sql: todavía no se puede excluir.">—</span>';
         }
 
-        var ex = (maestro.excluidos || {})[f.COD_PROVEE];
+        var ex = excluidosDe(m.modulo)[f.COD_PROVEE];
         var cod = escapar(f.COD_PROVEE);
         var nombre = escapar(f.NOMBRE || '');
-
-        var puede = Permisos.puedeEditar('bodyMaestroProv');
+        var mod = escapar(m.modulo);
+        var hist = '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-hist-excl" '
+            + 'data-cod="' + cod + '" data-modulo="' + mod + '" title="Historial de exclusiones de '
+            + 'este proveedor en ' + escapar(m.nombre) + '.">'
+            + '<i class="fas fa-clock-rotate-left"></i></button>';
 
         if (!ex) {
-            return !puede ? '' : '<button class="btn btn-sm btn-outline-secondary py-0 px-2 prov-excluir-mod" '
-                + 'data-cod="' + cod + '" data-nombre="' + nombre + '" title="Excluir de '
-                + 'Proveedores Locales: toda su deuda sale de la fila del tablero porque ya se '
-                + 'considera en otra pestaña.">excluir</button>';
+            return !m.puede_editar ? '' : '<button class="btn btn-sm btn-outline-secondary py-0 px-2 '
+                + 'prov-excluir-mod" data-cod="' + cod + '" data-nombre="' + nombre + '" data-modulo="'
+                + mod + '" title="' + escapar('Excluir de ' + m.nombre + '. ' + (EFECTO_EXCLUSION[m.modulo] || ''))
+                + '">excluir</button>';
         }
 
-        return '<span class="prov-badge-excluida" title="' + escapar('Excluido: ' + ex.MOTIVO
-                + '\n' + Auditoria.linea('alta', ex.USUARIO, ex.FECHA_ALTA))
+        return '<span class="prov-badge-excluida" title="' + escapar('Excluido de ' + m.nombre + ': '
+                + ex.MOTIVO + '\n' + Auditoria.linea('alta', ex.USUARIO, ex.FECHA_ALTA))
             + '">excluido</span> '
-            + (!puede ? '' : '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-incluir-mod" '
-            + 'data-cod="' + cod + '" title="Volver a incluirlo. La exclusión queda en el '
-            + 'historial."><i class="fas fa-rotate-left"></i></button> ')
-            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-hist-excl" '
-            + 'data-cod="' + cod + '" title="Historial de exclusiones de este proveedor.">'
-            + '<i class="fas fa-clock-rotate-left"></i></button>';
+            + (!m.puede_editar ? '' : '<button class="btn btn-sm btn-outline-secondary py-0 px-1 '
+            + 'prov-incluir-mod" data-cod="' + cod + '" data-modulo="' + mod + '" title="Volver a '
+            + 'incluirlo. La exclusión queda en el historial."><i class="fas fa-rotate-left"></i></button> ')
+            + hist;
     }
 
     /** Engancha las tres acciones dentro de un contenedor */
@@ -3518,31 +3595,31 @@
 
         raizExcl.querySelectorAll('.prov-excluir-mod').forEach(function(b) {
             b.addEventListener('click', function() {
-                excluirProveedorModulo(b.getAttribute('data-cod'), b.getAttribute('data-nombre'));
+                excluirProveedorModulo(b.getAttribute('data-cod'), b.getAttribute('data-nombre'),
+                    b.getAttribute('data-modulo') || 'PROV_LOCALES');
             });
         });
 
         raizExcl.querySelectorAll('.prov-incluir-mod').forEach(function(b) {
             b.addEventListener('click', function() {
-                incluirProveedorModulo(b.getAttribute('data-cod'));
+                incluirProveedorModulo(b.getAttribute('data-cod'), b.getAttribute('data-modulo') || 'PROV_LOCALES');
             });
         });
 
         raizExcl.querySelectorAll('.prov-hist-excl').forEach(function(b) {
             b.addEventListener('click', function() {
-                verHistorialExclusion(b.getAttribute('data-cod'));
+                verHistorialExclusion(b.getAttribute('data-cod'), b.getAttribute('data-modulo') || 'PROV_LOCALES');
             });
         });
     }
 
-    function excluirProveedorModulo(cod, nombre) {
+    function excluirProveedorModulo(cod, nombre, modulo) {
+        var nom = nombreModulo(modulo);
+
         Notificacion.pedirTexto({
-            titulo: 'Excluir de Proveedores Locales',
-            mensaje: '¿Excluir a ' + cod + (nombre ? ' (' + nombre + ')' : '')
-                + ' de Proveedores Locales?',
-            detalle: 'Toda su deuda —la emitida y la que venga— sale de la fila del tablero y '
-                + 'pasa a su propia serie, porque ya se considera en otra pestaña. Para sacar '
-                + 'una factura suelta está la exclusión por factura, en Cuentas a Pagar.',
+            titulo: 'Excluir de ' + nom,
+            mensaje: '¿Excluir a ' + cod + (nombre ? ' (' + nombre + ')' : '') + ' de ' + nom + '?',
+            detalle: EFECTO_EXCLUSION[modulo] || '',
             etiqueta: 'Motivo',
             placeholder: 'Ej.: ya se proyecta en Crono Nacionalización',
             maxlargo: 200,
@@ -3554,11 +3631,10 @@
             if (motivo === null) { return; }
 
             return pedirJson('Controller/ProveedoresController.php?action=excluirProveedor',
-                    { cod_provee: cod, motivo: motivo })
+                    { cod_provee: cod, motivo: motivo, modulo: modulo })
                 .then(function(r) {
-                    Notificacion.exito(r.cod_provee + ' quedó excluido de Proveedores Locales.', {
-                        detalle: 'Toda su deuda sale de la fila del tablero y pasa a su propia '
-                            + 'serie. En Cuentas a Pagar se ve con "Ver excluidas".'
+                    Notificacion.exito(r.cod_provee + ' quedó excluido de ' + nom + '.', {
+                        detalle: EFECTO_EXCLUSION[modulo] || ''
                     });
 
                     recargarMaestroYListado();
@@ -3568,20 +3644,22 @@
         });
     }
 
-    function incluirProveedorModulo(cod) {
+    function incluirProveedorModulo(cod, modulo) {
+        var nom = nombreModulo(modulo);
+
         Notificacion.confirmar({
             titulo: 'Volver a incluir',
-            mensaje: '¿Volver a incluir a ' + cod + ' en Proveedores Locales?',
-            detalle: 'Su deuda vuelve a la fila del tablero según cómo se le paga. La exclusión '
-                + 'no se borra: queda en el historial, con su motivo.',
+            mensaje: '¿Volver a incluir a ' + cod + ' en ' + nom + '?',
+            detalle: 'Su deuda vuelve a ' + nom + ' como antes de excluirlo. La exclusión no se '
+                + 'borra: queda en el historial, con su motivo.',
             confirmar: 'Incluir'
         }).then(function(ok) {
             if (!ok) { return; }
 
             return pedirJson('Controller/ProveedoresController.php?action=incluirProveedor',
-                    { cod_provee: cod })
+                    { cod_provee: cod, modulo: modulo })
                 .then(function() {
-                    Notificacion.exito(cod + ' incluido de nuevo en Proveedores Locales.');
+                    Notificacion.exito(cod + ' incluido de nuevo en ' + nom + '.');
                     recargarMaestroYListado();
                 });
         }).catch(function(error) {
@@ -3589,9 +3667,11 @@
         });
     }
 
-    function verHistorialExclusion(cod) {
+    function verHistorialExclusion(cod, modulo) {
+        var nom = nombreModulo(modulo);
+
         pedirJson('Controller/ProveedoresController.php?action=getHistorialExclusion&cod_provee='
-                + encodeURIComponent(cod))
+                + encodeURIComponent(cod) + '&modulo=' + encodeURIComponent(modulo))
             .then(function(filas) {
                 var tabla = '<table class="table table-sm small mt-3 mb-0"><thead><tr>'
                     + '<th>Desde</th><th>Hasta</th><th>Motivo</th><th>Quién</th>'
@@ -3599,7 +3679,8 @@
                     + (filas || []).map(function(h) {
                         return '<tr' + (h.VIGENTE ? ' class="fw-semibold"' : '') + '>'
                             + '<td>' + escapar(h.FECHA_ALTA || '') + '</td>'
-                            + '<td>' + (h.VIGENTE ? 'vigente' : escapar(h.FECHA_BAJA || '')) + '</td>'
+                            + '<td>' + (h.VIGENTE ? 'vigente' : escapar(h.FECHA_BAJA || '')
+                                + (h.USUARIO_BAJA ? ' (' + escapar(h.USUARIO_BAJA) + ')' : '')) + '</td>'
                             + '<td>' + escapar(h.MOTIVO || '') + '</td>'
                             + '<td>' + escapar(h.USUARIO || '—') + '</td>'
                             + '</tr>';
@@ -3607,11 +3688,10 @@
                     + '</tbody></table>';
 
                 return Notificacion.confirmar({
-                    titulo: 'Historial de exclusión',
-                    mensaje: cod + ': cada vez que se lo excluyó de Proveedores Locales, y hasta '
-                        + 'cuándo.',
+                    titulo: 'Historial de exclusión · ' + nom,
+                    mensaje: cod + ': cada vez que se lo excluyó de ' + nom + ', y hasta cuándo.',
                     html: (filas && filas.length) ? tabla
-                        : '<p class="text-muted small mt-3 mb-0">Nunca se lo excluyó.</p>',
+                        : '<p class="text-muted small mt-3 mb-0">Nunca se lo excluyó de ' + escapar(nom) + '.</p>',
                     confirmar: 'Cerrar',
                     cancelar: 'Cerrar'
                 });

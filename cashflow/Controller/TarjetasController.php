@@ -191,7 +191,9 @@ function proveedoresTarjetaCorp() {
     $seguros = TarjetasSeguros::proveedores((new ProveedoresCategorias())->mapa());
 
     return array_values(array_filter(TarjetasCorporativas::proveedoresDelUniverso(
-        TarjetasCorporativas::universo((new Proveedores())->getPendientes(date('Y-m-d')))),
+        TarjetasCorporativas::universo((new Proveedores())->getPendientes(date('Y-m-d')),
+            AlquileresUniverso::delPedido(),
+            (new ProveedoresExclusion())->vigentes(ProveedoresExclusion::MODULO_TARJETAS))),
         function ($p) use ($seguros) { return !isset($seguros[$p['COD_PROVEE']]); }));
 }
 
@@ -434,7 +436,9 @@ try {
                 $data['n_comp'], $data['fecha_vto_tango']);
             $existe = false;
 
-            foreach (TarjetasCorporativas::universo((new Proveedores())->getPendientes($hoy)) as $fu) {
+            foreach (TarjetasCorporativas::universo((new Proveedores())->getPendientes($hoy),
+                         AlquileresUniverso::delPedido(),
+            (new ProveedoresExclusion())->vigentes(ProveedoresExclusion::MODULO_TARJETAS)) as $fu) {
                 if (TarjetasCorporativas::claveCuota($fu) === implode('|', $cuota)) {
                     $existe = true;
                     break;

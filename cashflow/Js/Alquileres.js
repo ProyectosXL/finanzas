@@ -1,9 +1,9 @@
 /**
  * RRHH y Operativos -> Alquileres
  *
- * Dos sub-pestañas con datos -Proyeccion y Ventas- y una tercera, Facturas,
- * que llega en la proxima entrega. Las dos salen de UN pedido (getProyeccion):
- * tienen que describir el mismo estado.
+ * Tres sub-pestañas -Proyeccion, Ventas y Facturas- que salen de UN pedido
+ * (getProyeccion): tienen que describir el mismo estado. Facturas se dibuja en
+ * Js/Alquileres-Facturas.js, con lo que este archivo le pasa al cargar.
  *
  * EL NAVEGADOR NO CALCULA NADA. Cuanto se paga, cuando y de donde sale lo
  * resuelve el servidor (AlquileresPago, la misma regla que va a usar el
@@ -40,10 +40,15 @@
         pedir(ENDPOINT + '?action=getProyeccion')
             .then(function(d) {
                 datos = d.data;
-                AvisosPanel.pintar('avisosAlquileres', datos.avisos || []);
+                /* Con los del tablero de su seccion: los mismos que el proveedor
+                   ALQUILERES le dice al cuadro. */
+                AvisosPanel.pintarPestana('avisosAlquileres', datos.avisos || [], { tab: 'alquileres' });
                 pintarKpis();
                 dibujar();
                 dibujarVentas();
+
+                if (window.AlquileresFacturasTab) { window.AlquileresFacturasTab.pintar(datos); }
+
                 Cargando.ocultar('alqSpinner');
                 mostrar('alqWrapper', true);
                 mostrar('kpisAlquileres', true);
@@ -180,6 +185,17 @@
 
             t += '\n\nPago: ' + fecha(p.fecha) + (p.nota_dia ? ' — ' + p.nota_dia : '')
                 + '\nOrigen: ' + (datos.origenes[p.origen] || p.origen);
+
+            /* UNA FACTURA IMPUTADA: cual, que renglon, y que parte le toca a
+               este local. El importe es el de la factura, con IVA. */
+            if (p.origen === 'FACTURA') {
+                t += '\nFactura ' + d.factura + ' de ' + (d.razon || d.cod_provee)
+                    + '\nImputación ' + d.imputacion + ', renglón ' + d.renglon + ' · cubre ' + rotuloMes(d.mes_cubre)
+                    + '\nImporte con IVA y percepciones (la factura no se abre en impuestos)'
+                    + '\nParte de este local: ' + numero(d.peso * 100, 1) + ' % '
+                    + (d.reparto === 'IGUAL' ? '(partes iguales: no había nada proyectado)'
+                        : '(en proporción a lo proyectado)');
+            }
 
             if (grupo === 'VARIABLES' && d.venta !== undefined) {
                 t += '\nVenta del mes ' + rotuloMes(p.mes_concepto) + ': ' + importeTexto(d.venta)
@@ -474,8 +490,13 @@
             crearColumnasFijas({ tabla: 'tablaAlqVentas', control: 'colFijasAlqVentas', clave: 'alquileres_ventas', porDefecto: [0] });
         }
 
+        AvisosPanel.pedirTablero('alquileres');
         cargar();
     }
+
+    /* La sub-pestaña Facturas recarga todo despues de escribir: sus datos
+       salen del mismo pedido que la Proyeccion. */
+    window.AlquileresPestana = { recargar: cargar };
 
     function enganchar(id, evento, fn) {
         var el = document.getElementById(id);

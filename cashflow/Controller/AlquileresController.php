@@ -36,8 +36,20 @@ function responder($data, $mensaje = null) {
     echo json_encode($r, JSON_UNESCAPED_UNICODE);
 }
 
+/** El horizonte del tablero: las escrituras de Facturas revalidan con el mismo */
+function horizonteAlq() {
+    require_once __DIR__ . '/../Class/Parametros.php';
+    require_once __DIR__ . '/../Class/Horizonte.php';
+
+    return Horizonte::desdeParametros(new Parametros());
+}
+
 try {
     require_once __DIR__ . '/../Class/Alquileres.php';
+    require_once __DIR__ . '/../Class/AlquileresImputaciones.php';
+    require_once __DIR__ . '/../Class/AlquileresFacturaVto.php';
+    require_once __DIR__ . '/../Class/AlquileresUniverso.php';
+    require_once __DIR__ . '/../Class/Proveedores.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 
@@ -60,7 +72,91 @@ try {
             require_once __DIR__ . '/../Class/Horizonte.php';
 
             $h = Horizonte::desdeParametros(new Parametros());
-            responder((new Alquileres($h->hoy()))->proyeccion($h));
+            $alq = new Alquileres($h->hoy());
+            $c = $alq->calcular($h, $alq->insumos($h));
+
+            /* LAS QUE TANGO YA PAGO SE MARCAN SOLAS, para cualquiera que pueda
+               ver la pestaña y con un usuario fijo, como la conciliacion de
+               Proveedores Locales: no es una decision de nadie, es copiar lo que
+               dice Tango. El calculo no depende de la marca (ya la trata como
+               pagada); la marca deja la fecha. Si falla, la pestaña carga igual. */
+            if (!empty($c['pagadas_nuevas'])) {
+                try {
+                    (new AlquileresImputaciones())->marcarPagadas($c['pagadas_nuevas']);
+                } catch (Throwable $e) {
+                    $c['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'No se pudo marcar como pagadas las facturas que '
+                        . 'Tango ya canceló (' . $e->getMessage() . '). Se toman igual como pagadas y se '
+                        . 'reintenta en la próxima carga.', 'Facturas');
+                }
+            }
+
+            $out = Alquileres::armarPestana($c, $h);
+            $out['facturas']['tablas'] = (new AlquileresImputaciones())->tablaCreada();
+            responder($out);
+            break;
+
+        /* ================================================================
+           LA SUB-PESTAÑA FACTURAS
+
+           Toda escritura revalida contra los pendientes de AHORA
+           (Alquileres::contextoImputacion()): lo que vino del navegador es un
+           pedido, no un hecho.
+           ================================================================ */
+        case 'editarVtoFactura':
+            $data = bodyJson();
+            $hoy = date('Y-m-d');
+            $h = horizonteAlq();
+            $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
+            $cuota = ['COD_PROVEE' => $data['cod_provee'] ?? '', 'T_COMP' => $data['t_comp'] ?? '',
+                      'N_COMP' => $data['n_comp'] ?? '', 'FECHA_VTO' => $data['vto_tango'] ?? ''];
+
+            if (!isset($e['pendientes'][AlquileresImputacion::claveCuota($cuota)])) {
+                throw new InvalidArgumentException('Esa factura ya no está pendiente en Tango, o no es de alquiler: '
+                    . 'volvé a cargar la pestaña. No se guardó nada.');
+            }
+
+            $r = (new AlquileresFacturaVto())->guardar($cuota['COD_PROVEE'], $cuota['T_COMP'], $cuota['N_COMP'],
+                $cuota['FECHA_VTO'], $data['fecha'] ?? '', $data['motivo'] ?? null, $usuario, $hoy);
+            responder($r, $r['deshecha'] ? 'Vuelve al vencimiento de Tango.'
+                : 'Vencimiento a considerar: ' . date('d/m/Y', strtotime($r['fecha'])) . '.');
+            break;
+
+        case 'deshacerVtoFactura':
+            $data = bodyJson();
+            $r = (new AlquileresFacturaVto())->deshacer($data['cod_provee'] ?? '', $data['t_comp'] ?? '',
+                $data['n_comp'] ?? '', $data['vto_tango'] ?? '', $usuario);
+            responder($r, $r['habia'] ? 'Vuelve al vencimiento de Tango. El cambio queda en el historial.'
+                : 'Ya estaba con el vencimiento de Tango.');
+            break;
+
+        case 'previsualizarImputacion':
+            $h = horizonteAlq();
+            $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
+            responder(AlquileresImputacion::validar(bodyJson(), $e));
+            break;
+
+        case 'guardarImputacion':
+            $data = bodyJson();
+            $h = horizonteAlq();
+            $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
+            $v = AlquileresImputacion::validar($data, $e, true);
+
+            if (!$v['ok']) {
+                throw new InvalidArgumentException('No se guardó: ' . implode(' ', $v['errores']));
+            }
+
+            $r = (new AlquileresImputaciones())->guardar($v, $data['observacion'] ?? null, $usuario);
+            responder($r, 'Imputación ' . $r['id'] . ' guardada.' . (empty($r['reemplazadas']) ? ''
+                : ' Reemplaza a la ' . implode(', ', $r['reemplazadas']) . ', que queda en el historial.'));
+            break;
+
+        case 'deshacerImputacion':
+            $data = bodyJson();
+            $habia = (new AlquileresImputaciones())->deshacer((int) ($data['id'] ?? 0), $usuario);
+            responder(['habia' => $habia], $habia
+                ? 'Imputación deshecha: sus facturas vuelven a Sin imputar y la proyección que reemplazaba '
+                  . 'vuelve. Queda en el historial.'
+                : 'Esa imputación ya no estaba vigente.');
             break;
 
         /* ================================================================
@@ -97,7 +193,31 @@ try {
 
         case 'bajaRazon':
             $data = bodyJson();
+
+            /* NO SE DA DE BAJA CON IMPUTACIONES DE FACTURAS TODAVIA PENDIENTES:
+               sus facturas volverian a Proveedores Locales con la imputacion
+               contada aca. El mensaje lista cuales deshacer. Las de facturas ya
+               pagadas no frenan. Los pendientes son de TODO Tango: la condicion
+               de seguridad no importa para saber si una factura sigue debiendose. */
+            $imps = new AlquileresImputaciones();
+
+            if ($imps->tablaCreada()) {
+                $pendClaves = [];
+
+                foreach ((new Proveedores())->getPendientes(date('Y-m-d')) as $p) {
+                    $pendClaves[AlquileresImputacion::claveCuota($p)] = true;
+                }
+
+                $bloquean = AlquileresImputacion::bloqueanBaja($data['cod_provee'] ?? '', $imps->vigentes(), $pendClaves);
+
+                if (!empty($bloquean)) {
+                    throw new InvalidArgumentException(AlquileresImputacion::mensajeBajaBloqueada(
+                        Planilla::codigo($data['cod_provee'] ?? ''), $bloquean));
+                }
+            }
+
             $r = $par->bajaRazon($data['cod_provee'] ?? '', $usuario);
+            AlquileresUniverso::olvidar();
             responder($r, 'La razón social ' . $r['cod'] . ' quedó dada de baja. No se borra: queda en el '
                 . 'historial, y sus locales pasan a Incompletos.');
             break;

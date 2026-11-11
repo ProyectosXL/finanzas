@@ -7,6 +7,8 @@ require_once __DIR__ . '/../Proveedores.php';
    Corporativos, y escribir 'TARJETA CORP' a mano en dos lados es como se
    desincronizan el dia que ese valor cambie. */
 require_once __DIR__ . '/../TarjetasCorporativas.php';
+require_once __DIR__ . '/../AlquileresFacturas.php';
+require_once __DIR__ . '/../AlquileresUniverso.php';
 
 /**
  * ProveedoresProvider
@@ -173,6 +175,26 @@ class ProveedoresProvider extends CashflowProvider {
      */
     const SERIE_EXCLUIDOS_PROVEEDOR = 'PAGOS_EXCLUIDOS_PROVEEDOR';
 
+    /**
+     * LAS FACTURAS DE ALQUILER, que ya no son de este modulo.
+     *
+     * Las de las razones sociales dadas de alta en Parametros -> Alquileres
+     * (AlquileresFacturas) se gestionan y suman en Alquileres: imputadas, por su
+     * a pagar, en la serie REAL de ese modulo; sin imputar, en ninguna. Aca van
+     * SOLO a esta serie y a ninguna otra, ni siquiera a PAGOS_TODO: el universo
+     * de Proveedores Locales queda sin ellas, y por eso las dos particiones
+     * siguen cerrando sin un quinto miembro.
+     *
+     * ES INFORMATIVA Y NO ES COMPONENTE DE NADA. Existe para poder auditar
+     * cuanto salio de Proveedores Locales; una fila del tablero que la lea
+     * contaria dos veces lo que Alquileres ya cuenta. El control al pie de
+     * sql/cashflow_alquileres_fila.sql lo verifica.
+     *
+     * Incluye las de proveedores excluidos de Alquileres: tampoco son de este
+     * modulo, y no vuelven a el por estar excluidas.
+     */
+    const SERIE_ALQUILERES = 'PAGOS_ALQUILERES';
+
     protected function calcular($h) {
         if ($this->codigo() !== 'PROV_LOCALES') {
             $this->avisar('El codigo de proveedor "' . $this->codigo()
@@ -190,7 +212,19 @@ class ProveedoresProvider extends CashflowProvider {
            Lo unico que cambia en las series es en que columna cae cada importe de
            PAGOS; ninguna serie gana ni pierde un peso. Ver
            Proveedores::resolverFechaPago(). */
-        $items = $prov->getPendientes($h->hoy(), $h);
+        $todos = $prov->getPendientes($h->hoy(), $h);
+
+        /* LAS FACTURAS DE ALQUILER NO SON DE ESTE MODULO: van a
+           SERIE_ALQUILERES y a ninguna otra, asi que el universo de Proveedores
+           Locales -PAGOS_TODO y sus dos particiones- queda sin ellas y sigue
+           cerrando. Los avisos de abajo miran solo lo que se queda, para no
+           decir "queda fuera de la fila" de plata que se cuenta en Alquileres.
+           La regla es la de la pestaña: AlquileresFacturas. */
+        $ctxAlq = AlquileresUniverso::delPedido();
+        $partes = AlquileresFacturas::partir($todos, $ctxAlq);
+        $items = $partes[AlquileresFacturas::A_PROV_LOCALES];
+        $this->avisarTodos(array_merge($ctxAlq['avisos'], AlquileresFacturas::avisoCondicion($ctxAlq, $todos),
+            AlquileresFacturas::avisoFueraDeProvLocales($partes)));
 
         $this->avisarTodos($prov->avisosCronogramaConNivel());
         $this->avisarTodos(Proveedores::avisosPendientesConNivel($items));
@@ -211,7 +245,10 @@ class ProveedoresProvider extends CashflowProvider {
            factura se va a imputar. Si la lectura falla, avisa y sigue. */
         $this->avisarTodos($prov->avisosSaldosConNivel($h->hoy()));
 
-        return $this->repartir($h, $items);
+        $alquiler = array_map(function ($i) { return ['ALQUILER' => true] + $i; },
+            array_merge($partes[AlquileresFacturas::A_ALQUILERES], $partes[AlquileresFacturas::A_EXCLUIDA]));
+
+        return $this->repartir($h, array_merge($items, $alquiler));
     }
 
     /**
@@ -531,7 +568,8 @@ class ProveedoresProvider extends CashflowProvider {
             self::SERIE_CRONO_OPERATIVOS => $this->serieVacia($h),
             self::SERIE_SIN_RUBRO => $this->serieVacia($h),
             self::SERIE_EXCLUIDOS_FACTURA => $this->serieVacia($h),
-            self::SERIE_EXCLUIDOS_PROVEEDOR => $this->serieVacia($h)
+            self::SERIE_EXCLUIDOS_PROVEEDOR => $this->serieVacia($h),
+            self::SERIE_ALQUILERES => $this->serieVacia($h)
         ];
 
         /* SE CREA UNA SERIE POR CADA RUBRO DEL MAESTRO, aunque hoy no tenga
@@ -622,6 +660,13 @@ class ProveedoresProvider extends CashflowProvider {
      * @return array Codigos de serie
      */
     public static function seriesDeItem($item) {
+        /* UNA FACTURA DE ALQUILER VA A SU SERIE Y A NINGUNA OTRA: no es parte
+           del universo de este modulo. Ver SERIE_ALQUILERES. La marca la pone
+           calcular() con AlquileresFacturas, que es la regla. */
+        if (!empty($item['ALQUILER'])) {
+            return [self::SERIE_ALQUILERES];
+        }
+
         $cronograma = !empty($item['CRONOGRAMA']);
         $excluido = !empty($item['EXCLUIDO']);
         $excluidaManual = !empty($item['EXCLUIDA_MANUAL']);

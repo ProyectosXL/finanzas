@@ -791,14 +791,20 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                      una fila MANUAL es una que se va a perder
                                      en la próxima importación. -->
                                 <th class="text-center" id="thOrigenMaestroProv">ORIGEN</th>
-                                <!-- Si el proveedor está excluido de
-                                     Proveedores Locales porque su deuda ya se
-                                     considera en otra pestaña. No es un dato
-                                     de la planilla: vive en su propia tabla y
-                                     la reimportación no lo toca. Ver
+                                <!-- LA EXCLUSIÓN POR MÓDULO: una columna por
+                                     cada pestaña que lee las cuentas a pagar
+                                     de Tango. No es un dato de la planilla:
+                                     vive en su propia tabla y la reimportación
+                                     no la toca. CADA COLUMNA SE EDITA CON EL
+                                     PERMISO DE SU MÓDULO: quien no lo tiene la
+                                     ve sin botones. Ver
                                      Class/ProveedoresExclusion.php. -->
                                 <th class="text-center"
                                     title="Excluido de Proveedores Locales: toda su deuda sale de la fila del tablero porque ya se considera en otra pestaña.">PROV. LOCALES</th>
+                                <th class="text-center"
+                                    title="Excluido de Tarjetas Pagos Corporativos: sus facturas no entran a esa pestaña. La exclusión por factura de esa pestaña es otra cosa y sigue existiendo.">TARJETAS</th>
+                                <th class="text-center"
+                                    title="Excluido de Alquileres: sus facturas no entran a esa pestaña, no se imputan, no suman y no vuelven a Proveedores Locales. Para pasarlo a Proveedores Locales se lo da de baja en Parámetros › Alquileres.">ALQUILERES</th>
                                 <th class="text-center">Historial</th>
                                 <th class="text-center" style="width: 90px;"></th>
                             </tr>

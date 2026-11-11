@@ -137,23 +137,79 @@ class TarjetasCorporativas {
      * null. Normalizar de nuevo aca seria una tercera normalizacion del mismo
      * valor, que es exactamente como se separan dos criterios.
      *
+     * UNA FACTURA DE ALQUILER NO ENTRA, aunque tenga TARJETA CORP: la gestiona la
+     * pestaña Alquileres y alla suma. Es la misma regla que saca esas facturas de
+     * Proveedores Locales (AlquileresFacturas::deProveedoresLocales()), asi que
+     * una factura esta en un solo lado. Al 10/11/2026 no hay ninguna asi.
+     *
+     * UN PROVEEDOR EXCLUIDO DE ESTA PESTAÑA TAMPOCO ENTRA (ProveedoresExclusion,
+     * modulo TARJETAS_CORP): se decidio que su deuda ya se cuenta en otro lado.
+     * Es otra decision que la exclusion POR FACTURA de esta pestaña, que sigue
+     * existiendo y se aplica despues, en resolver().
+     *
      * Estatica y pura.
      *
      * @param array $pendientes Lo que devolvio Proveedores::getPendientes()
+     * @param array|null $ctxAlquiler De AlquileresUniverso::delPedido(); null =
+     *        sin separar las de alquiler (solo para pruebas viejas)
+     * @param array $excluidos Mapa COD_PROVEE => ... de los excluidos de
+     *        TARJETAS_CORP (ProveedoresExclusion::vigentes())
      * @return array Las filas de tarjeta corporativa, tal como venian
      */
-    public static function universo($pendientes) {
+    public static function universo($pendientes, $ctxAlquiler = null, $excluidos = []) {
         $v = [];
+
+        if ($ctxAlquiler !== null) {
+            require_once __DIR__ . '/AlquileresFacturas.php';
+            $pendientes = AlquileresFacturas::deProveedoresLocales($pendientes, $ctxAlquiler);
+        }
 
         foreach (is_array($pendientes) ? $pendientes : [] as $p) {
             $forma = isset($p['FORMA_PAGO_VIGENTE']) ? trim((string) $p['FORMA_PAGO_VIGENTE']) : '';
 
-            if ($forma === self::FORMA) {
+            if ($forma === self::FORMA && !isset($excluidos[isset($p['COD_PROVEE']) ? $p['COD_PROVEE'] : ''])) {
                 $v[] = $p;
             }
         }
 
         return $v;
+    }
+
+    /**
+     * El aviso por los proveedores excluidos de esta pestaña: cuantos, cuanto
+     * y quienes, con donde se revisan. INFORMATIVO: fue una decision, con
+     * motivo, y la plata no falta del cuadro sin explicacion.
+     *
+     * Estatica y pura.
+     *
+     * @param array $universoSinExcluir universo() SIN los excluidos
+     * @param array $excluidos Mapa COD_PROVEE => ['MOTIVO', ...]
+     * @return array Lista de avisos
+     */
+    public static function avisoExcluidosProveedor($universoSinExcluir, $excluidos) {
+        $porProv = [];
+
+        foreach (is_array($universoSinExcluir) ? $universoSinExcluir : [] as $f) {
+            $cod = isset($f['COD_PROVEE']) ? $f['COD_PROVEE'] : '';
+
+            if (isset($excluidos[$cod])) {
+                $porProv[$cod] = (isset($porProv[$cod]) ? $porProv[$cod] : 0.0) + floatval($f['IMPORTE_PENDIENTE']);
+            }
+        }
+
+        if (empty($porProv)) {
+            return [];
+        }
+
+        $lista = [];
+
+        foreach ($porProv as $cod => $imp) {
+            $lista[] = $cod . ' ' . self::plata($imp) . ' (' . $excluidos[$cod]['MOTIVO'] . ')';
+        }
+
+        return [Aviso::nuevo(Aviso::INFO, count($porProv) . ' proveedor(es) están excluidos de Tarjetas '
+            . 'Pagos Corporativos y sus facturas no entran: ' . self::plata(array_sum($porProv)) . '. '
+            . implode('; ', $lista) . '. Se revisan en Proveedores Locales › Maestro, columna Tarjetas.')];
     }
 
     /**
