@@ -35,10 +35,10 @@
    POR QUE (COD_PROVEE, MODULO) Y NO UN BIT
 
    La exclusion es POR MODULO: un proveedor puede estar contado en otra pestana
-   para un circuito y no para otro. Hoy el unico modulo es Proveedores Locales,
-   pero agregar otro es ampliar el CHECK de MODULO -un ALTER de una linea- y
-   escribir su codigo; la tabla no cambia. Un BIT fijo obligaria a una columna
-   por modulo.
+   para un circuito y no para otro. Agregar un modulo es ampliar el CHECK de
+   MODULO y escribir su codigo; la tabla no cambia. Asi entraron Tarjetas Pagos
+   Corporativos y Alquileres: ver sql/cashflow_prov_exclusion_modulos_ampliar.sql,
+   que va despues de este. Un BIT fijo obligaria a una columna por modulo.
 
    MODULO ES UN CHECK Y NO UNA LISTA ADMINISTRABLE a proposito: un modulo nuevo
    siempre viene con codigo que lo lea, asi que no hay nada que un usuario
@@ -95,7 +95,10 @@ BEGIN
         /* Cuando se lo volvio a incluir. */
         FECHA_BAJA  DATETIME     NULL,
         CONSTRAINT PK_RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO PRIMARY KEY CLUSTERED (ID),
-        CONSTRAINT CK_RO_T_CF_PROVEXC_MODULO CHECK (MODULO IN ('PROV_LOCALES')),
+        /* Los tres modulos de una instalacion nueva. Una tabla creada antes con
+           solo PROV_LOCALES la amplia sql/cashflow_prov_exclusion_modulos_ampliar.sql. */
+        CONSTRAINT CK_RO_T_CF_PROVEXC_MODULO
+            CHECK (MODULO IN ('PROV_LOCALES', 'TARJETAS_CORP', 'ALQUILERES')),
         CONSTRAINT CK_RO_T_CF_PROVEXC_MOTIVO CHECK (LEN(LTRIM(RTRIM(MOTIVO))) > 0)
     );
 

@@ -85,16 +85,26 @@ class AlquileresUniverso {
     }
 
     /**
-     * Los excluidos de Alquileres.
+     * Los excluidos de Alquileres (ProveedoresExclusion, modulo ALQUILERES).
      *
-     * HOY NO HAY NINGUNO: el modulo ALQUILERES de ProveedoresExclusion todavia no
-     * existe (llega con sql/cashflow_prov_exclusion_modulos_ampliar.sql). Va
-     * como metodo propio para que agregarlo sea cambiar solo esto.
+     * Sin la tabla de exclusiones no hay ninguno, que es lo cierto. Si no se
+     * puede leer, tampoco, y se avisa: tratarlos como no excluidos los deja en
+     * la pestaña, donde sin imputar no suman, asi que no se cuenta nada dos
+     * veces.
      *
      * @return string[]
      */
     protected function excluidos(&$avisos) {
-        return [];
+        try {
+            require_once __DIR__ . '/ProveedoresExclusion.php';
+
+            return array_keys((new ProveedoresExclusion())->vigentes(ProveedoresExclusion::MODULO_ALQUILERES));
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los proveedores excluidos de '
+                . 'Alquileres (' . $e->getMessage() . '): mientras tanto se toman como incluidos.');
+
+            return [];
+        }
     }
 
     /** @return bool Si el modulo ALQUILERES esta construido en el registro */

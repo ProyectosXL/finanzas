@@ -222,7 +222,7 @@ $subs = array_map(function ($m) { return $m['codigo']; }, Parametros::getModulos
 $tabsMalas = [];
 $subsMalas = [];
 
-foreach (AuthCashflow::ESCRITURAS as $c => $acciones) {
+foreach (AuthCashflow::escriturasPosibles() as $c => $acciones) {
     foreach ($acciones as $a => $destinos) {
         foreach ($destinos as $d) {
             if (!in_array($d[0], $tabs, true)) {
@@ -251,7 +251,7 @@ seccion('el script de permisos da de alta exactamente las claves que pide el cod
    una escritura propia: saveParametro llega a cualquiera-. */
 $esperadas = [];
 
-foreach (AuthCashflow::ESCRITURAS as $acciones) {
+foreach (AuthCashflow::escriturasPosibles() as $acciones) {
     foreach ($acciones as $destinos) {
         foreach ($destinos as $d) {
             if ($d[0] !== 'parametros') {
@@ -425,7 +425,7 @@ seccion('cada pestaña con escrituras lleva el permiso en su raiz');
 
 $tabsConEscritura = [];
 
-foreach (AuthCashflow::ESCRITURAS as $acciones) {
+foreach (AuthCashflow::escriturasPosibles() as $acciones) {
     foreach ($acciones as $destinos) {
         foreach ($destinos as $d) {
             if ($d[0] !== 'parametros') {
@@ -445,7 +445,9 @@ foreach (array_keys($tabsConEscritura) as $tab) {
     }
 }
 
-chequear('las trece pestañas', 13, count($tabsConEscritura));
+/* Catorce desde que Alquileres tiene escrituras propias: la columna de su
+   exclusion en el Maestro y, despues, sus facturas. */
+chequear('las catorce pestañas', 14, count($tabsConEscritura));
 chequear('todas con data-puede-editar', [], $sinAtributo);
 
 $param = file_get_contents(__DIR__ . '/../Tabs/parametros.php');

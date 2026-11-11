@@ -2235,9 +2235,18 @@ chequear('el motivo se recorta al largo de la columna', 200,
    nadie. */
 $sqlExcl = file_get_contents(__DIR__ . '/../sql/cashflow_prov_exclusion_modulo.sql');
 
-foreach (array_keys(ProveedoresExclusion::MODULOS) as $mod) {
-    chequear('el CHECK de la tabla admite ' . $mod, true,
-        strpos($sqlExcl, "CHECK (MODULO IN ('" . $mod . "'") !== false);
+/* Los dos scripts: el que crea la tabla (instalacion nueva) y el que amplia
+   el CHECK de una tabla que ya existia. */
+$sqlAmpliar = file_get_contents(__DIR__ . '/../sql/cashflow_prov_exclusion_modulos_ampliar.sql');
+
+foreach (['crea' => $sqlExcl, 'amplia' => $sqlAmpliar] as $cual => $sqlCheck) {
+    preg_match("/CHECK \(MODULO IN \(([^)]*)\)\)/", $sqlCheck, $m);
+    preg_match_all("/'([A-Z_]+)'/", isset($m[1]) ? $m[1] : '', $lista);
+
+    foreach (array_keys(ProveedoresExclusion::MODULOS) as $mod) {
+        chequear('el CHECK del script que ' . $cual . ' la tabla admite ' . $mod, true,
+            in_array($mod, $lista[1], true));
+    }
 }
 
 chequear('el script es reejecutable: pregunta antes de crear', true,

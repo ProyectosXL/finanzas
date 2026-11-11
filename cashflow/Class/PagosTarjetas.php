@@ -649,7 +649,24 @@ class PagosTarjetas {
            que en Proveedores Locales, AlquileresFacturas. */
         $ctxAlq = AlquileresUniverso::delPedido();
         $salida['avisos'] = array_merge($salida['avisos'], $ctxAlq['avisos']);
-        $facturas = TarjetasCorporativas::universo($pendientes, $ctxAlq);
+
+        /* LOS EXCLUIDOS DE ESTA PESTAÑA, por proveedor (Maestro de Proveedores
+           Locales, columna Tarjetas). Si no se pueden leer no hay ninguno, y se
+           avisa: es el lado que muestra de mas, no el que esconde. */
+        $excluidosTc = [];
+
+        try {
+            require_once __DIR__ . '/ProveedoresExclusion.php';
+            $excluidosTc = (new ProveedoresExclusion())->vigentes(ProveedoresExclusion::MODULO_TARJETAS);
+        } catch (Throwable $e) {
+            $salida['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los proveedores '
+                . 'excluidos de Tarjetas Pagos Corporativos (' . $e->getMessage() . '): se toman como incluidos.');
+        }
+
+        $salida['avisos'] = array_merge($salida['avisos'],
+            TarjetasCorporativas::avisoExcluidosProveedor(
+                TarjetasCorporativas::universo($pendientes, $ctxAlq), $excluidosTc));
+        $facturas = TarjetasCorporativas::universo($pendientes, $ctxAlq, $excluidosTc);
 
         /* LAS FACTURAS DE LOS SEGUROS QUEDAN AFUERA: de la grilla, del total y de
            la serie. Un seguro se proyecta SOLO CON SUS POLIZAS; sus facturas en

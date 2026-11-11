@@ -65,6 +65,21 @@ function rechazarAlquiler($codigos) {
     }
 }
 
+/**
+ * El modulo de una exclusion, del pedido. SIN MODULO ES PROVEEDORES LOCALES:
+ * es lo que mandaba la pantalla antes de que hubiera tres, y una pestaña
+ * abierta desde antes del deploy tiene que seguir haciendo lo mismo.
+ *
+ * @param array $data
+ * @return string Validado contra ProveedoresExclusion::MODULOS
+ */
+function moduloExclusion($data) {
+    $m = (is_array($data) && isset($data['modulo']) && $data['modulo'] !== '')
+        ? $data['modulo'] : ProveedoresExclusion::MODULO_PROV_LOCALES;
+
+    return ProveedoresExclusion::validarModulo($m);
+}
+
 /** Los codigos de proveedor de una lista de comprobantes del pedido */
 function codigosDe($comprobantes) {
     return array_map(function ($c) { return is_array($c) && isset($c['cod_provee']) ? $c['cod_provee'] : ''; },
@@ -87,7 +102,18 @@ try {
     /* Quien escribe y si puede, antes de tocar nada: null en las acciones
        que solo leen. Ver Controller/autorizacion.php. */
     require_once __DIR__ . '/autorizacion.php';
-    $usuario = autorizar('Proveedores', $action);
+
+    /* EXCLUIR E INCLUIR UN PROVEEDOR PIDEN EL PERMISO DEL MODULO del que se
+       excluye, no el de esta pestaña: cada columna del Maestro se edita con el
+       suyo (AuthCashflow::TAB_DEL_MODULO). Un modulo invalido falla aca, antes
+       de autorizar. */
+    $pestanaDinamica = null;
+
+    if (AuthCashflow::necesitaTabDelModulo('Proveedores', $action)) {
+        $pestanaDinamica = ProveedoresExclusion::pestanaDe(moduloExclusion(bodyJson()));
+    }
+
+    $usuario = autorizar('Proveedores', $action, $pestanaDinamica);
 
     /* Las dos plantillas van ANTES de instanciar nada: no necesitan ni base ni
        datos cargados. Devuelven la DEFINICION -titulos, tipos y ejemplos, de la
@@ -587,6 +613,25 @@ try {
             $excluidos = $prov->exclusion()->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
             $nombresExcluidos = [];
 
+            /* LOS TRES MODULOS, cada uno con sus excluidos y con si quien mira
+               puede editar ESA columna: la edicion de cada una pide el permiso
+               de su modulo (AuthCashflow::TAB_DEL_MODULO). Quien no lo tiene ve
+               la columna sin poder tocarla. */
+            $porModulo = [];
+            $modulosExcl = [];
+
+            foreach (ProveedoresExclusion::MODULOS as $mod => $nombreMod) {
+                $porModulo[$mod] = $prov->exclusion()->vigentes($mod);
+                $modulosExcl[] = ['modulo' => $mod, 'nombre' => $nombreMod,
+                                  'puede_editar' => AuthCashflow::puedeEditar(ProveedoresExclusion::PESTANA[$mod])];
+            }
+
+            $todosExcluidos = [];
+
+            foreach ($porModulo as $vig) {
+                $todosExcluidos += $vig;
+            }
+
             if ($prov->exclusion()->avisoSinTabla() !== '') {
                 $avisosMaestro[] = $prov->exclusion()->avisoSinTabla();
             }
@@ -595,7 +640,7 @@ try {
                Tango: sin él, la fila sería un código suelto. Son pocos, así que
                una consulta por código alcanza; si CPA01 no se puede leer se
                muestran sin nombre, que no rompe nada. */
-            foreach (array_keys($excluidos) as $codExcl) {
+            foreach (array_keys($todosExcluidos) as $codExcl) {
                 if (!isset($mapa[$codExcl])) {
                     try {
                         $nombresExcluidos[$codExcl] = $prov->categorias()->tango()->existe($codExcl);
@@ -668,6 +713,8 @@ try {
                        maestro, para poder mostrarlos. Ver ProveedoresExclusion. */
                     'excluir_proveedor' => $prov->exclusion()->tablaCreada(),
                     'excluidos' => $excluidos,
+                    'excluidos_modulos' => $porModulo,
+                    'modulos_exclusion' => $modulosExcl,
                     'nombres_excluidos' => $nombresExcluidos,
 
                     /* LAS RETENCIONES DE CADA PROVEEDOR: los impuestos activos y
@@ -773,18 +820,30 @@ try {
         case 'excluirProveedor':
             $data = bodyJson();
 
+            $modulo = moduloExclusion($data);
+
             $r = $prov->exclusion()->excluir(
                 isset($data['cod_provee']) ? $data['cod_provee'] : '',
-                ProveedoresExclusion::MODULO_PROV_LOCALES,
+                $modulo,
                 isset($data['motivo']) ? $data['motivo'] : '',
                 $usuario);
+
+            AlquileresUniverso::olvidar();
+
+            $efecto = [
+                ProveedoresExclusion::MODULO_PROV_LOCALES => 'toda su deuda sale de la fila del tablero y '
+                    . 'pasa a su propia serie.',
+                ProveedoresExclusion::MODULO_TARJETAS => 'sus facturas salen de Tarjetas Pagos '
+                    . 'Corporativos.',
+                ProveedoresExclusion::MODULO_ALQUILERES => 'sus facturas salen de Alquileres y no suman en '
+                    . 'ningún lado; tampoco vuelven a Proveedores Locales.'
+            ];
 
             echo json_encode([
                 'success' => true,
                 'message' => $r['cod_provee'] . ' (' . $r['nombre'] . ') quedó excluido de '
-                    . 'Proveedores Locales: toda su deuda sale de la fila del tablero y pasa a '
-                    . 'su propia serie.',
-                'data' => $r
+                    . ProveedoresExclusion::MODULOS[$modulo] . ': ' . $efecto[$modulo],
+                'data' => $r + ['modulo' => $modulo]
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -795,14 +854,15 @@ try {
                 throw new Exception('Falta el código del proveedor.');
             }
 
-            $habia = $prov->exclusion()->incluir($data['cod_provee'],
-                ProveedoresExclusion::MODULO_PROV_LOCALES, $usuario);
+            $modulo = moduloExclusion($data);
+            $habia = $prov->exclusion()->incluir($data['cod_provee'], $modulo, $usuario);
+            AlquileresUniverso::olvidar();
 
             echo json_encode([
                 'success' => true,
                 'message' => $habia
-                    ? 'Proveedor incluido de nuevo en Proveedores Locales. La exclusión anterior '
-                        . 'queda en el historial.'
+                    ? 'Proveedor incluido de nuevo en ' . ProveedoresExclusion::MODULOS[$modulo]
+                        . '. La exclusión anterior queda en el historial.'
                     : 'Ese proveedor no estaba excluido.',
                 'data' => ['habia' => $habia]
             ], JSON_UNESCAPED_UNICODE);
@@ -815,8 +875,7 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'data' => $prov->exclusion()->historial($_GET['cod_provee'],
-                    ProveedoresExclusion::MODULO_PROV_LOCALES)
+                'data' => $prov->exclusion()->historial($_GET['cod_provee'], moduloExclusion($_GET))
             ], JSON_UNESCAPED_UNICODE);
             break;
 

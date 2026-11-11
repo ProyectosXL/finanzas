@@ -81,6 +81,16 @@ class AuthCashflow {
     const SUB_DEL_PARAMETRO = '@MODULO';
 
     /**
+     * PESTAÑA que no se puede saber de antemano: sale del modulo del que se
+     * excluye un proveedor (ProveedoresExclusion::PESTANA). Es el caso de
+     * excluirProveedor e incluirProveedor: un solo endpoint, en la solapa
+     * Maestro de Proveedores Locales, y CADA COLUMNA SE EDITA CON EL PERMISO DE
+     * SU MODULO. Quien maneja Alquileres decide quien sale de Alquileres, aunque
+     * no pueda tocar Proveedores Locales. Ver exigirAccion().
+     */
+    const TAB_DEL_MODULO = '@PESTANA_DEL_MODULO';
+
+    /**
      * QUE PERMISO EXIGE CADA ACCION DE CADA CONTROLLER.
      *
      * Es la UNICA fuente: ningun controller escribe un nombre de permiso suelto.
@@ -244,8 +254,10 @@ class AuthCashflow {
             'aplicarPagos' => [['proveedores_locales', null]],
             'previewMaestro' => [['proveedores_locales', null]],
             'aplicarMaestro' => [['proveedores_locales', null]],
-            'excluirProveedor' => [['proveedores_locales', null]],
-            'incluirProveedor' => [['proveedores_locales', null]],
+            /* La pestaña del MODULO del que se excluye: Proveedores Locales,
+               Pagos con Tarjetas o Alquileres. Ver TAB_DEL_MODULO. */
+            'excluirProveedor' => [[self::TAB_DEL_MODULO, null]],
+            'incluirProveedor' => [[self::TAB_DEL_MODULO, null]],
             'saveProveedor' => [['proveedores_locales', null]],
             'deleteProveedor' => [['proveedores_locales', null]],
             /* La conciliacion ya no es una accion: corre sola al cargar los
@@ -294,14 +306,12 @@ class AuthCashflow {
     /**
      * Claves de edicion que se dan de alta ANTES de que exista su escritura.
      *
-     * cashflow.editar.alquileres va a habilitar la imputacion de facturas de
-     * alquiler, que llega en la entrega siguiente. Se crea ya
-     * (sql/cashflow_alquileres_permisos.sql) para no volver a la base de apps
-     * cuando llegue, y se declara aca para que tests/test_auth_cashflow.php
-     * la reconozca: una clave en un script que el codigo no pide es un error,
-     * salvo que este en esta lista.
+     * Se declaran aca para que tests/test_auth_cashflow.php las reconozca: una
+     * clave en un script que el codigo no pide es un error, salvo que este en
+     * esta lista. Hoy no hay ninguna: cashflow.editar.alquileres, la ultima,
+     * ya la piden la exclusion de Alquileres y sus facturas.
      */
-    const CLAVES_RESERVADAS = ['cashflow.editar.alquileres'];
+    const CLAVES_RESERVADAS = [];
 
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
@@ -721,10 +731,12 @@ class AuthCashflow {
      *
      * @param string $controlador
      * @param string $accion
-     * @param string|null $subDinamico
+     * @param string|null $subDinamico Lo que el pedido decide, ya resuelto: la
+     *        sub-pestaña de las acciones con SUB_DEL_PARAMETRO, o la pestaña de
+     *        las que tienen TAB_DEL_MODULO
      * @return array|null null si la accion solo lee
      * @throws AuthCashflowSinPermiso si la accion no esta declarada, o si
-     *         necesita la sub-pestaña y no se la pasaron
+     *         necesita la sub-pestaña o la pestaña y no se la pasaron
      */
     public static function destinosDe($controlador, $accion, $subDinamico = null) {
         if (in_array($accion, self::LECTURAS[$controlador] ?? [], true)) {
@@ -748,6 +760,15 @@ class AuthCashflow {
                 $d[1] = $subDinamico;
             }
 
+            if ($d[0] === self::TAB_DEL_MODULO) {
+                if ($subDinamico === null || trim((string) $subDinamico) === '') {
+                    throw new AuthCashflowSinPermiso('No se pudo determinar de qué módulo se excluye el '
+                        . 'proveedor, así que no se puede verificar el permiso.');
+                }
+
+                $d[0] = $subDinamico;
+            }
+
             $destinos[] = $d;
         }
 
@@ -764,6 +785,53 @@ class AuthCashflow {
     public static function necesitaSubDelParametro($controlador, $accion) {
         foreach (self::ESCRITURAS[$controlador][$accion] ?? [] as $d) {
             if ($d[1] === self::SUB_DEL_PARAMETRO) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * ESCRITURAS con TAB_DEL_MODULO resuelto a cada pestaña posible: la de cada
+     * modulo de ProveedoresExclusion. Es lo que el mapa PUEDE llegar a pedir, y
+     * lo que miran las pruebas que verifican que cada pestaña exista, tenga su
+     * clave en los scripts y su atributo en la vista. Pura.
+     *
+     * @return array Misma forma que ESCRITURAS
+     */
+    public static function escriturasPosibles() {
+        require_once __DIR__ . '/ProveedoresExclusion.php';
+        $out = [];
+
+        foreach (self::ESCRITURAS as $c => $acciones) {
+            foreach ($acciones as $a => $destinos) {
+                foreach ($destinos as $d) {
+                    if ($d[0] !== self::TAB_DEL_MODULO) {
+                        $out[$c][$a][] = $d;
+                        continue;
+                    }
+
+                    foreach (array_unique(array_values(ProveedoresExclusion::PESTANA)) as $tab) {
+                        $out[$c][$a][] = [$tab, $d[1]];
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Si la accion necesita que le pasen la pestaña (TAB_DEL_MODULO).
+     *
+     * @param string $controlador
+     * @param string $accion
+     * @return bool
+     */
+    public static function necesitaTabDelModulo($controlador, $accion) {
+        foreach (self::ESCRITURAS[$controlador][$accion] ?? [] as $d) {
+            if ($d[0] === self::TAB_DEL_MODULO) {
                 return true;
             }
         }
