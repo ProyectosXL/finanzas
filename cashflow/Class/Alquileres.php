@@ -6,6 +6,7 @@ require_once __DIR__ . '/AlquileresConceptos.php';
 require_once __DIR__ . '/AlquileresCalculo.php';
 require_once __DIR__ . '/AlquileresVenta.php';
 require_once __DIR__ . '/AlquileresPago.php';
+require_once __DIR__ . '/AlquileresImputacion.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Inflacion.php';
 
@@ -186,8 +187,70 @@ class Alquileres {
         $crono = new CronogramaDatos();
         $ins['habiles'] = $crono->habilesEntre($desde, $hasta);
         $ins['avisos'] = array_merge($avisos, $crono->avisosConNivel());
+        $ins['facturas'] = $this->insumosFacturas($h);
 
         return $ins;
+    }
+
+    /**
+     * Lo que hace falta para las facturas reales: el contexto de
+     * AlquileresFacturas, las cuotas pendientes de alquiler (de la MISMA
+     * lectura de Tango que Proveedores Locales), los vencimientos editados, las
+     * imputaciones vigentes y, de las imputadas que ya no estan pendientes, que
+     * dice Tango.
+     *
+     * SI LA CONDICION DE SEGURIDAD NO SE CUMPLE, NO SE LEE NADA MAS: las
+     * facturas siguen en Proveedores Locales y aca no se toman, ni para la
+     * grilla ni para reemplazar la proyeccion. El aviso critico lo dice.
+     *
+     * Nunca lanza: lo que no se puede leer queda vacio, con su aviso.
+     *
+     * @param Horizonte $h
+     * @return array ['ctx', 'pendientes', 'excluidas', 'vtos', 'imputaciones', 'en_tango', 'avisos']
+     */
+    protected function insumosFacturas($h) {
+        $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'imputaciones' => [],
+                'en_tango' => [], 'avisos' => []];
+
+        try {
+            require_once __DIR__ . '/AlquileresUniverso.php';
+            require_once __DIR__ . '/Proveedores.php';
+            require_once __DIR__ . '/AlquileresImputaciones.php';
+            require_once __DIR__ . '/AlquileresFacturaVto.php';
+
+            $ctx = AlquileresUniverso::delPedido();
+            $out['ctx'] = $ctx;
+            $out['avisos'] = $ctx['avisos'];
+
+            if (empty($ctx['razones'])) {
+                return $out;
+            }
+
+            $prov = new Proveedores();
+            $todos = $prov->getPendientes($h->hoy());
+            $partes = AlquileresFacturas::partir($todos, $ctx);
+            $out['avisos'] = array_merge($out['avisos'], AlquileresFacturas::avisoCondicion($ctx, $todos));
+
+            if (empty($ctx['condicion']['cumple'])) {
+                return $out;
+            }
+
+            $out['pendientes'] = $partes[AlquileresFacturas::A_ALQUILERES];
+            $out['excluidas'] = $partes[AlquileresFacturas::A_EXCLUIDA];
+            $out['vtos'] = (new AlquileresFacturaVto())->vigentes();
+            $out['imputaciones'] = (new AlquileresImputaciones())->vigentes();
+
+            $pares = AlquileresImputacion::aConsultarEnTango($out['imputaciones'], $out['pendientes']);
+            $out['en_tango'] = empty($pares) ? [] : $prov->estadoComprobantesEnTango($pares);
+        } catch (Throwable $e) {
+            $out['avisos'][] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron leer las facturas de alquiler ('
+                . $e->getMessage() . '): la pestaña y el tablero muestran solo la proyección, sin facturas.',
+                'Facturas');
+            $out['pendientes'] = [];
+            $out['imputaciones'] = [];
+        }
+
+        return $out;
     }
 
     /**
@@ -195,12 +258,78 @@ class Alquileres {
      * explica cada uno. Es lo que leen la pestaña y el proveedor del tablero:
      * los dos suman ESTA lista, uno por mes y el otro por dia.
      *
+     * CON LAS FACTURAS YA APLICADAS: lo que cubre una imputacion sale de la
+     * lista y entra la factura, en su fecha (AlquileresImputacion::aplicar()).
+     * Los pagos de origen FACTURA son la serie REAL del tablero; el resto, la
+     * PROYECTADO.
+     *
      * @param Horizonte $h
      * @param array $ins Lo de insumos()
      * @return array ['pagos', 'locales', 'ventas', 'meses_pago', 'meses_concepto',
-     *                'faltan_inflacion', 'avisos']
+     *                'faltan_inflacion', 'avisos', 'facturas', 'imputaciones',
+     *                'reemplazados', 'facturas_kpis', 'pagadas_nuevas', 'fuera_horizonte_facturas',
+     *                'condicion']
      */
     public function calcular($h, $ins) {
+        return self::conFacturas($this->calcularProyeccion($h, $ins), $ins, $h);
+    }
+
+    /**
+     * Aplica las facturas imputadas a la proyeccion. Estatica: no lee nada.
+     *
+     * @param array $out Lo de calcularProyeccion()
+     * @param array $ins Lo de insumos(), con 'facturas' (sin el, la proyeccion sola)
+     * @param Horizonte $h
+     * @return array
+     */
+    public static function conFacturas($out, $ins, $h) {
+        $out += ['facturas' => [], 'imputaciones' => [], 'reemplazados' => [], 'pagadas_nuevas' => [],
+                 'facturas_kpis' => ['sin_imputar_n' => 0, 'sin_imputar_importe' => 0.0, 'imputadas_n' => 0,
+                                     'imputadas_a_pagar' => 0.0],
+                 'fuera_horizonte_facturas' => 0.0, 'condicion' => null];
+        $f = $ins['facturas'] ?? null;
+
+        if ($f === null) {
+            return $out;
+        }
+
+        $out['avisos'] = array_merge($out['avisos'], $f['avisos']);
+        $out['condicion'] = ($f['ctx'] === null) ? null : $f['ctx']['condicion'];
+
+        if ($f['ctx'] === null || empty($f['ctx']['condicion']['cumple'])) {
+            return $out;
+        }
+
+        $a = AlquileresImputacion::aplicar([
+            'pagos' => $out['pagos'],
+            'meses_pago' => $out['meses_pago'],
+            'pendientes' => $f['pendientes'],
+            'excluidas' => $f['excluidas'],
+            'vtos' => $f['vtos'],
+            'imputaciones' => $f['imputaciones'],
+            'en_tango' => $f['en_tango'],
+            'ctx' => $f['ctx'],
+            'habiles' => $ins['habiles'] ?? [],
+            'hoy' => $h->hoy()
+        ]);
+
+        $out['pagos'] = $a['pagos'];
+        $out['reemplazados'] = $a['reemplazados'];
+        $out['facturas'] = $a['facturas'];
+        $out['imputaciones'] = $a['imputaciones'];
+        $out['pagadas_nuevas'] = $a['pagadas_nuevas'];
+        $out['facturas_kpis'] = $a['kpis'];
+        $out['fuera_horizonte_facturas'] = $a['fuera_horizonte'];
+        $out['avisos'] = array_merge($out['avisos'], $a['avisos']);
+
+        return $out;
+    }
+
+    /**
+     * La proyeccion sola, sin facturas: lo que se calculaba antes de que
+     * existieran. Ver calcular().
+     */
+    protected function calcularProyeccion($h, $ins) {
         $avisos = $ins['avisos'] ?? [];
         $base = $this->leerBase($avisos);
         $universo = $this->universoRazones($avisos);
@@ -488,7 +617,7 @@ class Alquileres {
                 $mes = $p['mes_pago'];
 
                 if (!isset($fila['grupos'][$grupo])) {
-                    $fila['grupos'][$grupo] = ['grupo' => $grupo, 'nombre' => AlquileresConceptos::NOMBRE_GRUPO[$grupo],
+                    $fila['grupos'][$grupo] = ['grupo' => $grupo, 'nombre' => self::nombresGrupo()[$grupo],
                                                'meses' => [], 'total' => self::celdaVacia(), 'conceptos' => []];
                 }
 
@@ -518,7 +647,7 @@ class Alquileres {
             /* Los grupos en su orden, y cada uno con sus conceptos en orden. */
             $ordenados = [];
 
-            foreach (array_keys(AlquileresConceptos::NOMBRE_GRUPO) as $gr) {
+            foreach (array_keys(self::nombresGrupo()) as $gr) {
                 if (isset($fila['grupos'][$gr])) {
                     $g = $fila['grupos'][$gr];
                     ksort($g['conceptos'], SORT_NATURAL);
@@ -551,7 +680,55 @@ class Alquileres {
             ],
             'origenes' => AlquileresCalculo::NOMBRE_ORIGEN,
             'estados' => AlquileresPago::NOMBRE_ESTADO,
+            'facturas' => self::armarFacturas($c),
             'avisos' => $c['avisos']
+        ];
+    }
+
+    /**
+     * Los grupos de la grilla de Proyeccion, en orden: los de los conceptos y
+     * los dos de las facturas que no caen en uno solo.
+     */
+    public static function nombresGrupo() {
+        return AlquileresConceptos::NOMBRE_GRUPO + [
+            AlquileresImputacion::GRUPO_VARIOS => 'Facturas de varios grupos',
+            AlquileresImputacion::GRUPO_OTROS => 'Otros (no proyectados)'
+        ];
+    }
+
+    /**
+     * La sub-pestaña Facturas: la grilla por cuota, las imputaciones, las
+     * tarjetas y lo que el armado de una imputacion necesita (conceptos,
+     * atajos, locales con su razon social). No calcula nada.
+     */
+    private static function armarFacturas($c) {
+        $conceptos = [];
+
+        foreach (AlquileresImputacion::CONCEPTOS as $id) {
+            $conceptos[] = ['id' => $id, 'nombre' => ($id === AlquileresImputacion::EXTRA) ? 'Extraordinario'
+                : (($id === AlquileresImputacion::OTROS) ? 'Otros (no proyectados)'
+                    : $id . ' · ' . (AlquileresConceptos::NOMBRE[(int) $id] ?? ''))];
+        }
+
+        $locales = [];
+
+        foreach ($c['locales'] as $nro => $l) {
+            $locales[] = ['nro' => $nro, 'nombre' => $l['nombre'], 'cod_provee' => $l['params']['cod_provee'] ?? null,
+                          'razon' => $l['razon']];
+        }
+
+        return [
+            'condicion' => $c['condicion'],
+            'filas' => $c['facturas'],
+            'imputaciones' => $c['imputaciones'],
+            'kpis' => $c['facturas_kpis'],
+            'estados' => AlquileresImputacion::NOMBRE_ESTADO,
+            'conceptos' => $conceptos,
+            'atajos' => AlquileresImputacion::atajos(),
+            'nombres_grupo' => AlquileresConceptos::NOMBRE_GRUPO,
+            'locales' => $locales,
+            'tolerancia' => AlquileresImputacion::TOLERANCIA,
+            'reemplazados' => count($c['reemplazados'])
         ];
     }
 
@@ -619,6 +796,18 @@ class Alquileres {
     }
 
     private static function nombreConcepto($p) {
+        /* UNA LINEA POR RENGLON DE FACTURA, dentro del grupo de sus conceptos:
+           dice de que imputacion y renglon es y que conceptos cubre. */
+        if ($p['origen'] === AlquileresCalculo::FACTURA) {
+            $d = $p['detalle'];
+
+            return 'Factura · imputación ' . $d['imputacion'] . ', renglón ' . $d['renglon'] . ' ('
+                . implode(', ', array_map(function ($c) {
+                    return ($c === AlquileresImputacion::EXTRA) ? 'extraordinario'
+                        : (($c === AlquileresImputacion::OTROS) ? 'otros' : $c);
+                }, $d['conceptos'])) . ')';
+        }
+
         if ($p['grupo'] === AlquileresConceptos::EXTRA) {
             $d = $p['detalle'];
             return $d['pct'] . ' % s/ ' . implode(' + ', array_keys($d['base']));
