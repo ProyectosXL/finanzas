@@ -280,11 +280,46 @@ $claves = function ($archivo) {
 };
 $enEdicion = $claves('cashflow_permisos_edicion.sql');
 $enAlquileres = $claves('cashflow_alquileres_permisos.sql');
-$enScript = array_values(array_unique(array_merge($enEdicion, $enAlquileres)));
+$enCalendario = $claves('cashflow_calendario_permisos.sql');
+$enScript = array_values(array_unique(array_merge($enEdicion, $enAlquileres, $enCalendario)));
 sort($enScript);
 
 chequear('las mismas claves en los scripts y en el codigo', $esperadas, $enScript);
-chequear('ninguna clave en los dos scripts', [], array_values(array_intersect($enEdicion, $enAlquileres)));
+chequear('ninguna clave en dos scripts', [], array_values(array_unique(array_merge(
+    array_intersect($enEdicion, $enAlquileres), array_intersect($enEdicion, $enCalendario),
+    array_intersect($enAlquileres, $enCalendario)))));
+
+/* CALENDARIO VA EN SU SCRIPT, que la asigna a quien hoy edita Generales: el
+   cronograma, el horizonte y los feriados de comercio se editaban con ese
+   permiso, y moverlos de sub-pestaña no le puede quitar la edicion a nadie. */
+chequear('el de Calendario trae su clave', ['cashflow.editar.parametros.calendario'], $enCalendario);
+$scriptCal = file_get_contents(__DIR__ . '/../sql/cashflow_calendario_permisos.sql');
+chequear('y la asigna a los roles que editan Generales', true,
+    (bool) preg_match('/INSERT\s+INTO\s+dbo\.FP_ROL_PERMISO/i', $scriptCal)
+    && strpos($scriptCal, "'cashflow.editar.parametros.generales'") !== false);
+
+seccion('el cronograma y los feriados bancarios se editan con el permiso de Calendario');
+
+foreach (['saveFechaCronograma', 'quitarFechaCronograma', 'contarOverridesCronograma',
+          'saveConfigCronograma', 'saveFeriadoBancario', 'quitarFeriadoBancario'] as $a) {
+    chequear($a . ' pide Calendario', [['parametros', 'CALENDARIO']],
+        AuthCashflow::destinosDe('Parametros', $a));
+}
+
+chequear('las cuentas de Gastos Locales siguen en Generales', [['parametros', 'GENERALES']],
+    AuthCashflow::destinosDe('Parametros', 'saveCuentasGastosLocales'));
+chequear('la inflacion tambien', [['parametros', 'GENERALES']],
+    AuthCashflow::destinosDe('Parametros', 'saveInflacionMes'));
+chequear('leer los feriados de un año es una lectura', null,
+    AuthCashflow::destinosDe('Parametros', 'getFeriadosBancarios'));
+chequear('con Generales solo, no se edita el cronograma', false,
+    AuthCashflow::permiteEditar(['cashflow.tab.parametros' => true,
+        'cashflow.editar.parametros.generales' => true], false, 'parametros', 'CALENDARIO'));
+chequear('con Calendario, si', true,
+    AuthCashflow::permiteEditar(['cashflow.tab.parametros' => true,
+        'cashflow.editar.parametros.calendario' => true], false, 'parametros', 'CALENDARIO'));
+chequear('un parametro migrado a Calendario pide Calendario', 'CALENDARIO',
+    Parametros::subPestanaDe('CALENDARIO', 'GENERAL'));
 
 sort($enAlquileres);
 chequear('el de Alquileres trae sus dos claves de edicion',

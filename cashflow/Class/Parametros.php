@@ -99,11 +99,27 @@ class Parametros {
         'GENERALES' => [
             'nombre' => 'Generales',
             'icono' => 'fa-gears',
-            'descripcion' => 'Lo que afecta a todo el módulo: el horizonte de proyección, la '
-                . 'alícuota de IVA, los feriados de comercio, la inflación mensual esperada y '
-                . 'el cronograma de pagos. Acá también se ven, sin poder editarlas, la curva '
-                . 'de dólar futuro y la cotización del BCRA',
-            'secciones' => ['generales', 'inflacion', 'cronograma', 'gastos_locales', 'cotizaciones']
+            'descripcion' => 'Lo que afecta a todo el módulo y no es una fecha: la alícuota de '
+                . 'IVA, la inflación mensual esperada y las cuentas que no entran en Gastos '
+                . 'Locales. Acá también se ven, sin poder editarlas, la curva de dólar futuro y '
+                . 'la cotización del BCRA. Las fechas —el horizonte, los feriados y el '
+                . 'cronograma de pagos— están en Calendario',
+            'secciones' => ['generales', 'inflacion', 'gastos_locales', 'cotizaciones']
+        ],
+        /* VA PEGADA A GENERALES porque también afecta a TODAS las pestañas: el
+           horizonte es el eje de todo el módulo, los feriados bancarios corren
+           cada fecha al día hábil y los de comercio marcan columnas sin venta.
+           Junta todo lo que es una fecha, que en Generales quedaba mezclado con
+           la alícuota y la inflación. Los parámetros llegan acá con
+           sql/cashflow_parametros_calendario.sql; antes, se ven en Generales. */
+        'CALENDARIO' => [
+            'nombre' => 'Calendario',
+            'icono' => 'fa-calendar-days',
+            'descripcion' => 'Todo lo que es una fecha y mueve a todas las pestañas: cuántas '
+                . 'columnas diarias y mensuales tiene el eje, qué días no opera el banco '
+                . '—RO_T_CALENDARIO más los feriados que se agregan o se quitan acá—, qué días '
+                . 'no se vende y qué día se paga cada concepto del cronograma de pagos',
+            'secciones' => ['generales', 'feriados_bancarios', 'cronograma']
         ],
         'VENTAS' => [
             'nombre' => 'Ventas',
@@ -347,6 +363,38 @@ class Parametros {
                                 . 'y ningún cálculo cambia: el horizonte y la alícuota se leen '
                                 . 'por clave, no por módulo.';
                         }
+                    }
+
+                    /* ANTES DE sql/cashflow_parametros_calendario.sql EL
+                       HORIZONTE Y LOS FERIADOS DE COMERCIO SIGUEN EN GENERALES.
+                       Acá no se rescatan: se ven y se editan allá, como hasta
+                       hoy, y mostrarlos en las dos sub-pestañas haría creer que
+                       son dos valores distintos. Esta avisa adónde están. */
+                    if ($codigo === 'CALENDARIO' && empty($modulo['generales'])) {
+                        $modulo['avisos'][] = 'El horizonte de proyección y los feriados de '
+                            . 'comercio todavía figuran en Parámetros › Generales, y se editan '
+                            . 'ahí: corré sql/cashflow_parametros_calendario.sql contra la base '
+                            . 'central para moverlos acá. Ningún cálculo cambia: se leen por '
+                            . 'clave, no por módulo.';
+                    }
+                } elseif ($seccion === 'feriados_bancarios') {
+                    /* RO_T_CALENDARIO más los ajustes, del año en curso. Los
+                       otros años los pide el selector con getFeriadosBancarios.
+                       Dentro de un try como las demás: sin 'power' o sin la
+                       tabla de ajustes la sección avisa y el resto de la
+                       sub-pestaña anda. */
+                    try {
+                        $modulo['feriados_bancarios'] = $this->feriadosBancarios(null);
+
+                        foreach ($modulo['feriados_bancarios']['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo['feriados_bancarios'] = ['anio' => intval(date('Y')),
+                            'anios' => [], 'filas' => [], 'tabla_creada' => false,
+                            'avisos' => []];
+                        $modulo['avisos'][] = 'No se pudieron leer los feriados bancarios: '
+                            . $e->getMessage();
                     }
                 } elseif ($seccion === 'respaldo') {
                     $modulo['respaldo'] = $this->getParametros('RESPALDO', $codigo);
@@ -845,6 +893,63 @@ class Parametros {
     }
 
     /**
+     * Puerta a los ajustes del calendario bancario.
+     *
+     * @return CalendarioAjustes
+     */
+    public function calendarioAjustes() {
+        require_once __DIR__ . '/CalendarioAjustes.php';
+
+        if ($this->calendarioAjustes === null) {
+            $this->calendarioAjustes = new CalendarioAjustes();
+        }
+
+        return $this->calendarioAjustes;
+    }
+
+    /**
+     * Los feriados bancarios de un año, para la grilla de Parametros ›
+     * Calendario: los de RO_T_CALENDARIO y los ajustes, cada uno con su origen.
+     *
+     * EL CALENDARIO EXTERNO SE LEE SIN AJUSTES (getDiasHabilesBase()): la
+     * grilla tiene que decir qué dice RO_T_CALENDARIO y qué se cambió acá, y
+     * con el mapa ya ajustado los dos se confundirían.
+     *
+     * @param mixed $anio null o '' para el actual
+     * @return array ['anio', 'anios', 'filas', 'tabla_creada', 'avisos']
+     */
+    public function feriadosBancarios($anio) {
+        require_once __DIR__ . '/Ventas.php';
+
+        // Primero la puerta: es la que carga la clase.
+        $ajustes = $this->calendarioAjustes();
+        $a = CalendarioAjustes::validarAnio($anio);
+        $base = (new Ventas())->getDiasHabilesBase($a . '-01-01', $a . '-12-31');
+        $avisos = [];
+
+        if ($ajustes->avisoSinTabla() !== '') {
+            $avisos[] = $ajustes->avisoSinTabla();
+        }
+
+        if (empty($base)) {
+            $avisos[] = 'RO_T_CALENDARIO no tiene datos para ' . $a . '. Se asumen hábiles los '
+                . 'días de lunes a viernes, salvo los feriados que se carguen acá.';
+        }
+
+        $actual = intval(date('Y'));
+
+        return [
+            'anio' => $a,
+            /* El anterior y los dos siguientes: lo que el eje puede llegar a
+               pedir, más el año que se acaba de ir para revisar. */
+            'anios' => range($actual - 1, $actual + 2),
+            'filas' => CalendarioAjustes::grilla($base, $ajustes->listar($a)),
+            'tabla_creada' => $ajustes->tablaCreada(),
+            'avisos' => $avisos
+        ];
+    }
+
+    /**
      * Hasta que dia llega el tramo diario del eje, o null si no hay tramo.
      *
      * Es lo unico que la pantalla necesita para decir que fechas del cronograma
@@ -1141,6 +1246,9 @@ class Parametros {
     /** @var CronogramaDatos|null Puerta al cronograma de pagos; la resuelve cronograma() */
     private $cronograma = null;
 
+    /** @var CalendarioAjustes|null Puerta a los feriados bancarios; la resuelve calendarioAjustes() */
+    private $calendarioAjustes = null;
+
     /** @var Logistica|null Puerta al maestro de fleteros; la resuelve logistica() */
     private $logistica = null;
 
@@ -1400,6 +1508,14 @@ class Parametros {
                 . 'tarjeta en Parámetros › Generales, que valida que sean códigos de cuenta.');
         }
 
+        /* LOS FERIADOS DE COMERCIO SE VALIDAN ACA: la pantalla los arma como
+           lista, pero esta funcion guarda cualquier texto, y un "25/12" o un
+           "12-32" no falla en la base -el dia simplemente no se reconoce y la
+           venta de ese dia se estima como si fuera uno comun-. */
+        if ($clave === 'feriados_comercio') {
+            $valor = self::normalizarFeriadosComercio($valor);
+        }
+
         /* EL PLAZO DEL DEPOSITO DE CHEQUES TIENE SU PROPIO CAMINO. Esta funcion
            guarda cualquier texto, y un plazo de cero o de "dos" dejaria a los
            cheques depositados sin proyectar. Se rechaza aca y no se valida aca para que la regla
@@ -1559,6 +1675,42 @@ class Parametros {
         }
 
         return $feriados;
+    }
+
+    /**
+     * Valida y normaliza la lista de feriados de comercio. Pura.
+     *
+     * Cada uno 'MM-DD' de un dia que existe en algun año (el 29 de febrero
+     * vale), sin repetidos y en orden de calendario. Vacia es valida: un año
+     * sin feriados de comercio es una decision, no un error.
+     *
+     * @param mixed $valor CSV
+     * @return string CSV 'MM-DD,MM-DD'
+     * @throws Exception nombrando el que esta mal
+     */
+    public static function normalizarFeriadosComercio($valor) {
+        $lista = [];
+
+        foreach (explode(',', (string) $valor) as $item) {
+            $item = trim($item);
+
+            if ($item === '') {
+                continue;
+            }
+
+            if (!preg_match('/^(\d{2})-(\d{2})$/', $item, $m)
+                || !checkdate(intval($m[1]), intval($m[2]), 2024)) {
+                throw new Exception('"' . $item . '" no es un feriado de comercio válido: cada uno '
+                    . 'va como MM-DD (por ejemplo 12-25 para el 25 de diciembre).');
+            }
+
+            $lista[$item] = true;
+        }
+
+        $lista = array_keys($lista);
+        sort($lista);
+
+        return implode(',', $lista);
     }
 
     /* ====================================================================
