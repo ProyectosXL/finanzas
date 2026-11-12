@@ -247,7 +247,7 @@ vacío     → null
 
 > Esto **cambió** en `feature/cronogramas-tarjetas-corporativas`.
 
-Las facturas que se pagan por cronograma no salen el día que vencen: salen **el día de pago siguiente**. Por eso el cuadro las proyecta ahí, con el cronograma `PROV_LOCALES` de *Parámetros › Generales* —por defecto **el 2do y el 4to miércoles** de cada mes, corrido al hábil anterior si el miércoles no es hábil—. Ver `README-logistica-local.md`, sección 3: es uno de tres cronogramas, uno por concepto, con su día y su frecuencia configurables.
+Las facturas que se pagan por cronograma no salen el día que vencen: salen **el día de pago siguiente**. Por eso el cuadro las proyecta ahí, con el cronograma `PROV_LOCALES` de *Parámetros › Calendario* —por defecto **el 2do y el 4to miércoles** de cada mes, corrido al hábil anterior si el miércoles no es hábil—. Ver `README-logistica-local.md`, sección 3: es uno de tres cronogramas, uno por concepto, con su día y su frecuencia configurables.
 
 ### A qué facturas aplica
 

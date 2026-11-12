@@ -116,7 +116,7 @@ Un local propio habilitado que no pagó nada con la caja en 90 días va en la gr
 
 ## 3. El cronograma: el único que se corre hacia adelante
 
-Es el concepto `GASTOS_LOCALES` del cronograma de *Parámetros › Generales* (ver `README-logistica-local.md`, sección 3). Tres diferencias con los otros tres conceptos, declaradas en `CronogramaPagos::CONCEPTOS`:
+Es el concepto `GASTOS_LOCALES` del cronograma de *Parámetros › Calendario* (ver `README-logistica-local.md`, sección 3). Tres diferencias con los otros tres conceptos, declaradas en `CronogramaPagos::CONCEPTOS`:
 
 | | Gastos Locales | Los otros |
 | --- | --- | --- |
@@ -169,7 +169,7 @@ Lo que un local paga con su caja puede ser una factura de un proveedor que tambi
 ## Permisos
 
 - `cashflow.tab.gastos_locales`: ver la pestaña. Las dos acciones del controller (`getPlanilla`, `getComprobantes`) son lecturas y además exigen ese permiso (`autorizarLectura`), porque los comprobantes traen leyendas y usuarios de cada caja.
-- Lo editable vive en *Parámetros › Generales* y pide `cashflow.editar.parametros.generales`: el día del cronograma (`saveConfigCronograma`) y las cuentas (`saveCuentasGastosLocales`).
+- Lo editable vive en Parámetros: el día del cronograma (`saveConfigCronograma`) en *Calendario*, con `cashflow.editar.parametros.calendario`, y las cuentas (`saveCuentasGastosLocales`) en *Generales*, con `cashflow.editar.parametros.generales`.
 
 ---
 

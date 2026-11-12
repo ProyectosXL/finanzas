@@ -421,6 +421,25 @@ Las facturas de Tango de las razones sociales dadas de alta en Parámetros › A
 
 **Orden: 53 → 54 → 55.** El 53 va después del 51; el 54, después de `sql/cashflow_prov_exclusion_modulo.sql`; el 55, después del 53 y de `sql/cashflow_estructura_grupos.sql`. **Con el 53 corrido, las facturas pasan a Alquileres y quedan sin imputar**: no suman hasta que se imputen, y el aviso de atención lo dice con el importe. El 55 no mueve ningún importe: real + proyectado es lo mismo que la fila de antes.
 
+### Parámetros › Calendario: feriados bancarios editables (`feature/parametros-calendario`)
+
+Una sub-pestaña nueva, **Calendario**, pegada a Generales, con todo lo que es una fecha: el **horizonte de proyección**, los **feriados bancarios** —`RO_T_CALENDARIO` más los que se agregan o se quitan acá—, los **feriados de comercio** (ahora una lista de DD/MM) y el **cronograma de pagos**, que se mudó entero desde Generales. En Generales quedan la alícuota, la inflación, Gastos Locales y las cotizaciones. Ver *Los días no hábiles se marcan en el eje*, más abajo.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 56 | `sql/cashflow_parametros_calendario.sql` | Crea `RO_T_CASHFLOW_CALENDARIO_AJUSTE` (un ajuste vigente por fecha, de lunes a viernes, sin borrado físico) y pasa a `MODULO = 'CALENDARIO'` `horizonte_dias`, `horizonte_meses`, `feriados_comercio` y los `cronograma_*`, **sin tocar ningún `VALOR`** | Todo anda como hoy: los feriados bancarios son `RO_T_CALENDARIO` tal cual; el horizonte y los feriados de comercio se ven y se editan en Generales, y Calendario avisa nombrando el script. El cronograma ya se ve en Calendario |
+| 57 | `sql/cashflow_calendario_permisos.sql` (**`apps`**) | `cashflow.editar.parametros.calendario`, si no existe, **asignada a los roles que hoy tienen `cashflow.editar.parametros.generales`** | Calendario se ve, pero **sólo el administrador la edita**: el cronograma de pagos, que hasta hoy se editaba con el permiso de Generales, queda de solo lectura para los demás |
+
+El 56 contra `central`, después de `sql/cashflow_parametros_generales.sql`; el 57 contra `apps`, **antes de publicar el código**, para que nadie pierda la edición del cronograma. Los dos son reejecutables.
+
+**Ningún número cambia al correrlos.** El 56 sólo mueve dónde se dibujan los parámetros —las fórmulas los leen por clave— y crea la tabla vacía. Lo que mueve el tablero es **cargar un ajuste**: un feriado agregado corre al día hábil todo lo que caía ese día (cronograma de pagos, Ventas, Echeqs, Tarjetas, Saldos) y se marca como no hábil en el eje.
+
+Para verificar después de correrlos:
+- Parámetros › Calendario muestra el horizonte y los feriados de comercio, sin avisos; Generales ya no los muestra.
+- *Agregar feriado* en un día de semana hábil, con descripción: la fila aparece como *Ajuste*, y el eje del tablero marca ese día como feriado.
+- *Marcar hábil* un feriado bancario y después *Quitar ajuste*: vuelve a *Calendario bancario*.
+- Un rol que editaba Generales puede cambiar el día de un concepto del cronograma.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -480,9 +499,12 @@ En este orden, contra `central`:
 -- 53. sql/cashflow_alquileres_facturas.sql         (Alquileres: vencimientos e imputaciones de facturas)
 -- 54. sql/cashflow_prov_exclusion_modulos_ampliar.sql  (exclusion de proveedores: Tarjetas y Alquileres)
 -- 55. sql/cashflow_alquileres_fila.sql             (la fila Alquileres, real y proyectado)
+-- 56. sql/cashflow_parametros_calendario.sql       (Parametros > Calendario: ajustes de feriados bancarios)
 ```
 
-**El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento.
+**El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento. **El 57, `sql/cashflow_calendario_permisos.sql`, también va contra `apps`**, antes de publicar el código de Calendario: le da la edición de Calendario a quien hoy edita Generales.
+
+**El 56 va después del 25**, que es el que dejó en Generales los parámetros que mueve. Corrido antes, los mueve igual desde Ventas.
 
 **El 49 va después del 37**, al que le agrega columnas, y del de la forma por factura de Proveedores Locales. Ver *Proveedores Locales: pago con excedente y pago parcial*, más arriba.
 
@@ -590,6 +612,10 @@ En todas las pantallas con eje, la columna diaria de un **sábado, domingo o fer
 | Lunes a viernes con `DIA_LABORAL = 0` | Feriado |
 | Fecha que `RO_T_CALENDARIO` no tiene | El respaldo de siempre (lunes a viernes hábiles): el fin de semana se marca, un feriado no |
 | No se pudo leer el calendario | Igual que el caso anterior, sin aviso nuevo: las pestañas que corren fechas ya avisan que no lo pudieron leer |
+| Feriado agregado en Parámetros › Calendario | Feriado, aunque `RO_T_CALENDARIO` lo tenga hábil o no tenga la fecha |
+| Feriado bancario marcado hábil en Parámetros › Calendario | Hábil: no se marca |
+
+**Los feriados se corrigen en Parámetros › Calendario, no en `RO_T_CALENDARIO`.** Esa tabla es externa (XL-APPS / `POWER_BI_CONTROL`), la mantiene otro proceso y no se escribe. Las correcciones viven en `RO_T_CASHFLOW_CALENDARIO_AJUSTE` (central) y las aplica `Ventas::getDiasHabiles()`: es `getDiasHabilesBase()` —la lectura de `RO_T_CALENDARIO`, que sigue siendo la única— más `CalendarioAjustes::aplicar()`. Así **el corrimiento al día hábil y la marca del eje ven el ajuste a la vez**, en todas las pantallas. Un ajuste es de lunes a viernes, distinto de lo que dice `RO_T_CALENDARIO` y, si es un feriado, con descripción (`CalendarioAjustes::validar()`). Sin la tabla, o si no se puede leer, el mapa queda intacto: el cálculo nunca se rompe por un ajuste. `getDiasHabilesBase()` sólo la usa la pantalla, para mostrar el origen de cada feriado.
 
 **"Feriado" incluye cualquier día de semana no laborable bancario**, tenga o no `ES_FERIADO = 1`. Es el mismo criterio con el que se corren los importes al día hábil (`DiasHabiles`, `Echeqs::correrAHabil()`), así que la marca coincide siempre con el corrimiento. Verificado contra la base: desde 2026 no hay ningún día de semana con `DIA_LABORAL = 0` y `ES_FERIADO = 0`, así que hoy los dos criterios marcan los mismos días. `RO_T_CALENDARIO` no tiene el nombre del feriado, por eso el tooltip dice sólo "Feriado".
 
@@ -1704,6 +1730,8 @@ Verificado en Chrome: arrancando contraído, las 27 entradas tienen su tooltip; 
 Las sub-pestañas salen de `Parametros::$modulos`, así que **agregar un módulo es declararlo ahí y sumar su `tab-pane`**: el `<li>` se genera solo. Cada módulo tiene su propio archivo de `Tabs/`, su propio JS y un prefijo de clase propio, porque `Parametros.js` busca `.param-input`, `.mix-*` y `.respaldo-*` en **todo** el documento.
 
 > **La primera es Generales**, y ahí viven los parámetros que afectan a todo el módulo: el horizonte —que es el eje del tablero y de las diez pantallas con eje temporal—, la alícuota, los feriados de comercio, la inflación mensual esperada y el cronograma de pagos. Estaban bajo *Ventas*, donde tocarlos parecía mover una sola pantalla. **Ningún cálculo se enteró del cambio**: el único lugar que pide parámetros por `MODULO` es esta pantalla; las fórmulas los leen por clave con `getParametrosMap()`, que no filtra. Ver `README-logistica-local.md`.
+>
+> **La segunda es Calendario** (`feature/parametros-calendario`): todo lo que es una fecha salió de Generales —el horizonte, los feriados de comercio y el cronograma de pagos— y se sumaron los **feriados bancarios editables**. En Generales quedan la alícuota, la inflación, Gastos Locales y las cotizaciones. Mismo criterio que la mudanza anterior: ningún cálculo se entera. Ver *Parámetros › Calendario: feriados bancarios editables* y *Los días no hábiles se marcan en el eje*.
 >
 > Generales muestra además la **curva de dólar futuro** y la **cotización del BCRA**, las dos de **solo lectura**: llegan por API y las mantiene otro proceso. Un campo editable al lado haría creer que se pueden corregir desde ahí.
 

@@ -133,7 +133,7 @@ Cambiar la modalidad **no toca ningún mes**: sólo cambia cómo se edita. La pa
 
 ### Es uno de tres cronogramas, y el día ya no está en el código
 
-Desde `feature/cronogramas-tarjetas-corporativas` hay **un cronograma por concepto**, cada uno con su día de la semana y su frecuencia, en *Parámetros › Generales*:
+Desde `feature/cronogramas-tarjetas-corporativas` hay **un cronograma por concepto**, cada uno con su día de la semana y su frecuencia, en *Parámetros › Calendario* (hasta `feature/parametros-calendario`, en Generales):
 
 | Concepto | Por defecto | Lo usa |
 | --- | --- | --- |
