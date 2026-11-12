@@ -52,14 +52,23 @@
 
         <div class="tab-content">
 
-        <!-- Lo que afecta a TODAS las pestañas: el horizonte, la alícuota, los
-             feriados, la inflación mensual y el cronograma de pagos; más las
-             dos cotizaciones, que se muestran y no se editan. Va PRIMERA por
+        <!-- Lo que afecta a TODAS las pestañas y no es una fecha: la alícuota,
+             la inflación mensual y las cuentas excluidas de Gastos Locales; más
+             las dos cotizaciones, que se muestran y no se editan. Va PRIMERA por
              eso mismo. Mismo criterio que los demás módulos: archivo y JS
              propios, y clases con prefijo pgen- porque Parametros.js busca
              .param-input, .mix-* y .respaldo-* en TODO el documento. -->
         <div class="tab-pane fade show active" id="paneParamGenerales" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'GENERALES'); ?>>
             <?php include __DIR__ . '/parametros_generales.php'; ?>
+        </div>
+
+        <!-- Todo lo que es una fecha: el horizonte, los feriados bancarios y de
+             comercio, y el cronograma de pagos, que vino de Generales. Va
+             PEGADA a Generales porque también mueve todas las pestañas. Mismo
+             criterio que los demás: archivo y JS propios, y clases con prefijo
+             pcal-. -->
+        <div class="tab-pane fade" id="paneParamCalendario" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'CALENDARIO'); ?>>
+            <?php include __DIR__ . '/parametros_calendario.php'; ?>
         </div>
 
         <div class="tab-pane fade" id="paneParamVentas" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'VENTAS'); ?>>
@@ -280,6 +289,7 @@
 
 <script src="Js/Parametros.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Generales.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Calendario.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Saldos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Cob-Electronicos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Prechequeado.js?v=<?php echo time(); ?>"></script>

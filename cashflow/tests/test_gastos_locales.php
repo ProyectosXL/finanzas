@@ -390,7 +390,7 @@ chequear('y no tiene clave de edicion propia', false,
 
 $fuentePar = file_get_contents(__DIR__ . '/../Class/Parametros.php');
 chequear('Generales dibuja la tarjeta de Gastos Locales', true,
-    strpos($fuentePar, "'cronograma', 'gastos_locales', 'cotizaciones'") !== false);
+    strpos($fuentePar, "'generales', 'inflacion', 'gastos_locales', 'cotizaciones'") !== false);
 chequear('y el guardado generico rechaza la lista: tiene su propia validacion', true,
     strpos($fuentePar, "if (\$clave === 'gastos_locales_cuentas_excluidas') {") !== false);
 

@@ -12,7 +12,7 @@ require_once __DIR__ . '/Auditoria.php';
  * --------------
  * No es un dato de ningun modulo en particular: es una expectativa de la empresa
  * sobre la economia, y cualquier costo que se proyecte a doce meses la va a
- * necesitar. Por eso vive en Parametros -> Generales, al lado del horizonte y de
+ * necesitar. Por eso vive en Parametros -> Generales, al lado de
  * la alicuota, y no adentro de los modulos que la consumen.
  *
  * DOS FORMAS DE AJUSTAR, Y NO SON INTERCAMBIABLES

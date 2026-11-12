@@ -674,7 +674,7 @@ class TarjetasSupervisoras {
      * El reparto de la parte en EFECTIVO: partes iguales en los pagos del mes
      * del cronograma SUPERVISORAS.
      *
-     * ES EL CRONOGRAMA SUPERVISORAS DE Parametros -> Generales -por defecto
+     * ES EL CRONOGRAMA SUPERVISORAS DE Parametros -> Calendario -por defecto
      * todos los lunes del mes, con sus overrides-, y por eso recibe los pagos ya
      * resueltos en vez de calcularlos: la regla vive en CronogramaPagos y una
      * segunda version aca se desincronizaria en el primer feriado nuevo. Hasta

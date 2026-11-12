@@ -8,10 +8,11 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
 /**
  * Parametros -> Generales
  *
- * Lo que afecta a TODO el modulo, y no a una pestana: el horizonte de
- * proyeccion, la alicuota, los feriados de comercio, la inflacion mensual
- * esperada y el cronograma de pagos. Mas las dos cotizaciones, que se muestran
- * y no se editan.
+ * Lo que afecta a TODO el modulo, no es una fecha y no es de una pestana: la
+ * alicuota, la inflacion mensual esperada y las cuentas excluidas de Gastos
+ * Locales. Mas las dos cotizaciones, que se muestran y no se editan. Las
+ * fechas -el horizonte, los feriados y el cronograma de pagos- se fueron a
+ * Tabs/parametros_calendario.php.
  *
  * Archivo y JS propios, como los demas modulos de esta pestana, y clases con
  * prefijo pgen-. Parametros.js busca .param-input, .mix-* y .respaldo-* en TODO
@@ -34,15 +35,19 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
     <div id="pgenAvisos"></div>
 
     <!-- ========================================================
-         EL EJE Y LA ALÍCUOTA
+         LOS VALORES GENERALES (la alícuota)
+         El horizonte y los feriados de comercio se fueron a
+         Calendario. Hasta correr sql/cashflow_parametros_calendario.sql
+         siguen figurando acá, y se dibujan igual: la grilla muestra
+         todo lo que llega.
          ======================================================== -->
     <div class="card mb-4">
         <div class="card-header">
-            <h5 class="mb-0">El eje de proyección</h5>
+            <h5 class="mb-0">Valores generales</h5>
             <small class="text-muted">
-                Cuántas columnas diarias y mensuales tiene el tablero, la alícuota de IVA
-                y los feriados de comercio. <strong>Mueven todas las pestañas</strong>, no
-                sólo Ventas: el horizonte es el eje de todo el módulo.
+                La alícuota de IVA. <strong>Mueve todas las pestañas</strong> que proyectan
+                venta, no sólo Ventas. El horizonte y los feriados están en
+                Parámetros › Calendario.
             </small>
         </div>
         <div class="card-body">
@@ -149,117 +154,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
     </div>
 
     <!-- ========================================================
-         CRONOGRAMA DE PAGOS — UNO POR CONCEPTO
-         Tres tablas en la misma card, porque son tres caras del mismo
-         dato: cómo se calcula cada cronograma, los pagos que se pueden
-         mover a mano y el resto del horizonte, que sólo se mira.
-         ======================================================== -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-                <h5 class="mb-0">Cronograma de pagos</h5>
-                <small class="text-muted">
-                    <strong>Un cronograma por concepto</strong>, cada uno con su día de la
-                    semana y su frecuencia: <em>quincenal</em> es el 2do y el 4to de ese día
-                    del mes; <em>semanal</em>, todos los de ese día. Si el día no es hábil, el
-                    pago se corre al día hábil <strong>anterior</strong>, salvo
-                    <strong>Gastos Locales</strong>, que se corre al <strong>siguiente</strong>,
-                    es siempre semanal y no se mueve a mano.
-                </small>
-            </div>
-            <button class="btn btn-sm btn-outline-success" data-exportar="pgenTablaCronograma"
-                    data-exportar-nombre="Parametros_Cronograma_Pagos"
-                    title="Exportar a Excel los próximos pagos">
-                <i class="fas fa-file-excel me-1"></i> Exportar
-            </button>
-        </div>
-
-        <!-- 1. CÓMO SE CALCULA CADA UNO -->
-        <div class="card-body pb-0">
-            <h6 class="mb-1">Configuración</h6>
-            <small class="text-muted d-block mb-2">
-                Cambiar el día o la frecuencia de un concepto <strong>da de baja los pagos
-                movidos a mano</strong> de ese concepto desde este mes: con otro día, el número
-                de pago apunta a otra fecha. Antes de guardar se dice cuántos son.
-            </small>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table id="pgenTablaCronoConfig" class="table table-sm table-hover mb-0 align-middle"
-                       data-orden="no">
-                    <thead>
-                        <tr>
-                            <th>Concepto</th>
-                            <th>Lo usa</th>
-                            <th style="width: 160px;">Día de la semana</th>
-                            <th style="width: 160px;">Frecuencia</th>
-                            <th>Se paga</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pgenCronoConfigBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 2. LOS DOS PRÓXIMOS PAGOS DE CADA CONCEPTO: los únicos que se editan -->
-        <div class="card-body pb-0 border-top">
-            <h6 class="mb-1">Próximos pagos</h6>
-            <small class="text-muted d-block mb-2">
-                Los <strong>dos próximos</strong> de cada concepto. La fecha cargada a mano
-                <strong>no se corre</strong> al día hábil: se respeta tal cual. El
-                <strong>motivo es obligatorio</strong>: es lo único que después explica por qué
-                ese pago no cayó donde la cuenta decía.
-            </small>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table id="pgenTablaCronograma" class="table table-sm table-hover mb-0 align-middle"
-                       data-orden="no">
-                    <thead>
-                        <tr>
-                            <th>Concepto</th>
-                            <th>Pago</th>
-                            <th>Teórica</th>
-                            <th>Calculada</th>
-                            <th style="width: 170px;">Fecha de pago</th>
-                            <th>Motivo</th>
-                            <th class="text-center" style="width: 130px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="pgenCronogramaBody">
-                        <!-- Se genera dinámicamente -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 3. EL RESTO DEL HORIZONTE: se ve, no se edita -->
-        <div class="card-body pb-0 border-top">
-            <h6 class="mb-1">Resto del horizonte</h6>
-            <small class="text-muted d-block mb-2">
-                Calculadas, no editables. Cada mes reparte su importe <strong>en partes
-                iguales</strong> entre sus pagos: mitad y mitad en quincenal, un cuarto o un
-                quinto en semanal.
-            </small>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table id="pgenTablaCronoResto" class="table table-sm table-hover mb-0"
-                       data-orden="no">
-                    <thead>
-                        <tr id="pgenCronoRestoHead">
-                            <th>Mes</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pgenCronoRestoBody"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- ========================================================
          GASTOS LOCALES: LAS CUENTAS QUE NO ENTRAN EN EL PROMEDIO
-         El día de pago está arriba, en el cronograma. Acá va lo otro
+         El día de pago está en el cronograma, en Calendario. Acá va lo otro
          que decide el número de la pestaña Proveedores › Gastos
          Locales: qué cuentas de caja se dejan afuera.
          ======================================================== -->
@@ -269,8 +165,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
             <small class="text-muted">
                 El promedio de los últimos 90 días toma los egresos de caja de los locales
                 propios en las cuentas que empiezan con <strong>5</strong>. Las cuentas de esta
-                lista <strong>no entran</strong>. El día de pago se elige arriba, en el
-                cronograma.
+                lista <strong>no entran</strong>. El día de pago se elige en el cronograma
+                de pagos, en Parámetros › Calendario.
             </small>
         </div>
         <div class="card-body">
@@ -336,51 +232,6 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
                     <h6 class="mb-1">Dólar oficial BCRA</h6>
                     <div id="pgenBcra"></div>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ============================================================
-     HISTORIAL DE UNA FECHA DEL CRONOGRAMA
-     La fecha y el motivo se editan en la fila; el modal queda sólo
-     para ver qué fechas tuvo ese pago y quién las cambió.
-     ============================================================ -->
-<div class="modal fade" id="pgenModalFecha" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">
-                    Historial de la fecha de pago
-                    <small class="text-muted ms-2" id="pgenFechaTitulo"></small>
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"
-                        aria-label="Cerrar"></button>
-            </div>
-            <div class="modal-body">
-                <div class="small text-muted mb-2">
-                    Las fechas no se borran: se dan de baja.
-                </div>
-                <div class="table-responsive" style="max-height: 220px; overflow-y: auto;">
-                    <table class="table table-sm mb-0" id="pgenTablaHistorialFecha">
-                        <thead>
-                            <tr>
-                                <th>Estado</th>
-                                <th>Fecha</th>
-                                <th>Calculada</th>
-                                <th>Motivo</th>
-                                <th>Usuario</th>
-                                <th>Alta</th>
-                                <th>Baja</th>
-                            </tr>
-                        </thead>
-                        <tbody id="pgenHistorialFechaBody"></tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-sm btn-secondary"
-                        data-bs-dismiss="modal">Cerrar</button>
             </div>
         </div>
     </div>

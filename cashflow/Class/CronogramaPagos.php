@@ -10,7 +10,7 @@
  * Hasta feature/cronogramas-tarjetas-corporativas habia uno solo -el 2do y el
  * 4to viernes- escrito en el codigo, y lo compartian Logistica Local y la parte
  * en efectivo de Gastos Supervisoras. Ahora cada concepto tiene el suyo, con su
- * dia de la semana y su frecuencia configurables en Parametros -> Generales:
+ * dia de la semana y su frecuencia configurables en Parametros -> Calendario:
  *
  *   PROV_LOCALES  miercoles, quincenal   Cuentas a Pagar Locales
  *   LOGISTICA     viernes,   quincenal   Logistica Local
@@ -35,7 +35,7 @@
  * POR QUE ES UNA CLASE APARTE, Y POR QUE ES PURA
  * ----------------------------------------------
  * El cronograma no es de ningun consumidor: es cuando la empresa paga, y vive en
- * Parametros -> Generales porque cualquier egreso que se pague con el mismo
+ * Parametros -> Calendario porque cualquier egreso que se pague con el mismo
  * calendario lo va a pedir.
  *
  * NO TOCA LA BASE. Recibe la configuracion, el mapa de dias habiles y el de
@@ -338,7 +338,7 @@ class CronogramaPagos {
                     'corrimiento' => $corrimiento, 'defecto' => true,
                     'aviso' => 'El cronograma de ' . $nombre . ' tiene un valor que no se '
                         . 'entiende (' . $e->getMessage() . '). Se usa el valor por defecto, '
-                        . self::describir($defecto) . '. Corregilo en Parámetros › Generales.'];
+                        . self::describir($defecto) . '. Corregilo en Parámetros › Calendario.'];
         }
 
         return ['dia' => $cfg['dia'], 'frecuencia' => $cfg['frecuencia'],
