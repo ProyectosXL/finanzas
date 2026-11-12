@@ -502,10 +502,44 @@ class Ventas {
     }
 
     /**
-     * Mapa de dias bancarios habiles.
+     * Mapa de dias bancarios habiles: RO_T_CALENDARIO con los ajustes de
+     * Parametros › Calendario aplicados.
+     *
+     * ES EL QUE USA TODO EL MODULO para correr una fecha al dia habil. Los
+     * ajustes -un feriado agregado, un feriado bancario pasado a habil- viven
+     * en central (RO_T_CASHFLOW_CALENDARIO_AJUSTE) porque RO_T_CALENDARIO es
+     * externa y no se escribe. Ver Class/CalendarioAjustes.php.
+     *
+     * Sin la tabla de ajustes, o si no se puede leer, devuelve la lectura de
+     * RO_T_CALENDARIO tal cual: el calculo nunca se rompe por un ajuste.
+     *
+     * @param string $desde Fecha inicial 'Y-m-d'
+     * @param string $hasta Fecha final 'Y-m-d'
+     * @return array Mapa 'Y-m-d' => bool
+     */
+    public function getDiasHabiles($desde, $hasta) {
+        require_once __DIR__ . '/CalendarioAjustes.php';
+
+        if ($this->ajustesCalendario === null) {
+            $this->ajustesCalendario = new CalendarioAjustes();
+        }
+
+        return $this->ajustesCalendario->aplicar(
+            $this->getDiasHabilesBase($desde, $hasta), $desde, $hasta);
+    }
+
+    /** @var CalendarioAjustes|null Una por instancia: cachea el chequeo de la tabla */
+    private $ajustesCalendario = null;
+
+    /**
+     * Mapa de dias bancarios habiles de RO_T_CALENDARIO, SIN ajustes.
      *
      * Unica lectura del modulo fuera de 'central': RO_T_CALENDARIO vive en la
      * conexion 'power' (host de apps, base DATABASE_POWER).
+     *
+     * SOLO PARA LA PANTALLA DE AJUSTES, que necesita saber que dice el
+     * calendario externo para mostrar el origen de cada feriado y para
+     * rechazar un ajuste que no cambia nada. Para calcular, getDiasHabiles().
      *
      * La tabla esta poblada hasta 2027 y se sigue extendiendo. Si el motor pide
      * una fecha que no existe, no se rompe: proximoHabil() asume habil de lunes
@@ -515,7 +549,7 @@ class Ventas {
      * @param string $hasta Fecha final 'Y-m-d'
      * @return array Mapa 'Y-m-d' => bool
      */
-    public function getDiasHabiles($desde, $hasta) {
+    public function getDiasHabilesBase($desde, $hasta) {
         $cid = $this->conn->conectar('power');
 
         if (!$cid) {

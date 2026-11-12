@@ -128,7 +128,19 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql`, `sql/SJ_CASHFLOW_VEN
 
 **Base**: POWER_BI_CONTROL
 
-**Descripción**: Calendario bancario que el motor de cobranzas consulta para saber si una fecha de acreditación es hábil. Es la única lectura del módulo fuera de LAKER_SA. Se usa el campo DIA_LABORAL, que excluye sábados, domingos y feriados nacionales; cuando una acreditación cae en un día no laboral, se corre al próximo hábil. **No se debe confundir con el calendario comercial de la venta**, que sí incluye sábados y domingos porque las sucursales abren, y que sólo excluye los tres feriados de comercio del parámetro feriados_comercio. La tabla está poblada hasta 2027: si el motor pide una fecha que no existe, asume hábil de lunes a viernes y deja un aviso en pantalla en lugar de fallar.
+**Descripción**: Calendario bancario que el motor de cobranzas consulta para saber si una fecha de acreditación es hábil. Es la única lectura del módulo fuera de LAKER_SA. Se usa el campo DIA_LABORAL, que excluye sábados, domingos y feriados nacionales; cuando una acreditación cae en un día no laboral, se corre al próximo hábil. **No se debe confundir con el calendario comercial de la venta**, que sí incluye sábados y domingos porque las sucursales abren, y que sólo excluye los tres feriados de comercio del parámetro feriados_comercio. La tabla está poblada hasta 2027: si el motor pide una fecha que no existe, asume hábil de lunes a viernes y deja un aviso en pantalla en lugar de fallar. **El módulo no la escribe nunca**: las correcciones van en RO_T_CASHFLOW_CALENDARIO_AJUSTE, abajo.
+
+---
+
+- **Módulo**: Parámetros — Calendario
+
+        **Tabla: RO_T_CASHFLOW_CALENDARIO_AJUSTE**
+
+**Servidor**: XL-TANGO
+
+**Base**: LAKER_SA
+
+**Descripción**: Los feriados bancarios que el cashflow agrega o quita a mano sobre RO_T_CALENDARIO, que es externa y no se escribe. Una fila por fecha con el valor que vale (DIA_LABORAL 0 feriado agregado, 1 feriado bancario pasado a hábil) y una DESCRIPCION, obligatoria al marcar un feriado porque RO_T_CALENDARIO no tiene el nombre. Sólo de lunes a viernes (CHECK) y un solo ajuste vigente por fecha (índice único filtrado por VIGENTE = 1); sin borrado físico: quitar un ajuste pone VIGENTE = 0 con USUARIO_BAJA y FECHA_BAJA. Lleva las columnas de auditoría USUARIO_/FECHA_ ALTA, MODIF y BAJA. La aplica Ventas::getDiasHabiles() sobre la lectura de RO_T_CALENDARIO, así que el corrimiento al día hábil de todo el módulo y la marca de días no hábiles del eje la ven a la vez. Se edita en Parámetros › Calendario. La crea sql/cashflow_parametros_calendario.sql; sin ella el calendario es RO_T_CALENDARIO tal cual.
 
 ---
 
@@ -193,6 +205,7 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql`, `sql/SJ_CASHFLOW_VEN
 | RO_T_CASHFLOW_PARAMETROS | Tabla | XL-TANGO | LAKER_SA |
 | RO_T_CASHFLOW_CONF_SECCION | Tabla | XL-TANGO | LAKER_SA |
 | RO_T_CASHFLOW_CONF_FILA | Tabla | XL-TANGO | LAKER_SA |
+| RO_T_CASHFLOW_CALENDARIO_AJUSTE | Tabla | XL-TANGO | LAKER_SA |
 | SJ_CASHFLOW_VENTAS_HIST | Stored Procedure | XL-TANGO | LAKER_SA |
 | RO_SP_CASHFLOW_VENTAS_HIST_DIA | Stored Procedure | XL-TANGO | LAKER_SA |
 | RO_T_CALENDARIO | Tabla (lectura, externa) | XL-APPS | POWER_BI_CONTROL |

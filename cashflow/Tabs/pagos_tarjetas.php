@@ -182,7 +182,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         <h5 class="mb-0">Por supervisora</h5>
                         <small class="text-muted">
                             El <strong>efectivo</strong> sale en partes iguales en los pagos del
-                            cronograma Supervisoras de <em>Parámetros › Generales</em>
+                            cronograma Supervisoras de <em>Parámetros › Calendario</em>
                             (<span id="supRegla">todos los lunes</span>); la <strong>tarjeta</strong>, el día de
                             vencimiento de su tarjeta. Un resumen cargado pisa la estimación del
                             mes.

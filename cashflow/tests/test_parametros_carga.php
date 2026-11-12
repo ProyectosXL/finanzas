@@ -75,6 +75,7 @@ seccion('ninguna sub-pestaña pide datos al cargar la pagina salvo la primera');
 
 $modulosJs = [
     'GENERALES' => 'Js/Parametros-Generales.js',
+    'CALENDARIO' => 'Js/Parametros-Calendario.js',
     'VENTAS' => 'Js/Parametros.js',
     'SALDOS' => 'Js/Parametros-Saldos.js',
     'COB_ELECTRONICOS' => 'Js/Parametros-Cob-Electronicos.js',
@@ -105,7 +106,7 @@ foreach ($modulosJs as $codigo => $archivo) {
         preg_match('/^        cargar(PlazosGlobales|Escala|Clientes)?\(\);$/m', $arranque));
 }
 
-chequear('las que leen getTodo piden su modulo con ParametrosCarga.pedir()', 10,
+chequear('las que leen getTodo piden su modulo con ParametrosCarga.pedir()', 11,
     array_sum(array_map(function ($c) use ($modulosJs, $leer) {
         return substr_count($leer($modulosJs[$c]), "ParametrosCarga.pedir('" . $c . "')");
     }, array_keys($modulosJs))));

@@ -271,7 +271,7 @@ class PagosTarjetas {
         $estimado = TarjetasSupervisoras::estimar($promedios, $meses, $inflacion, $ventana,
             $estados);
 
-        /* EL CRONOGRAMA SUPERVISORAS de Parametros -> Generales, con sus
+        /* EL CRONOGRAMA SUPERVISORAS de Parametros -> Calendario, con sus
            overrides: por defecto todos los lunes del mes. Hasta
            feature/cronogramas-tarjetas-corporativas era el de Logistica Local,
            el 2do y el 4to viernes. */

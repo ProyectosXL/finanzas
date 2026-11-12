@@ -124,6 +124,8 @@ try {
     require_once __DIR__ . '/../Class/Inflacion.php';
     // Los nombres de los conceptos del cronograma, para los mensajes.
     require_once __DIR__ . '/../Class/CronogramaPagos.php';
+    // La fecha larga de los mensajes de los feriados bancarios.
+    require_once __DIR__ . '/../Class/CalendarioAjustes.php';
 
     // Obtener accion del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
@@ -202,7 +204,8 @@ try {
             break;
 
         /* ================================================================
-           MODULO GENERALES: INFLACION Y CRONOGRAMA
+           MODULO GENERALES: INFLACION. Y MODULO CALENDARIO: EL CRONOGRAMA
+           (se mudo de sub-pestaña con su card; ver AuthCashflow::ESCRITURAS)
 
            LA VALIDACION QUE VALE ES LA DE LAS CLASES. La pantalla acota lo que
            se puede tipear, pero lo que manda el navegador es un pedido y no una
@@ -411,6 +414,58 @@ try {
                           . 'del próximo pago de los fleteros: vuelven al calculado y quedan en el '
                           . 'historial.'
                         : ''),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           MODULO CALENDARIO: LOS FERIADOS BANCARIOS
+
+           Ajustes sobre RO_T_CALENDARIO, que es externa y no se escribe: viven
+           en central y los aplica Ventas::getDiasHabiles(). La validacion -de
+           lunes a viernes, distinto del calendario externo, descripcion al
+           marcar feriado- es la de CalendarioAjustes.
+           ================================================================ */
+        case 'getFeriadosBancarios':
+            echo json_encode([
+                'success' => true,
+                'data' => $parametros->feriadosBancarios(isset($_GET['anio']) ? $_GET['anio'] : null)
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveFeriadoBancario':
+            $data = bodyJson();
+
+            if (!isset($data['fecha']) || !isset($data['dia_laboral'])) {
+                throw new Exception('Faltan la fecha y si el día es feriado o hábil');
+            }
+
+            $r = $parametros->calendarioAjustes()->guardar(
+                $data['fecha'],
+                $data['dia_laboral'],
+                isset($data['descripcion']) ? $data['descripcion'] : null,
+                $usuario
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'El ' . CalendarioAjustes::fechaLarga($r['fecha'])
+                    . ($r['dia_laboral'] ? ' pasa a ser hábil' : ' pasa a ser feriado bancario')
+                    . ' para todo el cashflow. Las fechas que caían ese día se corren solas.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'quitarFeriadoBancario':
+            $data = bodyJson();
+
+            $r = $parametros->calendarioAjustes()->quitar(
+                isset($data['id']) ? $data['id'] : null, $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Se quitó el ajuste del ' . CalendarioAjustes::fechaLarga($r['fecha'])
+                    . ': vuelve a valer lo que dice RO_T_CALENDARIO. Queda en el historial.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

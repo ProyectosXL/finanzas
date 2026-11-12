@@ -80,7 +80,7 @@ require_once __DIR__ . '/../AlquileresUniverso.php';
  * ------------------------------------------------------
  * Al 16/09/2026 eran 378 vencimientos por $965 millones, apilados en el primer
  * dia del eje. Desde feature/cronogramas-tarjetas-corporativas lo vencido DEL
- * CRONOGRAMA va al proximo dia de pago (Parametros -> Generales, concepto
+ * CRONOGRAMA va al proximo dia de pago (Parametros -> Calendario, concepto
  * PROV_LOCALES), y solo lo de las otras formas -debito, caja, tarjeta- sigue en
  * el primer dia. El aviso dice cuanto es cada parte. Ver
  * Proveedores::avisosPendientes().

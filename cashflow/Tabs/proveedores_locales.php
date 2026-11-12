@@ -40,7 +40,7 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
         <small>
             Las facturas que se pagan por <strong>echeq o transferencia</strong> y no tienen
             fecha cargada —o la tienen y ya pasó— se proyectan en el <strong>próximo día de
-            pago del cronograma</strong> de Proveedores Locales (<em>Parámetros › Generales</em>),
+            pago del cronograma</strong> de Proveedores Locales (<em>Parámetros › Calendario</em>),
             a partir de su vencimiento o de hoy. En la columna de fecha llevan la etiqueta
             <strong>crono</strong>. Una fecha cargada futura se respeta tal cual. Mover un día
             de pago en Parámetros mueve todas sus facturas.

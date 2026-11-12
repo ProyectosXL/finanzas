@@ -192,14 +192,21 @@ class AuthCashflow {
             'saveParametro' => [['parametros', self::SUB_DEL_PARAMETRO]],
             'saveInflacionMes' => [['parametros', 'GENERALES']],
             'aplicarInflacionConstante' => [['parametros', 'GENERALES']],
-            'saveFechaCronograma' => [['parametros', 'GENERALES']],
-            'quitarFechaCronograma' => [['parametros', 'GENERALES']],
-            /* El conteo de overrides que se darian de baja es el primer paso de
-               cambiar el dia de un concepto: como los preview, pide edicion. */
-            'contarOverridesCronograma' => [['parametros', 'GENERALES']],
-            'saveConfigCronograma' => [['parametros', 'GENERALES']],
             // Gastos Locales es solo lectura: su lista de cuentas se edita en Generales.
             'saveCuentasGastosLocales' => [['parametros', 'GENERALES']],
+            /* EL CRONOGRAMA DE PAGOS SE FUE A CALENDARIO con su card, y su
+               permiso con el: es una decision sobre fechas. Los roles que lo
+               editaban en Generales reciben el de Calendario con
+               sql/cashflow_calendario_permisos.sql. */
+            'saveFechaCronograma' => [['parametros', 'CALENDARIO']],
+            'quitarFechaCronograma' => [['parametros', 'CALENDARIO']],
+            /* El conteo de overrides que se darian de baja es el primer paso de
+               cambiar el dia de un concepto: como los preview, pide edicion. */
+            'contarOverridesCronograma' => [['parametros', 'CALENDARIO']],
+            'saveConfigCronograma' => [['parametros', 'CALENDARIO']],
+            // Los feriados bancarios: los ajustes sobre RO_T_CALENDARIO.
+            'saveFeriadoBancario' => [['parametros', 'CALENDARIO']],
+            'quitarFeriadoBancario' => [['parametros', 'CALENDARIO']],
             /* El mix de cobro es un arbol (Class/MixCobro.php). La previsualizacion
                tambien pide edicion: la usa solo quien esta editando el arbol, como
                los preview del cronograma. */
@@ -337,7 +344,7 @@ class AuthCashflow {
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento',
-            'getHistorialRubroPct'],
+            'getHistorialRubroPct', 'getFeriadosBancarios'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],
@@ -574,7 +581,9 @@ class AuthCashflow {
 
     /**
      * La clave de FP_PERMISOS que habilita editar una pestaña o sub-pestaña.
-     * La misma que da de alta sql/cashflow_permisos_edicion.sql.
+     * La misma que da de alta sql/cashflow_permisos_edicion.sql (o, las mas
+     * nuevas, sql/cashflow_alquileres_permisos.sql y
+     * sql/cashflow_calendario_permisos.sql).
      *
      * @param string $tab
      * @param string|null $sub

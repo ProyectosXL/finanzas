@@ -223,7 +223,7 @@ class CronogramaDatos {
 
     /**
      * Los tres conceptos con su configuracion y quien la cambio por ultima vez,
-     * para la tabla de configuracion de Parametros -> Generales.
+     * para la tabla de configuracion de Parametros -> Calendario.
      *
      * EL QUIEN Y CUANDO ES EL DEL ULTIMO DE LOS DOS PARAMETROS que se toco: el dia
      * y la frecuencia se guardan juntos, asi que es una sola modificacion.

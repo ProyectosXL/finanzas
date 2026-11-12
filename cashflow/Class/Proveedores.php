@@ -749,7 +749,7 @@ class Proveedores {
      * fechas: eso pasa una sola vez, aca.
      *
      * CON EL HORIZONTE, LAS FACTURAS DEL CRONOGRAMA VAN A SUS DIAS DE PAGO: se lee
-     * el cronograma PROV_LOCALES de Parametros -> Generales y cada una se ubica en
+     * el cronograma PROV_LOCALES de Parametros -> Calendario y cada una se ubica en
      * su proximo pago (ver resolverFechaPago()). Sin el horizonte no se lee -lo
      * pide Tarjetas Pagos Corporativos, que usa FECHA_VTO y no esta fecha- y
      * 'Pago' queda como antes. FECHA_VTO es SIEMPRE el vencimiento crudo de
