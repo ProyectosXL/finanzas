@@ -189,6 +189,22 @@ class AlquileresImputacion {
         return isset($vtos[$c]) ? $vtos[$c]['FECHA_VTO'] : self::vtoDeParametro($cuota, $dias);
     }
 
+    /**
+     * Las razones sociales de un local del contexto de validar(): la principal y
+     * las adicionales. Una factura de CUALQUIERA de ellas se puede imputar al
+     * local (San Justo: SASANJ el alquiler, SAUCCS las expensas y el fondo).
+     *
+     * @param array $l ['cod_provee', 'razones' => [...]]
+     * @return string[]
+     */
+    private static function razonesDe($l) {
+        $cods = isset($l['razones']) ? $l['razones'] : [$l['cod_provee'] ?? null];
+
+        return array_values(array_filter(array_map(['Planilla', 'codigo'], $cods), function ($c) {
+            return $c !== '';
+        }));
+    }
+
     /** De donde sale el vencimiento a considerar: EDITADO, PARAMETRO o TANGO */
     public static function origenVto($cuota, $vtos, $dias = []) {
         if (isset($vtos[self::claveCuota($cuota)])) {
@@ -403,7 +419,9 @@ class AlquileresImputacion {
      *     'pendientes' => claveCuota => fila de getPendientes() (solo las de destino A_ALQUILERES),
      *     'imputaciones' => las vigentes (AlquileresImputaciones::vigentes()),
      *     'pagos' => la proyeccion ORIGINAL,
-     *     'locales' => nro => ['cod_provee', 'nombre', 'pct_iva', 'pct_percepcion', 'pct_retencion']
+     *     'locales' => nro => ['cod_provee', 'razones' (la principal y las adicionales:
+     *                  AlquileresPago::razonesDelLocal()), 'nombre', 'pct_iva', 'pct_percepcion',
+     *                  'pct_retencion']
      * ]
      * @param bool $guardar Al guardar, la retencion de cada factura es
      *        obligatoria (0 es un valor; vacio no): en la previsualizacion todavia
@@ -490,7 +508,7 @@ class AlquileresImputacion {
                 }
 
                 foreach ($locales as $nro => $l) {
-                    if (($l['cod_provee'] ?? null) === $todos) {
+                    if (in_array($todos, self::razonesDe($l), true)) {
                         $lista[] = (int) $nro;
                     }
                 }
@@ -506,7 +524,7 @@ class AlquileresImputacion {
             foreach ($lista as $nro) {
                 if (!isset($locales[$nro])) {
                     $errores[] = $n . ': el local ' . $nro . ' no existe en la app de alquileres.';
-                } elseif (!isset($razones[$locales[$nro]['cod_provee'] ?? ''])) {
+                } elseif (empty(array_intersect(self::razonesDe($locales[$nro]), array_keys($razones)))) {
                     $errores[] = $n . ': ' . $locales[$nro]['nombre'] . ' no es de ninguna de las razones '
                         . 'sociales de las facturas tildadas.';
                 }

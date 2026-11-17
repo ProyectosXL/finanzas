@@ -3,6 +3,7 @@
 require_once __DIR__ . '/AlquileresConceptos.php';
 require_once __DIR__ . '/AlquileresCalculo.php';
 require_once __DIR__ . '/DiasHabiles.php';
+require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/Inflacion.php';
 
 /**
@@ -239,19 +240,48 @@ class AlquileresPago {
        ==================================================================== */
 
     /**
+     * Las razones sociales de un local: la principal primero y despues las
+     * adicionales, sin repetir. La principal es la unica que da el dia de
+     * vencimiento y el diferimiento; las adicionales sirven para imputarle
+     * facturas y para que sus extraordinarios lo alcancen.
+     *
+     * @param array|null $local La fila de Parametros (['cod_provee', 'adicionales'])
+     * @return string[]
+     */
+    public static function razonesDelLocal($local) {
+        if ($local === null) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach (array_merge([$local['cod_provee'] ?? null], $local['adicionales'] ?? []) as $c) {
+            $c = Planilla::codigo($c);
+
+            if ($c !== '' && !in_array($c, $out, true)) {
+                $out[] = $c;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Si un extraordinario alcanza a un local.
      *
      * Con "todos los locales", alcanza a todo local que HOY tenga esa razon
-     * social, incluido uno que se le asigno despues de cargar el
-     * extraordinario.
+     * social -principal o adicional-, incluido uno que se le asigno despues de
+     * cargar el extraordinario.
      *
      * @param array $extra ['cod_provee', 'todos', 'locales' => [nro]]
      * @param int $nro
-     * @param string|null $codLocal La razon social del local
+     * @param string|string[]|null $codLocal Las razones sociales del local (razonesDelLocal())
      * @return bool
      */
     public static function alcanza($extra, $nro, $codLocal) {
-        if ($codLocal === null || $extra['cod_provee'] !== $codLocal) {
+        $cods = array_map(['Planilla', 'codigo'], array_filter((array) $codLocal, function ($c) { return $c !== null; }));
+
+        if (!in_array(Planilla::codigo($extra['cod_provee']), $cods, true)) {
             return false;
         }
 

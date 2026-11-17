@@ -129,7 +129,9 @@
                     + (r.en_rubro ? '' : ' <span class="badge bg-warning text-dark" title="Sigue de alta: '
                         + 'darla de baja es una decisión">ya no tiene rubro ALQUILER</span>')
                 + '</td>'
-                + '<td class="text-end">' + r.locales + '</td>'
+                + '<td class="text-end"' + (r.locales_adicional ? ' title="' + r.locales + ' como principal y '
+                    + r.locales_adicional + ' como adicional"' : '') + '>' + r.locales
+                    + (r.locales_adicional ? ' <small class="text-muted">+' + r.locales_adicional + '</small>' : '') + '</td>'
                 + '<td><input type="number" min="' + datos.dia_min + '" max="' + datos.dia_max + '" '
                     + 'class="form-control form-control-sm palq-razon" data-campo="dia" placeholder="general" '
                     + 'value="' + (r.dia === null ? '' : r.dia) + '"></td>'
@@ -291,7 +293,7 @@
                 + '<td>' + (ESTADO_BADGE[l.estado] || '')
                     + (l.faltan && l.faltan.length ? '<div class="small text-danger">Falta: ' + esc(l.faltan.join(', ')) + '</div>' : '')
                 + '</td>'
-                + '<td>' + select('cod_provee', opRazon, p.cod_provee, cerrado) + '</td>'
+                + '<td>' + select('cod_provee', opRazon, p.cod_provee, cerrado) + adicionales(l, cerrado) + '</td>'
                 + '<td>' + select('frecuencia', opFrec, p.frecuencia, cerrado) + '</td>'
                 + '<td>' + select('mes_ajuste', opMes, p.mes_ajuste, cerrado || String(p.frecuencia) === '1') + '</td>'
                 + '<td>' + input('pct_iva', ivaSugerido, 'decimal', cerrado,
@@ -310,7 +312,78 @@
             el.addEventListener('change', function() { guardarLocal(el.closest('tr')); });
         });
 
+        cuerpo.querySelectorAll('.palq-adic-alta').forEach(function(el) {
+            el.addEventListener('change', function() {
+                if (!el.value) { return; }
+
+                escribir('altaRazonLocal', { nro: parseInt(el.closest('tr').getAttribute('data-nro'), 10),
+                                             cod_provee: el.value });
+            });
+        });
+
+        cuerpo.querySelectorAll('.palq-adic-baja').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var nro = parseInt(btn.closest('tr').getAttribute('data-nro'), 10);
+                var cod = btn.getAttribute('data-cod');
+
+                Notificacion.confirmar({
+                    titulo: 'Quitar razón social del local',
+                    mensaje: '¿' + (nombreRazon(cod) || cod) + ' deja de facturarle a este local?',
+                    detalle: 'Sus facturas ya no se van a poder imputar a este local. No se borra: queda en el historial.',
+                    confirmar: 'Quitar',
+                    peligro: true
+                }).then(function(si) {
+                    if (si) { escribir('bajaRazonLocal', { nro: nro, cod_provee: cod }); }
+                });
+            });
+        });
+
         Permisos.soloLectura(cuerpo);
+    }
+
+    function nombreRazon(cod) {
+        var r = (datos.razones || []).filter(function(x) { return x.cod === cod; })[0];
+
+        return r ? r.nombre : null;
+    }
+
+    /**
+     * Las razones sociales ADICIONALES del local: las que le facturan algo
+     * además de la principal (San Justo: SAUCCS las expensas y el fondo). Sus
+     * facturas se pueden imputar al local; el vencimiento y el diferimiento
+     * siguen siendo los de la principal.
+     */
+    function adicionales(l, cerrado) {
+        var p = l.params || {};
+        var actuales = p.adicionales || [];
+        var chips = actuales.map(function(cod) {
+            var nombre = nombreRazon(cod);
+
+            return '<span class="badge bg-light text-dark border me-1 mt-1" title="Razón social adicional: sus '
+                + 'facturas se imputan a este local. Vencimiento y diferimiento: los de la principal.">'
+                + esc(nombre || cod)
+                + (nombre ? '' : ' <span class="text-danger">(dada de baja)</span>')
+                + ' <button type="button" class="btn btn-link btn-sm p-0 text-danger palq-adic-baja" data-cod="'
+                + esc(cod) + '" title="Quitar"' + (cerrado ? ' disabled' : '') + '><i class="fas fa-xmark"></i></button></span>';
+        }).join('');
+
+        if (cerrado || !p.cod_provee) {
+            return chips ? '<div>' + chips + '</div>' : '';
+        }
+
+        var libres = (datos.razones || []).filter(function(r) {
+            return r.cod !== p.cod_provee && actuales.indexOf(r.cod) === -1;
+        });
+        var sinTabla = !datos.tabla_razones_local;
+
+        return '<div>' + chips + '</div>'
+            + (libres.length ? '<select class="form-select form-select-sm mt-1 palq-adic-alta"'
+                + (sinTabla ? ' disabled title="Falta correr ' + esc(datos.script_razones_local) + '"'
+                    : ' title="Otra razón social que le factura a este local (expensas, fondo…)"') + '>'
+                + '<option value="">+ otra razón social…</option>'
+                + libres.map(function(r) {
+                    return '<option value="' + esc(r.cod) + '">' + esc(r.nombre) + '</option>';
+                }).join('') + '</select>' : '');
     }
 
     function select(campo, opciones, val, deshabilitado) {
@@ -386,7 +459,8 @@
         var sel = document.getElementById('palqExtraLocales');
 
         sel.innerHTML = (datos.locales || []).filter(function(l) {
-            return l.params && l.params.cod_provee === cod && cod !== '';
+            return l.params && cod !== '' && (l.params.cod_provee === cod
+                || (l.params.adicionales || []).indexOf(cod) !== -1);
         }).map(function(l) {
             return '<option value="' + l.nro + '">' + esc(l.nombre) + '</option>';
         }).join('');

@@ -44,6 +44,14 @@ class AlquileresParametros {
 
     const TABLAS = [self::T_GENERAL, self::T_RAZON, self::T_LOCAL, self::T_EXTRA, self::T_EXTRA_LOCAL];
 
+    /**
+     * Las razones sociales ADICIONALES de un local (script 58). No esta en
+     * TABLAS: sin ella todo funciona como antes, con una razon por local, y lo
+     * que falla -con el nombre del script- es agregar una adicional.
+     */
+    const T_LOCAL_RAZON = 'RO_T_CASHFLOW_ALQ_LOCAL_RAZON';
+    const SCRIPT_RAZONES_LOCAL = 'sql/cashflow_alquileres_local_razones.sql';
+
     /** El valor de la columna RUBRO del maestro que arma el buscador */
     const RUBRO = 'ALQUILER';
 
@@ -59,6 +67,9 @@ class AlquileresParametros {
 
     /** @var string[]|null */
     private $faltan = null;
+
+    /** @var bool|null */
+    private $tablaRazonesLocal = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -290,6 +301,17 @@ class AlquileresParametros {
         return empty($this->tablasFaltantes());
     }
 
+    /** @return bool Si ya se corrio el script de las razones adicionales de un local */
+    public function tablaRazonesLocalCreada() {
+        if ($this->tablaRazonesLocal === null) {
+            $row = $this->fila("SELECT OBJECT_ID(?, 'U') AS ID", ['dbo.' . self::T_LOCAL_RAZON],
+                               'Error al verificar las tablas de alquileres');
+            $this->tablaRazonesLocal = ($row !== null && $row['ID'] !== null);
+        }
+
+        return $this->tablaRazonesLocal;
+    }
+
     public function avisoSinTabla() {
         return $this->tablaCreada() ? ''
             : 'Falta correr ' . self::SCRIPT . ' contra la base central: no existen '
@@ -392,9 +414,22 @@ class AlquileresParametros {
                 'fecha_fin' => ($r['FECHA_FIN'] instanceof DateTime) ? $r['FECHA_FIN']->format('Y-m-d')
                     : (($r['FECHA_FIN'] === null) ? null : substr((string) $r['FECHA_FIN'], 0, 10)),
                 'venta_mensual_estimada' => self::numero($r['VENTA_MENSUAL_ESTIMADA']),
+                'adicionales' => [],
                 'usuario' => $r['USUARIO_MODIF'],
                 'fecha' => self::momento($r['FECHA_MODIF'])
             ];
+        }
+
+        /* LAS RAZONES ADICIONALES, en el orden en que se agregaron. Solo las de
+           un local con fila: sin principal no se puede agregar una. */
+        if ($this->tablaRazonesLocalCreada()) {
+            foreach ($this->filas("SELECT NRO_SUCURS, COD_PROVEE FROM dbo." . self::T_LOCAL_RAZON
+                                  . " WHERE VIGENTE = 1 ORDER BY ID", [],
+                                  'Error al leer las razones sociales adicionales de los locales') as $r) {
+                if (isset($out[(int) $r['NRO_SUCURS']])) {
+                    $out[(int) $r['NRO_SUCURS']]['adicionales'][] = $r['COD_PROVEE'];
+                }
+            }
         }
 
         return $out;
@@ -585,6 +620,87 @@ class AlquileresParametros {
     }
 
     /**
+     * Valida agregar una razon social adicional a un local. Pura.
+     *
+     * @param string $cod
+     * @param array|null $local La fila vigente del local (locales()), null si no tiene
+     * @param array $razones COD_PROVEE => ... de las dadas de alta
+     * @param string $nombreLocal
+     * @return string El codigo, normalizado
+     * @throws InvalidArgumentException
+     */
+    public static function validarRazonLocal($cod, $local, $razones, $nombreLocal) {
+        $c = Planilla::codigo($cod);
+
+        if ($c === '') {
+            throw new InvalidArgumentException('Elegí la razón social a agregar.');
+        }
+
+        if (!isset($razones[$c])) {
+            throw new InvalidArgumentException('La razón social ' . $c . ' no está dada de alta en la sección '
+                . 'Razones sociales.');
+        }
+
+        if ($local === null || ($local['cod_provee'] ?? null) === null || $local['cod_provee'] === '') {
+            throw new InvalidArgumentException($nombreLocal . ' todavía no tiene razón social principal: elegila '
+                . 'primero. La principal es la que da el día de vencimiento y el diferimiento.');
+        }
+
+        if (Planilla::codigo($local['cod_provee']) === $c) {
+            throw new InvalidArgumentException($c . ' ya es la razón social principal de ' . $nombreLocal . '.');
+        }
+
+        if (in_array($c, array_map(['Planilla', 'codigo'], $local['adicionales'] ?? []), true)) {
+            throw new InvalidArgumentException($c . ' ya es una razón social de ' . $nombreLocal . '.');
+        }
+
+        return $c;
+    }
+
+    /**
+     * Agrega una razon social adicional a un local: sus facturas se pueden
+     * imputar a el y sus extraordinarios lo alcanzan. NO cambia ninguna fecha
+     * proyectada: el dia y el diferimiento son los de la principal.
+     *
+     * @param array $universo NRO_SUCURS => ['nombre', ...] de AlquileresApp::locales()
+     * @return array ['nro', 'cod']
+     */
+    public function altaRazonLocal($nro, $cod, $universo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablas();
+        $this->exigirTablaRazonesLocal();
+        $n = (int) $nro;
+
+        if (!isset($universo[$n])) {
+            throw new InvalidArgumentException('El local ' . $n . ' no es un local de la app de alquileres.');
+        }
+
+        $c = self::validarRazonLocal($cod, $this->locales()[$n] ?? null, $this->razonesVigentes(),
+                                     $universo[$n]['nombre']);
+
+        $this->ejecutar("INSERT INTO dbo." . self::T_LOCAL_RAZON
+            . " (NRO_SUCURS, COD_PROVEE, VIGENTE, USUARIO_ALTA, USUARIO_MODIF) VALUES (?, ?, 1, ?, ?)",
+            [$n, $c, $usuario, $usuario], 'Error al agregar la razón social al local');
+
+        return ['nro' => $n, 'cod' => $c];
+    }
+
+    /** Quita una razon social adicional de un local. No se borra: queda en el historial. */
+    public function bajaRazonLocal($nro, $cod, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablaRazonesLocal();
+        $n = (int) $nro;
+        $c = Planilla::codigo($cod);
+
+        if ($this->darDeBaja(self::T_LOCAL_RAZON, "NRO_SUCURS = ? AND COD_PROVEE = ? AND VIGENTE = 1",
+                             [$n, $c], $usuario) < 1) {
+            throw new InvalidArgumentException($c . ' no era una razón social adicional de ese local.');
+        }
+
+        return ['nro' => $n, 'cod' => $c];
+    }
+
+    /**
      * Da de alta un pago extraordinario. Los locales elegidos tienen que ser de
      * esa razon social.
      *
@@ -657,6 +773,13 @@ class AlquileresParametros {
     private function exigirTablas() {
         if (!$this->tablaCreada()) {
             throw new Exception($this->avisoSinTabla());
+        }
+    }
+
+    private function exigirTablaRazonesLocal() {
+        if (!$this->tablaRazonesLocalCreada()) {
+            throw new InvalidArgumentException('Todavía no se puede agregar más de una razón social a un local: '
+                . 'falta correr ' . self::SCRIPT_RAZONES_LOCAL . ' contra la base central.');
         }
     }
 

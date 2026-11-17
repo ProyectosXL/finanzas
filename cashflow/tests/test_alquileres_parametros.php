@@ -78,6 +78,30 @@ chequearLanza('sin locales ni "todos" no', function () {
     AlquileresParametros::validarExtra(['cod_provee' => 'X', 'conceptos' => [8], 'mes_base' => 1, 'pct' => 1]);
 });
 
+seccion('AlquileresParametros: mas de una razon social por local');
+
+$razVig = ['SASANJ' => ['dia' => null], 'SAUCCS' => ['dia' => null]];
+$sanJusto = ['cod_provee' => 'SASANJ', 'adicionales' => []];
+chequear('una dada de alta que no es la principal se agrega', 'SAUCCS',
+    AlquileresParametros::validarRazonLocal(' sauccs ', $sanJusto, $razVig, 'SAN JUSTO'));
+chequearLanza('una que no esta dada de alta no', function () use ($sanJusto, $razVig) {
+    AlquileresParametros::validarRazonLocal('OGMERC', $sanJusto, $razVig, 'SAN JUSTO');
+});
+chequearLanza('la principal no se repite como adicional', function () use ($sanJusto, $razVig) {
+    AlquileresParametros::validarRazonLocal('SASANJ', $sanJusto, $razVig, 'SAN JUSTO');
+});
+chequearLanza('ni una adicional dos veces', function () use ($razVig) {
+    AlquileresParametros::validarRazonLocal('SAUCCS', ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS']],
+        $razVig, 'SAN JUSTO');
+});
+chequearLanza('sin principal no: la principal da el vencimiento y el diferimiento', function () use ($razVig) {
+    AlquileresParametros::validarRazonLocal('SAUCCS', ['cod_provee' => null], $razVig, 'SAN JUSTO');
+});
+chequear('la tabla de las adicionales no es obligatoria: sin el script 58 todo sigue como antes', false,
+    in_array(AlquileresParametros::T_LOCAL_RAZON, AlquileresParametros::TABLAS, true));
+chequear('el script existe y crea la tabla', true, strpos((string) @file_get_contents(__DIR__ . '/../'
+    . AlquileresParametros::SCRIPT_RAZONES_LOCAL), 'CREATE TABLE dbo.' . AlquileresParametros::T_LOCAL_RAZON) !== false);
+
 seccion('AlquileresParametros: el universo del buscador es la columna RUBRO');
 
 $mapa = [

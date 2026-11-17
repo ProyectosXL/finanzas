@@ -51,8 +51,9 @@ App de alquileres (central, SÓLO SE LEE)        Parámetros › Alquileres (cas
 | 53 | `sql/cashflow_alquileres_facturas.sql` | `central` | El vencimiento a considerar por cuota y la imputación (cabecera, facturas, renglones, conceptos, locales), con auditoría e historial | Las facturas de alquiler **siguen en Cuentas a Pagar Locales** (condición de seguridad, parte 12) y las pantallas lo avisan en crítico; no se imputa ni se cambia un vencimiento |
 | 54 | `sql/cashflow_prov_exclusion_modulos_ampliar.sql` | `central` | Amplía el `CHECK` de la exclusión por módulo a `TARJETAS_CORP` y `ALQUILERES` | Excluir de Tarjetas o de Alquileres falla con un mensaje que nombra el script |
 | 55 | `sql/cashflow_alquileres_fila.sql` | `central` | Reemplaza la fila *Alquileres* (`ALQUILERES/PAGOS`) por dos filas agrupadas, `REAL` y `PROYECTADO`, en una transacción, con el control de doble conteo al pie | La fila de antes sigue activa y muestra el total, sin abrir |
+| 58 | `sql/cashflow_alquileres_local_razones.sql` | `central` | Las razones sociales **adicionales** de un local (parte 3.c), con historial. No migra nada | Una razón por local, como antes; el *+ otra razón social* queda deshabilitado y nombra el script |
 
-El 51 va después de `sql/cashflow_prov_locales.sql` (el maestro de proveedores): sin el maestro crea las tablas igual pero no siembra a nadie, y lo dice. El 52 es independiente. **53 → 54 → 55**: el 53 después del 51, el 54 después de `sql/cashflow_prov_exclusion_modulo.sql`, el 55 después del 53 y de `sql/cashflow_estructura_grupos.sql`.
+El 51 va después de `sql/cashflow_prov_locales.sql` (el maestro de proveedores): sin el maestro crea las tablas igual pero no siembra a nadie, y lo dice. El 52 es independiente. **53 → 54 → 55**; el **58**, en cualquier momento después del 51. El 53 después del 51, el 54 después de `sql/cashflow_prov_exclusion_modulo.sql`, el 55 después del 53 y de `sql/cashflow_estructura_grupos.sql`.
 
 **El tablero se mueve con el código, no con los scripts**: con el módulo disponible, la fila de antes (activa, `ALQUILERES/PAGOS`) muestra el total. Ver parte 15.
 
@@ -132,6 +133,7 @@ Al 10/11/2026 el rubro trae **23** proveedores: los 21 del rubro económico *Alq
 
 Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trimestral, semestral), **mes del último ajuste** (obligatorio salvo mensual), **% IVA** (arranca sugiriendo la alícuota de Generales y se puede subir o bajar: hay locales con otros cargos), **% percepción** y **% retención** (obligatorios; 0 es un valor, vacío no), **fecha de fin** (opcional) y **venta mensual estimada** (neta; sólo para locales nuevos).
 
+- **Más de una razón social por local** (script 58). La del desplegable es la **principal**: la única que da el **día de vencimiento y el diferimiento** del local en la proyección. Debajo, *+ otra razón social* agrega **adicionales**: las que le facturan algo más. San Justo (80): SASANJ (CONTINENTAL URBANA) factura el alquiler y SAUCCS (URBANA CENTROS COMERCIALES) las expensas y el fondo. Una adicional **no cambia ninguna fecha proyectada**; sirve para que **sus facturas se imputen al local** (también con *todos los locales de X*) y para que **sus extraordinarios lo alcancen**. Hace falta la principal para agregar una; se quita con la ✕ (baja lógica, con historial). La columna *Locales* de Razones sociales cuenta las principales y, aparte (*+N*), las adicionales. `AlquileresPago::razonesDelLocal()` es la lista; `AlquileresParametros::validarRazonLocal()`, la validación.
 - El **mes del último ajuste es un mes del año**, no un año-mes: ancla el ciclo, y como las frecuencias dividen a 12 el dato no envejece. Trimestral con septiembre ajusta en diciembre, marzo, junio y septiembre.
 - Se guarda **por fila**, como Parámetros › Tarjetas. Un trimestral sin mes del último ajuste **no se guarda** y la pantalla dice por qué.
 - El filtro **Incompletos** muestra los locales que no proyectan, o no proyectan todo, por falta de algún dato.
@@ -145,7 +147,7 @@ Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trim
 
 ### 3.d Pagos extraordinarios
 
-Un % sobre uno o varios **conceptos base** (de los que se proyectan) de un **mes base** del año, que se paga en *mes base + diferimiento* y **se repite todos los años** hasta que se da de baja. Por razón social, con *todos los locales* (incluidos los que se le asignen después) o algunos. No se editan: baja y alta, para que el historial explique los meses ya proyectados. Lleva IVA, percepción y retención del local.
+Un % sobre uno o varios **conceptos base** (de los que se proyectan) de un **mes base** del año, que se paga en *mes base + diferimiento* y **se repite todos los años** hasta que se da de baja. Por razón social, con *todos los locales* (incluidos los que se le asignen después, como principal o adicional) o algunos. No se editan: baja y alta, para que el historial explique los meses ya proyectados. Lleva IVA, percepción y retención del local.
 
 Ejemplo: Cencosud, 75 % del VMA (8) de diciembre, 1 mes de diferimiento: se paga en enero. Los conceptos base salen de la misma jerarquía de la parte 8: si diciembre está cerrado en la app, el VMA cerrado; si no, el proyectado.
 
@@ -303,7 +305,7 @@ El tooltip de la celda dice de cuál sale. Al 17/11/2026 cambiaron 2 de las 4 cu
 
 ### Qué se imputa
 
-Una o varias cuotas, **de una o varias razones sociales**, repartidas en **renglones** de **conceptos** (los que se proyectan, *Extraordinario* y *Otros (no proyectados)*, con atajos por grupo) × **locales** (uno, varios, o *todos los de una razón social* de las facturas tildadas) × **mes que cubre** (el mes de pago cuya proyección reemplaza) × **importe** (con IVA y percepciones). Los renglones son **del grupo**, no de una factura.
+Una o varias cuotas, **de una o varias razones sociales**, a locales de cualquiera de ellas —principal o adicional (parte 3.c)—, repartidas en **renglones** de **conceptos** (los que se proyectan, *Extraordinario* y *Otros (no proyectados)*, con atajos por grupo) × **locales** (uno, varios, o *todos los de una razón social* de las facturas tildadas) × **mes que cubre** (el mes de pago cuya proyección reemplaza) × **importe** (con IVA y percepciones). Los renglones son **del grupo**, no de una factura.
 
 - **La suma de los renglones tiene que dar el pendiente de las cuotas tildadas (±$ 1).** Si no, no se guarda y se muestra la diferencia.
 - **Retención por factura**, obligatoria al guardar (0 es un valor). Se sugiere con el % de retención de los locales, ponderado por el reparto, sobre el neto de Tango; sin él, sobre el importe sin el IVA ni la percepción de los locales.
@@ -404,6 +406,7 @@ php tests/run.php alquileres
 | `Tabs/parametros_alquileres.php`, `Js/Parametros-Alquileres.js` | La sub-pestaña de Parámetros |
 | `sql/cashflow_alquileres.sql`, `sql/cashflow_alquileres_permisos.sql` | Los scripts 51 y 52 |
 | `sql/cashflow_alquileres_facturas.sql`, `sql/cashflow_prov_exclusion_modulos_ampliar.sql`, `sql/cashflow_alquileres_fila.sql` | Los scripts 53, 54 y 55 |
+| `sql/cashflow_alquileres_local_razones.sql` | El script 58: las razones sociales adicionales de un local |
 
 ---
 

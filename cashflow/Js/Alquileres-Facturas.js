@@ -389,7 +389,11 @@
 
     function dibujarRenglones() {
         var razones = razonesTildadas();
-        var locales = (datos.locales || []).filter(function(l) { return razones[l.cod_provee]; });
+        /* Los locales de cualquiera de sus razones sociales: la principal o una
+           adicional (San Justo recibe facturas de SASANJ y de SAUCCS). */
+        var locales = (datos.locales || []).filter(function(l) {
+            return (l.razones || [l.cod_provee]).some(function(c) { return razones[c]; });
+        });
         var nombresGrupo = datos.nombres_grupo || {};
 
         html('alqImpRenglones', renglones.map(function(r, i) {

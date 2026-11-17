@@ -153,6 +153,15 @@ $algunos = ['todos' => false, 'locales' => [2, 78]] + $cencosud;
 chequear('un subconjunto: alcanza a los elegidos', true, AlquileresPago::alcanza($algunos, 78, 'SAUNIC'));
 chequear('y no a los demas', false, AlquileresPago::alcanza($algunos, 3, 'SAUNIC'));
 
+/* MAS DE UNA RAZON SOCIAL POR LOCAL. */
+chequear('las razones de un local: la principal primero, sin repetir', ['SASANJ', 'SAUCCS'],
+    AlquileresPago::razonesDelLocal(['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS', 'sasanj']]));
+chequear('sin adicionales, la principal', ['SAPALA'], AlquileresPago::razonesDelLocal(['cod_provee' => 'SAPALA']));
+chequear('sin fila, ninguna', [], AlquileresPago::razonesDelLocal(null));
+chequear('un extraordinario de la adicional alcanza al local', true,
+    AlquileresPago::alcanza($cencosud, 80, ['SASANJ', 'SAUNIC']));
+chequear('y uno de otra razon no', false, AlquileresPago::alcanza($cencosud, 80, ['SASANJ', 'SAUCCS']));
+
 seccion('Fecha de fin');
 
 $fin = $base;

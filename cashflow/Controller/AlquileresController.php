@@ -234,13 +234,31 @@ try {
             responder($r, 'Local ' . $universo[$r['nro']]['nombre'] . ' guardado.');
             break;
 
+        /* MAS DE UNA RAZON SOCIAL POR LOCAL: las adicionales. El dia y el
+           diferimiento siguen siendo los de la principal. */
+        case 'altaRazonLocal':
+            $data = bodyJson();
+            $universo = (new AlquileresApp())->locales();
+            $r = $par->altaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $universo, $usuario);
+            responder($r, $r['cod'] . ' agregada a ' . $universo[$r['nro']]['nombre'] . ': sus facturas se pueden '
+                . 'imputar a este local. El vencimiento y el diferimiento siguen siendo los de la razón principal.');
+            break;
+
+        case 'bajaRazonLocal':
+            $data = bodyJson();
+            $r = $par->bajaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $usuario);
+            responder($r, $r['cod'] . ' ya no es razón social de ese local. No se borra: queda en el historial.');
+            break;
+
         case 'altaExtra':
             $data = bodyJson();
             $cod = trim((string) ($data['cod_provee'] ?? ''));
             $deLaRazon = [];
 
+            /* Los locales de la razon social: los que la tienen como principal o
+               como adicional. */
             foreach ($par->locales() as $nro => $l) {
-                if ($l['cod_provee'] === $cod) {
+                if (in_array(Planilla::codigo($cod), AlquileresPago::razonesDelLocal($l), true)) {
                     $deLaRazon[] = $nro;
                 }
             }

@@ -70,6 +70,10 @@ class Alquileres {
                 'en_rubro' => isset($universo[$cod]),
                 'locales' => count(array_filter($base['locales'], function ($l) use ($cod) {
                     return ($l['params']['cod_provee'] ?? null) === $cod;
+                })),
+                'locales_adicional' => count(array_filter($base['locales'], function ($l) use ($cod) {
+                    return in_array(Planilla::codigo($cod), array_map(['Planilla', 'codigo'],
+                        $l['params']['adicionales'] ?? []), true);
                 }))
             ];
         }
@@ -124,6 +128,8 @@ class Alquileres {
             'rubro_sin_fila' => $sinFila,
             'tabla_creada' => $this->par->tablaCreada(),
             'script' => AlquileresParametros::SCRIPT,
+            'tabla_razones_local' => $base['tablas_ok'] && $this->tablaRazonesLocal($avisos),
+            'script_razones_local' => AlquileresParametros::SCRIPT_RAZONES_LOCAL,
             'general' => $base['general'],
             'razones' => array_values($razonesAlta),
             'historial_razones' => $base['tablas_ok'] ? $this->par->razones(false) : [],
@@ -381,6 +387,7 @@ class Alquileres {
 
         foreach ($proy['locales'] as $nro => $l) {
             $locales[$nro] = ['cod_provee' => $l['params']['cod_provee'] ?? null, 'nombre' => $l['nombre'],
+                              'razones' => AlquileresPago::razonesDelLocal($l['params']),
                               'pct_iva' => $l['params']['pct_iva'] ?? null,
                               'pct_percepcion' => $l['params']['pct_percepcion'] ?? null,
                               'pct_retencion' => $l['params']['pct_retencion'] ?? null];
@@ -388,6 +395,18 @@ class Alquileres {
 
         return ['pendientes' => $pend, 'imputaciones' => $f['imputaciones'], 'pagos' => $proy['pagos'],
                 'locales' => $locales, 'dias' => $f['dias'] ?? [], 'avisos' => $f['avisos']];
+    }
+
+    /** Si se puede agregar mas de una razon social a un local (script 58). Nunca lanza. */
+    protected function tablaRazonesLocal(&$avisos) {
+        try {
+            return $this->par->tablaRazonesLocalCreada();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo verificar la tabla de razones sociales adicionales ('
+                . $e->getMessage() . ').', 'Locales');
+
+            return false;
+        }
     }
 
     /**
@@ -564,7 +583,7 @@ class Alquileres {
             }
 
             $extras = array_values(array_filter($base['extras'], function ($x) use ($nro, $p) {
-                return AlquileresPago::alcanza($x, $nro, $p['cod_provee']);
+                return AlquileresPago::alcanza($x, $nro, AlquileresPago::razonesDelLocal($p));
             }));
 
             foreach (AlquileresPago::pagosLocal([
@@ -799,7 +818,7 @@ class Alquileres {
 
         foreach ($c['locales'] as $nro => $l) {
             $locales[] = ['nro' => $nro, 'nombre' => $l['nombre'], 'cod_provee' => $l['params']['cod_provee'] ?? null,
-                          'razon' => $l['razon']];
+                          'razones' => AlquileresPago::razonesDelLocal($l['params']), 'razon' => $l['razon']];
         }
 
         return [
@@ -996,8 +1015,14 @@ class Alquileres {
                 'nombre' => $l['nombre'],
                 'habilitado' => $l['habilitado'],
                 'params' => $p,
+                /* La principal y, despues, las adicionales dadas de alta: es lo
+                   que muestra la columna Razon social de la pestaña. */
                 'razon' => (isset($p['cod_provee']) && isset($out['razones'][$p['cod_provee']]))
-                    ? $out['razones'][$p['cod_provee']]['razon'] : null,
+                    ? implode(' · ', array_map(function ($c) use ($out) { return $out['razones'][$c]['razon']; },
+                        array_values(array_filter(AlquileresPago::razonesDelLocal($p), function ($c) use ($out) {
+                            return isset($out['razones'][$c]);
+                        }))))
+                    : null,
                 'estado' => $estado['estado'],
                 'faltan' => $estado['faltan'],
                 'nuevo' => $nuevo,

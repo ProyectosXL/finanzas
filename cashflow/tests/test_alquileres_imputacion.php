@@ -329,6 +329,21 @@ $fuera = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA'
     ['conceptos' => ['8'], 'locales' => [3], 'mes' => '2026-11', 'importe' => 3000]]], $soloA);
 chequear('un local de otra razon social no se puede imputar', false, $fuera['ok']);
 
+/* MAS DE UNA RAZON SOCIAL POR LOCAL: San Justo tiene SASANJ (alquiler) y
+   SAUCCS (expensas y fondo). Una factura de la adicional se imputa al local. */
+$conAdic = $locales;
+$conAdic[3]['razones'] = ['SAUNIC', 'SAPALA'];
+$adic = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA', 't_comp' => 'FAC', 'n_comp' => 'C1',
+    'vto_tango' => '2026-11-20', 'pendiente' => 3000, 'retencion' => 0]], 'renglones' => [
+    ['conceptos' => ['8'], 'locales' => [3], 'mes' => '2026-11', 'importe' => 3000]]],
+    ['locales' => $conAdic] + $soloA);
+chequear('con la razon como adicional del local, si', [true, []], [$adic['ok'], $adic['errores']]);
+$adicTodos = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA', 't_comp' => 'FAC',
+    'n_comp' => 'C1', 'vto_tango' => '2026-11-20', 'pendiente' => 3000, 'retencion' => 0]], 'renglones' => [
+    ['conceptos' => ['8'], 'todos_de' => 'SAPALA', 'mes' => '2026-11', 'importe' => 3000]]],
+    ['locales' => $conAdic] + $soloA);
+chequear('"todos los de" incluye a los que la tienen como adicional', [1, 2, 3], $adicTodos['renglones'][0]['locales']);
+
 $re = AlquileresImputacion::validar($borrador(3000, 1000, [
     ['conceptos' => ['1'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 4000]]),
     ['imputaciones' => [$imp]] + $e);
