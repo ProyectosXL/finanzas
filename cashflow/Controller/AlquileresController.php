@@ -115,9 +115,14 @@ try {
                     . 'volvé a cargar la pestaña. No se guardó nada.');
             }
 
+            /* Elegir la fecha que la cuota tendria sin editar (la de Parametros)
+               es deshacer. */
+            $base = AlquileresImputacion::origenVto($cuota, [], $e['dias']) === AlquileresImputacion::VTO_PARAMETRO
+                ? 'de Parámetros' : 'de Tango';
             $r = (new AlquileresFacturaVto())->guardar($cuota['COD_PROVEE'], $cuota['T_COMP'], $cuota['N_COMP'],
-                $cuota['FECHA_VTO'], $data['fecha'] ?? '', $data['motivo'] ?? null, $usuario, $hoy);
-            responder($r, $r['deshecha'] ? 'Vuelve al vencimiento de Tango.'
+                $cuota['FECHA_VTO'], $data['fecha'] ?? '', $data['motivo'] ?? null, $usuario, $hoy,
+                AlquileresImputacion::vtoDeParametro($cuota, $e['dias']));
+            responder($r, $r['deshecha'] ? 'Vuelve al vencimiento ' . $base . '.'
                 : 'Vencimiento a considerar: ' . date('d/m/Y', strtotime($r['fecha'])) . '.');
             break;
 
@@ -125,8 +130,8 @@ try {
             $data = bodyJson();
             $r = (new AlquileresFacturaVto())->deshacer($data['cod_provee'] ?? '', $data['t_comp'] ?? '',
                 $data['n_comp'] ?? '', $data['vto_tango'] ?? '', $usuario);
-            responder($r, $r['habia'] ? 'Vuelve al vencimiento de Tango. El cambio queda en el historial.'
-                : 'Ya estaba con el vencimiento de Tango.');
+            responder($r, $r['habia'] ? 'Vuelve al vencimiento sin editar (el de Parámetros de la razón social). '
+                . 'El cambio queda en el historial.' : 'Ya estaba con el vencimiento sin editar.');
             break;
 
         case 'previsualizarImputacion':

@@ -205,6 +205,35 @@ $r = aplicarP($PROY, [$f1], [imputacionP(1, [$f1], [['conceptos' => ['1'], 'loca
 chequear('la factura se paga en el vencimiento editado', '2026-12-15',
     array_values(array_filter($r['pagos'], 'esFactura'))[0]['fecha']);
 
+/* LA JERARQUIA: fecha manual > dia de Parametros (el de la razon social o el
+   general) en el mes del vencimiento de Tango. El caso real: FAC A0005000027187
+   de SAGALL vence en Tango el 20/11 y la razon social tiene dia 18. */
+$dias = AlquileresImputacion::diasDeVencimiento(
+    ['SAPALA' => ['dia' => 18], 'SAUNIC' => ['dia' => null], 'OTRA' => ['dia' => null]], 10);
+chequear('el dia de cada razon social: el suyo, o el general', ['SAPALA' => 18, 'SAUNIC' => 10, 'OTRA' => 10], $dias);
+chequear('sin dia propio ni general no esta en el mapa', [],
+    AlquileresImputacion::diasDeVencimiento(['SAPALA' => ['dia' => null]], null));
+chequear('sin editar, el dia de Parametros en el mes del vencimiento de Tango', '2026-11-18',
+    AlquileresImputacion::vtoAConsiderar($f1, [], $dias));
+chequear('aunque Tango venza antes del dia de Parametros', '2026-11-18',
+    AlquileresImputacion::vtoAConsiderar(cuotaP('SAPALA', 'A9', 1.0, '2026-11-02'), [], $dias));
+chequear('la fecha manual manda sobre la de Parametros', '2026-12-15',
+    AlquileresImputacion::vtoAConsiderar($f1, $vtos, $dias));
+chequear('el general para una razon sin dia propio', '2026-11-10',
+    AlquileresImputacion::vtoAConsiderar(cuotaP('SAUNIC', 'C9', 1.0), [], $dias));
+chequear('una razon que no esta en el mapa queda con el de Tango', '2026-11-20',
+    AlquileresImputacion::vtoAConsiderar(cuotaP('XXXX', 'X9', 1.0), [], $dias));
+chequear('el origen de cada fecha', [AlquileresImputacion::VTO_EDITADO, AlquileresImputacion::VTO_PARAMETRO,
+    AlquileresImputacion::VTO_TANGO], [AlquileresImputacion::origenVto($f1, $vtos, $dias),
+    AlquileresImputacion::origenVto($f1, [], $dias), AlquileresImputacion::origenVto(cuotaP('XXXX', 'X9', 1.0), [], $dias)]);
+$r = aplicarP($PROY, [$f1], [imputacionP(1, [$f1], [['conceptos' => ['1'], 'locales' => [1],
+    'mes' => '2026-11', 'importe' => 1600.0]])], ['dias' => $dias]);
+chequear('la factura imputada se paga el dia de Parametros', '2026-11-18',
+    array_values(array_filter($r['pagos'], 'esFactura'))[0]['fecha']);
+chequear('y la grilla lo dice', ['2026-11-20', '2026-11-18', '2026-11-18', AlquileresImputacion::VTO_PARAMETRO],
+    [$r['facturas'][0]['vto_tango'], $r['facturas'][0]['vto_parametro'], $r['facturas'][0]['vto_considerar'],
+     $r['facturas'][0]['vto_origen']]);
+
 $d = AlquileresImputacion::fechaDePago('2026-11-05', $HAB, $HOY);
 chequear('vencida: el siguiente habil desde hoy, no el primer dia del eje', ['2026-11-10', true], [$d['fecha'], $d['vencido']]);
 chequear('y lo anota', true, strpos(AlquileresImputacion::notaFecha($d), 'vencía el 05/11/2026') !== false);

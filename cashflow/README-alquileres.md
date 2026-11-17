@@ -285,7 +285,13 @@ Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, venc
 
 ### El vencimiento a considerar
 
-**Es la única fecha de pago** de una factura de alquiler: la planilla de pagos de Proveedores Locales deja estas facturas en error. Mismo patrón que Tarjetas (`AlquileresFacturaVto`, tabla propia): input que guarda al cambiar, fecha mínima hoy (`TarjetasCorporativas::validarVtoEditado()`, la misma regla), **↺ que vuelve al de Tango**, por cuota, con historial y motivo opcional.
+**Es la única fecha de pago** de una factura de alquiler: la planilla de pagos de Proveedores Locales deja estas facturas en error. La jerarquía (`AlquileresImputacion::vtoAConsiderar()`):
+
+1. **La fecha manual**, cargada en la grilla. Mismo patrón que Tarjetas (`AlquileresFacturaVto`, tabla propia): input que guarda al cambiar, fecha mínima hoy (`TarjetasCorporativas::validarVtoEditado()`, la misma regla), por cuota, con historial y motivo opcional. **↺ la quita** y vuelve a la de Parámetros; elegir a mano la fecha de Parámetros también.
+2. **La de Parámetros**: el día de vencimiento de la razón social (o el general) **en el mes del vencimiento de Tango** (`vtoDeParametro()`). Ejemplo: FAC A0005000027187 de SAGALL (día 18) vence en Tango el 20/11/2026 y se considera el **18/11**.
+3. La de Tango, sólo si la razón social no tiene día y no hay general (chip *Tango* en la celda).
+
+El tooltip de la celda dice de cuál sale. Al 17/11/2026 cambiaron 2 de las 4 cuotas pendientes: SAGALL A0005000027187 (20/11 → 18/11) y SACORR A0000200000467 (18/11 → 15/11, que por vencida se paga el siguiente hábil desde hoy).
 
 **Vencida**: una imputada con vencimiento a considerar anterior a hoy se paga el **siguiente día hábil desde hoy** (`AlquileresImputacion::fechaDePago()`), y la celda lo anota con `detalle`.
 

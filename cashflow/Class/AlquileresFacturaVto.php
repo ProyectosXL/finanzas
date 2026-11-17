@@ -11,8 +11,9 @@ require_once __DIR__ . '/TarjetasFacturaVto.php';
 
 /**
  * AlquileresFacturaVto
- * El vencimiento a considerar de una cuota de alquiler, cuando no es el de
- * Tango.
+ * El vencimiento a considerar de una cuota de alquiler cargado a mano. Sin el,
+ * la cuota vence el dia de Parametros de su razon social en el mes del
+ * vencimiento de Tango (AlquileresImputacion::vtoAConsiderar()).
  *
  * ES LA UNICA FECHA DE PAGO de una factura de alquiler: la planilla de pagos de
  * Proveedores Locales no se usa para estas facturas (las deja en error). Mismo
@@ -120,9 +121,13 @@ class AlquileresFacturaVto {
      * factura de alquiler pendiente lo verifica quien llama, contra los
      * pendientes de ahora.
      *
+     * CORREGIR A LA FECHA QUE TENDRIA SIN EDITAR ES DESHACER: la de Parametros
+     * ($vtoBase, AlquileresImputacion::vtoDeParametro()), o la de Tango si no
+     * se pasa.
+     *
      * @return array ['fecha', 'reemplazo' => bool, 'deshecha' => bool]
      */
-    public function guardar($codProvee, $tComp, $nComp, $vtoTango, $fecha, $motivo, $usuario, $hoy) {
+    public function guardar($codProvee, $tComp, $nComp, $vtoTango, $fecha, $motivo, $usuario, $hoy, $vtoBase = null) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
@@ -131,7 +136,7 @@ class AlquileresFacturaVto {
         $m = trim((string) $motivo);
         $m = ($m === '') ? null : mb_substr($m, 0, self::LARGO_MOTIVO);
 
-        if ($f === $c[3]) {
+        if ($f === (($vtoBase === null || $vtoBase === '') ? $c[3] : substr((string) $vtoBase, 0, 10))) {
             $r = $this->deshacer($codProvee, $tComp, $nComp, $vtoTango, $usuario);
 
             return ['fecha' => $f, 'reemplazo' => false, 'deshecha' => $r['habia']];

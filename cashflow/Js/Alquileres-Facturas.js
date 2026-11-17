@@ -172,20 +172,33 @@
         return '<span class="badge ' + cls + '" title="' + esc(tip) + '">' + esc(t) + '</span>';
     }
 
-    /** El vencimiento a considerar: input que guarda al cambiar, mínimo hoy, y ↺ al de Tango */
+    /**
+     * El vencimiento a considerar: la fecha manual, o el día de Parámetros de la
+     * razón social en el mes del vencimiento de Tango. Input que guarda al
+     * cambiar, mínimo hoy, y ↺ a la de Parámetros.
+     */
     function celdaVto(f, edita) {
         var ed = f.vto_editado;
+        var sinEditar = f.vto_origen === 'TANGO'
+            ? 'el de Tango (la razón social no tiene día de vencimiento en Parámetros, ni hay uno general)'
+            : 'el ' + fecha(f.vto_parametro) + ', por el día de vencimiento de la razón social en Parámetros';
         var titulo = ed
-            ? 'Cambiado en esta pestaña. En Tango vence el ' + fecha(f.vto_tango) + '.'
+            ? 'Cambiado en esta pestaña. Sin el cambio sería ' + sinEditar + '. En Tango vence el '
+              + fecha(f.vto_tango) + '.'
               + (ed.MOTIVO ? '\nMotivo: ' + ed.MOTIVO : '')
               + '\n' + Auditoria.texto({ alta: { usuario: ed.USUARIO_ALTA, fecha: ed.FECHA_ALTA } })
-            : 'El de Tango. Es la fecha en que se paga si está imputada.';
+            : (f.vto_origen === 'TANGO' ? 'El de Tango: la razón social no tiene día de vencimiento en '
+                + 'Parámetros, ni hay uno general.'
+              : 'El día de vencimiento de la razón social en Parámetros (o el general), en el mes del '
+                + 'vencimiento de Tango (' + fecha(f.vto_tango) + ').')
+              + '\nEs la fecha en que se paga si está imputada.';
+        var chip = ed ? ' <span class="badge bg-info text-dark">cambiado</span>'
+            : (f.vto_origen === 'TANGO' ? ' <span class="badge bg-light text-dark border">Tango</span>' : '');
         var nota = f.nota_fecha ? '<div class="small text-muted">' + esc(f.nota_fecha) + '</div>' : '';
 
         if (!edita || ESTADOS_PENDIENTES.indexOf(f.estado) === -1) {
             return '<td data-orden="' + esc(f.vto_considerar) + '" title="' + esc(titulo) + '">'
-                + fecha(f.vto_considerar) + (ed ? ' <span class="badge bg-info text-dark">cambiado</span>' : '')
-                + nota + '</td>';
+                + fecha(f.vto_considerar) + chip + nota + '</td>';
         }
 
         return '<td data-orden="' + esc(f.vto_considerar) + '">'
@@ -193,9 +206,10 @@
             +   '<input type="date" class="form-control form-control-sm alq-vto" value="' + esc(f.vto_considerar) + '"'
             +   ' min="' + esc(hoy) + '" data-cod="' + esc(f.cod_provee) + '" data-tcomp="' + esc(f.t_comp) + '"'
             +   ' data-ncomp="' + esc(f.n_comp) + '" data-vto-tango="' + esc(f.vto_tango) + '"'
+            +   ' data-vto-base="' + esc(f.vto_parametro) + '"'
             +   ' data-vigente="' + esc(f.vto_considerar) + '" title="' + esc(titulo) + '">'
             +   (ed ? '<button class="btn btn-outline-secondary alq-vto-volver" type="button" title="Volver al '
-                    + 'vencimiento de Tango (' + esc(fecha(f.vto_tango)) + ')"><i class="fas fa-rotate-left"></i></button>' : '')
+                    + 'vencimiento sin editar (' + esc(fecha(f.vto_parametro)) + ')"><i class="fas fa-rotate-left"></i></button>' : '')
             + '</div>' + nota + '</td>';
     }
 
@@ -224,7 +238,8 @@
         Notificacion.pedirTexto({
             titulo: 'Vencimiento a considerar',
             mensaje: cuota.t_comp + ' ' + cuota.n_comp + ' de ' + cuota.cod_provee + ': se paga el ' + fecha(nueva) + '.',
-            detalle: 'En Tango vence el ' + fecha(cuota.vto_tango) + ' y ahí no cambia.',
+            detalle: 'En Tango vence el ' + fecha(cuota.vto_tango) + ' y ahí no cambia. Elegir el '
+                + fecha(input.getAttribute('data-vto-base')) + ' quita la fecha manual.',
             etiqueta: 'Motivo',
             opcional: true,
             maxlargo: 300,

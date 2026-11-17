@@ -221,11 +221,11 @@ class Alquileres {
      * Nunca lanza: lo que no se puede leer queda vacio, con su aviso.
      *
      * @param Horizonte $h
-     * @return array ['ctx', 'pendientes', 'excluidas', 'vtos', 'imputaciones', 'en_tango', 'avisos']
+     * @return array ['ctx', 'pendientes', 'excluidas', 'vtos', 'dias', 'imputaciones', 'en_tango', 'avisos']
      */
     protected function insumosFacturas($h) {
-        $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'imputaciones' => [],
-                'en_tango' => [], 'avisos' => []];
+        $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'dias' => [],
+                'imputaciones' => [], 'en_tango' => [], 'avisos' => []];
 
         try {
             require_once __DIR__ . '/AlquileresUniverso.php';
@@ -260,6 +260,7 @@ class Alquileres {
             $out['pendientes'] = $partes[AlquileresFacturas::A_ALQUILERES];
             $out['excluidas'] = $partes[AlquileresFacturas::A_EXCLUIDA];
             $out['vtos'] = (new AlquileresFacturaVto())->vigentes();
+            $out['dias'] = $this->diasDeVencimiento();
             $out['imputaciones'] = (new AlquileresImputaciones())->vigentes();
 
             $pares = AlquileresImputacion::aConsultarEnTango($out['imputaciones'], $out['pendientes']);
@@ -328,6 +329,7 @@ class Alquileres {
             'pendientes' => $f['pendientes'],
             'excluidas' => $f['excluidas'],
             'vtos' => $f['vtos'],
+            'dias' => $f['dias'] ?? [],
             'imputaciones' => $f['imputaciones'],
             'en_tango' => $f['en_tango'],
             'ctx' => $f['ctx'],
@@ -385,7 +387,26 @@ class Alquileres {
         }
 
         return ['pendientes' => $pend, 'imputaciones' => $f['imputaciones'], 'pagos' => $proy['pagos'],
-                'locales' => $locales, 'avisos' => $f['avisos']];
+                'locales' => $locales, 'dias' => $f['dias'] ?? [], 'avisos' => $f['avisos']];
+    }
+
+    /**
+     * El dia de vencimiento de Parametros de cada razon social dada de alta (el
+     * suyo o el general): con el se arma el vencimiento a considerar de sus
+     * facturas (AlquileresImputacion::vtoAConsiderar()). Vacio si no se puede
+     * leer: las facturas quedan con el de Tango.
+     *
+     * @return array COD_PROVEE => int
+     */
+    protected function diasDeVencimiento() {
+        if (!$this->par->tablaCreada()) {
+            return [];
+        }
+
+        $general = $this->par->general();
+
+        return AlquileresImputacion::diasDeVencimiento($this->par->razonesVigentes(),
+            ($general === null) ? null : $general['dia']);
     }
 
     /**
