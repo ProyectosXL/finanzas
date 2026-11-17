@@ -283,6 +283,35 @@ class AlquileresApp {
     }
 
     /**
+     * Los contratos de cada local, de RO_T_CONTRATOS_ALQUILERES (la tabla de
+     * contratos de la app): la vigencia de cada uno, VIG_DESDE a VIG_HASTA. Un
+     * local tiene varios -los viejos, el vigente, a veces uno corto en el
+     * medio- y cuentan todos: la vigencia de un local es la union de sus
+     * contratos. No es una tabla de TABLAS: si no esta, vacio, y quien la usa
+     * avisa.
+     *
+     * @return array NRO_SUCURS => [['desde' => 'Y-m-d', 'hasta' => 'Y-m-d']], por desde
+     */
+    public function contratos() {
+        $sql = "SELECT NRO_SUCURS, VIG_DESDE, VIG_HASTA
+                FROM dbo.RO_T_CONTRATOS_ALQUILERES
+                WHERE NRO_SUCURS IS NOT NULL AND VIG_DESDE IS NOT NULL AND VIG_HASTA IS NOT NULL
+                ORDER BY NRO_SUCURS, VIG_DESDE, VIG_HASTA";
+        $out = [];
+
+        foreach ($this->filas($sql, [], 'Error al leer los contratos de los locales') as $r) {
+            $d = ($r['VIG_DESDE'] instanceof DateTime) ? $r['VIG_DESDE']->format('Y-m-d') : substr((string) $r['VIG_DESDE'], 0, 10);
+            $h = ($r['VIG_HASTA'] instanceof DateTime) ? $r['VIG_HASTA']->format('Y-m-d') : substr((string) $r['VIG_HASTA'], 0, 10);
+
+            if ($d <= $h) {
+                $out[(int) $r['NRO_SUCURS']][] = ['desde' => $d, 'hasta' => $h];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * La venta NETA (sin IVA) por local y mes, de RO_T_RENTABILIDAD_BRUTA: la
      * misma que usa la app para los conceptos 7 y 17.
      *

@@ -172,10 +172,10 @@ chequear('y despues tambien: se asume la renovacion', true, isset($pf[8]['2026-1
 
 seccion('Segun la vigencia del contrato: un local temporal');
 
-/* XL RURAL: un contrato de un mes. Solo se proyectan los meses del contrato. */
+/* XL RURAL: un contrato de un mes en la app (RO_T_CONTRATOS_ALQUILERES). Solo
+   se proyectan los meses de sus contratos. */
 $temp = $base;
-$temp['local'] += ['modo' => 'VIGENCIA', 'fecha_inicio' => '2026-12-01', 'fecha_fin' => '2026-12-31'];
-$temp['local']['fecha_fin'] = '2026-12-31';
+$temp['local'] += ['modo' => 'VIGENCIA', 'contratos' => [['desde' => '2026-12-03', 'hasta' => '2026-12-31']]];
 $pt = porConcepto(AlquileresPago::pagosLocal($temp));
 chequear('antes del inicio no', false, isset($pt[8]['2026-11']));
 chequear('el mes del contrato si', [true, true], [isset($pt[8]['2026-12']), isset($pt[1]['2026-12'])]);
@@ -184,11 +184,19 @@ $tempDif = $temp;
 $tempDif['razon']['diferimiento'] = 1;
 chequear('un variable del mes del contrato que se paga diferido despues, si: la venta existio', true,
     isset(porConcepto(AlquileresPago::pagosLocal($tempDif))[7]['2027-01']));
-chequear('vigente(): sin inicio es desde siempre', [true, false],
-    [AlquileresPago::vigente(['modo' => 'VIGENCIA', 'fecha_fin' => '2026-12-31'], '2020-01'),
-     AlquileresPago::vigente(['modo' => 'VIGENCIA', 'fecha_fin' => '2026-12-31'], '2027-01')]);
+$dos = ['modo' => 'VIGENCIA', 'contratos' => [['desde' => '2026-01-01', 'hasta' => '2026-06-30'],
+                                              ['desde' => '2026-09-01', 'hasta' => '2026-09-30']]];
+chequear('vigente(): la union de sus contratos, y el hueco no', [true, true, false],
+    [AlquileresPago::vigente($dos, '2026-03'), AlquileresPago::vigente($dos, '2026-09'),
+     AlquileresPago::vigente($dos, '2026-07')]);
+chequear('sin contratos, segun vigencia nada', false, AlquileresPago::vigente(['modo' => 'VIGENCIA'], '2026-11'));
 chequear('segun apertura todo es vigente', true,
-    AlquileresPago::vigente(['modo' => 'APERTURA', 'fecha_fin' => '2026-12-31'], '2030-01'));
+    AlquileresPago::vigente(['modo' => 'APERTURA', 'contratos' => []], '2030-01'));
+chequear('el contrato que se muestra: el de hoy, el proximo o el ultimo', ['VIGENTE', 'FUTURO', 'VENCIDO', null],
+    [AlquileresPago::contratoActual($dos['contratos'], '2026-03-10')['cuando'],
+     AlquileresPago::contratoActual($dos['contratos'], '2026-08-10')['cuando'],
+     AlquileresPago::contratoActual($dos['contratos'], '2026-11-17')['cuando'],
+     AlquileresPago::contratoActual([], '2026-11-17')]);
 
 seccion('El estado de un local');
 
@@ -204,12 +212,15 @@ chequear('cerrado en Lakers: no proyecta y no es incompleto', ['estado' => 'CERR
     AlquileresPago::estadoLocal($completo, false, $razones, 10, '2026-11'));
 chequear('contrato vencido: sigue proyectando', 'PROYECTA',
     AlquileresPago::estadoLocal(['fecha_fin' => '2026-10-31'] + $completo, true, $razones, 10, '2026-11')['estado']);
-chequear('segun la vigencia, contrato vencido: finalizado, no incompleto', 'FINALIZADO',
-    AlquileresPago::estadoLocal(['fecha_fin' => '2026-10-31', 'modo' => 'VIGENCIA'] + $completo, true, $razones, 10,
-        '2026-11')['estado']);
-chequear('segun la vigencia, todavia vigente: proyecta', 'PROYECTA',
-    AlquileresPago::estadoLocal(['fecha_fin' => '2026-11-20', 'modo' => 'VIGENCIA'] + $completo, true, $razones, 10,
-        '2026-11')['estado']);
+chequear('segun la vigencia, todos sus contratos vencidos: finalizado, no incompleto', 'FINALIZADO',
+    AlquileresPago::estadoLocal(['modo' => 'VIGENCIA', 'contratos' => [['desde' => '2026-02-03', 'hasta' => '2026-03-03']]]
+        + $completo, true, $razones, 10, '2026-11')['estado']);
+chequear('segun la vigencia, con un contrato que llega a este mes: proyecta', 'PROYECTA',
+    AlquileresPago::estadoLocal(['modo' => 'VIGENCIA', 'contratos' => [['desde' => '2026-11-01', 'hasta' => '2026-11-20']]]
+        + $completo, true, $razones, 10, '2026-11')['estado']);
+$sinContrato = AlquileresPago::estadoLocal(['modo' => 'VIGENCIA'] + $completo, true, $razones, 10, '2026-11');
+chequear('segun la vigencia sin contrato en la app: incompleto, y dice que falta', ['INCOMPLETO', true],
+    [$sinContrato['estado'], strpos(implode(' ', $sinContrato['faltan']), 'contrato en la app') !== false]);
 chequear('sin fila en Parametros: falta todo', ['razón social', 'frecuencia de actualización', '% IVA', '% percepción', '% retención'],
     AlquileresPago::estadoLocal(null, true, $razones, 10, '2026-11')['faltan']);
 chequear('sin razon social', ['razón social'],

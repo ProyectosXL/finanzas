@@ -7,16 +7,17 @@
    QUE AGREGA ESTE SCRIPT, a RO_T_CASHFLOW_ALQ_LOCAL
 
      MODO_PROYECCION   'APERTURA' (o NULL): el local proyecta mientras este
-                       abierto en Lakers. FECHA_FIN es el vencimiento del
-                       contrato y solo avisa: se asume la renovacion.
-                       'VIGENCIA': el local proyecta SOLO entre FECHA_INICIO y
-                       FECHA_FIN. Es para los locales temporales: XL RURAL, con
-                       un contrato de un mes.
-     FECHA_INICIO      el inicio del contrato. Solo lo usa VIGENCIA (vacio =
-                       desde siempre).
+                       abierto en Lakers. El vencimiento de su ultimo
+                       contrato en la app solo avisa: se asume la renovacion.
+                       'VIGENCIA': el local proyecta SOLO en los meses de sus
+                       contratos de la app de alquileres
+                       (RO_T_CONTRATOS_ALQUILERES, VIG_DESDE a VIG_HASTA). Es
+                       para los locales temporales: XL RURAL.
+     FECHA_INICIO      SIN USO: se agrego para cargar el contrato a mano, y la
+                       vigencia sale de la tabla de contratos de la app. Queda
+                       vacia; FECHA_FIN tampoco se usa ya.
 
    NULL ES APERTURA: las filas que ya existen siguen como hoy, sin migrar nada.
-   Con VIGENCIA, FECHA_FIN es obligatoria (lo valida la pantalla).
 
    ES REEJECUTABLE: pregunta por COL_LENGTH y por el CHECK. No borra nada.
    ============================================================================ */

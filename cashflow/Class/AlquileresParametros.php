@@ -57,8 +57,11 @@ class AlquileresParametros {
      * FECHA_INICIO de RO_T_CASHFLOW_ALQ_LOCAL):
      *   APERTURA  mientras este abierto en Lakers; el vencimiento del contrato
      *             solo avisa (se asume la renovacion). Es el de siempre.
-     *   VIGENCIA  solo entre el inicio y el vencimiento del contrato: los
-     *             locales temporales, como XL RURAL.
+     *   VIGENCIA  solo en los meses de sus contratos de la app de alquileres
+     *             (RO_T_CONTRATOS_ALQUILERES, AlquileresApp::contratos()): los
+     *             locales temporales, como XL RURAL. Las fechas NO se cargan aca.
+     *   FECHA_FIN y FECHA_INICIO de la tabla ya no se usan: la vigencia es la
+     *   de los contratos de la app.
      */
     const MODO_APERTURA = 'APERTURA';
     const MODO_VIGENCIA = 'VIGENCIA';
@@ -206,10 +209,6 @@ class AlquileresParametros {
             throw new InvalidArgumentException('Proyecta según: tiene que ser apertura o vigencia del contrato.');
         }
 
-        if ($modo === self::MODO_VIGENCIA && $fin === '') {
-            throw new InvalidArgumentException('Para proyectar según la vigencia del contrato hace falta su '
-                . 'vencimiento (y, si no arranca ya, su inicio).');
-        }
 
         $venta = trim(str_replace(',', '.', (string) ($d['venta_mensual_estimada'] ?? '')));
 

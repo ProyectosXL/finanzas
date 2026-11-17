@@ -443,10 +443,11 @@ class Alquileres {
         $porVencer = [];
 
         foreach ($locales as $l) {
-            $fin = $l['params']['fecha_fin'] ?? null;
+            /* El vencimiento es el del ultimo contrato de la app: hasta el, cubre. */
+            $fin = empty($l['contratos']) ? null : max(array_column($l['contratos'], 'hasta'));
 
-            /* Un local que proyecta segun la vigencia ya corta en su fecha: no se avisa. */
-            if (empty($fin) || !$l['habilitado'] || AlquileresPago::porVigencia($l['params'])) {
+            /* Un local que proyecta segun la vigencia ya corta en su contrato: no se avisa. */
+            if (empty($fin) || !$l['habilitado'] || AlquileresPago::porVigencia($l['params'] ?? null)) {
                 continue;
             }
 
@@ -462,9 +463,9 @@ class Alquileres {
         $out = [];
 
         if (!empty($vencidos)) {
-            $out[] = Aviso::nuevo(Aviso::WARNING, 'Contrato vencido según Parámetros › Alquileres: '
-                . implode(', ', $vencidos) . '. Se sigue proyectando con las condiciones de hoy; actualizá la '
-                . 'fecha si se renovó. Si el local cerró, se ve como cerrado cuando Lakers lo deshabilita.', 'Locales');
+            $out[] = Aviso::nuevo(Aviso::WARNING, 'Contrato vencido en la app de alquileres: '
+                . implode(', ', $vencidos) . '. Se sigue proyectando con las condiciones de hoy; si se renovó, '
+                . 'cargá el contrato nuevo en la app. Si el local cerró, se ve como cerrado cuando Lakers lo deshabilita.', 'Locales');
         }
 
         if (!empty($porVencer)) {
@@ -586,10 +587,20 @@ class Alquileres {
                VIGENCIA (un local temporal) reparte solo en los meses del
                contrato. */
             $vig = ($p !== null) && AlquileresPago::porVigencia($p);
+            $activoEn = null;
+
+            if ($vig) {
+                $activoEn = [];
+
+                foreach ($mesesConcepto as $m) {
+                    $activoEn[$m] = AlquileresPago::vigente($p, $m);
+                }
+            }
+
             $entradaVenta[$nro] = [
                 'activo' => $l['habilitado'] && $l['estado'] !== AlquileresPago::FINALIZADO,
-                'activo_desde' => ($vig && !empty($p['fecha_inicio'])) ? substr($p['fecha_inicio'], 0, 7) : null,
-                'activo_hasta' => ($vig && !empty($p['fecha_fin'])) ? substr($p['fecha_fin'], 0, 7) : null,
+                'activo_hasta' => null,
+                'activo_en' => $activoEn,
                 'manual' => $p['venta_mensual_estimada'] ?? null
             ];
         }
@@ -1100,8 +1111,24 @@ class Alquileres {
 
         $mesActual = substr($this->hoy, 0, 7);
 
+        /* LOS CONTRATOS DE LA APP (RO_T_CONTRATOS_ALQUILERES): de ahi sale la
+           vigencia. Segun APERTURA solo avisan; segun VIGENCIA deciden que
+           meses proyecta el local. */
+        $contratos = [];
+
+        try {
+            $contratos = $this->app->contratos();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los contratos de la app de alquileres ('
+                . $e->getMessage() . '): los locales que proyectan según la vigencia quedan sin proyectar.', 'Locales');
+        }
+
         foreach ($localesApp as $nro => $l) {
             $p = $params[$nro] ?? null;
+
+            if ($p !== null) {
+                $p['contratos'] = $contratos[$nro] ?? [];
+            }
             $estado = AlquileresPago::estadoLocal($p, $l['habilitado'], $out['razones'], $diaGeneral, $mesActual);
             $mesesVenta = 0;
 
@@ -1138,7 +1165,11 @@ class Alquileres {
                 'estado' => $estado['estado'],
                 'faltan' => $estado['faltan'],
                 'nuevo' => $nuevo,
-                'meses_venta' => $mesesVenta
+                'meses_venta' => $mesesVenta,
+                /* El contrato que se muestra en Parametros y en el aviso: el de hoy, el
+                   proximo o el ultimo, de la app. */
+                'contrato' => AlquileresPago::contratoActual($contratos[$nro] ?? [], $this->hoy),
+                'contratos' => $contratos[$nro] ?? []
             ];
         }
 

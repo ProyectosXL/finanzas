@@ -450,7 +450,7 @@ Dos cambios en Alquileres (ver `README-alquileres.md`, partes 3.c y 12):
 | # | Script | Qué hace | Si no se corre |
 | --- | --- | --- | --- |
 | 58 | `sql/cashflow_alquileres_local_razones.sql` | Crea `RO_T_CASHFLOW_ALQ_LOCAL_RAZON` (una vigente por local y razón social, con historial). No migra nada: sin filas, todo sigue como hoy | Todo anda como hoy, con una razón por local; en Parámetros › Alquileres › Locales el *+ otra razón social* está deshabilitado y nombra el script |
-| 59 | `sql/cashflow_alquileres_local_vigencia.sql` | Agrega `MODO_PROYECCION` (`APERTURA` / `VIGENCIA`; NULL = apertura) y `FECHA_INICIO` a `RO_T_CASHFLOW_ALQ_LOCAL`, con sus `CHECK` | Todos proyectan según apertura; *Proyecta según* queda deshabilitado y nombra el script |
+| 59 | `sql/cashflow_alquileres_local_vigencia.sql` | Agrega `MODO_PROYECCION` (`APERTURA` / `VIGENCIA`; NULL = apertura) a `RO_T_CASHFLOW_ALQ_LOCAL`, con su `CHECK`, y `FECHA_INICIO`, sin uso: según vigencia, los meses salen de los contratos de la app (`RO_T_CONTRATOS_ALQUILERES`) | Todos proyectan según apertura; *Proyecta según* queda deshabilitado y nombra el script |
 
 Los dos contra `central`, después del 51, en cualquier orden. Reejecutables. **Ningún número cambia al correrlos**: lo que cambia algo es agregar una razón adicional a un local, o pasar un local a *Vigencia del contrato* (XL RURAL, el temporal de La Rural).
 

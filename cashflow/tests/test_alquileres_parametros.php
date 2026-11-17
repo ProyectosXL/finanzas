@@ -38,9 +38,8 @@ $temporal = AlquileresParametros::validarLocal(['modo' => 'vigencia', 'fecha_ini
     'fecha_fin' => '2027-07-31']);
 chequear('un temporal segun la vigencia', ['VIGENCIA', '2027-07-01', '2027-07-31'],
     [$temporal['modo'], $temporal['fecha_inicio'], $temporal['fecha_fin']]);
-chequearLanza('segun la vigencia sin vencimiento no', function () {
-    AlquileresParametros::validarLocal(['modo' => 'VIGENCIA']);
-});
+chequear('segun la vigencia no pide fechas: salen de los contratos de la app', 'VIGENCIA',
+    AlquileresParametros::validarLocal(['modo' => 'VIGENCIA'])['modo']);
 chequearLanza('el inicio despues del vencimiento no', function () {
     AlquileresParametros::validarLocal(['fecha_inicio' => '2027-08-01', 'fecha_fin' => '2027-07-31']);
 });

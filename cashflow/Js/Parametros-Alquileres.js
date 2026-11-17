@@ -252,7 +252,7 @@
         }
 
         if (!locales.length) {
-            cuerpo.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3">'
+            cuerpo.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-3">'
                 + (soloIncompletos ? 'Ningún local incompleto.' : 'No hay locales en la app de alquileres.')
                 + '</td></tr>';
             return;
@@ -281,7 +281,7 @@
 
             if (cerrado && !cerradoVisto) {
                 cerradoVisto = true;
-                cabecera = '<tr class="table-light"><td colspan="13" class="small text-muted">'
+                cabecera = '<tr class="table-light"><td colspan="12" class="small text-muted">'
                     + '<strong>Cerrados en Lakers</strong>: no proyectan ni cuentan como incompletos. Sus meses '
                     + 'cerrados en la app se siguen viendo en la pestaña.</td></tr>';
             }
@@ -308,14 +308,7 @@
                 + '<td>' + select('modo', opModo, p.modo || 'APERTURA', cerrado || sinVigencia)
                     + (sinVigencia ? '<div class="small text-muted" title="Falta correr ' + esc(datos.script_vigencia)
                         + '">Falta el script</div>' : '') + '</td>'
-                + '<td><input type="date" class="form-control form-control-sm palq-local" data-campo="fecha_inicio" value="'
-                    + esc(p.fecha_inicio || '') + '"' + (cerrado || sinVigencia || porVigencia === false ? ' disabled' : '')
-                    + ' title="Inicio del contrato: sólo cuenta si proyecta según la vigencia. Vacío: desde siempre."></td>'
-                + '<td><input type="date" class="form-control form-control-sm palq-local" data-campo="fecha_fin" value="'
-                    + esc(p.fecha_fin || '') + '"' + (cerrado ? ' disabled' : '') + ' title="'
-                    + (porVigencia ? 'Vencimiento del contrato: desde el mes siguiente el local deja de proyectar.'
-                        : 'Vencimiento del contrato: informativo, no corta la proyección (se asume la renovación). Avisa cuando vence.')
-                    + '"></td>'
+                + '<td>' + celdaContrato(l, porVigencia) + '</td>'
                 + '<td>' + input('venta_mensual_estimada', p.venta_mensual_estimada, 'decimal', cerrado || !l.nuevo,
                         l.nuevo ? 'Neta, sin IVA' : 'Sólo para locales nuevos: este tiene 12 meses de venta') + '</td>'
                 + '<td><small class="text-muted">' + (p.usuario ? esc(Auditoria.linea('modif', p.usuario, p.fecha)) : '') + '</small></td>'
@@ -353,6 +346,37 @@
         });
 
         Permisos.soloLectura(cuerpo);
+    }
+
+    /**
+     * El contrato del local, DE LA APP DE ALQUILERES (RO_T_CONTRATOS_ALQUILERES):
+     * no se carga acá. El de hoy, el próximo o el último; el tooltip los lista
+     * todos. Según la vigencia, esos son los meses que proyecta.
+     */
+    function contratoTexto(c) {
+        return fecha(c.desde) + ' – ' + fecha(c.hasta);
+    }
+
+    function celdaContrato(l, porVigencia) {
+        var c = l.contrato;
+        var todos = (l.contratos || []).map(contratoTexto).join('\n');
+        var titulo = (todos ? 'Contratos en la app de alquileres:\n' + todos + '\n\n' : 'Sin contratos en la app de alquileres.\n\n')
+            + (porVigencia ? 'Según la vigencia: proyecta sólo los meses de estos contratos.'
+                : 'Según la apertura: el vencimiento sólo avisa (se asume la renovación).');
+
+        if (!c) {
+            return '<span class="small ' + (porVigencia ? 'text-danger' : 'text-muted') + '" title="' + esc(titulo) + '">'
+                + 'sin contrato en la app</span>';
+        }
+
+        var chip = { VIGENTE: '', FUTURO: ' <span class="badge bg-info text-dark">próximo</span>',
+                     VENCIDO: ' <span class="badge bg-warning text-dark">vencido</span>' }[c.cuando] || '';
+
+        return '<span class="small text-nowrap" title="' + esc(titulo) + '">' + esc(contratoTexto(c)) + '</span>' + chip;
+    }
+
+    function fecha(f) {
+        return f ? String(f).substring(8, 10) + '/' + String(f).substring(5, 7) + '/' + String(f).substring(0, 4) : '';
     }
 
     function nombreRazon(cod) {
@@ -435,18 +459,6 @@
         if (d.frecuencia && d.frecuencia !== '1' && !d.mes_ajuste) {
             Notificacion.advertencia('Con frecuencia ' + datos.frecuencias[d.frecuencia].toLowerCase()
                 + ' hace falta el mes del último ajuste: es el que ancla el ciclo. Elegilo y se guarda la fila.');
-            return;
-        }
-
-        var inicio = fila.querySelector('[data-campo="fecha_inicio"]');
-
-        if (inicio && datos.columnas_vigencia) {
-            inicio.disabled = (d.modo !== 'VIGENCIA');
-        }
-
-        if (d.modo === 'VIGENCIA' && !d.fecha_fin) {
-            Notificacion.advertencia('Para proyectar según la vigencia hace falta el vencimiento del contrato '
-                + '(y el inicio, si no arranca ya). Cargalo y se guarda la fila.');
             return;
         }
 

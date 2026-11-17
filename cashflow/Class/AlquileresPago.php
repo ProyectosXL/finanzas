@@ -76,9 +76,9 @@ class AlquileresPago {
      *
      *   CERRADO_LAKERS  HABILITADO = 0 en SUCURSALES_LAKERS. No proyecta y NO es
      *                   un incompleto: no falta ningun dato, el local cerro.
-     *   FINALIZADO      proyecta segun la VIGENCIA del contrato y el contrato
-     *                   vencio en un mes anterior al actual. Tampoco es un
-     *                   incompleto. (Segun APERTURA el vencimiento no corta.)
+     *   FINALIZADO      proyecta segun la VIGENCIA y todos sus contratos de la
+     *                   app vencieron en un mes anterior al actual. Tampoco es
+     *                   un incompleto. (Segun APERTURA el vencimiento no corta.)
      *   INCOMPLETO      le falta algun dato para proyectar; 'faltan' dice cual y
      *                   donde se carga.
      *   PROYECTA
@@ -98,9 +98,19 @@ class AlquileresPago {
             return ['estado' => self::CERRADO_LAKERS, 'faltan' => []];
         }
 
-        if ($local !== null && self::porVigencia($local) && !empty($local['fecha_fin'])
-            && substr($local['fecha_fin'], 0, 7) < $mesActual) {
-            return ['estado' => self::FINALIZADO, 'faltan' => []];
+        /* SEGUN VIGENCIA: sin contrato en la app no hay que proyectar (falta el
+           dato); con contratos que ya vencieron todos, termino. */
+        if ($local !== null && self::porVigencia($local)) {
+            $contratos = $local['contratos'] ?? [];
+
+            if (empty($contratos)) {
+                return ['estado' => self::INCOMPLETO,
+                        'faltan' => ['contrato en la app de alquileres (proyecta según la vigencia)']];
+            }
+
+            if (max(array_map(function ($c) { return substr($c['hasta'], 0, 7); }, $contratos)) < $mesActual) {
+                return ['estado' => self::FINALIZADO, 'faltan' => []];
+            }
         }
 
         $faltan = [];
@@ -249,10 +259,11 @@ class AlquileresPago {
     /**
      * Si un mes esta dentro de lo que proyecta el local. Segun APERTURA (el de
      * siempre) todos: el vencimiento del contrato no corta, y el cierre lo da
-     * Lakers. Segun VIGENCIA, solo los meses entre el inicio (vacio = desde
-     * siempre) y el vencimiento del contrato, ambos incluidos.
+     * Lakers. Segun VIGENCIA, solo los meses cubiertos por ALGUNO de sus
+     * contratos de la app (RO_T_CONTRATOS_ALQUILERES), de su mes de inicio a su
+     * mes de vencimiento, ambos incluidos. Sin contratos, ninguno.
      *
-     * @param array|null $local ['modo', 'fecha_inicio', 'fecha_fin']
+     * @param array|null $local ['modo', 'contratos' => [['desde', 'hasta']]]
      * @param string $mes 'Y-m'
      * @return bool
      */
@@ -261,10 +272,43 @@ class AlquileresPago {
             return true;
         }
 
-        $desde = empty($local['fecha_inicio']) ? null : substr($local['fecha_inicio'], 0, 7);
-        $hasta = empty($local['fecha_fin']) ? null : substr($local['fecha_fin'], 0, 7);
+        foreach ($local['contratos'] ?? [] as $c) {
+            if ($mes >= substr($c['desde'], 0, 7) && $mes <= substr($c['hasta'], 0, 7)) {
+                return true;
+            }
+        }
 
-        return ($desde === null || $mes >= $desde) && ($hasta === null || $mes <= $hasta);
+        return false;
+    }
+
+    /**
+     * El contrato que se muestra: el que cubre hoy; si no hay, el proximo; si
+     * no, el ultimo que vencio. Null sin contratos.
+     *
+     * @param array $contratos [['desde', 'hasta']]
+     * @param string $hoy 'Y-m-d'
+     * @return array|null ['desde', 'hasta', 'cuando' => 'VIGENTE'|'FUTURO'|'VENCIDO']
+     */
+    public static function contratoActual($contratos, $hoy) {
+        $futuro = null;
+        $ultimo = null;
+
+        foreach ($contratos as $c) {
+            if ($c['desde'] <= $hoy && $c['hasta'] >= $hoy) {
+                return $c + ['cuando' => 'VIGENTE'];
+            }
+
+            if ($c['desde'] > $hoy && ($futuro === null || $c['desde'] < $futuro['desde'])) {
+                $futuro = $c;
+            }
+
+            if ($c['hasta'] < $hoy && ($ultimo === null || $c['hasta'] > $ultimo['hasta'])) {
+                $ultimo = $c;
+            }
+        }
+
+        return ($futuro !== null) ? $futuro + ['cuando' => 'FUTURO']
+            : (($ultimo !== null) ? $ultimo + ['cuando' => 'VENCIDO'] : null);
     }
 
     /**
@@ -325,10 +369,10 @@ class AlquileresPago {
      *
      * @param array $e [
      *     'local' => ['pct_iva', 'pct_percepcion', 'pct_retencion', 'cod_provee', 'modo',
-     *                 'fecha_inicio', 'fecha_fin']. Segun APERTURA la fecha de fin es el
-     *                vencimiento del contrato y no corta (se asume la renovacion; un
-     *                cierre real es HABILITADO = 0 en Lakers); segun VIGENCIA solo se
-     *                proyectan los meses del contrato (vigente()),
+     *                 'contratos']. Segun APERTURA el vencimiento del contrato no corta
+     *                (se asume la renovacion; un cierre real es HABILITADO = 0 en
+     *                Lakers); segun VIGENCIA solo se proyectan los meses de sus
+     *                contratos de la app (vigente()),
      *     'razon' => ['dia' => int|null, 'diferimiento' => int],
      *     'dia_general' => int|null,
      *     'proyeccion' => lo de AlquileresCalculo::proyectarLocal(), con los

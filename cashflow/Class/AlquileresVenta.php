@@ -97,8 +97,8 @@ class AlquileresVenta {
      *                                   proyeccion de los dias que faltan (REAL_PROYECTADA)
      * ]
      * 'activo' es false para un local cerrado en Lakers: no reparte nunca.
-     * 'activo_hasta' / 'activo_desde' (opcional): los meses de su contrato, para
-     * un local que proyecta segun la VIGENCIA: reparte solo entre esos meses.
+     * 'activo_hasta' / 'activo_desde' / 'activo_en' ('Y-m' => bool), opcionales: para
+     * un local que proyecta segun la VIGENCIA de sus contratos, reparte solo en esos meses.
      *
      * @return array [
      *     'ventas' => [nro => ['Y-m' => ['bruta', 'neta', 'origen', 'derivada',
@@ -215,7 +215,8 @@ class AlquileresVenta {
 
             foreach ($e['locales'] as $nro => $l) {
                 $activos[$nro] = $l['activo'] && ($l['activo_hasta'] === null || $mes <= $l['activo_hasta'])
-                    && (($l['activo_desde'] ?? null) === null || $mes >= $l['activo_desde']);
+                    && (($l['activo_desde'] ?? null) === null || $mes >= $l['activo_desde'])
+                    && (($l['activo_en'] ?? null) === null || !empty($l['activo_en'][$mes]));
             }
 
             /* Las manuales de los nuevos activos: van primero, porque se restan
