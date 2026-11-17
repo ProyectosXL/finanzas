@@ -205,6 +205,35 @@ $r = aplicarP($PROY, [$f1], [imputacionP(1, [$f1], [['conceptos' => ['1'], 'loca
 chequear('la factura se paga en el vencimiento editado', '2026-12-15',
     array_values(array_filter($r['pagos'], 'esFactura'))[0]['fecha']);
 
+/* LA JERARQUIA: fecha manual > dia de Parametros (el de la razon social o el
+   general) en el mes del vencimiento de Tango. El caso real: FAC A0005000027187
+   de SAGALL vence en Tango el 20/11 y la razon social tiene dia 18. */
+$dias = AlquileresImputacion::diasDeVencimiento(
+    ['SAPALA' => ['dia' => 18], 'SAUNIC' => ['dia' => null], 'OTRA' => ['dia' => null]], 10);
+chequear('el dia de cada razon social: el suyo, o el general', ['SAPALA' => 18, 'SAUNIC' => 10, 'OTRA' => 10], $dias);
+chequear('sin dia propio ni general no esta en el mapa', [],
+    AlquileresImputacion::diasDeVencimiento(['SAPALA' => ['dia' => null]], null));
+chequear('sin editar, el dia de Parametros en el mes del vencimiento de Tango', '2026-11-18',
+    AlquileresImputacion::vtoAConsiderar($f1, [], $dias));
+chequear('aunque Tango venza antes del dia de Parametros', '2026-11-18',
+    AlquileresImputacion::vtoAConsiderar(cuotaP('SAPALA', 'A9', 1.0, '2026-11-02'), [], $dias));
+chequear('la fecha manual manda sobre la de Parametros', '2026-12-15',
+    AlquileresImputacion::vtoAConsiderar($f1, $vtos, $dias));
+chequear('el general para una razon sin dia propio', '2026-11-10',
+    AlquileresImputacion::vtoAConsiderar(cuotaP('SAUNIC', 'C9', 1.0), [], $dias));
+chequear('una razon que no esta en el mapa queda con el de Tango', '2026-11-20',
+    AlquileresImputacion::vtoAConsiderar(cuotaP('XXXX', 'X9', 1.0), [], $dias));
+chequear('el origen de cada fecha', [AlquileresImputacion::VTO_EDITADO, AlquileresImputacion::VTO_PARAMETRO,
+    AlquileresImputacion::VTO_TANGO], [AlquileresImputacion::origenVto($f1, $vtos, $dias),
+    AlquileresImputacion::origenVto($f1, [], $dias), AlquileresImputacion::origenVto(cuotaP('XXXX', 'X9', 1.0), [], $dias)]);
+$r = aplicarP($PROY, [$f1], [imputacionP(1, [$f1], [['conceptos' => ['1'], 'locales' => [1],
+    'mes' => '2026-11', 'importe' => 1600.0]])], ['dias' => $dias]);
+chequear('la factura imputada se paga el dia de Parametros', '2026-11-18',
+    array_values(array_filter($r['pagos'], 'esFactura'))[0]['fecha']);
+chequear('y la grilla lo dice', ['2026-11-20', '2026-11-18', '2026-11-18', AlquileresImputacion::VTO_PARAMETRO],
+    [$r['facturas'][0]['vto_tango'], $r['facturas'][0]['vto_parametro'], $r['facturas'][0]['vto_considerar'],
+     $r['facturas'][0]['vto_origen']]);
+
 $d = AlquileresImputacion::fechaDePago('2026-11-05', $HAB, $HOY);
 chequear('vencida: el siguiente habil desde hoy, no el primer dia del eje', ['2026-11-10', true], [$d['fecha'], $d['vencido']]);
 chequear('y lo anota', true, strpos(AlquileresImputacion::notaFecha($d), 'vencía el 05/11/2026') !== false);
@@ -212,6 +241,44 @@ $d = AlquileresImputacion::fechaDePago('2026-09-15', $HAB, $HOY);
 chequear('vencida hace dos meses tambien', '2026-11-10', $d['fecha']);
 $d = AlquileresImputacion::fechaDePago('2026-11-21', $HAB, $HOY);
 chequear('un sabado pasa al lunes', ['2026-11-23', true], [$d['fecha'], $d['corrida']]);
+
+seccion('Las facturas del mes, pagadas o no');
+
+/* Una cuota emitida este mes y ya cancelada en Tango, que nadie imputo
+   (Proveedores::getCanceladasEmitidas()). */
+$pm = cuotaP('SAPALA', 'PM1', 0.0, '2026-11-12', ['IMPORTE_VTO' => 1500.0, 'FECHA_CANCELADO' => '2026-11-04']);
+$r = aplicarP($PROY, [], [], ['pagadas_mes' => [$pm]]);
+chequear('se ve en la grilla como Pagada, sin imputar', [AlquileresImputacion::PAGADA_SIN_IMPUTAR, 1500.0, true,
+    '2026-11-04'], [$r['facturas'][0]['estado'], $r['facturas'][0]['a_imputar'], $r['facturas'][0]['del_mes'],
+    $r['facturas'][0]['fecha_pagada']]);
+chequear('no se paga otra vez', 0.0, sumaDe($r['pagos'], 'esFactura'));
+chequear('y la proyeccion sigue entera en el flujo', count($PROY), count($r['pagos']));
+chequear('se avisa con el importe', true, (bool) array_filter($r['avisos'], function ($a) {
+    return strpos($a['texto'], 'ya pagadas en Tango y sin imputar, por $ 1.500,00') !== false; }));
+chequear('y lo cuentan las tarjetas', [1, 1500.0],
+    [$r['kpis']['pagadas_sin_imputar_n'], $r['kpis']['pagadas_sin_imputar_importe']]);
+
+/* Se imputa por el importe de la cuota: comoPendiente() la deja validar. */
+$pmPend = AlquileresImputacion::comoPendiente($pm);
+$vPm = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA', 't_comp' => 'FAC', 'n_comp' => 'PM1',
+    'vto_tango' => '2026-11-12', 'pendiente' => 1500.0, 'retencion' => 0]], 'renglones' => [
+    ['conceptos' => ['1', '8'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 1500.0]]],
+    ['pendientes' => [AlquileresImputacion::claveCuota($pmPend) => $pmPend], 'imputaciones' => [], 'pagos' => $PROY,
+     'locales' => [1 => ['cod_provee' => 'SAPALA', 'nombre' => 'ABASTO', 'pct_iva' => 21.0, 'pct_percepcion' => 3.0,
+                         'pct_retencion' => 2.0]]], true);
+chequear('una pagada del mes se imputa por su importe', [true, 1500.0], [$vPm['ok'], $vPm['total_facturas']]);
+
+/* Imputada y pagada: reemplaza la proyeccion de lo que cubre y no se paga. */
+$impPm = imputacionP(11, [['FECHA_VTO' => '2026-11-12', 'IMPORTE_PENDIENTE' => 1500.0] + $pm],
+    [['conceptos' => ['1', '8'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 1500.0]]);
+$r = aplicarP($PROY, [], [$impPm], ['pagadas_mes' => [$pm],
+    'en_tango' => ['SAPALA|PM1' => [['T_COMP' => 'FAC', 'ESTADO' => 'CAN', 'FECHA_CANCELADO' => '2026-11-04']]]]);
+chequear('imputada y pagada: el monto desaparece del flujo', [2, 0.0],
+    [count($r['reemplazados']), sumaDe($r['pagos'], 'esFactura')]);
+chequear('una sola fila, Pagada, con los datos de Tango y la fecha de pago', [1, AlquileresImputacion::PAGADA, 1500.0,
+    '2026-11-02', '2026-11-04'],
+    [count($r['facturas']), $r['facturas'][0]['estado'], $r['facturas'][0]['importe'], $r['facturas'][0]['emision'],
+     $r['facturas'][0]['fecha_pagada']]);
 
 seccion('Pagada en Tango');
 
@@ -299,6 +366,21 @@ $fuera = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA'
     'vto_tango' => '2026-11-20', 'pendiente' => 3000, 'retencion' => 0]], 'renglones' => [
     ['conceptos' => ['8'], 'locales' => [3], 'mes' => '2026-11', 'importe' => 3000]]], $soloA);
 chequear('un local de otra razon social no se puede imputar', false, $fuera['ok']);
+
+/* MAS DE UNA RAZON SOCIAL POR LOCAL: San Justo tiene SASANJ (alquiler) y
+   SAUCCS (expensas y fondo). Una factura de la adicional se imputa al local. */
+$conAdic = $locales;
+$conAdic[3]['razones'] = ['SAUNIC', 'SAPALA'];
+$adic = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA', 't_comp' => 'FAC', 'n_comp' => 'C1',
+    'vto_tango' => '2026-11-20', 'pendiente' => 3000, 'retencion' => 0]], 'renglones' => [
+    ['conceptos' => ['8'], 'locales' => [3], 'mes' => '2026-11', 'importe' => 3000]]],
+    ['locales' => $conAdic] + $soloA);
+chequear('con la razon como adicional del local, si', [true, []], [$adic['ok'], $adic['errores']]);
+$adicTodos = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA', 't_comp' => 'FAC',
+    'n_comp' => 'C1', 'vto_tango' => '2026-11-20', 'pendiente' => 3000, 'retencion' => 0]], 'renglones' => [
+    ['conceptos' => ['8'], 'todos_de' => 'SAPALA', 'mes' => '2026-11', 'importe' => 3000]]],
+    ['locales' => $conAdic] + $soloA);
+chequear('"todos los de" incluye a los que la tienen como adicional', [1, 2, 3], $adicTodos['renglones'][0]['locales']);
 
 $re = AlquileresImputacion::validar($borrador(3000, 1000, [
     ['conceptos' => ['1'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 4000]]),

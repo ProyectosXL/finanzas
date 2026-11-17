@@ -110,14 +110,20 @@ try {
             $cuota = ['COD_PROVEE' => $data['cod_provee'] ?? '', 'T_COMP' => $data['t_comp'] ?? '',
                       'N_COMP' => $data['n_comp'] ?? '', 'FECHA_VTO' => $data['vto_tango'] ?? ''];
 
-            if (!isset($e['pendientes'][AlquileresImputacion::claveCuota($cuota)])) {
+            if (!isset($e['pendientes'][AlquileresImputacion::claveCuota($cuota)])
+                || !empty($e['pendientes'][AlquileresImputacion::claveCuota($cuota)]['PAGADA_TANGO'])) {
                 throw new InvalidArgumentException('Esa factura ya no está pendiente en Tango, o no es de alquiler: '
                     . 'volvé a cargar la pestaña. No se guardó nada.');
             }
 
+            /* Elegir la fecha que la cuota tendria sin editar (la de Parametros)
+               es deshacer. */
+            $base = AlquileresImputacion::origenVto($cuota, [], $e['dias']) === AlquileresImputacion::VTO_PARAMETRO
+                ? 'de Parámetros' : 'de Tango';
             $r = (new AlquileresFacturaVto())->guardar($cuota['COD_PROVEE'], $cuota['T_COMP'], $cuota['N_COMP'],
-                $cuota['FECHA_VTO'], $data['fecha'] ?? '', $data['motivo'] ?? null, $usuario, $hoy);
-            responder($r, $r['deshecha'] ? 'Vuelve al vencimiento de Tango.'
+                $cuota['FECHA_VTO'], $data['fecha'] ?? '', $data['motivo'] ?? null, $usuario, $hoy,
+                AlquileresImputacion::vtoDeParametro($cuota, $e['dias']));
+            responder($r, $r['deshecha'] ? 'Vuelve al vencimiento ' . $base . '.'
                 : 'Vencimiento a considerar: ' . date('d/m/Y', strtotime($r['fecha'])) . '.');
             break;
 
@@ -125,8 +131,8 @@ try {
             $data = bodyJson();
             $r = (new AlquileresFacturaVto())->deshacer($data['cod_provee'] ?? '', $data['t_comp'] ?? '',
                 $data['n_comp'] ?? '', $data['vto_tango'] ?? '', $usuario);
-            responder($r, $r['habia'] ? 'Vuelve al vencimiento de Tango. El cambio queda en el historial.'
-                : 'Ya estaba con el vencimiento de Tango.');
+            responder($r, $r['habia'] ? 'Vuelve al vencimiento sin editar (el de Parámetros de la razón social). '
+                . 'El cambio queda en el historial.' : 'Ya estaba con el vencimiento sin editar.');
             break;
 
         case 'previsualizarImputacion':
@@ -229,13 +235,31 @@ try {
             responder($r, 'Local ' . $universo[$r['nro']]['nombre'] . ' guardado.');
             break;
 
+        /* MAS DE UNA RAZON SOCIAL POR LOCAL: las adicionales. El dia y el
+           diferimiento siguen siendo los de la principal. */
+        case 'altaRazonLocal':
+            $data = bodyJson();
+            $universo = (new AlquileresApp())->locales();
+            $r = $par->altaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $universo, $usuario);
+            responder($r, $r['cod'] . ' agregada a ' . $universo[$r['nro']]['nombre'] . ': sus facturas se pueden '
+                . 'imputar a este local. El vencimiento y el diferimiento siguen siendo los de la razón principal.');
+            break;
+
+        case 'bajaRazonLocal':
+            $data = bodyJson();
+            $r = $par->bajaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $usuario);
+            responder($r, $r['cod'] . ' ya no es razón social de ese local. No se borra: queda en el historial.');
+            break;
+
         case 'altaExtra':
             $data = bodyJson();
             $cod = trim((string) ($data['cod_provee'] ?? ''));
             $deLaRazon = [];
 
+            /* Los locales de la razon social: los que la tienen como principal o
+               como adicional. */
             foreach ($par->locales() as $nro => $l) {
-                if ($l['cod_provee'] === $cod) {
+                if (in_array(Planilla::codigo($cod), AlquileresPago::razonesDelLocal($l), true)) {
                     $deLaRazon[] = $nro;
                 }
             }

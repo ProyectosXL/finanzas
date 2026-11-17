@@ -70,6 +70,10 @@ class Alquileres {
                 'en_rubro' => isset($universo[$cod]),
                 'locales' => count(array_filter($base['locales'], function ($l) use ($cod) {
                     return ($l['params']['cod_provee'] ?? null) === $cod;
+                })),
+                'locales_adicional' => count(array_filter($base['locales'], function ($l) use ($cod) {
+                    return in_array(Planilla::codigo($cod), array_map(['Planilla', 'codigo'],
+                        $l['params']['adicionales'] ?? []), true);
                 }))
             ];
         }
@@ -124,6 +128,11 @@ class Alquileres {
             'rubro_sin_fila' => $sinFila,
             'tabla_creada' => $this->par->tablaCreada(),
             'script' => AlquileresParametros::SCRIPT,
+            'tabla_razones_local' => $base['tablas_ok'] && $this->tablaRazonesLocal($avisos),
+            'modos' => AlquileresParametros::MODOS,
+            'columnas_vigencia' => $base['tablas_ok'] && $this->columnasVigencia($avisos),
+            'script_vigencia' => AlquileresParametros::SCRIPT_VIGENCIA,
+            'script_razones_local' => AlquileresParametros::SCRIPT_RAZONES_LOCAL,
             'general' => $base['general'],
             'razones' => array_values($razonesAlta),
             'historial_razones' => $base['tablas_ok'] ? $this->par->razones(false) : [],
@@ -221,11 +230,12 @@ class Alquileres {
      * Nunca lanza: lo que no se puede leer queda vacio, con su aviso.
      *
      * @param Horizonte $h
-     * @return array ['ctx', 'pendientes', 'excluidas', 'vtos', 'imputaciones', 'en_tango', 'avisos']
+     * @return array ['ctx', 'pendientes', 'excluidas', 'vtos', 'dias', 'pagadas_mes', 'imputaciones',
+     *                'en_tango', 'avisos']
      */
     protected function insumosFacturas($h) {
-        $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'imputaciones' => [],
-                'en_tango' => [], 'avisos' => []];
+        $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'dias' => [],
+                'pagadas_mes' => [], 'imputaciones' => [], 'en_tango' => [], 'avisos' => []];
 
         try {
             require_once __DIR__ . '/AlquileresUniverso.php';
@@ -260,6 +270,21 @@ class Alquileres {
             $out['pendientes'] = $partes[AlquileresFacturas::A_ALQUILERES];
             $out['excluidas'] = $partes[AlquileresFacturas::A_EXCLUIDA];
             $out['vtos'] = (new AlquileresFacturaVto())->vigentes();
+            $out['dias'] = $this->diasDeVencimiento();
+
+            /* LAS YA PAGADAS DEL MES: emitidas en el mes en curso y canceladas en
+               Tango. Se ven en Facturas para poder imputarlas: una pagada sin
+               imputar deja la proyeccion de su mes en el flujo. Si no se pueden
+               leer, la grilla sigue con las pendientes y se avisa. */
+            try {
+                $out['pagadas_mes'] = AlquileresFacturas::partir($prov->getCanceladasEmitidas(
+                    array_keys($ctx['razones']), substr($h->hoy(), 0, 8) . '01', date('Y-m-t', strtotime($h->hoy()))),
+                    $ctx)[AlquileresFacturas::A_ALQUILERES];
+            } catch (Throwable $e) {
+                $out['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer de Tango las facturas de '
+                    . 'alquiler ya pagadas este mes (' . $e->getMessage() . '): la grilla muestra sólo las pendientes.',
+                    'Facturas');
+            }
             $out['imputaciones'] = (new AlquileresImputaciones())->vigentes();
 
             $pares = AlquileresImputacion::aConsultarEnTango($out['imputaciones'], $out['pendientes']);
@@ -328,6 +353,8 @@ class Alquileres {
             'pendientes' => $f['pendientes'],
             'excluidas' => $f['excluidas'],
             'vtos' => $f['vtos'],
+            'dias' => $f['dias'] ?? [],
+            'pagadas_mes' => $f['pagadas_mes'] ?? [],
             'imputaciones' => $f['imputaciones'],
             'en_tango' => $f['en_tango'],
             'ctx' => $f['ctx'],
@@ -375,17 +402,122 @@ class Alquileres {
             $pend[AlquileresImputacion::claveCuota($p)] = $p;
         }
 
+        /* LAS YA PAGADAS DEL MES TAMBIEN SE IMPUTAN, por el importe de la cuota:
+           se validan como si ese fuera su pendiente. Al guardarlas, la proxima
+           carga las ve canceladas en Tango y las marca Pagadas: reemplazan la
+           proyeccion del mes que cubren y no generan pago. */
+        foreach ($f['pagadas_mes'] ?? [] as $p) {
+            $c = AlquileresImputacion::claveCuota($p);
+
+            if (!isset($pend[$c])) {
+                $pend[$c] = AlquileresImputacion::comoPendiente($p);
+            }
+        }
+
         $locales = [];
 
         foreach ($proy['locales'] as $nro => $l) {
             $locales[$nro] = ['cod_provee' => $l['params']['cod_provee'] ?? null, 'nombre' => $l['nombre'],
+                              'razones' => AlquileresPago::razonesDelLocal($l['params']),
                               'pct_iva' => $l['params']['pct_iva'] ?? null,
                               'pct_percepcion' => $l['params']['pct_percepcion'] ?? null,
                               'pct_retencion' => $l['params']['pct_retencion'] ?? null];
         }
 
         return ['pendientes' => $pend, 'imputaciones' => $f['imputaciones'], 'pagos' => $proy['pagos'],
-                'locales' => $locales, 'avisos' => $f['avisos']];
+                'locales' => $locales, 'dias' => $f['dias'] ?? [], 'avisos' => $f['avisos']];
+    }
+
+    /**
+     * Los contratos vencidos o que vencen dentro del horizonte (la "fecha de fin"
+     * de Parametros). No cortan la proyeccion: se asume que se renuevan con las
+     * mismas condiciones, y el aviso es para revisarlos. Pura.
+     *
+     * @param array $locales Los de leerBase()
+     * @param string $hoy 'Y-m-d'
+     * @param string $ultimoMes 'Y-m' del horizonte
+     * @return array Avisos
+     */
+    public static function avisoContratos($locales, $hoy, $ultimoMes) {
+        $vencidos = [];
+        $porVencer = [];
+
+        foreach ($locales as $l) {
+            /* El vencimiento es el del ultimo contrato de la app: hasta el, cubre. */
+            $fin = empty($l['contratos']) ? null : max(array_column($l['contratos'], 'hasta'));
+
+            /* Un local que proyecta segun la vigencia ya corta en su contrato: no se avisa. */
+            if (empty($fin) || !$l['habilitado'] || AlquileresPago::porVigencia($l['params'] ?? null)) {
+                continue;
+            }
+
+            $txt = $l['nombre'] . ' (' . date('d/m/Y', strtotime($fin)) . ')';
+
+            if ($fin < $hoy) {
+                $vencidos[] = $txt;
+            } elseif (substr($fin, 0, 7) <= $ultimoMes) {
+                $porVencer[] = $txt;
+            }
+        }
+
+        $out = [];
+
+        if (!empty($vencidos)) {
+            $out[] = Aviso::nuevo(Aviso::WARNING, 'Contrato vencido en la app de alquileres: '
+                . implode(', ', $vencidos) . '. Se sigue proyectando con las condiciones de hoy; si se renovó, '
+                . 'cargá el contrato nuevo en la app. Si el local cerró, se ve como cerrado cuando Lakers lo deshabilita.', 'Locales');
+        }
+
+        if (!empty($porVencer)) {
+            $out[] = Aviso::nuevo(Aviso::INFO, 'Contratos que vencen dentro del horizonte: ' . implode(', ', $porVencer)
+                . '. Después del vencimiento se sigue proyectando con las condiciones de hoy (se asume la renovación).',
+                'Locales');
+        }
+
+        return $out;
+    }
+
+    /** Si se puede proyectar segun la vigencia del contrato (script 59). Nunca lanza. */
+    protected function columnasVigencia(&$avisos) {
+        try {
+            return $this->par->columnasVigenciaCreadas();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron verificar las columnas de vigencia ('
+                . $e->getMessage() . ').', 'Locales');
+
+            return false;
+        }
+    }
+
+    /** Si se puede agregar mas de una razon social a un local (script 58). Nunca lanza. */
+    protected function tablaRazonesLocal(&$avisos) {
+        try {
+            return $this->par->tablaRazonesLocalCreada();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo verificar la tabla de razones sociales adicionales ('
+                . $e->getMessage() . ').', 'Locales');
+
+            return false;
+        }
+    }
+
+    /**
+     * El dia de vencimiento de Parametros de cada razon social dada de alta (el
+     * suyo o el general): con el se arma el vencimiento a considerar de sus
+     * facturas (AlquileresImputacion::vtoAConsiderar()). Vacio si no se puede
+     * leer: las facturas quedan con el de Tango.
+     *
+     * @return array COD_PROVEE => int
+     */
+    protected function diasDeVencimiento() {
+        if (!$this->par->tablaCreada()) {
+            return [];
+        }
+
+        $general = $this->par->general();
+
+        return AlquileresImputacion::diasDeVencimiento($this->par->razonesVigentes(),
+            ($general === null) ? null : $general['dia']);
     }
 
     /**
@@ -450,34 +582,64 @@ class Alquileres {
 
         foreach ($base['locales'] as $nro => $l) {
             $p = $l['params'];
+            /* SEGUN APERTURA el vencimiento del contrato no corta: se asume la
+               renovacion, y deja de repartir solo si cerro en Lakers. SEGUN
+               VIGENCIA (un local temporal) reparte solo en los meses del
+               contrato. */
+            $vig = ($p !== null) && AlquileresPago::porVigencia($p);
+            $activoEn = null;
+
+            if ($vig) {
+                $activoEn = [];
+
+                foreach ($mesesConcepto as $m) {
+                    $activoEn[$m] = AlquileresPago::vigente($p, $m);
+                }
+            }
+
             $entradaVenta[$nro] = [
                 'activo' => $l['habilitado'] && $l['estado'] !== AlquileresPago::FINALIZADO,
-                'activo_hasta' => empty($p['fecha_fin']) ? null : substr($p['fecha_fin'], 0, 7),
+                'activo_hasta' => null,
+                'activo_en' => $activoEn,
                 'manual' => $p['venta_mensual_estimada'] ?? null
             ];
         }
 
+        $avisos = array_merge($avisos, self::avisoContratos($base['locales'], $hoy, end($mesesPago)));
+
         $ventas = ($ins['iva'] === null) ? null : AlquileresVenta::calcular([
             'meses' => $mesesConcepto, 'locales' => $entradaVenta, 'netas' => $netas, 'brutas' => $brutas,
-            'ventana' => $base['ventana'], 'canal' => $ins['canal'], 'iva' => $ins['iva']
+            'ventana' => $base['ventana'], 'canal' => $ins['canal'], 'iva' => $ins['iva'], 'hoy' => $hoy
         ]);
         $out['ventas'] = $ventas;
 
+        /* LOS MESES SIN VENTA PROYECTADA DEL CANAL (los anteriores al horizonte)
+           se estiman con la venta real de los demas (AlquileresVenta). Quedan
+           sin venta solo los que no tienen participacion ni venta manual: se
+           nombran, con los meses. */
+        $sinVentaMes = [];
+
         foreach ($mesesConcepto as $m) {
             if (!isset($ins['canal'][$m]) && $ventas !== null) {
-                $sinReal = false;
-
                 foreach ($ventas['ventas'] as $nro => $vm) {
-                    if (($vm[$m] ?? null) === null && $base['locales'][$nro]['estado'] === AlquileresPago::PROYECTA) {
-                        $sinReal = true;
+                    /* Solo importa si tiene conceptos variables en la app. */
+                    $tieneVariables = !empty(array_intersect_key($pct[$nro] ?? [],
+                        array_flip(AlquileresConceptos::delGrupo(AlquileresConceptos::VARIABLES))));
+
+                    if (($vm[$m] ?? null) === null && $base['locales'][$nro]['estado'] === AlquileresPago::PROYECTA
+                        && $tieneVariables) {
+                        $sinVentaMes[$base['locales'][$nro]['nombre']][] = $m;
                     }
                 }
-
-                if ($sinReal) {
-                    $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No hay venta proyectada del canal LOCALES para '
-                        . $m . ' y algún local no tiene venta real: sus conceptos variables de ese mes no se proyectan.');
-                }
             }
+        }
+
+        if (!empty($sinVentaMes)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Sin venta para estimar los variables de meses sin proyección '
+                . 'del canal LOCALES: ' . implode('; ', array_map(function ($n, $ms) {
+                    return $n . ' (' . implode(', ', $ms) . ')';
+                }, array_keys($sinVentaMes), $sinVentaMes)) . '. No tienen venta en la app ni participación: se '
+                . 'resuelve cargando su venta mensual estimada en Parámetros › Alquileres.');
         }
 
         /* Las tasas de las expensas: la de cada local y la general. */
@@ -543,7 +705,7 @@ class Alquileres {
             }
 
             $extras = array_values(array_filter($base['extras'], function ($x) use ($nro, $p) {
-                return AlquileresPago::alcanza($x, $nro, $p['cod_provee']);
+                return AlquileresPago::alcanza($x, $nro, AlquileresPago::razonesDelLocal($p));
             }));
 
             foreach (AlquileresPago::pagosLocal([
@@ -778,7 +940,7 @@ class Alquileres {
 
         foreach ($c['locales'] as $nro => $l) {
             $locales[] = ['nro' => $nro, 'nombre' => $l['nombre'], 'cod_provee' => $l['params']['cod_provee'] ?? null,
-                          'razon' => $l['razon']];
+                          'razones' => AlquileresPago::razonesDelLocal($l['params']), 'razon' => $l['razon']];
         }
 
         return [
@@ -949,8 +1111,24 @@ class Alquileres {
 
         $mesActual = substr($this->hoy, 0, 7);
 
+        /* LOS CONTRATOS DE LA APP (RO_T_CONTRATOS_ALQUILERES): de ahi sale la
+           vigencia. Segun APERTURA solo avisan; segun VIGENCIA deciden que
+           meses proyecta el local. */
+        $contratos = [];
+
+        try {
+            $contratos = $this->app->contratos();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los contratos de la app de alquileres ('
+                . $e->getMessage() . '): los locales que proyectan según la vigencia quedan sin proyectar.', 'Locales');
+        }
+
         foreach ($localesApp as $nro => $l) {
             $p = $params[$nro] ?? null;
+
+            if ($p !== null) {
+                $p['contratos'] = $contratos[$nro] ?? [];
+            }
             $estado = AlquileresPago::estadoLocal($p, $l['habilitado'], $out['razones'], $diaGeneral, $mesActual);
             $mesesVenta = 0;
 
@@ -966,7 +1144,8 @@ class Alquileres {
                VARIABLES: no es un incompleto del todo, y por eso va en
                'faltan' sin cambiar el estado. El filtro Incompletos lo muestra. */
             if ($nuevo && $estado['estado'] === AlquileresPago::PROYECTA
-                && ($p['venta_mensual_estimada'] ?? null) === null) {
+                && ($p['venta_mensual_estimada'] ?? null) === null
+                && $mesesVenta < AlquileresVenta::MESES_MIN_PROPIA) {
                 $estado['faltan'][] = 'venta mensual estimada (local nuevo, sin 12 meses de venta)';
             }
 
@@ -975,12 +1154,22 @@ class Alquileres {
                 'nombre' => $l['nombre'],
                 'habilitado' => $l['habilitado'],
                 'params' => $p,
+                /* La principal y, despues, las adicionales dadas de alta: es lo
+                   que muestra la columna Razon social de la pestaña. */
                 'razon' => (isset($p['cod_provee']) && isset($out['razones'][$p['cod_provee']]))
-                    ? $out['razones'][$p['cod_provee']]['razon'] : null,
+                    ? implode(' · ', array_map(function ($c) use ($out) { return $out['razones'][$c]['razon']; },
+                        array_values(array_filter(AlquileresPago::razonesDelLocal($p), function ($c) use ($out) {
+                            return isset($out['razones'][$c]);
+                        }))))
+                    : null,
                 'estado' => $estado['estado'],
                 'faltan' => $estado['faltan'],
                 'nuevo' => $nuevo,
-                'meses_venta' => $mesesVenta
+                'meses_venta' => $mesesVenta,
+                /* El contrato que se muestra en Parametros y en el aviso: el de hoy, el
+                   proximo o el ultimo, de la app. */
+                'contrato' => AlquileresPago::contratoActual($contratos[$nro] ?? [], $this->hoy),
+                'contratos' => $contratos[$nro] ?? []
             ];
         }
 

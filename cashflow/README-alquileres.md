@@ -51,8 +51,10 @@ App de alquileres (central, SÓLO SE LEE)        Parámetros › Alquileres (cas
 | 53 | `sql/cashflow_alquileres_facturas.sql` | `central` | El vencimiento a considerar por cuota y la imputación (cabecera, facturas, renglones, conceptos, locales), con auditoría e historial | Las facturas de alquiler **siguen en Cuentas a Pagar Locales** (condición de seguridad, parte 12) y las pantallas lo avisan en crítico; no se imputa ni se cambia un vencimiento |
 | 54 | `sql/cashflow_prov_exclusion_modulos_ampliar.sql` | `central` | Amplía el `CHECK` de la exclusión por módulo a `TARJETAS_CORP` y `ALQUILERES` | Excluir de Tarjetas o de Alquileres falla con un mensaje que nombra el script |
 | 55 | `sql/cashflow_alquileres_fila.sql` | `central` | Reemplaza la fila *Alquileres* (`ALQUILERES/PAGOS`) por dos filas agrupadas, `REAL` y `PROYECTADO`, en una transacción, con el control de doble conteo al pie | La fila de antes sigue activa y muestra el total, sin abrir |
+| 58 | `sql/cashflow_alquileres_local_razones.sql` | `central` | Las razones sociales **adicionales** de un local (parte 3.c), con historial. No migra nada | Una razón por local, como antes; el *+ otra razón social* queda deshabilitado y nombra el script |
+| 59 | `sql/cashflow_alquileres_local_vigencia.sql` | `central` | Agrega a `RO_T_CASHFLOW_ALQ_LOCAL` **`MODO_PROYECCION`** (`APERTURA` / `VIGENCIA`, NULL = apertura), con su `CHECK` (parte 3.c), y `FECHA_INICIO`, que quedó sin uso. No migra nada | Todos proyectan según apertura, como hoy; *Proyecta según* queda deshabilitado y nombra el script |
 
-El 51 va después de `sql/cashflow_prov_locales.sql` (el maestro de proveedores): sin el maestro crea las tablas igual pero no siembra a nadie, y lo dice. El 52 es independiente. **53 → 54 → 55**: el 53 después del 51, el 54 después de `sql/cashflow_prov_exclusion_modulo.sql`, el 55 después del 53 y de `sql/cashflow_estructura_grupos.sql`.
+El 51 va después de `sql/cashflow_prov_locales.sql` (el maestro de proveedores): sin el maestro crea las tablas igual pero no siembra a nadie, y lo dice. El 52 es independiente. **53 → 54 → 55**; el **58**, en cualquier momento después del 51. El 53 después del 51, el 54 después de `sql/cashflow_prov_exclusion_modulo.sql`, el 55 después del 53 y de `sql/cashflow_estructura_grupos.sql`.
 
 **El tablero se mueve con el código, no con los scripts**: con el módulo disponible, la fila de antes (activa, `ALQUILERES/PAGOS`) muestra el total. Ver parte 15.
 
@@ -130,8 +132,22 @@ Al 10/11/2026 el rubro trae **23** proveedores: los 21 del rubro económico *Alq
 
 ### 3.c Locales
 
-Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trimestral, semestral), **mes del último ajuste** (obligatorio salvo mensual), **% IVA** (arranca sugiriendo la alícuota de Generales y se puede subir o bajar: hay locales con otros cargos), **% percepción** y **% retención** (obligatorios; 0 es un valor, vacío no), **fecha de fin** (opcional) y **venta mensual estimada** (neta; sólo para locales nuevos).
+Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trimestral, semestral), **mes del último ajuste** (obligatorio salvo mensual), **% IVA** (arranca sugiriendo la alícuota de Generales y se puede subir o bajar: hay locales con otros cargos), **% percepción** y **% retención** (obligatorios; 0 es un valor, vacío no), **vencimiento del contrato** (opcional; la columna `FECHA_FIN`) y **venta mensual estimada** (neta; sólo para locales nuevos).
 
+**Proyecta según** (script 59, `AlquileresPago::vigente()`), por local:
+
+| Modo | Proyecta | El vencimiento del contrato |
+| --- | --- | --- |
+| **Apertura** (el de siempre; vacío = apertura) | Mientras el local esté abierto en Lakers | Sólo avisa: se asume la renovación |
+| **Vigencia del contrato** | Sólo los meses cubiertos por **alguno de sus contratos de la app**, de su mes de inicio a su mes de vencimiento. Un variable de un mes vigente que se paga diferido después sí se paga: la venta existió. En la venta, reparte sólo en esos meses. Sin contratos en la app, *Incompleto* | Corta: cuando vencieron todos, el local queda *Contrato finalizado* (no es incompleto) y no se muestra en la pestaña salvo que le quede algo por pagar |
+
+**LOS CONTRATOS SALEN DE LA APP DE ALQUILERES**, de `RO_T_CONTRATOS_ALQUILERES` (`VIG_DESDE` a `VIG_HASTA`, `AlquileresApp::contratos()`): no se cargan en Parámetros. Un local tiene varios —los viejos, el vigente, a veces uno corto en el medio— y cuentan todos. La columna *Contrato (app)* de Parámetros muestra el de hoy, el próximo o el último (`AlquileresPago::contratoActual()`) y el tooltip, todos. Las columnas `FECHA_FIN` y `FECHA_INICIO` de `RO_T_CASHFLOW_ALQ_LOCAL` ya no se usan: la fecha de fin cargada a mano era una copia de esa tabla.
+
+Es para los **locales temporales**: XL RURAL proyecta según la vigencia. Al 17/11/2026 su único contrato en la app es del 03/02 al 03/03/2026, así que queda *Contrato finalizado*; el contrato de un mes nuevo se carga en la app y desde ahí proyecta ese mes.
+
+Según apertura, **el vencimiento del contrato (el último de la app) no corta la proyección**: se asume que se renueva con las condiciones de hoy. Un contrato vencido da un aviso de atención (*si se renovó, cargá el contrato nuevo en la app*; al 17/11/2026, SOLAR, vencido el 30/09/2026) y uno que vence dentro del horizonte, uno informativo (`Alquileres::avisoContratos()`). Un local deja de proyectar sólo si **cerró en Lakers** (`HABILITADO = 0`). Hasta el 17/11/2026 la fecha cortaba todo desde el mes siguiente; con 8 locales con fecha dentro del horizonte (Distrito Arcos y MDP Gallegos al 31/12/2026, Alto Palermo, Abasto, Parque Brown, San Justo, Gurruchaga, Tortugas), el total del horizonte pasó de $ 3.311,4 M a $ 4.204,1 M.
+
+- **Más de una razón social por local** (script 58). La del desplegable es la **principal**: la única que da el **día de vencimiento y el diferimiento** del local en la proyección. Debajo, *+ otra razón social* agrega **adicionales**: las que le facturan algo más. San Justo (80): SASANJ (CONTINENTAL URBANA) factura el alquiler y SAUCCS (URBANA CENTROS COMERCIALES) las expensas y el fondo. Una adicional **no cambia ninguna fecha proyectada**; sirve para que **sus facturas se imputen al local** (también con *todos los locales de X*) y para que **sus extraordinarios lo alcancen**. Hace falta la principal para agregar una; se quita con la ✕ (baja lógica, con historial). La columna *Locales* de Razones sociales cuenta las principales y, aparte (*+N*), las adicionales. `AlquileresPago::razonesDelLocal()` es la lista; `AlquileresParametros::validarRazonLocal()`, la validación.
 - El **mes del último ajuste es un mes del año**, no un año-mes: ancla el ciclo, y como las frecuencias dividen a 12 el dato no envejece. Trimestral con septiembre ajusta en diciembre, marzo, junio y septiembre.
 - Se guarda **por fila**, como Parámetros › Tarjetas. Un trimestral sin mes del último ajuste **no se guarda** y la pantalla dice por qué.
 - El filtro **Incompletos** muestra los locales que no proyectan, o no proyectan todo, por falta de algún dato.
@@ -140,12 +156,12 @@ Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trim
 | --- | --- | --- |
 | *Proyecta* | Tiene razón social dada de alta, frecuencia (y mes, si no es mensual), IVA, percepción, retención y un día de vencimiento | No. Un **local nuevo sin venta manual** proyecta fijos y expensas, pero no variables: figura en *Incompletos* con eso como faltante |
 | *Incompleto* | Le falta algo de lo anterior | Sí |
-| *Cerrado en Lakers* | `HABILITADO = 0` en `SUCURSALES_LAKERS` | **No**: no falta ningún dato, el local cerró. Se lista aparte y su venta real se sigue viendo. Flores 1 es este caso |
-| *Contrato finalizado* | Su fecha de fin es de un mes anterior al actual | No. La fecha de fin es para los locales habilitados que dejan de pagar alquiler |
+| *Cerrado en Lakers* | `HABILITADO = 0` en `SUCURSALES_LAKERS` | **No**: no falta ningún dato, el local cerró. No se muestra ni en la Proyección ni en Ventas. Flores 1 es este caso |
+| *Contrato finalizado* | Proyecta **según la vigencia** y su contrato venció en un mes anterior al actual | **No**. No se muestra, salvo que le quede algo por pagar (un variable diferido) |
 
 ### 3.d Pagos extraordinarios
 
-Un % sobre uno o varios **conceptos base** (de los que se proyectan) de un **mes base** del año, que se paga en *mes base + diferimiento* y **se repite todos los años** hasta que se da de baja. Por razón social, con *todos los locales* (incluidos los que se le asignen después) o algunos. No se editan: baja y alta, para que el historial explique los meses ya proyectados. Lleva IVA, percepción y retención del local.
+Un % sobre uno o varios **conceptos base** (de los que se proyectan) de un **mes base** del año, que se paga en *mes base + diferimiento* y **se repite todos los años** hasta que se da de baja. Por razón social, con *todos los locales* (incluidos los que se le asignen después, como principal o adicional) o algunos. No se editan: baja y alta, para que el historial explique los meses ya proyectados. Lleva IVA, percepción y retención del local.
 
 Ejemplo: Cencosud, 75 % del VMA (8) de diciembre, 1 mes de diferimiento: se paga en enero. Los conceptos base salen de la misma jerarquía de la parte 8: si diciembre está cerrado en la app, el VMA cerrado; si no, el proyectado.
 
@@ -182,12 +198,14 @@ Ejemplo: Cencosud, 75 % del VMA (8) de diciembre, 1 mes de diferimiento: se paga
 | --- | --- |
 | **Real** | El mes ya tiene venta en la app: neta de `RO_T_RENTABILIDAD_BRUTA` y bruta de `RO_V_VENTAS_BRUTAS_IE`. Si hay una y no la otra (hoy no pasa en ningún local), la que falta se deriva con el IVA general y el tooltip lo dice |
 | **Estimada** | La venta proyectada del canal `LOCALES` de la pestaña Ventas, repartida por la participación de cada local en la venta neta real de los **últimos 12 meses cerrados** de la app |
-| **Manual** | Un local **nuevo** (sin 12 meses de venta en esa ventana) no entra al reparto: usa la venta mensual estimada de Parámetros. Sin ella no proyecta variables y se avisa |
+| **Manual** | Un local **nuevo** (sin 12 meses de venta en esa ventana) usa la venta mensual estimada de Parámetros, si está |
+| **Estimada (participación propia)** | Un **nuevo sin venta manual** con al menos **3 meses** de venta en la ventana (`MESES_MIN_PROPIA`) entra al reparto con su **participación propia**: su venta sobre la de los locales de 12 meses **en esos mismos meses**, para que la estacionalidad no lo infle ni lo achique. Se suma a las de los demás y se normaliza todo: la suma sigue cerrando contra el canal. Con menos de 3 meses, no proyecta variables y se avisa. Malvinas (8 meses) es este caso |
+| **Real + proyectada** | **El mes en curso** con venta real: la real de la app (lo vendido hasta ayer) **más** la estimada —o la manual— del mes completo por la fracción de días que faltan, hoy incluido: `(días del mes − día de hoy + 1) / días del mes`. Antes el mes en curso tomaba como venta del mes lo vendido hasta el momento y los variables salían chicos. El tooltip separa la real de la proyectada. Al 17/11/2026 la venta neta de noviembre de los locales pasó de $ 454,0 M (lo vendido) a $ 1.091,4 M, y el total del horizonte subió $ 1,13 M (los variables de noviembre se pagan diferidos). Supone que la real de la app llega hasta ayer: `RO_T_RENTABILIDAD_BRUTA` es mensual y no dice hasta qué día está cargada |
 
 - **La venta del canal es la del mes completo**, `Ventas::ventaMensualCanal()`: la base mensual (`baseMensual()`) por la participación mensual del canal. No es la grilla diaria de Ventas, que en el mes en curso arranca hoy y en los primeros 28 días usa la participación del tramo: los porcentajes del alquiler son sobre el mes entero. Al 10/11/2026, noviembre da **$ 1.652,6 M** contra los $ 1.269,6 M que muestra Ventas desde hoy, y los 12 meses suman **$ 22.372 M**. No se recalcula: se le pide a Ventas.
 - **Las manuales se restan del canal antes de repartir**, así que *estimadas + manuales = canal* al centavo. El redondeo sobrante va al local con más participación. Lo fija una prueba, y el pie de la sub-pestaña Ventas muestra la diferencia, que da 0 en los meses estimados.
-- **Un local cerrado no entra al denominador** (cerrado en Lakers, o con fecha de fin pasada). Un local *incompleto* pero abierto sí reparte: sigue vendiendo.
-- Para los variables diferidos se calculan también los meses de venta **anteriores al horizonte** que se pagan adentro: con diferimiento 2, la venta de dos meses atrás. Esos meses tienen venta real; si a alguno le faltara, no hay venta del canal con qué estimarlo y se avisa.
+- **Un local cerrado en Lakers no entra al denominador.** Un local *incompleto* pero abierto sí reparte: sigue vendiendo.
+- Para los variables diferidos se calculan también los meses de venta **anteriores al horizonte** que se pagan adentro: con diferimiento 2, la venta de dos meses atrás. Esos meses no tienen venta proyectada del canal: si a algún local le falta la real, **el canal se arma con la venta real de los que la tienen, dividida por su participación**, y el que falta se estima con la suya (el tooltip lo dice). Sólo queda sin venta, con un aviso que lo nombra, un local sin venta en la app, sin participación y sin venta manual **que tenga conceptos variables**: OESTE no tiene ventas, pero tampoco porcentajes de variables, así que no se avisa.
 
 ---
 
@@ -233,7 +251,7 @@ a pagar     = neto + IVA + percepción − retención
 - **Mes de pago**: fijos, fondo y expensas, el mismo mes; variables, el mes de la venta + el diferimiento de la razón social; extraordinarios, el mes base + su diferimiento.
 - **Día**: el de la razón social, o el general. Si no es hábil, el siguiente hábil (`DiasHabiles::siguiente()`) y la celda lo anota con `detalle`.
 - **Un vencimiento que ya pasó en el mes en curso** —todavía sin factura— va al **siguiente hábil desde hoy**, nunca apilado en el primer día del eje. Es provisorio: una factura imputada que cubre ese mes lo reemplaza, en su propia fecha.
-- **Fecha de fin**: desde el mes siguiente no se proyectan conceptos del local. Un variable de un mes anterior a la fecha de fin que se paga diferido después sí se paga: la venta existió.
+- **Vencimiento del contrato** (la fecha de fin de Parámetros): no corta; ver 3.c.
 - Cada parte se redondea a centavos una sola vez. La app trunca a pesos; como los meses cerrados se leen tal cual, eso no cambia nada de lo cerrado.
 
 ---
@@ -253,7 +271,7 @@ a pagar     = neto + IVA + percepción − retención
 
 ### Ventas
 
-Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*), incluidos los meses anteriores al horizonte que pagan los diferidos. Al pie, estimadas + manuales, la venta del canal Locales y la diferencia (0 en los meses estimados). El tooltip de una estimada dice la participación del local y la venta del canal; la sub-pestaña, el período de la participación.
+Los locales **cerrados en Lakers no se muestran** (tampoco en la Proyección, que ya no lleva la tarjeta de cerrados). Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*, *Real + proyectada*), incluidos los meses anteriores al horizonte que pagan los diferidos. La primera columna es el **número de sucursal** y la grilla viene **ordenada por él**; el encabezado cambia el orden. Al pie, el **total de los locales** en todos los meses (neta o bruta, según el selector: antes los meses sólo con venta real, como septiembre y octubre, no totalizaban) y, como control del reparto, estimadas + manuales del mes completo, la venta del canal Locales y la diferencia (0 en los meses estimados). El tooltip de una estimada dice la participación del local y la venta del canal; la sub-pestaña, el período de la participación.
 
 ### Facturas
 
@@ -281,11 +299,17 @@ Las facturas salen de Proveedores Locales **sólo si** el módulo `ALQUILERES` e
 
 ### La grilla
 
-Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, vencimiento de Tango, **vencimiento a considerar**, importe, pendiente, retención, **a pagar** y estado (*Sin imputar*, *Imputada*, *Imputada parcialmente* —otra cuota del comprobante sin imputar—, *Pagada*, *Ya no está en Tango*, *Sin dato de Tango*, *Imputación suspendida*). Filtros por razón social y estado, *Ver pagadas*, totales, exportar y tres tarjetas: **sin imputar** (cantidad e importe: plata que no suma en ningún lado), imputadas a pagar y pagos proyectados reemplazados.
+Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, vencimiento de Tango, **vencimiento a considerar**, importe, pendiente, retención, **a pagar** y estado (*Sin imputar*, *Imputada*, *Imputada parcialmente* —otra cuota del comprobante sin imputar—, *Pagada*, *Ya no está en Tango*, *Sin dato de Tango*, *Imputación suspendida*). Filtros por razón social y estado, *Ver pagadas de meses anteriores* (las del mes en curso se ven siempre), totales, exportar y tres tarjetas: **sin imputar** (cantidad e importe: plata que no suma en ningún lado), imputadas a pagar y pagos proyectados reemplazados.
 
 ### El vencimiento a considerar
 
-**Es la única fecha de pago** de una factura de alquiler: la planilla de pagos de Proveedores Locales deja estas facturas en error. Mismo patrón que Tarjetas (`AlquileresFacturaVto`, tabla propia): input que guarda al cambiar, fecha mínima hoy (`TarjetasCorporativas::validarVtoEditado()`, la misma regla), **↺ que vuelve al de Tango**, por cuota, con historial y motivo opcional.
+**Es la única fecha de pago** de una factura de alquiler: la planilla de pagos de Proveedores Locales deja estas facturas en error. La jerarquía (`AlquileresImputacion::vtoAConsiderar()`):
+
+1. **La fecha manual**, cargada en la grilla. Mismo patrón que Tarjetas (`AlquileresFacturaVto`, tabla propia): input que guarda al cambiar, fecha mínima hoy (`TarjetasCorporativas::validarVtoEditado()`, la misma regla), por cuota, con historial y motivo opcional. **↺ la quita** y vuelve a la de Parámetros; elegir a mano la fecha de Parámetros también.
+2. **La de Parámetros**: el día de vencimiento de la razón social (o el general) **en el mes del vencimiento de Tango** (`vtoDeParametro()`). Ejemplo: FAC A0005000027187 de SAGALL (día 18) vence en Tango el 20/11/2026 y se considera el **18/11**.
+3. La de Tango, sólo si la razón social no tiene día y no hay general (chip *Tango* en la celda).
+
+El tooltip de la celda dice de cuál sale. Al 17/11/2026 cambiaron 2 de las 4 cuotas pendientes: SAGALL A0005000027187 (20/11 → 18/11) y SACORR A0000200000467 (18/11 → 15/11, que por vencida se paga el siguiente hábil desde hoy).
 
 **Vencida**: una imputada con vencimiento a considerar anterior a hoy se paga el **siguiente día hábil desde hoy** (`AlquileresImputacion::fechaDePago()`), y la celda lo anota con `detalle`.
 
@@ -297,7 +321,7 @@ Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, venc
 
 ### Qué se imputa
 
-Una o varias cuotas, **de una o varias razones sociales**, repartidas en **renglones** de **conceptos** (los que se proyectan, *Extraordinario* y *Otros (no proyectados)*, con atajos por grupo) × **locales** (uno, varios, o *todos los de una razón social* de las facturas tildadas) × **mes que cubre** (el mes de pago cuya proyección reemplaza) × **importe** (con IVA y percepciones). Los renglones son **del grupo**, no de una factura.
+Una o varias cuotas, **de una o varias razones sociales**, a locales de cualquiera de ellas —principal o adicional (parte 3.c)—, repartidas en **renglones** de **conceptos** (los que se proyectan, *Extraordinario* y *Otros (no proyectados)*, con atajos por grupo) × **locales** (uno, varios, o *todos los de una razón social* de las facturas tildadas) × **mes que cubre** (el mes de pago cuya proyección reemplaza) × **importe** (con IVA y percepciones). Los renglones son **del grupo**, no de una factura.
 
 - **La suma de los renglones tiene que dar el pendiente de las cuotas tildadas (±$ 1).** Si no, no se guarda y se muestra la diferencia.
 - **Retención por factura**, obligatoria al guardar (0 es un valor). Se sugiere con el % de retención de los locales, ponderado por el reparto, sobre el neto de Tango; sin él, sobre el importe sin el IVA ni la percepción de los locales.
@@ -313,6 +337,7 @@ Una o varias cuotas, **de una o varias razones sociales**, repartidas en **rengl
 
 ### Sin imputar, pagada, cambiada
 
+- **Las facturas del mes, pagadas o no.** Además de las pendientes, la grilla trae las cuotas **emitidas en el mes en curso y ya canceladas en Tango** de las razones dadas de alta (`Proveedores::getCanceladasEmitidas()`: CPA54 con `ESTADO_VTO = 'PAG'`, comprobantes que suman deuda, `CPA21.CRE_DEB = 'D'`). Las que nadie imputó quedan **Pagada, sin imputar**: no se pagan otra vez, pero **la proyección de lo que cubren sigue en el flujo** hasta que se imputen. Se tildan e imputan como las demás, **por el importe de la cuota** (`AlquileresImputacion::comoPendiente()`); en la próxima carga Tango las da canceladas, quedan *Pagada* y **reemplazan** la proyección del mes que cubren: **para que el monto desaparezca del flujo, la factura tiene que estar imputada y pagada**. Aviso de atención con la cantidad y el importe, y la tarjeta *sin imputar* lo suma al pie. Al 17/11/2026 eran **40 por $ 317,5 M**, contra $ 321,2 M proyectados a pagar en noviembre. No se les cambia el vencimiento.
 - **Sin imputar no suma** —ni en la pestaña ni en el tablero—: contaría dos veces contra la proyección. Aviso de atención: *"N factura(s) de alquiler sin imputar por $ X: no suman hasta que se imputen"*.
 - **Pagada en Tango**: sale de pendientes; se marca *Pagada* con la fecha de cancelación al cargar la pestaña (usuario del sistema, como la conciliación de Proveedores Locales, con `Proveedores::estadoComprobantesEnTango()`). **Sigue reemplazando** el mes que cubre. Se ve con *Ver pagadas*.
 - **Desaparecida sin pago** (anulada) o sin dato de Tango: **deja de reemplazar**, la proyección vuelve y se avisa para imputar la nueva. En un grupo de varias facturas, cuando **todas** quedaron así.
@@ -398,6 +423,7 @@ php tests/run.php alquileres
 | `Tabs/parametros_alquileres.php`, `Js/Parametros-Alquileres.js` | La sub-pestaña de Parámetros |
 | `sql/cashflow_alquileres.sql`, `sql/cashflow_alquileres_permisos.sql` | Los scripts 51 y 52 |
 | `sql/cashflow_alquileres_facturas.sql`, `sql/cashflow_prov_exclusion_modulos_ampliar.sql`, `sql/cashflow_alquileres_fila.sql` | Los scripts 53, 54 y 55 |
+| `sql/cashflow_alquileres_local_razones.sql` | El script 58: las razones sociales adicionales de un local |
 
 ---
 

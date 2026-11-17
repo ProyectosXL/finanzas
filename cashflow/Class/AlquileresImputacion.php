@@ -44,7 +44,8 @@ require_once __DIR__ . '/AlquileresFacturas.php';
  * CUANTO Y CUANDO
  * ---------------
  * Cada cuota pendiente se paga en su VENCIMIENTO A CONSIDERAR (el editado, o el
- * de Tango), corrido al siguiente habil, y si ya paso, el siguiente habil desde
+ * dia de Parametros de su razon social en el mes del vencimiento de Tango:
+ * vtoAConsiderar()), corrido al siguiente habil, y si ya paso, el siguiente habil desde
  * hoy: nunca apilado en el primer dia del eje. Se paga por su a pagar, pendiente
  * menos retencion. La proyeccion reemplazada deja de pagarse en SU fecha: el
  * importe real va en la de la factura.
@@ -97,6 +98,13 @@ class AlquileresImputacion {
     const SIN_DATO = 'SIN_DATO';
     const SUSPENDIDA = 'SUSPENDIDA';
 
+    /**
+     * Emitida en el mes en curso y ya cancelada en Tango, SIN IMPUTAR. No genera
+     * pago (ya salio la plata), pero la proyeccion del mes que cubre sigue en el
+     * flujo hasta que se impute: imputada y pagada, la reemplaza.
+     */
+    const PAGADA_SIN_IMPUTAR = 'PAGADA_SIN_IMPUTAR';
+
     const NOMBRE_ESTADO = [
         self::SIN_IMPUTAR => 'Sin imputar',
         self::IMPUTADA => 'Imputada',
@@ -104,8 +112,14 @@ class AlquileresImputacion {
         self::PAGADA => 'Pagada',
         self::ANULADA => 'Ya no está en Tango',
         self::SIN_DATO => 'Sin dato de Tango',
-        self::SUSPENDIDA => 'Imputación suspendida'
+        self::SUSPENDIDA => 'Imputación suspendida',
+        self::PAGADA_SIN_IMPUTAR => 'Pagada, sin imputar'
     ];
+
+    /** De donde sale el vencimiento a considerar de una cuota (origenVto()) */
+    const VTO_EDITADO = 'EDITADO';
+    const VTO_PARAMETRO = 'PARAMETRO';
+    const VTO_TANGO = 'TANGO';
 
     /* ====================================================================
        CLAVES Y FECHAS
@@ -126,16 +140,96 @@ class AlquileresImputacion {
     }
 
     /**
-     * El vencimiento a considerar de una cuota: el editado, o el de Tango.
+     * Una cuota ya pagada en Tango (Proveedores::getCanceladasEmitidas()) vista
+     * como pendiente para validar su imputacion: lo que se imputa es el importe
+     * de la cuota. PAGADA_TANGO la distingue: no se le cambia el vencimiento y no
+     * se paga.
+     */
+    public static function comoPendiente($pagada) {
+        return ['IMPORTE_PENDIENTE' => round((float) $pagada['IMPORTE_VTO'], 2), 'PAGADA_TANGO' => true] + $pagada;
+    }
+
+    /**
+     * El dia de vencimiento de Parametros de cada razon social: el suyo, o el
+     * general. Una razon sin dia propio y sin general no esta en el mapa.
+     *
+     * @param array $razones COD_PROVEE => ['dia' => int|null, ...] (las vigentes)
+     * @param int|null $diaGeneral
+     * @return array COD_PROVEE => int
+     */
+    public static function diasDeVencimiento($razones, $diaGeneral) {
+        $out = [];
+
+        foreach ($razones as $cod => $r) {
+            $d = ($r['dia'] ?? null) ?? $diaGeneral;
+
+            if ($d !== null) {
+                $out[Planilla::codigo($cod)] = (int) $d;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * El vencimiento de una cuota segun Parametros: el dia de su razon social
+     * (o el general) EN EL MES DEL VENCIMIENTO DE TANGO. Sin dia en
+     * Parametros, el de Tango. Los dias van de 1 a 28: existen en todo mes.
+     *
+     * @param array $cuota Fila de getPendientes()
+     * @param array $dias COD_PROVEE => dia (diasDeVencimiento())
+     * @return string 'Y-m-d'
+     */
+    public static function vtoDeParametro($cuota, $dias) {
+        $tango = substr((string) $cuota['FECHA_VTO'], 0, 10);
+        $cod = Planilla::codigo($cuota['COD_PROVEE'] ?? '');
+
+        if (!isset($dias[$cod]) || strlen($tango) !== 10) {
+            return $tango;
+        }
+
+        return substr($tango, 0, 8) . sprintf('%02d', $dias[$cod]);
+    }
+
+    /**
+     * El vencimiento a considerar de una cuota. LA JERARQUIA: la fecha cargada
+     * a mano en la grilla, y si no, la de Parametros (vtoDeParametro()). El de
+     * Tango solo queda si la razon social no tiene dia ni hay general.
      *
      * @param array $cuota Fila de getPendientes()
      * @param array $vtos claveCuota => ['FECHA_VTO', ...]
+     * @param array $dias COD_PROVEE => dia (diasDeVencimiento())
      * @return string 'Y-m-d'
      */
-    public static function vtoAConsiderar($cuota, $vtos) {
+    public static function vtoAConsiderar($cuota, $vtos, $dias = []) {
         $c = self::claveCuota($cuota);
 
-        return isset($vtos[$c]) ? $vtos[$c]['FECHA_VTO'] : substr((string) $cuota['FECHA_VTO'], 0, 10);
+        return isset($vtos[$c]) ? $vtos[$c]['FECHA_VTO'] : self::vtoDeParametro($cuota, $dias);
+    }
+
+    /**
+     * Las razones sociales de un local del contexto de validar(): la principal y
+     * las adicionales. Una factura de CUALQUIERA de ellas se puede imputar al
+     * local (San Justo: SASANJ el alquiler, SAUCCS las expensas y el fondo).
+     *
+     * @param array $l ['cod_provee', 'razones' => [...]]
+     * @return string[]
+     */
+    private static function razonesDe($l) {
+        $cods = isset($l['razones']) ? $l['razones'] : [$l['cod_provee'] ?? null];
+
+        return array_values(array_filter(array_map(['Planilla', 'codigo'], $cods), function ($c) {
+            return $c !== '';
+        }));
+    }
+
+    /** De donde sale el vencimiento a considerar: EDITADO, PARAMETRO o TANGO */
+    public static function origenVto($cuota, $vtos, $dias = []) {
+        if (isset($vtos[self::claveCuota($cuota)])) {
+            return self::VTO_EDITADO;
+        }
+
+        return isset($dias[Planilla::codigo($cuota['COD_PROVEE'] ?? '')]) ? self::VTO_PARAMETRO : self::VTO_TANGO;
     }
 
     /**
@@ -343,7 +437,9 @@ class AlquileresImputacion {
      *     'pendientes' => claveCuota => fila de getPendientes() (solo las de destino A_ALQUILERES),
      *     'imputaciones' => las vigentes (AlquileresImputaciones::vigentes()),
      *     'pagos' => la proyeccion ORIGINAL,
-     *     'locales' => nro => ['cod_provee', 'nombre', 'pct_iva', 'pct_percepcion', 'pct_retencion']
+     *     'locales' => nro => ['cod_provee', 'razones' (la principal y las adicionales:
+     *                  AlquileresPago::razonesDelLocal()), 'nombre', 'pct_iva', 'pct_percepcion',
+     *                  'pct_retencion']
      * ]
      * @param bool $guardar Al guardar, la retencion de cada factura es
      *        obligatoria (0 es un valor; vacio no): en la previsualizacion todavia
@@ -430,7 +526,7 @@ class AlquileresImputacion {
                 }
 
                 foreach ($locales as $nro => $l) {
-                    if (($l['cod_provee'] ?? null) === $todos) {
+                    if (in_array($todos, self::razonesDe($l), true)) {
                         $lista[] = (int) $nro;
                     }
                 }
@@ -446,7 +542,7 @@ class AlquileresImputacion {
             foreach ($lista as $nro) {
                 if (!isset($locales[$nro])) {
                     $errores[] = $n . ': el local ' . $nro . ' no existe en la app de alquileres.';
-                } elseif (!isset($razones[$locales[$nro]['cod_provee'] ?? ''])) {
+                } elseif (empty(array_intersect(self::razonesDe($locales[$nro]), array_keys($razones)))) {
                     $errores[] = $n . ': ' . $locales[$nro]['nombre'] . ' no es de ninguna de las razones '
                         . 'sociales de las facturas tildadas.';
                 }
@@ -600,6 +696,8 @@ class AlquileresImputacion {
      *     'pendientes' => [filas de getPendientes() con destino A_ALQUILERES],
      *     'excluidas' => [las de destino A_EXCLUIDA],
      *     'vtos' => claveCuota => ['FECHA_VTO', 'MOTIVO', 'USUARIO_ALTA', 'FECHA_ALTA'],
+     *     'dias' => COD_PROVEE => dia de vencimiento de Parametros (diasDeVencimiento()),
+     *               opcional: sin el, el de Tango,
      *     'imputaciones' => las vigentes (ver AlquileresImputaciones::vigentes()),
      *     'en_tango' => Proveedores::estadoComprobantesEnTango() de las imputadas que
      *                   ya no estan pendientes; null si no se pudo leer,
@@ -612,6 +710,7 @@ class AlquileresImputacion {
      */
     public static function aplicar($e) {
         $hoy = $e['hoy'];
+        $dias = $e['dias'] ?? [];
         $avisos = [];
         $pend = [];
 
@@ -712,7 +811,7 @@ class AlquileresImputacion {
                 $fila = $pend[self::claveCuota($f)];
                 $total = round((float) $fila['IMPORTE_PENDIENTE'], 2);
                 $ret = min(round((float) $f['RETENCION'], 2), $total);
-                $dia = self::fechaDePago(self::vtoAConsiderar($fila, $e['vtos']), $e['habiles'], $hoy);
+                $dia = self::fechaDePago(self::vtoAConsiderar($fila, $e['vtos'], $dias), $e['habiles'], $hoy);
                 $nota = self::notaFecha($dia);
                 $pesos = [];
 
@@ -825,11 +924,20 @@ class AlquileresImputacion {
                 $sinImputar['importe'] += $pendiente;
             }
 
-            $filas[] = self::filaFactura($p, $e['vtos'], $e['habiles'], $hoy, $estado, $g, $f);
+            $filas[] = self::filaFactura($p, $e['vtos'], $dias, $e['habiles'], $hoy, $estado, $g, $f);
         }
 
-        /* Las imputadas que ya no estan pendientes: pagadas (con "Ver pagadas"),
-           anuladas o sin dato de Tango. */
+        /* Las ya pagadas del mes, por cuota: con ellas se completan las filas de
+           las imputadas pagadas (emision, importe, leyenda). */
+        $pagadasMes = [];
+
+        foreach ($e['pagadas_mes'] ?? [] as $p) {
+            $pagadasMes[self::claveCuota($p)] = $p;
+        }
+
+        /* Las imputadas que ya no estan pendientes: pagadas (las del mes se ven
+           siempre; las anteriores, con "Ver pagadas"), anuladas o sin dato de
+           Tango. */
         foreach ($grupos as $id => $g) {
             foreach ($g['facturas'] as $k => $f) {
                 $s = $g['estados'][$k];
@@ -838,17 +946,44 @@ class AlquileresImputacion {
                     continue;
                 }
 
-                $filas[] = self::filaFactura(['COD_PROVEE' => $f['COD_PROVEE'], 'RAZON_SOC' => $f['RAZON_SOC'] ?? '',
-                    'T_COMP' => $f['T_COMP'], 'N_COMP' => $f['N_COMP'], 'FECHA_VTO' => $f['FECHA_VTO_TANGO'],
-                    'FECHA_EMIS' => null, 'IMPORTE_VTO' => null, 'IMPORTE_PENDIENTE' => 0.0, 'LEYENDA' => ''],
-                    $e['vtos'], $e['habiles'], $hoy, $s['estado'], $g, $f) + ['fecha_pagada' => $s['fecha']];
+                $c = self::claveCuota($f);
+                $fila = isset($pagadasMes[$c]) ? ['IMPORTE_PENDIENTE' => 0.0] + $pagadasMes[$c]
+                    : ['COD_PROVEE' => $f['COD_PROVEE'], 'RAZON_SOC' => $f['RAZON_SOC'] ?? '',
+                       'T_COMP' => $f['T_COMP'], 'N_COMP' => $f['N_COMP'], 'FECHA_VTO' => $f['FECHA_VTO_TANGO'],
+                       'FECHA_EMIS' => null, 'IMPORTE_VTO' => null, 'IMPORTE_PENDIENTE' => 0.0, 'LEYENDA' => ''];
+
+                $filas[] = array_merge(self::filaFactura($fila, $e['vtos'], $dias, $e['habiles'], $hoy, $s['estado'],
+                    $g, $f), ['fecha_pagada' => $s['fecha']]);
             }
+        }
+
+        /* LAS PAGADAS DEL MES QUE NADIE IMPUTO: no se pagan (la plata ya salio),
+           pero la proyeccion del mes que cubren sigue en el flujo. Se imputan
+           por el importe de la cuota; imputadas y pagadas, la reemplazan. */
+        $pagadasSin = ['n' => 0, 'importe' => 0.0];
+
+        foreach ($pagadasMes as $c => $p) {
+            if (isset($cuotaImp[$c]) || isset($pend[$c])) {
+                continue;
+            }
+
+            $pagadasSin['n']++;
+            $pagadasSin['importe'] += (float) $p['IMPORTE_VTO'];
+            $filas[] = array_merge(self::filaFactura($p, $e['vtos'], $dias, $e['habiles'], $hoy,
+                self::PAGADA_SIN_IMPUTAR, null, null), ['fecha_pagada' => $p['FECHA_CANCELADO'] ?? null]);
         }
 
         /* 6. LOS AVISOS. */
         if ($sinImputar['n'] > 0) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinImputar['n'] . ' factura(s) de alquiler sin imputar por '
                 . self::plata($sinImputar['importe']) . ': no suman hasta que se imputen.', 'Facturas');
+        }
+
+        if ($pagadasSin['n'] > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $pagadasSin['n'] . ' factura(s) de alquiler de este mes ya '
+                . 'pagadas en Tango y sin imputar, por ' . self::plata($pagadasSin['importe']) . ': la proyección '
+                . 'de lo que cubren sigue en el flujo hasta que se imputen (Alquileres › Facturas, estado «Pagada, '
+                . 'sin imputar»).', 'Facturas');
         }
 
         $cambios = [];
@@ -932,7 +1067,9 @@ class AlquileresImputacion {
                 'sin_imputar_n' => $sinImputar['n'],
                 'sin_imputar_importe' => round($sinImputar['importe'], 2),
                 'imputadas_n' => count($imputadas),
-                'imputadas_a_pagar' => round(array_sum(array_column($imputadas, 'a_pagar')), 2)
+                'imputadas_a_pagar' => round(array_sum(array_column($imputadas, 'a_pagar')), 2),
+                'pagadas_sin_imputar_n' => $pagadasSin['n'],
+                'pagadas_sin_imputar_importe' => round($pagadasSin['importe'], 2)
             ],
             'avisos' => $avisos
         ];
@@ -1038,9 +1175,9 @@ class AlquileresImputacion {
     }
 
     /** Una fila de la grilla de Facturas */
-    private static function filaFactura($p, $vtos, $habiles, $hoy, $estado, $g, $f) {
+    private static function filaFactura($p, $vtos, $dias, $habiles, $hoy, $estado, $g, $f) {
         $c = self::claveCuota($p);
-        $vto = self::vtoAConsiderar($p, $vtos);
+        $vto = self::vtoAConsiderar($p, $vtos, $dias);
         $pendiente = round((float) $p['IMPORTE_PENDIENTE'], 2);
         $ret = ($f === null) ? null : round((float) $f['RETENCION'], 2);
         $dia = in_array($estado, [self::SIN_IMPUTAR, self::IMPUTADA, self::PARCIAL, self::SUSPENDIDA], true)
@@ -1057,10 +1194,16 @@ class AlquileresImputacion {
             'vto_tango' => substr((string) $p['FECHA_VTO'], 0, 10),
             'vto_considerar' => $vto,
             'vto_editado' => isset($vtos[$c]) ? $vtos[$c] : null,
+            'vto_parametro' => self::vtoDeParametro($p, $dias),
+            'vto_origen' => self::origenVto($p, $vtos, $dias),
             'fecha_pago' => ($dia === null) ? null : $dia['fecha'],
             'nota_fecha' => ($dia === null) ? '' : self::notaFecha($dia),
             'importe' => isset($p['IMPORTE_VTO']) ? $p['IMPORTE_VTO'] : null,
             'pendiente' => $pendiente,
+            /* Lo que se imputa: el pendiente, o el importe de una cuota ya pagada. */
+            'a_imputar' => ($estado === self::PAGADA_SIN_IMPUTAR) ? round((float) $p['IMPORTE_VTO'], 2) : $pendiente,
+            /* Emitida en el mes en curso: las pagadas del mes se ven sin "Ver pagadas". */
+            'del_mes' => substr((string) ($p['FECHA_EMIS'] ?? ''), 0, 7) === substr($hoy, 0, 7),
             'neto_gravado' => AlquileresFacturas::netoDeCuota($p),
             'retencion' => $ret,
             'a_pagar' => round($pendiente - ($ret ?? 0.0), 2),

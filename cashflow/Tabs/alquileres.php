@@ -159,14 +159,6 @@
                 </small>
             </div>
         </div>
-
-        <!-- Los cerrados en Lakers no proyectan y no son incompletos: van aparte. -->
-        <div class="card mb-4" id="alqCerradosCard" style="display: none;">
-            <div class="card-body py-2">
-                <small class="text-muted"><strong>Cerrados en Lakers</strong> (no proyectan):
-                    <span id="alqCerrados"></span>. Su venta real se sigue viendo en la sub-pestaña Ventas.</small>
-            </div>
-        </div>
     </div>
 
     <!-- ============================================================
@@ -183,7 +175,9 @@
                     <small class="text-muted">
                         <span class="badge alq-origen-REAL">Real</span> de la app ·
                         <span class="badge alq-origen-ESTIMADA">Estimada</span> la venta del canal Locales repartida por participación ·
-                        <span class="badge alq-origen-MANUAL">Manual</span> la de Parámetros, para locales nuevos.
+                        <span class="badge alq-origen-MANUAL">Manual</span> la de Parámetros, para locales nuevos ·
+                        <span class="badge alq-origen-REAL_PROYECTADA">Real + proyectada</span> el mes en curso: lo
+                        vendido hasta ayer más la estimada del mes por los días que faltan.
                         <span id="alqVentasPeriodo"></span>
                     </small>
                 </div>
@@ -285,7 +279,7 @@
                     </select>
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="alqFactVerPagadas">
-                        <label class="form-check-label small" for="alqFactVerPagadas">Ver pagadas</label>
+                        <label class="form-check-label small" for="alqFactVerPagadas" title="Las pagadas de este mes se ven siempre">Ver pagadas de meses anteriores</label>
                     </div>
                     <button id="btnAlqImputar" class="btn btn-sm btn-primary" disabled
                             title="Tildá una o varias facturas, de una o varias razones sociales">

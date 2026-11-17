@@ -27,6 +27,8 @@
 
     var ESTADOS_PENDIENTES = ['SIN_IMPUTAR', 'IMPUTADA', 'PARCIAL', 'SUSPENDIDA'];
     var ESTADOS_PAGADAS = ['PAGADA'];
+    /* Las que se pueden tildar e imputar: las pendientes y las ya pagadas del mes que nadie imputo. */
+    var ESTADOS_IMPUTABLES = ESTADOS_PENDIENTES.concat(['PAGADA_SIN_IMPUTAR']);
 
     function puedeEditar() {
         return Permisos.puedeEditar('alqFactBody') && datos && datos.tablas;
@@ -71,7 +73,9 @@
         var k = datos.kpis || {};
 
         texto('alqFactKpiSin', importe(k.sin_imputar_importe));
-        texto('alqFactKpiSinPie', (k.sin_imputar_n || 0) + ' factura(s): no suman en ningún lado hasta que se imputen');
+        texto('alqFactKpiSinPie', (k.sin_imputar_n || 0) + ' factura(s): no suman en ningún lado hasta que se imputen'
+            + (k.pagadas_sin_imputar_n ? ' · ' + k.pagadas_sin_imputar_n + ' pagada(s) del mes sin imputar por '
+                + importeTexto(k.pagadas_sin_imputar_importe) : ''));
         texto('alqFactKpiImp', importe(k.imputadas_a_pagar));
         texto('alqFactKpiImpPie', (k.imputadas_n || 0) + ' factura(s) · pendiente − retención');
         texto('alqFactKpiReemp', String(datos.reemplazados || 0));
@@ -85,7 +89,8 @@
         return datos.filas.filter(function(f) {
             if (r && f.cod_provee !== r) { return false; }
             if (e && f.estado !== e) { return false; }
-            if (!pagadas && ESTADOS_PAGADAS.indexOf(f.estado) !== -1) { return false; }
+            /* Las pagadas del mes se ven siempre; las anteriores, con "Ver pagadas". */
+            if (!pagadas && !f.del_mes && ESTADOS_PAGADAS.indexOf(f.estado) !== -1) { return false; }
 
             return true;
         });
@@ -107,7 +112,7 @@
         }
 
         html('alqFactBody', filas.map(function(f) {
-            var tildable = edita && ESTADOS_PENDIENTES.indexOf(f.estado) !== -1;
+            var tildable = edita && ESTADOS_IMPUTABLES.indexOf(f.estado) !== -1;
 
             return '<tr data-clave="' + esc(f.clave) + '">'
                 + '<td class="text-center" data-exportar-omitir>' + (tildable
@@ -159,12 +164,18 @@
     function chipEstado(f) {
         var cls = { SIN_IMPUTAR: 'bg-danger', IMPUTADA: 'bg-success', PARCIAL: 'bg-warning text-dark',
                     PAGADA: 'bg-secondary', ANULADA: 'bg-warning text-dark', SIN_DATO: 'bg-warning text-dark',
-                    SUSPENDIDA: 'bg-warning text-dark' }[f.estado] || 'bg-light text-dark';
+                    SUSPENDIDA: 'bg-warning text-dark', PAGADA_SIN_IMPUTAR: 'bg-danger' }[f.estado] || 'bg-light text-dark';
         var t = datos.estados[f.estado] || f.estado;
         var tip = f.imputacion ? 'Imputación ' + f.imputacion + '\n'
             + Auditoria.texto({ alta: { usuario: f.imputacion_usuario, fecha: f.imputacion_fecha } }) : '';
 
-        if (f.estado === 'PAGADA' && f.fecha_pagada) { tip += '\nPagada en Tango el ' + fecha(f.fecha_pagada); }
+        if ((f.estado === 'PAGADA' || f.estado === 'PAGADA_SIN_IMPUTAR') && f.fecha_pagada) {
+            tip += '\nPagada en Tango el ' + fecha(f.fecha_pagada);
+        }
+        if (f.estado === 'PAGADA_SIN_IMPUTAR') {
+            tip += '\nNo se paga otra vez, pero la proyección de lo que cubre sigue en el flujo hasta que se impute '
+                + '(por su importe, ' + importeTexto(f.a_imputar) + ').';
+        }
         if (f.pendiente_al_imputar !== null && f.estado !== 'PAGADA' && Math.abs(f.pendiente_al_imputar - f.pendiente) > 0.005) {
             tip += '\nAl imputar el pendiente era ' + importeTexto(f.pendiente_al_imputar) + ': revisá la imputación.';
         }
@@ -172,20 +183,33 @@
         return '<span class="badge ' + cls + '" title="' + esc(tip) + '">' + esc(t) + '</span>';
     }
 
-    /** El vencimiento a considerar: input que guarda al cambiar, mínimo hoy, y ↺ al de Tango */
+    /**
+     * El vencimiento a considerar: la fecha manual, o el día de Parámetros de la
+     * razón social en el mes del vencimiento de Tango. Input que guarda al
+     * cambiar, mínimo hoy, y ↺ a la de Parámetros.
+     */
     function celdaVto(f, edita) {
         var ed = f.vto_editado;
+        var sinEditar = f.vto_origen === 'TANGO'
+            ? 'el de Tango (la razón social no tiene día de vencimiento en Parámetros, ni hay uno general)'
+            : 'el ' + fecha(f.vto_parametro) + ', por el día de vencimiento de la razón social en Parámetros';
         var titulo = ed
-            ? 'Cambiado en esta pestaña. En Tango vence el ' + fecha(f.vto_tango) + '.'
+            ? 'Cambiado en esta pestaña. Sin el cambio sería ' + sinEditar + '. En Tango vence el '
+              + fecha(f.vto_tango) + '.'
               + (ed.MOTIVO ? '\nMotivo: ' + ed.MOTIVO : '')
               + '\n' + Auditoria.texto({ alta: { usuario: ed.USUARIO_ALTA, fecha: ed.FECHA_ALTA } })
-            : 'El de Tango. Es la fecha en que se paga si está imputada.';
+            : (f.vto_origen === 'TANGO' ? 'El de Tango: la razón social no tiene día de vencimiento en '
+                + 'Parámetros, ni hay uno general.'
+              : 'El día de vencimiento de la razón social en Parámetros (o el general), en el mes del '
+                + 'vencimiento de Tango (' + fecha(f.vto_tango) + ').')
+              + '\nEs la fecha en que se paga si está imputada.';
+        var chip = ed ? ' <span class="badge bg-info text-dark">cambiado</span>'
+            : (f.vto_origen === 'TANGO' ? ' <span class="badge bg-light text-dark border">Tango</span>' : '');
         var nota = f.nota_fecha ? '<div class="small text-muted">' + esc(f.nota_fecha) + '</div>' : '';
 
         if (!edita || ESTADOS_PENDIENTES.indexOf(f.estado) === -1) {
             return '<td data-orden="' + esc(f.vto_considerar) + '" title="' + esc(titulo) + '">'
-                + fecha(f.vto_considerar) + (ed ? ' <span class="badge bg-info text-dark">cambiado</span>' : '')
-                + nota + '</td>';
+                + fecha(f.vto_considerar) + chip + nota + '</td>';
         }
 
         return '<td data-orden="' + esc(f.vto_considerar) + '">'
@@ -193,9 +217,10 @@
             +   '<input type="date" class="form-control form-control-sm alq-vto" value="' + esc(f.vto_considerar) + '"'
             +   ' min="' + esc(hoy) + '" data-cod="' + esc(f.cod_provee) + '" data-tcomp="' + esc(f.t_comp) + '"'
             +   ' data-ncomp="' + esc(f.n_comp) + '" data-vto-tango="' + esc(f.vto_tango) + '"'
+            +   ' data-vto-base="' + esc(f.vto_parametro) + '"'
             +   ' data-vigente="' + esc(f.vto_considerar) + '" title="' + esc(titulo) + '">'
             +   (ed ? '<button class="btn btn-outline-secondary alq-vto-volver" type="button" title="Volver al '
-                    + 'vencimiento de Tango (' + esc(fecha(f.vto_tango)) + ')"><i class="fas fa-rotate-left"></i></button>' : '')
+                    + 'vencimiento sin editar (' + esc(fecha(f.vto_parametro)) + ')"><i class="fas fa-rotate-left"></i></button>' : '')
             + '</div>' + nota + '</td>';
     }
 
@@ -224,7 +249,8 @@
         Notificacion.pedirTexto({
             titulo: 'Vencimiento a considerar',
             mensaje: cuota.t_comp + ' ' + cuota.n_comp + ' de ' + cuota.cod_provee + ': se paga el ' + fecha(nueva) + '.',
-            detalle: 'En Tango vence el ' + fecha(cuota.vto_tango) + ' y ahí no cambia.',
+            detalle: 'En Tango vence el ' + fecha(cuota.vto_tango) + ' y ahí no cambia. Elegir el '
+                + fecha(input.getAttribute('data-vto-base')) + ' quita la fecha manual.',
             etiqueta: 'Motivo',
             opcional: true,
             maxlargo: 300,
@@ -337,10 +363,11 @@
         renglones = [nuevoRenglon(fs)];
         html('alqImpFacturas', fs.map(function(f, i) {
             return '<tr><td>' + esc(f.razon || f.cod_provee) + '</td><td>' + esc(f.t_comp + ' ' + f.n_comp) + '</td>'
-                + '<td>' + fecha(f.vto_considerar) + '</td><td class="text-end">' + importe(f.pendiente) + '</td>'
+                + '<td>' + fecha(f.vto_considerar) + '</td><td class="text-end">' + importe(f.a_imputar)
+                + (f.estado === 'PAGADA_SIN_IMPUTAR' ? ' <span class="badge bg-secondary">pagada</span>' : '') + '</td>'
                 + '<td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end alq-imp-ret" '
                 + 'data-i="' + i + '" value="' + (f.retencion !== null ? f.retencion : '') + '" placeholder="sugerida al previsualizar"></td>'
-                + '<td class="text-end alq-imp-apagar" data-i="' + i + '">' + importe(f.pendiente - (f.retencion || 0)) + '</td></tr>';
+                + '<td class="text-end alq-imp-apagar" data-i="' + i + '">' + importe(f.a_imputar - (f.retencion || 0)) + '</td></tr>';
         }).join(''));
 
         document.querySelectorAll('#alqImpFacturas .alq-imp-ret').forEach(function(inp) {
@@ -361,7 +388,7 @@
     }
 
     function totalFacturas(fs) {
-        return (fs || tildadas()).reduce(function(a, f) { return a + f.pendiente; }, 0);
+        return (fs || tildadas()).reduce(function(a, f) { return a + f.a_imputar; }, 0);
     }
 
     function razonesTildadas() {
@@ -374,7 +401,11 @@
 
     function dibujarRenglones() {
         var razones = razonesTildadas();
-        var locales = (datos.locales || []).filter(function(l) { return razones[l.cod_provee]; });
+        /* Los locales de cualquiera de sus razones sociales: la principal o una
+           adicional (San Justo recibe facturas de SASANJ y de SAUCCS). */
+        var locales = (datos.locales || []).filter(function(l) {
+            return (l.razones || [l.cod_provee]).some(function(c) { return razones[c]; });
+        });
         var nombresGrupo = datos.nombres_grupo || {};
 
         html('alqImpRenglones', renglones.map(function(r, i) {
@@ -477,7 +508,7 @@
             var f = fs[Number(inp.getAttribute('data-i'))];
             var celda = document.querySelector('#alqImpFacturas .alq-imp-apagar[data-i="' + inp.getAttribute('data-i') + '"]');
 
-            if (celda) { celda.textContent = importeTexto(f.pendiente - (Number(inp.value) || 0)); }
+            if (celda) { celda.textContent = importeTexto(f.a_imputar - (Number(inp.value) || 0)); }
         });
 
         html('alqImpTotales', '<span>Facturas: <strong>' + importe(tf) + '</strong></span>'
@@ -496,7 +527,7 @@
                 var v = rets[i] ? rets[i].value : '';
 
                 return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango,
-                         pendiente: f.pendiente, retencion: v === '' ? null : Number(v) };
+                         pendiente: f.a_imputar, retencion: v === '' ? null : Number(v) };
             }),
             renglones: renglones.map(function(r) {
                 return { conceptos: r.conceptos, locales: r.todos_de ? [] : r.locales, todos_de: r.todos_de || null,

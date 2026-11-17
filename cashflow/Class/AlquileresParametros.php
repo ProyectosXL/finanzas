@@ -44,6 +44,30 @@ class AlquileresParametros {
 
     const TABLAS = [self::T_GENERAL, self::T_RAZON, self::T_LOCAL, self::T_EXTRA, self::T_EXTRA_LOCAL];
 
+    /**
+     * Las razones sociales ADICIONALES de un local (script 58). No esta en
+     * TABLAS: sin ella todo funciona como antes, con una razon por local, y lo
+     * que falla -con el nombre del script- es agregar una adicional.
+     */
+    const T_LOCAL_RAZON = 'RO_T_CASHFLOW_ALQ_LOCAL_RAZON';
+    const SCRIPT_RAZONES_LOCAL = 'sql/cashflow_alquileres_local_razones.sql';
+
+    /**
+     * SEGUN QUE PROYECTA UN LOCAL (script 59, columnas MODO_PROYECCION y
+     * FECHA_INICIO de RO_T_CASHFLOW_ALQ_LOCAL):
+     *   APERTURA  mientras este abierto en Lakers; el vencimiento del contrato
+     *             solo avisa (se asume la renovacion). Es el de siempre.
+     *   VIGENCIA  solo en los meses de sus contratos de la app de alquileres
+     *             (RO_T_CONTRATOS_ALQUILERES, AlquileresApp::contratos()): los
+     *             locales temporales, como XL RURAL. Las fechas NO se cargan aca.
+     *   FECHA_FIN y FECHA_INICIO de la tabla ya no se usan: la vigencia es la
+     *   de los contratos de la app.
+     */
+    const MODO_APERTURA = 'APERTURA';
+    const MODO_VIGENCIA = 'VIGENCIA';
+    const MODOS = [self::MODO_APERTURA => 'Apertura (Lakers)', self::MODO_VIGENCIA => 'Vigencia del contrato'];
+    const SCRIPT_VIGENCIA = 'sql/cashflow_alquileres_local_vigencia.sql';
+
     /** El valor de la columna RUBRO del maestro que arma el buscador */
     const RUBRO = 'ALQUILER';
 
@@ -59,6 +83,12 @@ class AlquileresParametros {
 
     /** @var string[]|null */
     private $faltan = null;
+
+    /** @var bool|null */
+    private $tablaRazonesLocal = null;
+
+    /** @var bool|null */
+    private $columnasVigencia = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -158,10 +188,27 @@ class AlquileresParametros {
 
         $cod = trim((string) ($d['cod_provee'] ?? ''));
         $fin = trim((string) ($d['fecha_fin'] ?? ''));
+        $inicio = trim((string) ($d['fecha_inicio'] ?? ''));
 
         if ($fin !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $fin)) {
-            throw new InvalidArgumentException('La fecha de fin tiene que ser una fecha (AAAA-MM-DD).');
+            throw new InvalidArgumentException('El vencimiento del contrato tiene que ser una fecha (AAAA-MM-DD).');
         }
+
+        if ($inicio !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $inicio)) {
+            throw new InvalidArgumentException('El inicio del contrato tiene que ser una fecha (AAAA-MM-DD).');
+        }
+
+        if ($inicio !== '' && $fin !== '' && $inicio > $fin) {
+            throw new InvalidArgumentException('El inicio del contrato no puede ser posterior a su vencimiento.');
+        }
+
+        $modo = strtoupper(trim((string) ($d['modo'] ?? '')));
+        $modo = ($modo === '') ? self::MODO_APERTURA : $modo;
+
+        if (!isset(self::MODOS[$modo])) {
+            throw new InvalidArgumentException('Proyecta según: tiene que ser apertura o vigencia del contrato.');
+        }
+
 
         $venta = trim(str_replace(',', '.', (string) ($d['venta_mensual_estimada'] ?? '')));
 
@@ -177,6 +224,8 @@ class AlquileresParametros {
             'pct_percepcion' => self::porcentaje($d['pct_percepcion'] ?? null, 'El % percepción'),
             'pct_retencion' => self::porcentaje($d['pct_retencion'] ?? null, 'El % retención'),
             'fecha_fin' => ($fin === '') ? null : $fin,
+            'fecha_inicio' => ($inicio === '') ? null : $inicio,
+            'modo' => $modo,
             'venta_mensual_estimada' => ($venta === '') ? null : round((float) $venta, 2)
         ];
     }
@@ -290,6 +339,28 @@ class AlquileresParametros {
         return empty($this->tablasFaltantes());
     }
 
+    /** @return bool Si ya se corrio el script 59 (proyectar segun apertura o vigencia) */
+    public function columnasVigenciaCreadas() {
+        if ($this->columnasVigencia === null) {
+            $row = $this->fila("SELECT COL_LENGTH(?, 'MODO_PROYECCION') AS M, COL_LENGTH(?, 'FECHA_INICIO') AS I",
+                ['dbo.' . self::T_LOCAL, 'dbo.' . self::T_LOCAL], 'Error al verificar las columnas de vigencia');
+            $this->columnasVigencia = ($row !== null && $row['M'] !== null && $row['I'] !== null);
+        }
+
+        return $this->columnasVigencia;
+    }
+
+    /** @return bool Si ya se corrio el script de las razones adicionales de un local */
+    public function tablaRazonesLocalCreada() {
+        if ($this->tablaRazonesLocal === null) {
+            $row = $this->fila("SELECT OBJECT_ID(?, 'U') AS ID", ['dbo.' . self::T_LOCAL_RAZON],
+                               'Error al verificar las tablas de alquileres');
+            $this->tablaRazonesLocal = ($row !== null && $row['ID'] !== null);
+        }
+
+        return $this->tablaRazonesLocal;
+    }
+
     public function avisoSinTabla() {
         return $this->tablaCreada() ? ''
             : 'Falta correr ' . self::SCRIPT . ' contra la base central: no existen '
@@ -375,8 +446,11 @@ class AlquileresParametros {
             return [];
         }
 
+        /* Sin el script 59 no hay MODO_PROYECCION ni FECHA_INICIO: todos son APERTURA. */
+        $vig = $this->columnasVigenciaCreadas();
         $sql = "SELECT NRO_SUCURS, COD_PROVEE, FRECUENCIA_MESES, MES_ULT_AJUSTE, PCT_IVA, PCT_PERCEPCION,
-                       PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, USUARIO_MODIF, FECHA_MODIF
+                       PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, USUARIO_MODIF, FECHA_MODIF"
+              . ($vig ? ", MODO_PROYECCION, FECHA_INICIO" : ", NULL AS MODO_PROYECCION, NULL AS FECHA_INICIO") . "
                 FROM dbo." . self::T_LOCAL . " WHERE VIGENTE = 1";
 
         $out = [];
@@ -391,10 +465,26 @@ class AlquileresParametros {
                 'pct_retencion' => self::numero($r['PCT_RETENCION']),
                 'fecha_fin' => ($r['FECHA_FIN'] instanceof DateTime) ? $r['FECHA_FIN']->format('Y-m-d')
                     : (($r['FECHA_FIN'] === null) ? null : substr((string) $r['FECHA_FIN'], 0, 10)),
+                'fecha_inicio' => ($r['FECHA_INICIO'] instanceof DateTime) ? $r['FECHA_INICIO']->format('Y-m-d')
+                    : (($r['FECHA_INICIO'] === null) ? null : substr((string) $r['FECHA_INICIO'], 0, 10)),
+                'modo' => ($r['MODO_PROYECCION'] === self::MODO_VIGENCIA) ? self::MODO_VIGENCIA : self::MODO_APERTURA,
                 'venta_mensual_estimada' => self::numero($r['VENTA_MENSUAL_ESTIMADA']),
+                'adicionales' => [],
                 'usuario' => $r['USUARIO_MODIF'],
                 'fecha' => self::momento($r['FECHA_MODIF'])
             ];
+        }
+
+        /* LAS RAZONES ADICIONALES, en el orden en que se agregaron. Solo las de
+           un local con fila: sin principal no se puede agregar una. */
+        if ($this->tablaRazonesLocalCreada()) {
+            foreach ($this->filas("SELECT NRO_SUCURS, COD_PROVEE FROM dbo." . self::T_LOCAL_RAZON
+                                  . " WHERE VIGENTE = 1 ORDER BY ID", [],
+                                  'Error al leer las razones sociales adicionales de los locales') as $r) {
+                if (isset($out[(int) $r['NRO_SUCURS']])) {
+                    $out[(int) $r['NRO_SUCURS']]['adicionales'][] = $r['COD_PROVEE'];
+                }
+            }
         }
 
         return $out;
@@ -568,20 +658,110 @@ class AlquileresParametros {
         }
 
         $nombre = mb_substr((string) $universo[$n]['nombre'], 0, 100);
+        $vig = $this->columnasVigenciaCreadas();
 
-        $this->enTransaccion(function () use ($n, $v, $nombre, $usuario) {
+        /* SIN EL SCRIPT 59 se guarda como siempre; lo unico que no se puede es
+           elegir VIGENCIA o cargar el inicio, y se dice por que. */
+        if (!$vig && ($v['modo'] === self::MODO_VIGENCIA || $v['fecha_inicio'] !== null)) {
+            throw new InvalidArgumentException('Todavía no se puede proyectar según la vigencia del contrato: falta '
+                . 'correr ' . self::SCRIPT_VIGENCIA . ' contra la base central.');
+        }
+
+        $this->enTransaccion(function () use ($n, $v, $nombre, $usuario, $vig) {
             $this->darDeBaja(self::T_LOCAL, "NRO_SUCURS = ? AND VIGENTE = 1", [$n], $usuario);
             $this->ejecutar("INSERT INTO dbo." . self::T_LOCAL
                 . " (NRO_SUCURS, DESC_SUCURS, COD_PROVEE, FRECUENCIA_MESES, MES_ULT_AJUSTE, PCT_IVA, PCT_PERCEPCION,
-                     PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-                [$n, $nombre, $v['cod_provee'], $v['frecuencia'], $v['mes_ajuste'], $v['pct_iva'],
+                     PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, VIGENTE, USUARIO_ALTA, USUARIO_MODIF"
+                . ($vig ? ", MODO_PROYECCION, FECHA_INICIO" : "") . ")
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?" . ($vig ? ", ?, ?" : "") . ")",
+                array_merge([$n, $nombre, $v['cod_provee'], $v['frecuencia'], $v['mes_ajuste'], $v['pct_iva'],
                  $v['pct_percepcion'], $v['pct_retencion'], $v['fecha_fin'], $v['venta_mensual_estimada'],
-                 $usuario, $usuario],
+                 $usuario, $usuario], $vig ? [$v['modo'], $v['fecha_inicio']] : []),
                 'Error al guardar los datos del local');
         });
 
         return ['nro' => $n] + $v;
+    }
+
+    /**
+     * Valida agregar una razon social adicional a un local. Pura.
+     *
+     * @param string $cod
+     * @param array|null $local La fila vigente del local (locales()), null si no tiene
+     * @param array $razones COD_PROVEE => ... de las dadas de alta
+     * @param string $nombreLocal
+     * @return string El codigo, normalizado
+     * @throws InvalidArgumentException
+     */
+    public static function validarRazonLocal($cod, $local, $razones, $nombreLocal) {
+        $c = Planilla::codigo($cod);
+
+        if ($c === '') {
+            throw new InvalidArgumentException('Elegí la razón social a agregar.');
+        }
+
+        if (!isset($razones[$c])) {
+            throw new InvalidArgumentException('La razón social ' . $c . ' no está dada de alta en la sección '
+                . 'Razones sociales.');
+        }
+
+        if ($local === null || ($local['cod_provee'] ?? null) === null || $local['cod_provee'] === '') {
+            throw new InvalidArgumentException($nombreLocal . ' todavía no tiene razón social principal: elegila '
+                . 'primero. La principal es la que da el día de vencimiento y el diferimiento.');
+        }
+
+        if (Planilla::codigo($local['cod_provee']) === $c) {
+            throw new InvalidArgumentException($c . ' ya es la razón social principal de ' . $nombreLocal . '.');
+        }
+
+        if (in_array($c, array_map(['Planilla', 'codigo'], $local['adicionales'] ?? []), true)) {
+            throw new InvalidArgumentException($c . ' ya es una razón social de ' . $nombreLocal . '.');
+        }
+
+        return $c;
+    }
+
+    /**
+     * Agrega una razon social adicional a un local: sus facturas se pueden
+     * imputar a el y sus extraordinarios lo alcanzan. NO cambia ninguna fecha
+     * proyectada: el dia y el diferimiento son los de la principal.
+     *
+     * @param array $universo NRO_SUCURS => ['nombre', ...] de AlquileresApp::locales()
+     * @return array ['nro', 'cod']
+     */
+    public function altaRazonLocal($nro, $cod, $universo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablas();
+        $this->exigirTablaRazonesLocal();
+        $n = (int) $nro;
+
+        if (!isset($universo[$n])) {
+            throw new InvalidArgumentException('El local ' . $n . ' no es un local de la app de alquileres.');
+        }
+
+        $c = self::validarRazonLocal($cod, $this->locales()[$n] ?? null, $this->razonesVigentes(),
+                                     $universo[$n]['nombre']);
+
+        $this->ejecutar("INSERT INTO dbo." . self::T_LOCAL_RAZON
+            . " (NRO_SUCURS, COD_PROVEE, VIGENTE, USUARIO_ALTA, USUARIO_MODIF) VALUES (?, ?, 1, ?, ?)",
+            [$n, $c, $usuario, $usuario], 'Error al agregar la razón social al local');
+
+        return ['nro' => $n, 'cod' => $c];
+    }
+
+    /** Quita una razon social adicional de un local. No se borra: queda en el historial. */
+    public function bajaRazonLocal($nro, $cod, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablaRazonesLocal();
+        $n = (int) $nro;
+        $c = Planilla::codigo($cod);
+
+        if ($this->darDeBaja(self::T_LOCAL_RAZON, "NRO_SUCURS = ? AND COD_PROVEE = ? AND VIGENTE = 1",
+                             [$n, $c], $usuario) < 1) {
+            throw new InvalidArgumentException($c . ' no era una razón social adicional de ese local.');
+        }
+
+        return ['nro' => $n, 'cod' => $c];
     }
 
     /**
@@ -657,6 +837,13 @@ class AlquileresParametros {
     private function exigirTablas() {
         if (!$this->tablaCreada()) {
             throw new Exception($this->avisoSinTabla());
+        }
+    }
+
+    private function exigirTablaRazonesLocal() {
+        if (!$this->tablaRazonesLocalCreada()) {
+            throw new InvalidArgumentException('Todavía no se puede agregar más de una razón social a un local: '
+                . 'falta correr ' . self::SCRIPT_RAZONES_LOCAL . ' contra la base central.');
         }
     }
 

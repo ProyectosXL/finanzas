@@ -339,3 +339,23 @@ if (!Pruebas::hayBase()) {
         !in_array('PROYECTADO', $activas, true) || (in_array('REAL', $activas, true) && !in_array('PAGOS', $activas, true)));
 }
 
+
+seccion('La fecha de fin es el vencimiento del contrato: avisa, no corta');
+
+$contratos = Alquileres::avisoContratos([
+    ['nombre' => 'DISTRITO ARCOS', 'habilitado' => true, 'params' => [],
+     'contratos' => [['desde' => '2023-08-01', 'hasta' => '2026-12-31']]],
+    ['nombre' => 'VIEJO', 'habilitado' => true, 'params' => [],
+     'contratos' => [['desde' => '2023-01-01', 'hasta' => '2025-10-31'], ['desde' => '2025-11-01', 'hasta' => '2026-10-31']]],
+    ['nombre' => 'LEJOS', 'habilitado' => true, 'params' => [], 'contratos' => [['desde' => '2026-01-01', 'hasta' => '2029-01-01']]],
+    ['nombre' => 'CERRADO', 'habilitado' => false, 'params' => [], 'contratos' => [['desde' => '2025-01-01', 'hasta' => '2026-01-01']]],
+    ['nombre' => 'TEMPORAL', 'habilitado' => true, 'params' => ['modo' => 'VIGENCIA'],
+     'contratos' => [['desde' => '2026-02-03', 'hasta' => '2026-03-03']]],
+    ['nombre' => 'SIN', 'habilitado' => true, 'params' => [], 'contratos' => []]
+], '2026-11-17', '2027-10');
+chequear('vencido: atencion, con el ultimo contrato; ni el cerrado ni el temporal', [Aviso::WARNING, true, false, false],
+    [$contratos[0]['nivel'], strpos($contratos[0]['texto'], 'VIEJO (31/10/2026)') !== false,
+     strpos($contratos[0]['texto'], 'CERRADO') !== false, strpos($contratos[0]['texto'], 'TEMPORAL') !== false]);
+chequear('por vencer dentro del horizonte: informativo, y el de 2029 no', [Aviso::INFO, true, false],
+    [$contratos[1]['nivel'], strpos($contratos[1]['texto'], 'DISTRITO ARCOS') !== false,
+     strpos($contratos[1]['texto'], 'LEJOS') !== false]);

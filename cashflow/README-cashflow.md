@@ -440,6 +440,22 @@ Para verificar después de correrlos:
 - *Marcar hábil* un feriado bancario y después *Quitar ajuste*: vuelve a *Calendario bancario*.
 - Un rol que editaba Generales puede cambiar el día de un concepto del cronograma.
 
+### Alquileres: el vencimiento de las facturas y más de una razón social por local (`feature/alquileres-vto-y-razones`)
+
+Dos cambios en Alquileres (ver `README-alquileres.md`, partes 3.c y 12):
+
+- **El vencimiento a considerar de una factura sale de Parámetros**: fecha manual > día de la razón social (o el general) en el mes del vencimiento de Tango. **No lleva script.** Al 17/11/2026 mueve 2 de las 4 cuotas pendientes (SAGALL A0005000027187 del 20/11 al 18/11; SACORR A0000200000467 del 18/11 al 15/11, vencida).
+- **Un local puede tener razones sociales adicionales** (San Justo: SASANJ y SAUCCS). La principal sigue mandando en la proyección (día y diferimiento); una adicional permite imputar sus facturas al local y que sus extraordinarios lo alcancen.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 58 | `sql/cashflow_alquileres_local_razones.sql` | Crea `RO_T_CASHFLOW_ALQ_LOCAL_RAZON` (una vigente por local y razón social, con historial). No migra nada: sin filas, todo sigue como hoy | Todo anda como hoy, con una razón por local; en Parámetros › Alquileres › Locales el *+ otra razón social* está deshabilitado y nombra el script |
+| 59 | `sql/cashflow_alquileres_local_vigencia.sql` | Agrega `MODO_PROYECCION` (`APERTURA` / `VIGENCIA`; NULL = apertura) a `RO_T_CASHFLOW_ALQ_LOCAL`, con su `CHECK`, y `FECHA_INICIO`, sin uso: según vigencia, los meses salen de los contratos de la app (`RO_T_CONTRATOS_ALQUILERES`) | Todos proyectan según apertura; *Proyecta según* queda deshabilitado y nombra el script |
+
+Los dos contra `central`, después del 51, en cualquier orden. Reejecutables. **Ningún número cambia al correrlos**: lo que cambia algo es agregar una razón adicional a un local, o pasar un local a *Vigencia del contrato* (XL RURAL, el temporal de La Rural).
+
+Para verificar después de correrlo: en Parámetros › Alquileres › Locales, San Justo → *+ otra razón social* → URBANA CENTROS COMERCIALES; en Alquileres › Facturas, tildar una factura de SAUCCS e imputarla a San Justo.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -500,6 +516,8 @@ En este orden, contra `central`:
 -- 54. sql/cashflow_prov_exclusion_modulos_ampliar.sql  (exclusion de proveedores: Tarjetas y Alquileres)
 -- 55. sql/cashflow_alquileres_fila.sql             (la fila Alquileres, real y proyectado)
 -- 56. sql/cashflow_parametros_calendario.sql       (Parametros > Calendario: ajustes de feriados bancarios)
+-- 58. sql/cashflow_alquileres_local_razones.sql  (Alquileres: mas de una razon social por local)
+-- 59. sql/cashflow_alquileres_local_vigencia.sql  (Alquileres: proyectar segun apertura o vigencia del contrato)
 ```
 
 **El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento. **El 57, `sql/cashflow_calendario_permisos.sql`, también va contra `apps`**, antes de publicar el código de Calendario: le da la edición de Calendario a quien hoy edita Generales.

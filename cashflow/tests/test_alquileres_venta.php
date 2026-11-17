@@ -87,6 +87,67 @@ foreach ([1, 2, 3] as $n) {
 }
 chequear('dic: la suma de los locales es el canal al centavo', 1234567.89, round($sumaDic, 2));
 
+seccion('AlquileresVenta: el mes en curso es la real + lo que falta vender');
+
+/* Hoy 21/11 (30 dias): faltan 10, hoy incluido. El local 3 vendio 300000
+   neto (363000 bruto) hasta ayer y estima 700000 bruto el mes completo. */
+$enCurso = $base + ['hoy' => '2026-11-21'];
+$enCurso['netas'][3]['2026-11'] = 300000.0;
+$enCurso['brutas'][3]['2026-11'] = 363000.0;
+$ec = AlquileresVenta::calcular($enCurso)['ventas'][3]['2026-11'];
+chequear('origen Real + proyectada', AlquileresVenta::REAL_PROYECTADA, $ec['origen']);
+chequear('bruta: la real + la estimada del mes x 10/30', round(363000.0 + 700000.0 * 10 / 30, 2), $ec['bruta']);
+chequear('neta: la real + la proyectada bruta / 1,21', round(300000.0 + round(700000.0 * 10 / 30, 2) / 1.21, 2),
+    $ec['neta']);
+chequear('la celda separa la real de la proyectada', [363000.0, 300000.0, 10, 30],
+    [$ec['real_bruta'], $ec['real_neta'], $ec['dias_restantes'], $ec['dias_mes']]);
+chequear('un mes anterior con real sigue siendo Real', 'REAL',
+    AlquileresVenta::calcular($enCurso)['ventas'][1]['2026-10']['origen']);
+chequear('sin hoy, como antes: la real sola', 'REAL',
+    AlquileresVenta::calcular(array_diff_key($enCurso, ['hoy' => 1]))['ventas'][3]['2026-11']['origen']);
+$primero = AlquileresVenta::calcular(['hoy' => '2026-11-01'] + $enCurso)['ventas'][3]['2026-11'];
+chequear('el dia 1 falta el mes entero', round(363000.0 + 700000.0, 2), $primero['bruta']);
+
+seccion('AlquileresVenta: un nuevo sin venta manual reparte con su participacion propia');
+
+/* El 6 tiene 6 meses de 100 (Malvinas tiene 8): contra 100 + 200 + 700 de
+   los de 12 meses en esos mismos meses, pesa 0,1. Todo se normaliza: 1,1. */
+$propio = $base;
+$propio['locales'][6] = ['activo' => true, 'activo_hasta' => null, 'manual' => null];
+$propio['netas'][6] = array_slice(doceMeses($ventana, 100), -6, null, true);
+$pp = AlquileresVenta::calcular($propio);
+chequear('sigue siendo nuevo', true, in_array(6, $pp['nuevos'], true));
+chequear('pero tiene participacion: su venta sobre la de los demas en sus meses', round(0.1 / 1.1, 6),
+    round($pp['participacion'][6], 6));
+chequear('los de 12 meses se renormalizan', round(0.7 / 1.1, 6), round($pp['participacion'][3], 6));
+chequear('estima con su parte del canal y lo dice', [AlquileresVenta::ESTIMADA, round(1000000.0 * 0.1 / 1.1, 2), 6],
+    [$pp['ventas'][6]['2026-11']['origen'], round($pp['ventas'][6]['2026-11']['bruta'], 2),
+     $pp['ventas'][6]['2026-11']['meses_propia']]);
+$s = 0.0;
+foreach ([1, 2, 3, 6] as $k) { $s += $pp['ventas'][$k]['2026-11']['bruta']; }
+chequear('y la suma sigue siendo el canal al centavo', 1000000.0, round($s, 2));
+$pocos = $propio;
+$pocos['netas'][6] = array_slice(doceMeses($ventana, 100), -2, null, true);
+chequear('con menos de 3 meses, no', null, AlquileresVenta::calcular($pocos)['ventas'][6]['2026-11']);
+$conManual = $propio;
+$conManual['locales'][6]['manual'] = 5000.0;
+chequear('la venta manual manda', AlquileresVenta::MANUAL,
+    AlquileresVenta::calcular($conManual)['ventas'][6]['2026-11']['origen']);
+
+seccion('AlquileresVenta: un mes sin venta proyectada del canal');
+
+/* Octubre sin canal (antes del horizonte): 1 y 2 tienen real, 3 no. El canal
+   sale de la real de 1 y 2 (60500 + 121000 bruto) sobre su participacion
+   (0,3): 605000; al 3 le toca el 70 %. */
+$sinCanal = $base;
+unset($sinCanal['canal']['2026-10']);
+$sinCanal['netas'][2]['2026-10'] = 100000.0;
+$sinCanal['brutas'][2]['2026-10'] = 121000.0;
+$sc = AlquileresVenta::calcular($sinCanal)['ventas'];
+chequear('el que no tiene real se estima con el canal de los reales', [AlquileresVenta::ESTIMADA, 423500.0, true],
+    [$sc[3]['2026-10']['origen'], round($sc[3]['2026-10']['bruta'], 2), $sc[3]['2026-10']['canal_de_reales']]);
+chequear('los que tienen real, real', ['REAL', 'REAL'], [$sc[1]['2026-10']['origen'], $sc[2]['2026-10']['origen']]);
+
 seccion('AlquileresVenta: un local nuevo');
 
 $conNuevo = $base;

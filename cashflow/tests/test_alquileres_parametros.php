@@ -32,8 +32,20 @@ $ok = AlquileresParametros::validarLocal([
     'cod_provee' => 'SAUNIC', 'frecuencia' => '3', 'mes_ajuste' => '9', 'pct_iva' => '23',
     'pct_percepcion' => '0', 'pct_retencion' => '1,5', 'fecha_fin' => '', 'venta_mensual_estimada' => ''
 ]);
-chequear('un trimestral completo', ['SAUNIC', 3, 9, 23.0, 0.0, 1.5, null, null],
+chequear('un trimestral completo, segun apertura por defecto', ['SAUNIC', 3, 9, 23.0, 0.0, 1.5, null, null, 'APERTURA', null],
     array_values($ok));
+$temporal = AlquileresParametros::validarLocal(['modo' => 'vigencia', 'fecha_inicio' => '2027-07-01',
+    'fecha_fin' => '2027-07-31']);
+chequear('un temporal segun la vigencia', ['VIGENCIA', '2027-07-01', '2027-07-31'],
+    [$temporal['modo'], $temporal['fecha_inicio'], $temporal['fecha_fin']]);
+chequear('segun la vigencia no pide fechas: salen de los contratos de la app', 'VIGENCIA',
+    AlquileresParametros::validarLocal(['modo' => 'VIGENCIA'])['modo']);
+chequearLanza('el inicio despues del vencimiento no', function () {
+    AlquileresParametros::validarLocal(['fecha_inicio' => '2027-08-01', 'fecha_fin' => '2027-07-31']);
+});
+chequearLanza('un modo que no existe no', function () {
+    AlquileresParametros::validarLocal(['modo' => 'OTRO']);
+});
 chequear('un IVA de 19 % tambien', 19.0, AlquileresParametros::validarLocal(['pct_iva' => '19'])['pct_iva']);
 chequear('vacio es null, no 0', null, AlquileresParametros::validarLocal(['pct_percepcion' => ''])['pct_percepcion']);
 chequear('0 es 0', 0.0, AlquileresParametros::validarLocal(['pct_retencion' => '0'])['pct_retencion']);
@@ -77,6 +89,30 @@ chequearLanza('un % de 0 no', function () {
 chequearLanza('sin locales ni "todos" no', function () {
     AlquileresParametros::validarExtra(['cod_provee' => 'X', 'conceptos' => [8], 'mes_base' => 1, 'pct' => 1]);
 });
+
+seccion('AlquileresParametros: mas de una razon social por local');
+
+$razVig = ['SASANJ' => ['dia' => null], 'SAUCCS' => ['dia' => null]];
+$sanJusto = ['cod_provee' => 'SASANJ', 'adicionales' => []];
+chequear('una dada de alta que no es la principal se agrega', 'SAUCCS',
+    AlquileresParametros::validarRazonLocal(' sauccs ', $sanJusto, $razVig, 'SAN JUSTO'));
+chequearLanza('una que no esta dada de alta no', function () use ($sanJusto, $razVig) {
+    AlquileresParametros::validarRazonLocal('OGMERC', $sanJusto, $razVig, 'SAN JUSTO');
+});
+chequearLanza('la principal no se repite como adicional', function () use ($sanJusto, $razVig) {
+    AlquileresParametros::validarRazonLocal('SASANJ', $sanJusto, $razVig, 'SAN JUSTO');
+});
+chequearLanza('ni una adicional dos veces', function () use ($razVig) {
+    AlquileresParametros::validarRazonLocal('SAUCCS', ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS']],
+        $razVig, 'SAN JUSTO');
+});
+chequearLanza('sin principal no: la principal da el vencimiento y el diferimiento', function () use ($razVig) {
+    AlquileresParametros::validarRazonLocal('SAUCCS', ['cod_provee' => null], $razVig, 'SAN JUSTO');
+});
+chequear('la tabla de las adicionales no es obligatoria: sin el script 58 todo sigue como antes', false,
+    in_array(AlquileresParametros::T_LOCAL_RAZON, AlquileresParametros::TABLAS, true));
+chequear('el script existe y crea la tabla', true, strpos((string) @file_get_contents(__DIR__ . '/../'
+    . AlquileresParametros::SCRIPT_RAZONES_LOCAL), 'CREATE TABLE dbo.' . AlquileresParametros::T_LOCAL_RAZON) !== false);
 
 seccion('AlquileresParametros: el universo del buscador es la columna RUBRO');
 

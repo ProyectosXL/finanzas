@@ -129,7 +129,9 @@
                     + (r.en_rubro ? '' : ' <span class="badge bg-warning text-dark" title="Sigue de alta: '
                         + 'darla de baja es una decisión">ya no tiene rubro ALQUILER</span>')
                 + '</td>'
-                + '<td class="text-end">' + r.locales + '</td>'
+                + '<td class="text-end"' + (r.locales_adicional ? ' title="' + r.locales + ' como principal y '
+                    + r.locales_adicional + ' como adicional"' : '') + '>' + r.locales
+                    + (r.locales_adicional ? ' <small class="text-muted">+' + r.locales_adicional + '</small>' : '') + '</td>'
                 + '<td><input type="number" min="' + datos.dia_min + '" max="' + datos.dia_max + '" '
                     + 'class="form-control form-control-sm palq-razon" data-campo="dia" placeholder="general" '
                     + 'value="' + (r.dia === null ? '' : r.dia) + '"></td>'
@@ -250,7 +252,7 @@
         }
 
         if (!locales.length) {
-            cuerpo.innerHTML = '<tr><td colspan="11" class="text-center text-muted py-3">'
+            cuerpo.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-3">'
                 + (soloIncompletos ? 'Ningún local incompleto.' : 'No hay locales en la app de alquileres.')
                 + '</td></tr>';
             return;
@@ -262,6 +264,10 @@
         var opFrec = '<option value="">—</option>' + Object.keys(datos.frecuencias).map(function(k) {
             return '<option value="' + k + '">' + esc(datos.frecuencias[k]) + '</option>';
         }).join('');
+        var opModo = Object.keys(datos.modos || {}).map(function(k) {
+            return '<option value="' + k + '">' + esc(datos.modos[k]) + '</option>';
+        }).join('');
+        var sinVigencia = !datos.columnas_vigencia;
         var opMes = '<option value="">—</option>' + MESES.map(function(m, i) {
             return '<option value="' + (i + 1) + '">' + m + '</option>';
         }).join('');
@@ -275,7 +281,7 @@
 
             if (cerrado && !cerradoVisto) {
                 cerradoVisto = true;
-                cabecera = '<tr class="table-light"><td colspan="11" class="small text-muted">'
+                cabecera = '<tr class="table-light"><td colspan="12" class="small text-muted">'
                     + '<strong>Cerrados en Lakers</strong>: no proyectan ni cuentan como incompletos. Sus meses '
                     + 'cerrados en la app se siguen viendo en la pestaña.</td></tr>';
             }
@@ -283,6 +289,7 @@
             /* El IVA arranca con el general hasta que se guarda el del local. */
             var iva = (p.pct_iva === null || p.pct_iva === undefined) ? '' : p.pct_iva;
             var ivaSugerido = (iva === '' && datos.iva_general !== null) ? datos.iva_general : iva;
+            var porVigencia = p.modo === 'VIGENCIA';
 
             return cabecera + '<tr data-nro="' + l.nro + '" class="' + (cerrado ? 'text-muted' : '') + '">'
                 + '<td><strong>' + esc(l.nombre) + '</strong> <small class="text-muted">' + l.nro + '</small>'
@@ -291,15 +298,17 @@
                 + '<td>' + (ESTADO_BADGE[l.estado] || '')
                     + (l.faltan && l.faltan.length ? '<div class="small text-danger">Falta: ' + esc(l.faltan.join(', ')) + '</div>' : '')
                 + '</td>'
-                + '<td>' + select('cod_provee', opRazon, p.cod_provee, cerrado) + '</td>'
+                + '<td>' + select('cod_provee', opRazon, p.cod_provee, cerrado) + adicionales(l, cerrado) + '</td>'
                 + '<td>' + select('frecuencia', opFrec, p.frecuencia, cerrado) + '</td>'
                 + '<td>' + select('mes_ajuste', opMes, p.mes_ajuste, cerrado || String(p.frecuencia) === '1') + '</td>'
                 + '<td>' + input('pct_iva', ivaSugerido, 'decimal', cerrado,
                         iva === '' ? 'Sugerido: la alícuota de Parámetros › Generales. Se guarda al tocar la fila.' : '') + '</td>'
                 + '<td>' + input('pct_percepcion', p.pct_percepcion, 'decimal', cerrado, '0 es un valor; vacío es incompleto') + '</td>'
                 + '<td>' + input('pct_retencion', p.pct_retencion, 'decimal', cerrado, 'Sobre el neto. 0 es un valor; vacío es incompleto') + '</td>'
-                + '<td><input type="date" class="form-control form-control-sm palq-local" data-campo="fecha_fin" value="'
-                    + esc(p.fecha_fin || '') + '"' + (cerrado ? ' disabled' : '') + ' title="Desde el mes siguiente deja de proyectar"></td>'
+                + '<td>' + select('modo', opModo, p.modo || 'APERTURA', cerrado || sinVigencia)
+                    + (sinVigencia ? '<div class="small text-muted" title="Falta correr ' + esc(datos.script_vigencia)
+                        + '">Falta el script</div>' : '') + '</td>'
+                + '<td>' + celdaContrato(l, porVigencia) + '</td>'
                 + '<td>' + input('venta_mensual_estimada', p.venta_mensual_estimada, 'decimal', cerrado || !l.nuevo,
                         l.nuevo ? 'Neta, sin IVA' : 'Sólo para locales nuevos: este tiene 12 meses de venta') + '</td>'
                 + '<td><small class="text-muted">' + (p.usuario ? esc(Auditoria.linea('modif', p.usuario, p.fecha)) : '') + '</small></td>'
@@ -310,7 +319,109 @@
             el.addEventListener('change', function() { guardarLocal(el.closest('tr')); });
         });
 
+        cuerpo.querySelectorAll('.palq-adic-alta').forEach(function(el) {
+            el.addEventListener('change', function() {
+                if (!el.value) { return; }
+
+                escribir('altaRazonLocal', { nro: parseInt(el.closest('tr').getAttribute('data-nro'), 10),
+                                             cod_provee: el.value });
+            });
+        });
+
+        cuerpo.querySelectorAll('.palq-adic-baja').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var nro = parseInt(btn.closest('tr').getAttribute('data-nro'), 10);
+                var cod = btn.getAttribute('data-cod');
+
+                Notificacion.confirmar({
+                    titulo: 'Quitar razón social del local',
+                    mensaje: '¿' + (nombreRazon(cod) || cod) + ' deja de facturarle a este local?',
+                    detalle: 'Sus facturas ya no se van a poder imputar a este local. No se borra: queda en el historial.',
+                    confirmar: 'Quitar',
+                    peligro: true
+                }).then(function(si) {
+                    if (si) { escribir('bajaRazonLocal', { nro: nro, cod_provee: cod }); }
+                });
+            });
+        });
+
         Permisos.soloLectura(cuerpo);
+    }
+
+    /**
+     * El contrato del local, DE LA APP DE ALQUILERES (RO_T_CONTRATOS_ALQUILERES):
+     * no se carga acá. El de hoy, el próximo o el último; el tooltip los lista
+     * todos. Según la vigencia, esos son los meses que proyecta.
+     */
+    function contratoTexto(c) {
+        return fecha(c.desde) + ' – ' + fecha(c.hasta);
+    }
+
+    function celdaContrato(l, porVigencia) {
+        var c = l.contrato;
+        var todos = (l.contratos || []).map(contratoTexto).join('\n');
+        var titulo = (todos ? 'Contratos en la app de alquileres:\n' + todos + '\n\n' : 'Sin contratos en la app de alquileres.\n\n')
+            + (porVigencia ? 'Según la vigencia: proyecta sólo los meses de estos contratos.'
+                : 'Según la apertura: el vencimiento sólo avisa (se asume la renovación).');
+
+        if (!c) {
+            return '<span class="small ' + (porVigencia ? 'text-danger' : 'text-muted') + '" title="' + esc(titulo) + '">'
+                + 'sin contrato en la app</span>';
+        }
+
+        var chip = { VIGENTE: '', FUTURO: ' <span class="badge bg-info text-dark">próximo</span>',
+                     VENCIDO: ' <span class="badge bg-warning text-dark">vencido</span>' }[c.cuando] || '';
+
+        return '<span class="small text-nowrap" title="' + esc(titulo) + '">' + esc(contratoTexto(c)) + '</span>' + chip;
+    }
+
+    function fecha(f) {
+        return f ? String(f).substring(8, 10) + '/' + String(f).substring(5, 7) + '/' + String(f).substring(0, 4) : '';
+    }
+
+    function nombreRazon(cod) {
+        var r = (datos.razones || []).filter(function(x) { return x.cod === cod; })[0];
+
+        return r ? r.nombre : null;
+    }
+
+    /**
+     * Las razones sociales ADICIONALES del local: las que le facturan algo
+     * además de la principal (San Justo: SAUCCS las expensas y el fondo). Sus
+     * facturas se pueden imputar al local; el vencimiento y el diferimiento
+     * siguen siendo los de la principal.
+     */
+    function adicionales(l, cerrado) {
+        var p = l.params || {};
+        var actuales = p.adicionales || [];
+        var chips = actuales.map(function(cod) {
+            var nombre = nombreRazon(cod);
+
+            return '<span class="badge bg-light text-dark border me-1 mt-1" title="Razón social adicional: sus '
+                + 'facturas se imputan a este local. Vencimiento y diferimiento: los de la principal.">'
+                + esc(nombre || cod)
+                + (nombre ? '' : ' <span class="text-danger">(dada de baja)</span>')
+                + ' <button type="button" class="btn btn-link btn-sm p-0 text-danger palq-adic-baja" data-cod="'
+                + esc(cod) + '" title="Quitar"' + (cerrado ? ' disabled' : '') + '><i class="fas fa-xmark"></i></button></span>';
+        }).join('');
+
+        if (cerrado || !p.cod_provee) {
+            return chips ? '<div>' + chips + '</div>' : '';
+        }
+
+        var libres = (datos.razones || []).filter(function(r) {
+            return r.cod !== p.cod_provee && actuales.indexOf(r.cod) === -1;
+        });
+        var sinTabla = !datos.tabla_razones_local;
+
+        return '<div>' + chips + '</div>'
+            + (libres.length ? '<select class="form-select form-select-sm mt-1 palq-adic-alta"'
+                + (sinTabla ? ' disabled title="Falta correr ' + esc(datos.script_razones_local) + '"'
+                    : ' title="Otra razón social que le factura a este local (expensas, fondo…)"') + '>'
+                + '<option value="">+ otra razón social…</option>'
+                + libres.map(function(r) {
+                    return '<option value="' + esc(r.cod) + '">' + esc(r.nombre) + '</option>';
+                }).join('') + '</select>' : '');
     }
 
     function select(campo, opciones, val, deshabilitado) {
@@ -386,7 +497,8 @@
         var sel = document.getElementById('palqExtraLocales');
 
         sel.innerHTML = (datos.locales || []).filter(function(l) {
-            return l.params && l.params.cod_provee === cod && cod !== '';
+            return l.params && cod !== '' && (l.params.cod_provee === cod
+                || (l.params.adicionales || []).indexOf(cod) !== -1);
         }).map(function(l) {
             return '<option value="' + l.nro + '">' + esc(l.nombre) + '</option>';
         }).join('');

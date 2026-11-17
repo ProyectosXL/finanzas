@@ -78,7 +78,11 @@
 
         var meses = datos.meses;
         var locales = datos.locales.filter(function(l) {
-            return l.estado !== 'CERRADO_LAKERS' && coincide(l);
+            /* Ni los cerrados en Lakers ni un temporal con el contrato terminado, salvo
+               que le quede algo por pagar en el horizonte (un variable diferido). */
+            return l.estado !== 'CERRADO_LAKERS'
+                && !(l.estado === 'FINALIZADO' && !(l.total && l.total.a_pagar))
+                && coincide(l);
         });
 
         document.getElementById('alqThead').innerHTML = '<tr>'
@@ -107,11 +111,6 @@
 
         aplicarAbiertos();
         pintarPie(locales, meses);
-
-        var cerrados = datos.locales.filter(function(l) { return l.estado === 'CERRADO_LAKERS'; });
-
-        mostrar('alqCerradosCard', cerrados.length > 0);
-        texto('alqCerrados', cerrados.map(function(l) { return l.nombre; }).join(', '));
     }
 
     function coincide(l) {
@@ -199,7 +198,7 @@
 
             if (grupo === 'VARIABLES' && d.venta !== undefined) {
                 t += '\nVenta del mes ' + rotuloMes(p.mes_concepto) + ': ' + importeTexto(d.venta)
-                    + (d.venta_origen ? ' (' + (d.venta_origen === 'REAL' ? 'real' : d.venta_origen === 'MANUAL' ? 'manual' : 'estimada') + ')' : '')
+                    + (d.venta_origen ? ' (' + (d.venta_origen === 'REAL' ? 'real' : d.venta_origen === 'MANUAL' ? 'manual' : d.venta_origen === 'REAL_PROYECTADA' ? 'real hasta ayer + proyectada' : 'estimada') + ')' : '')
                     + ' × ' + numero(d.pct) + ' %';
             } else if (grupo === 'VARIABLES') {
                 t += '\nVenta del mes ' + rotuloMes(p.mes_concepto) + ' (importe de la app)';
@@ -295,6 +294,7 @@
         var meses = v.meses;
 
         document.getElementById('alqVentasThead').innerHTML = '<tr>'
+            + '<th rowspan="2" class="text-end" title="Número de sucursal">Nro.</th>'
             + '<th rowspan="2" class="col-texto">Local</th>'
             + '<th rowspan="2" class="text-end" title="Participación en la venta neta real de los últimos 12 meses cerrados">Particip.</th>'
             + '</tr><tr>'
@@ -306,8 +306,17 @@
                     + esc(rotuloMes(m)) + '</th>';
             }).join('') + '</tr>';
 
-        document.getElementById('alqVentasBody').innerHTML = v.filas.map(function(f) {
+        /* ORDENADO POR NUMERO DE SUCURSAL por defecto; el encabezado lo cambia. */
+        /* LOS CERRADOS EN LAKERS NO SE MUESTRAN: no pagan alquiler. */
+        var filas = v.filas.filter(function(f) {
+            return f.estado !== 'CERRADO_LAKERS' && !(f.estado === 'FINALIZADO'
+                && !Object.keys(f.meses).some(function(m) { return f.meses[m]; }));
+        })
+            .sort(function(a, b) { return a.nro - b.nro; });
+
+        document.getElementById('alqVentasBody').innerHTML = filas.map(function(f) {
             return '<tr' + (f.estado === 'CERRADO_LAKERS' ? ' class="text-muted"' : '') + '>'
+                + '<td class="text-end" data-orden="' + f.nro + '">' + f.nro + '</td>'
                 + '<td>' + esc(f.nombre)
                     + (f.estado === 'CERRADO_LAKERS' ? ' <small>(cerrado en Lakers)</small>' : '')
                     + (f.nuevo && f.estado !== 'CERRADO_LAKERS' ? ' <span class="badge bg-info text-dark">nuevo</span>' : '') + '</td>'
@@ -326,12 +335,22 @@
 
         var pie = v.pie;
 
+        /* EL TOTAL DE LOS LOCALES, en todos los meses: real, estimada, manual o
+           real + proyectada, neta o bruta según el selector. Las tres de abajo
+           son el control del reparto contra el canal (bruta), que en los meses
+           con venta real no tiene con qué comparar. */
+        var total = meses.map(function(m) {
+            return filas.reduce(function(s, f) { return s + ((f.meses[m] || {})[tipoVenta] || 0); }, 0);
+        });
+
         document.getElementById('alqVentasTfoot').innerHTML =
-            '<tr><td class="fw-bold text-end" colspan="2">Estimadas + manuales (bruta)</td>'
-                + meses.map(function(m) { return '<td class="text-end fw-bold">' + celdaSuma(pie[m].estimada_manual) + '</td>'; }).join('') + '</tr>'
-            + '<tr><td class="fw-bold text-end" colspan="2">Canal Locales (Ventas, mes completo)</td>'
+            '<tr><td class="fw-bold text-end" colspan="3">Total locales (' + tipoVenta + ')</td>'
+                + total.map(function(t) { return '<td class="text-end fw-bold">' + celdaSuma(t) + '</td>'; }).join('') + '</tr>'
+            + '<tr class="text-muted"><td class="text-end" colspan="3">Estimadas + manuales, mes completo (bruta)</td>'
+                + meses.map(function(m) { return '<td class="text-end">' + celdaSuma(pie[m].estimada_manual) + '</td>'; }).join('') + '</tr>'
+            + '<tr class="text-muted"><td class="text-end" colspan="3">Canal Locales (Ventas, mes completo)</td>'
                 + meses.map(function(m) { return '<td class="text-end">' + (pie[m].canal === null ? '<span class="text-muted">—</span>' : importe(pie[m].canal)) + '</td>'; }).join('') + '</tr>'
-            + '<tr><td class="fw-bold text-end" colspan="2">Diferencia</td>'
+            + '<tr class="text-muted"><td class="text-end" colspan="3">Diferencia</td>'
                 + meses.map(function(m) {
                     var d = pie[m].diferencia;
 
@@ -339,13 +358,7 @@
                         + (d === null ? '<span class="text-muted">—</span>' : importe(d)) + '</td>';
                 }).join('') + '</tr>';
 
-        pintarEjeTotales('tablaAlqVentas', {
-            columnas: meses,
-            valores: meses.map(function(m) {
-                return v.filas.reduce(function(s, f) { return s + ((f.meses[m] || {})[tipoVenta] || 0); }, 0);
-            }),
-            formato: celdaSuma
-        });
+        pintarEjeTotales('tablaAlqVentas', { columnas: meses, valores: total, formato: celdaSuma });
 
         texto('alqVentasPeriodo', v.ventana.length
             ? ' Participación sobre ' + rotuloMes(v.ventana[0]) + ' a ' + rotuloMes(v.ventana[v.ventana.length - 1]) + '.'
@@ -363,6 +376,23 @@
         if (c.origen === 'ESTIMADA') {
             t += '\nParticipación ' + numero(c.participacion * 100, 2) + ' % de la venta del canal Locales ('
                 + importeTexto(c.canal) + ')';
+
+            if (c.meses_propia) {
+                t += '\nLocal nuevo: participación propia, sobre sus ' + c.meses_propia + ' meses de venta contra '
+                    + 'los locales de 12 meses en esos mismos meses.';
+            }
+
+            if (c.canal_de_reales) {
+                t += '\nMes sin venta proyectada del canal: el canal sale de la venta real de los demás locales.';
+            }
+        }
+
+        if (c.origen === 'REAL_PROYECTADA') {
+            t += '\n\nMes en curso: lo vendido hasta ayer + lo que falta vender.'
+                + '\nReal: neta ' + importeTexto(c.real_neta) + ' · bruta ' + importeTexto(c.real_bruta)
+                + '\nProyectada: neta ' + importeTexto(c.proyectada_neta) + ' · bruta ' + importeTexto(c.proyectada_bruta)
+                + '\n= ' + (c.participacion !== null ? 'estimada' : 'manual') + ' del mes completo (bruta '
+                + importeTexto(c.mes_completo_bruta) + ') × ' + c.dias_restantes + ' / ' + c.dias_mes + ' días que faltan, hoy incluido';
         }
 
         return t;
@@ -487,7 +517,7 @@
 
         if (typeof crearColumnasFijas === 'function') {
             crearColumnasFijas({ tabla: 'tablaAlquileres', control: 'colFijasAlq', clave: 'alquileres', porDefecto: [0, 1] });
-            crearColumnasFijas({ tabla: 'tablaAlqVentas', control: 'colFijasAlqVentas', clave: 'alquileres_ventas', porDefecto: [0] });
+            crearColumnasFijas({ tabla: 'tablaAlqVentas', control: 'colFijasAlqVentas', clave: 'alquileres_ventas', porDefecto: [0, 1] });
         }
 
         AvisosPanel.pedirTablero('alquileres');

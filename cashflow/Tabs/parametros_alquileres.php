@@ -169,7 +169,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'ALQUILERES');
                             <th style="width: 90px;">% IVA</th>
                             <th style="width: 90px;">% Percep.</th>
                             <th style="width: 90px;">% Ret.</th>
-                            <th style="width: 150px;">Fecha de fin</th>
+                            <th style="min-width: 150px;" title="Apertura: proyecta mientras esté abierto en Lakers y el vencimiento sólo avisa. Vigencia: proyecta sólo los meses de sus contratos en la app de alquileres (locales temporales).">Proyecta según</th>
+                            <th style="min-width: 170px;" title="De la app de alquileres (tabla de contratos): no se carga acá. Según la apertura sólo avisa; según la vigencia, decide qué meses proyecta.">Contrato (app)</th>
                             <th style="width: 150px;" title="Neta, sin IVA. Sólo locales nuevos">Venta mensual est.</th>
                             <th>Último cambio</th>
                         </tr>

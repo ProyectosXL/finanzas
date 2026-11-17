@@ -3,6 +3,7 @@
 require_once __DIR__ . '/AlquileresConceptos.php';
 require_once __DIR__ . '/AlquileresCalculo.php';
 require_once __DIR__ . '/DiasHabiles.php';
+require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/Inflacion.php';
 
 /**
@@ -56,6 +57,7 @@ class AlquileresPago {
     const PROYECTA = 'PROYECTA';
     const INCOMPLETO = 'INCOMPLETO';
     const CERRADO_LAKERS = 'CERRADO_LAKERS';
+    /** Un local que proyecta segun VIGENCIA cuyo contrato ya vencio (vigente()). */
     const FINALIZADO = 'FINALIZADO';
 
     const NOMBRE_ESTADO = [
@@ -74,9 +76,9 @@ class AlquileresPago {
      *
      *   CERRADO_LAKERS  HABILITADO = 0 en SUCURSALES_LAKERS. No proyecta y NO es
      *                   un incompleto: no falta ningun dato, el local cerro.
-     *   FINALIZADO      su fecha de fin es de un mes anterior al actual: desde el
-     *                   mes siguiente a la fecha de fin no proyecta. Tampoco es
-     *                   un incompleto.
+     *   FINALIZADO      proyecta segun la VIGENCIA y todos sus contratos de la
+     *                   app vencieron en un mes anterior al actual. Tampoco es
+     *                   un incompleto. (Segun APERTURA el vencimiento no corta.)
      *   INCOMPLETO      le falta algun dato para proyectar; 'faltan' dice cual y
      *                   donde se carga.
      *   PROYECTA
@@ -96,8 +98,19 @@ class AlquileresPago {
             return ['estado' => self::CERRADO_LAKERS, 'faltan' => []];
         }
 
-        if ($local !== null && !empty($local['fecha_fin']) && substr($local['fecha_fin'], 0, 7) < $mesActual) {
-            return ['estado' => self::FINALIZADO, 'faltan' => []];
+        /* SEGUN VIGENCIA: sin contrato en la app no hay que proyectar (falta el
+           dato); con contratos que ya vencieron todos, termino. */
+        if ($local !== null && self::porVigencia($local)) {
+            $contratos = $local['contratos'] ?? [];
+
+            if (empty($contratos)) {
+                return ['estado' => self::INCOMPLETO,
+                        'faltan' => ['contrato en la app de alquileres (proyecta según la vigencia)']];
+            }
+
+            if (max(array_map(function ($c) { return substr($c['hasta'], 0, 7); }, $contratos)) < $mesActual) {
+                return ['estado' => self::FINALIZADO, 'faltan' => []];
+            }
         }
 
         $faltan = [];
@@ -238,20 +251,109 @@ class AlquileresPago {
        EXTRAORDINARIOS
        ==================================================================== */
 
+    /** Si el local proyecta segun la vigencia del contrato (no segun la apertura) */
+    public static function porVigencia($local) {
+        return ($local['modo'] ?? null) === 'VIGENCIA';
+    }
+
+    /**
+     * Si un mes esta dentro de lo que proyecta el local. Segun APERTURA (el de
+     * siempre) todos: el vencimiento del contrato no corta, y el cierre lo da
+     * Lakers. Segun VIGENCIA, solo los meses cubiertos por ALGUNO de sus
+     * contratos de la app (RO_T_CONTRATOS_ALQUILERES), de su mes de inicio a su
+     * mes de vencimiento, ambos incluidos. Sin contratos, ninguno.
+     *
+     * @param array|null $local ['modo', 'contratos' => [['desde', 'hasta']]]
+     * @param string $mes 'Y-m'
+     * @return bool
+     */
+    public static function vigente($local, $mes) {
+        if ($local === null || !self::porVigencia($local)) {
+            return true;
+        }
+
+        foreach ($local['contratos'] ?? [] as $c) {
+            if ($mes >= substr($c['desde'], 0, 7) && $mes <= substr($c['hasta'], 0, 7)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * El contrato que se muestra: el que cubre hoy; si no hay, el proximo; si
+     * no, el ultimo que vencio. Null sin contratos.
+     *
+     * @param array $contratos [['desde', 'hasta']]
+     * @param string $hoy 'Y-m-d'
+     * @return array|null ['desde', 'hasta', 'cuando' => 'VIGENTE'|'FUTURO'|'VENCIDO']
+     */
+    public static function contratoActual($contratos, $hoy) {
+        $futuro = null;
+        $ultimo = null;
+
+        foreach ($contratos as $c) {
+            if ($c['desde'] <= $hoy && $c['hasta'] >= $hoy) {
+                return $c + ['cuando' => 'VIGENTE'];
+            }
+
+            if ($c['desde'] > $hoy && ($futuro === null || $c['desde'] < $futuro['desde'])) {
+                $futuro = $c;
+            }
+
+            if ($c['hasta'] < $hoy && ($ultimo === null || $c['hasta'] > $ultimo['hasta'])) {
+                $ultimo = $c;
+            }
+        }
+
+        return ($futuro !== null) ? $futuro + ['cuando' => 'FUTURO']
+            : (($ultimo !== null) ? $ultimo + ['cuando' => 'VENCIDO'] : null);
+    }
+
+    /**
+     * Las razones sociales de un local: la principal primero y despues las
+     * adicionales, sin repetir. La principal es la unica que da el dia de
+     * vencimiento y el diferimiento; las adicionales sirven para imputarle
+     * facturas y para que sus extraordinarios lo alcancen.
+     *
+     * @param array|null $local La fila de Parametros (['cod_provee', 'adicionales'])
+     * @return string[]
+     */
+    public static function razonesDelLocal($local) {
+        if ($local === null) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach (array_merge([$local['cod_provee'] ?? null], $local['adicionales'] ?? []) as $c) {
+            $c = Planilla::codigo($c);
+
+            if ($c !== '' && !in_array($c, $out, true)) {
+                $out[] = $c;
+            }
+        }
+
+        return $out;
+    }
+
     /**
      * Si un extraordinario alcanza a un local.
      *
      * Con "todos los locales", alcanza a todo local que HOY tenga esa razon
-     * social, incluido uno que se le asigno despues de cargar el
-     * extraordinario.
+     * social -principal o adicional-, incluido uno que se le asigno despues de
+     * cargar el extraordinario.
      *
      * @param array $extra ['cod_provee', 'todos', 'locales' => [nro]]
      * @param int $nro
-     * @param string|null $codLocal La razon social del local
+     * @param string|string[]|null $codLocal Las razones sociales del local (razonesDelLocal())
      * @return bool
      */
     public static function alcanza($extra, $nro, $codLocal) {
-        if ($codLocal === null || $extra['cod_provee'] !== $codLocal) {
+        $cods = array_map(['Planilla', 'codigo'], array_filter((array) $codLocal, function ($c) { return $c !== null; }));
+
+        if (!in_array(Planilla::codigo($extra['cod_provee']), $cods, true)) {
             return false;
         }
 
@@ -266,7 +368,11 @@ class AlquileresPago {
      * Todos los pagos de un local que caen en el horizonte.
      *
      * @param array $e [
-     *     'local' => ['pct_iva', 'pct_percepcion', 'pct_retencion', 'fecha_fin', 'cod_provee'],
+     *     'local' => ['pct_iva', 'pct_percepcion', 'pct_retencion', 'cod_provee', 'modo',
+     *                 'contratos']. Segun APERTURA el vencimiento del contrato no corta
+     *                (se asume la renovacion; un cierre real es HABILITADO = 0 en
+     *                Lakers); segun VIGENCIA solo se proyectan los meses de sus
+     *                contratos de la app (vigente()),
      *     'razon' => ['dia' => int|null, 'diferimiento' => int],
      *     'dia_general' => int|null,
      *     'proyeccion' => lo de AlquileresCalculo::proyectarLocal(), con los
@@ -284,7 +390,6 @@ class AlquileresPago {
         $dia = $e['razon']['dia'] ?? $e['dia_general'];
         $difer = (int) $e['razon']['diferimiento'];
         $enHorizonte = array_flip($e['meses_pago']);
-        $fin = empty($e['local']['fecha_fin']) ? null : substr($e['local']['fecha_fin'], 0, 7);
         $meses = $e['proyeccion']['meses'];
         $dias = [];
         $pagos = [];
@@ -297,7 +402,9 @@ class AlquileresPago {
         };
 
         foreach ($meses as $mesConcepto => $m) {
-            if ($fin !== null && $mesConcepto > $fin) {
+            /* Segun VIGENCIA, solo los meses del contrato. Un variable de un mes
+               vigente que se paga diferido despues si se paga: la venta existio. */
+            if (!self::vigente($e['local'], $mesConcepto)) {
                 continue;
             }
 
@@ -321,7 +428,7 @@ class AlquileresPago {
             foreach ($e['meses_pago'] as $mesPago) {
                 $mesBase = Inflacion::mesMas($mesPago, -(int) $x['diferimiento']);
 
-                if ((int) substr($mesBase, 5, 2) !== (int) $x['mes_base'] || ($fin !== null && $mesBase > $fin)) {
+                if ((int) substr($mesBase, 5, 2) !== (int) $x['mes_base'] || !self::vigente($e['local'], $mesBase)) {
                     continue;
                 }
 
