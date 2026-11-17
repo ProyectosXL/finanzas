@@ -252,7 +252,7 @@
         }
 
         if (!locales.length) {
-            cuerpo.innerHTML = '<tr><td colspan="11" class="text-center text-muted py-3">'
+            cuerpo.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3">'
                 + (soloIncompletos ? 'Ningún local incompleto.' : 'No hay locales en la app de alquileres.')
                 + '</td></tr>';
             return;
@@ -264,6 +264,10 @@
         var opFrec = '<option value="">—</option>' + Object.keys(datos.frecuencias).map(function(k) {
             return '<option value="' + k + '">' + esc(datos.frecuencias[k]) + '</option>';
         }).join('');
+        var opModo = Object.keys(datos.modos || {}).map(function(k) {
+            return '<option value="' + k + '">' + esc(datos.modos[k]) + '</option>';
+        }).join('');
+        var sinVigencia = !datos.columnas_vigencia;
         var opMes = '<option value="">—</option>' + MESES.map(function(m, i) {
             return '<option value="' + (i + 1) + '">' + m + '</option>';
         }).join('');
@@ -277,7 +281,7 @@
 
             if (cerrado && !cerradoVisto) {
                 cerradoVisto = true;
-                cabecera = '<tr class="table-light"><td colspan="11" class="small text-muted">'
+                cabecera = '<tr class="table-light"><td colspan="13" class="small text-muted">'
                     + '<strong>Cerrados en Lakers</strong>: no proyectan ni cuentan como incompletos. Sus meses '
                     + 'cerrados en la app se siguen viendo en la pestaña.</td></tr>';
             }
@@ -285,6 +289,7 @@
             /* El IVA arranca con el general hasta que se guarda el del local. */
             var iva = (p.pct_iva === null || p.pct_iva === undefined) ? '' : p.pct_iva;
             var ivaSugerido = (iva === '' && datos.iva_general !== null) ? datos.iva_general : iva;
+            var porVigencia = p.modo === 'VIGENCIA';
 
             return cabecera + '<tr data-nro="' + l.nro + '" class="' + (cerrado ? 'text-muted' : '') + '">'
                 + '<td><strong>' + esc(l.nombre) + '</strong> <small class="text-muted">' + l.nro + '</small>'
@@ -300,8 +305,17 @@
                         iva === '' ? 'Sugerido: la alícuota de Parámetros › Generales. Se guarda al tocar la fila.' : '') + '</td>'
                 + '<td>' + input('pct_percepcion', p.pct_percepcion, 'decimal', cerrado, '0 es un valor; vacío es incompleto') + '</td>'
                 + '<td>' + input('pct_retencion', p.pct_retencion, 'decimal', cerrado, 'Sobre el neto. 0 es un valor; vacío es incompleto') + '</td>'
+                + '<td>' + select('modo', opModo, p.modo || 'APERTURA', cerrado || sinVigencia)
+                    + (sinVigencia ? '<div class="small text-muted" title="Falta correr ' + esc(datos.script_vigencia)
+                        + '">Falta el script</div>' : '') + '</td>'
+                + '<td><input type="date" class="form-control form-control-sm palq-local" data-campo="fecha_inicio" value="'
+                    + esc(p.fecha_inicio || '') + '"' + (cerrado || sinVigencia || porVigencia === false ? ' disabled' : '')
+                    + ' title="Inicio del contrato: sólo cuenta si proyecta según la vigencia. Vacío: desde siempre."></td>'
                 + '<td><input type="date" class="form-control form-control-sm palq-local" data-campo="fecha_fin" value="'
-                    + esc(p.fecha_fin || '') + '"' + (cerrado ? ' disabled' : '') + ' title="Vencimiento del contrato: informativo, no corta la proyección (se asume la renovación). Avisa cuando vence."></td>'
+                    + esc(p.fecha_fin || '') + '"' + (cerrado ? ' disabled' : '') + ' title="'
+                    + (porVigencia ? 'Vencimiento del contrato: desde el mes siguiente el local deja de proyectar.'
+                        : 'Vencimiento del contrato: informativo, no corta la proyección (se asume la renovación). Avisa cuando vence.')
+                    + '"></td>'
                 + '<td>' + input('venta_mensual_estimada', p.venta_mensual_estimada, 'decimal', cerrado || !l.nuevo,
                         l.nuevo ? 'Neta, sin IVA' : 'Sólo para locales nuevos: este tiene 12 meses de venta') + '</td>'
                 + '<td><small class="text-muted">' + (p.usuario ? esc(Auditoria.linea('modif', p.usuario, p.fecha)) : '') + '</small></td>'
@@ -421,6 +435,18 @@
         if (d.frecuencia && d.frecuencia !== '1' && !d.mes_ajuste) {
             Notificacion.advertencia('Con frecuencia ' + datos.frecuencias[d.frecuencia].toLowerCase()
                 + ' hace falta el mes del último ajuste: es el que ancla el ciclo. Elegilo y se guarda la fila.');
+            return;
+        }
+
+        var inicio = fila.querySelector('[data-campo="fecha_inicio"]');
+
+        if (inicio && datos.columnas_vigencia) {
+            inicio.disabled = (d.modo !== 'VIGENCIA');
+        }
+
+        if (d.modo === 'VIGENCIA' && !d.fecha_fin) {
+            Notificacion.advertencia('Para proyectar según la vigencia hace falta el vencimiento del contrato '
+                + '(y el inicio, si no arranca ya). Cargalo y se guarda la fila.');
             return;
         }
 

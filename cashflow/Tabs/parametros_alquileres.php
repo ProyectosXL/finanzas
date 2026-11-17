@@ -169,7 +169,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'ALQUILERES');
                             <th style="width: 90px;">% IVA</th>
                             <th style="width: 90px;">% Percep.</th>
                             <th style="width: 90px;">% Ret.</th>
-                            <th style="width: 150px;" title="Informativa: después del vencimiento el local sigue proyectando (se asume la renovación). Un cierre se toma de Lakers.">Vto. contrato</th>
+                            <th style="min-width: 150px;" title="Apertura: proyecta mientras esté abierto en Lakers y el vencimiento sólo avisa. Vigencia: proyecta sólo entre el inicio y el vencimiento del contrato (locales temporales).">Proyecta según</th>
+                            <th style="width: 150px;" title="Sólo cuenta si proyecta según la vigencia. Vacío: desde siempre.">Inicio contrato</th>
+                            <th style="width: 150px;" title="Según apertura, informativo: después del vencimiento sigue proyectando (se asume la renovación). Según vigencia, corta.">Vto. contrato</th>
                             <th style="width: 150px;" title="Neta, sin IVA. Sólo locales nuevos">Venta mensual est.</th>
                             <th>Último cambio</th>
                         </tr>

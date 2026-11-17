@@ -32,8 +32,21 @@ $ok = AlquileresParametros::validarLocal([
     'cod_provee' => 'SAUNIC', 'frecuencia' => '3', 'mes_ajuste' => '9', 'pct_iva' => '23',
     'pct_percepcion' => '0', 'pct_retencion' => '1,5', 'fecha_fin' => '', 'venta_mensual_estimada' => ''
 ]);
-chequear('un trimestral completo', ['SAUNIC', 3, 9, 23.0, 0.0, 1.5, null, null],
+chequear('un trimestral completo, segun apertura por defecto', ['SAUNIC', 3, 9, 23.0, 0.0, 1.5, null, null, 'APERTURA', null],
     array_values($ok));
+$temporal = AlquileresParametros::validarLocal(['modo' => 'vigencia', 'fecha_inicio' => '2027-07-01',
+    'fecha_fin' => '2027-07-31']);
+chequear('un temporal segun la vigencia', ['VIGENCIA', '2027-07-01', '2027-07-31'],
+    [$temporal['modo'], $temporal['fecha_inicio'], $temporal['fecha_fin']]);
+chequearLanza('segun la vigencia sin vencimiento no', function () {
+    AlquileresParametros::validarLocal(['modo' => 'VIGENCIA']);
+});
+chequearLanza('el inicio despues del vencimiento no', function () {
+    AlquileresParametros::validarLocal(['fecha_inicio' => '2027-08-01', 'fecha_fin' => '2027-07-31']);
+});
+chequearLanza('un modo que no existe no', function () {
+    AlquileresParametros::validarLocal(['modo' => 'OTRO']);
+});
 chequear('un IVA de 19 % tambien', 19.0, AlquileresParametros::validarLocal(['pct_iva' => '19'])['pct_iva']);
 chequear('vacio es null, no 0', null, AlquileresParametros::validarLocal(['pct_percepcion' => ''])['pct_percepcion']);
 chequear('0 es 0', 0.0, AlquileresParametros::validarLocal(['pct_retencion' => '0'])['pct_retencion']);

@@ -48,9 +48,9 @@ require_once __DIR__ . '/Inflacion.php';
  * EL DENOMINADOR ES LA VENTA DE LOS QUE SIGUEN PROYECTANDO. Un local cerrado
  * en Lakers no entra al reparto aunque haya vendido en la ventana: si
  * entrara, su parte de la venta del canal quedaria asignada a un local que ya
- * no paga alquiler, y no la pagaria nadie. ('activo_hasta' sigue soportado,
- * pero Alquileres ya no lo usa: la fecha de fin de Parametros es el
- * vencimiento del contrato y no corta.)
+ * no paga alquiler, y no la pagaria nadie. Un local que proyecta segun la
+ * VIGENCIA del contrato (temporal) reparte solo en sus meses de contrato
+ * (activo_desde / activo_hasta); segun APERTURA, el vencimiento no corta.
  */
 class AlquileresVenta {
 
@@ -97,7 +97,8 @@ class AlquileresVenta {
      *                                   proyeccion de los dias que faltan (REAL_PROYECTADA)
      * ]
      * 'activo' es false para un local cerrado en Lakers: no reparte nunca.
-     * 'activo_hasta' es el mes de su fecha de fin: reparte hasta ese mes.
+     * 'activo_hasta' / 'activo_desde' (opcional): los meses de su contrato, para
+     * un local que proyecta segun la VIGENCIA: reparte solo entre esos meses.
      *
      * @return array [
      *     'ventas' => [nro => ['Y-m' => ['bruta', 'neta', 'origen', 'derivada',
@@ -213,7 +214,8 @@ class AlquileresVenta {
             $activos = [];
 
             foreach ($e['locales'] as $nro => $l) {
-                $activos[$nro] = $l['activo'] && ($l['activo_hasta'] === null || $mes <= $l['activo_hasta']);
+                $activos[$nro] = $l['activo'] && ($l['activo_hasta'] === null || $mes <= $l['activo_hasta'])
+                    && (($l['activo_desde'] ?? null) === null || $mes >= $l['activo_desde']);
             }
 
             /* Las manuales de los nuevos activos: van primero, porque se restan

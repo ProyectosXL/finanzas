@@ -57,7 +57,7 @@ class AlquileresPago {
     const PROYECTA = 'PROYECTA';
     const INCOMPLETO = 'INCOMPLETO';
     const CERRADO_LAKERS = 'CERRADO_LAKERS';
-    /** Ya no se usa: la fecha de fin es el vencimiento del contrato y no corta. Queda por las filas viejas. */
+    /** Un local que proyecta segun VIGENCIA cuyo contrato ya vencio (vigente()). */
     const FINALIZADO = 'FINALIZADO';
 
     const NOMBRE_ESTADO = [
@@ -76,6 +76,9 @@ class AlquileresPago {
      *
      *   CERRADO_LAKERS  HABILITADO = 0 en SUCURSALES_LAKERS. No proyecta y NO es
      *                   un incompleto: no falta ningun dato, el local cerro.
+     *   FINALIZADO      proyecta segun la VIGENCIA del contrato y el contrato
+     *                   vencio en un mes anterior al actual. Tampoco es un
+     *                   incompleto. (Segun APERTURA el vencimiento no corta.)
      *   INCOMPLETO      le falta algun dato para proyectar; 'faltan' dice cual y
      *                   donde se carga.
      *   PROYECTA
@@ -93,6 +96,11 @@ class AlquileresPago {
     public static function estadoLocal($local, $habilitado, $razones, $diaGeneral, $mesActual) {
         if (!$habilitado) {
             return ['estado' => self::CERRADO_LAKERS, 'faltan' => []];
+        }
+
+        if ($local !== null && self::porVigencia($local) && !empty($local['fecha_fin'])
+            && substr($local['fecha_fin'], 0, 7) < $mesActual) {
+            return ['estado' => self::FINALIZADO, 'faltan' => []];
         }
 
         $faltan = [];
@@ -233,6 +241,32 @@ class AlquileresPago {
        EXTRAORDINARIOS
        ==================================================================== */
 
+    /** Si el local proyecta segun la vigencia del contrato (no segun la apertura) */
+    public static function porVigencia($local) {
+        return ($local['modo'] ?? null) === 'VIGENCIA';
+    }
+
+    /**
+     * Si un mes esta dentro de lo que proyecta el local. Segun APERTURA (el de
+     * siempre) todos: el vencimiento del contrato no corta, y el cierre lo da
+     * Lakers. Segun VIGENCIA, solo los meses entre el inicio (vacio = desde
+     * siempre) y el vencimiento del contrato, ambos incluidos.
+     *
+     * @param array|null $local ['modo', 'fecha_inicio', 'fecha_fin']
+     * @param string $mes 'Y-m'
+     * @return bool
+     */
+    public static function vigente($local, $mes) {
+        if ($local === null || !self::porVigencia($local)) {
+            return true;
+        }
+
+        $desde = empty($local['fecha_inicio']) ? null : substr($local['fecha_inicio'], 0, 7);
+        $hasta = empty($local['fecha_fin']) ? null : substr($local['fecha_fin'], 0, 7);
+
+        return ($desde === null || $mes >= $desde) && ($hasta === null || $mes <= $hasta);
+    }
+
     /**
      * Las razones sociales de un local: la principal primero y despues las
      * adicionales, sin repetir. La principal es la unica que da el dia de
@@ -290,9 +324,11 @@ class AlquileresPago {
      * Todos los pagos de un local que caen en el horizonte.
      *
      * @param array $e [
-     *     'local' => ['pct_iva', 'pct_percepcion', 'pct_retencion', 'cod_provee']. La fecha de fin
-     *                es el VENCIMIENTO DEL CONTRATO: no corta la proyeccion (se asume
-     *                renovacion); un cierre real es HABILITADO = 0 en Lakers,
+     *     'local' => ['pct_iva', 'pct_percepcion', 'pct_retencion', 'cod_provee', 'modo',
+     *                 'fecha_inicio', 'fecha_fin']. Segun APERTURA la fecha de fin es el
+     *                vencimiento del contrato y no corta (se asume la renovacion; un
+     *                cierre real es HABILITADO = 0 en Lakers); segun VIGENCIA solo se
+     *                proyectan los meses del contrato (vigente()),
      *     'razon' => ['dia' => int|null, 'diferimiento' => int],
      *     'dia_general' => int|null,
      *     'proyeccion' => lo de AlquileresCalculo::proyectarLocal(), con los
@@ -322,6 +358,12 @@ class AlquileresPago {
         };
 
         foreach ($meses as $mesConcepto => $m) {
+            /* Segun VIGENCIA, solo los meses del contrato. Un variable de un mes
+               vigente que se paga diferido despues si se paga: la venta existio. */
+            if (!self::vigente($e['local'], $mesConcepto)) {
+                continue;
+            }
+
             foreach ($m['conceptos'] as $id => $c) {
                 $grupo = AlquileresConceptos::grupo($id);
                 $mesPago = AlquileresConceptos::seDifiere($id) ? Inflacion::mesMas($mesConcepto, $difer) : $mesConcepto;
@@ -342,7 +384,7 @@ class AlquileresPago {
             foreach ($e['meses_pago'] as $mesPago) {
                 $mesBase = Inflacion::mesMas($mesPago, -(int) $x['diferimiento']);
 
-                if ((int) substr($mesBase, 5, 2) !== (int) $x['mes_base']) {
+                if ((int) substr($mesBase, 5, 2) !== (int) $x['mes_base'] || !self::vigente($e['local'], $mesBase)) {
                     continue;
                 }
 

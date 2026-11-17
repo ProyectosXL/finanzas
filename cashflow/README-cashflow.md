@@ -450,8 +450,9 @@ Dos cambios en Alquileres (ver `README-alquileres.md`, partes 3.c y 12):
 | # | Script | Qué hace | Si no se corre |
 | --- | --- | --- | --- |
 | 58 | `sql/cashflow_alquileres_local_razones.sql` | Crea `RO_T_CASHFLOW_ALQ_LOCAL_RAZON` (una vigente por local y razón social, con historial). No migra nada: sin filas, todo sigue como hoy | Todo anda como hoy, con una razón por local; en Parámetros › Alquileres › Locales el *+ otra razón social* está deshabilitado y nombra el script |
+| 59 | `sql/cashflow_alquileres_local_vigencia.sql` | Agrega `MODO_PROYECCION` (`APERTURA` / `VIGENCIA`; NULL = apertura) y `FECHA_INICIO` a `RO_T_CASHFLOW_ALQ_LOCAL`, con sus `CHECK` | Todos proyectan según apertura; *Proyecta según* queda deshabilitado y nombra el script |
 
-Contra `central`, después del 51. Reejecutable. **Ningún número cambia al correrlo**: lo que cambia algo es agregar una razón adicional a un local.
+Los dos contra `central`, después del 51, en cualquier orden. Reejecutables. **Ningún número cambia al correrlos**: lo que cambia algo es agregar una razón adicional a un local, o pasar un local a *Vigencia del contrato* (XL RURAL, el temporal de La Rural).
 
 Para verificar después de correrlo: en Parámetros › Alquileres › Locales, San Justo → *+ otra razón social* → URBANA CENTROS COMERCIALES; en Alquileres › Facturas, tildar una factura de SAUCCS e imputarla a San Justo.
 
@@ -516,6 +517,7 @@ En este orden, contra `central`:
 -- 55. sql/cashflow_alquileres_fila.sql             (la fila Alquileres, real y proyectado)
 -- 56. sql/cashflow_parametros_calendario.sql       (Parametros > Calendario: ajustes de feriados bancarios)
 -- 58. sql/cashflow_alquileres_local_razones.sql  (Alquileres: mas de una razon social por local)
+-- 59. sql/cashflow_alquileres_local_vigencia.sql  (Alquileres: proyectar segun apertura o vigencia del contrato)
 ```
 
 **El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento. **El 57, `sql/cashflow_calendario_permisos.sql`, también va contra `apps`**, antes de publicar el código de Calendario: le da la edición de Calendario a quien hoy edita Generales.

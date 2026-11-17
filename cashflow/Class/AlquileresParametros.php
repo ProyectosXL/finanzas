@@ -52,6 +52,19 @@ class AlquileresParametros {
     const T_LOCAL_RAZON = 'RO_T_CASHFLOW_ALQ_LOCAL_RAZON';
     const SCRIPT_RAZONES_LOCAL = 'sql/cashflow_alquileres_local_razones.sql';
 
+    /**
+     * SEGUN QUE PROYECTA UN LOCAL (script 59, columnas MODO_PROYECCION y
+     * FECHA_INICIO de RO_T_CASHFLOW_ALQ_LOCAL):
+     *   APERTURA  mientras este abierto en Lakers; el vencimiento del contrato
+     *             solo avisa (se asume la renovacion). Es el de siempre.
+     *   VIGENCIA  solo entre el inicio y el vencimiento del contrato: los
+     *             locales temporales, como XL RURAL.
+     */
+    const MODO_APERTURA = 'APERTURA';
+    const MODO_VIGENCIA = 'VIGENCIA';
+    const MODOS = [self::MODO_APERTURA => 'Apertura (Lakers)', self::MODO_VIGENCIA => 'Vigencia del contrato'];
+    const SCRIPT_VIGENCIA = 'sql/cashflow_alquileres_local_vigencia.sql';
+
     /** El valor de la columna RUBRO del maestro que arma el buscador */
     const RUBRO = 'ALQUILER';
 
@@ -70,6 +83,9 @@ class AlquileresParametros {
 
     /** @var bool|null */
     private $tablaRazonesLocal = null;
+
+    /** @var bool|null */
+    private $columnasVigencia = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -169,9 +185,30 @@ class AlquileresParametros {
 
         $cod = trim((string) ($d['cod_provee'] ?? ''));
         $fin = trim((string) ($d['fecha_fin'] ?? ''));
+        $inicio = trim((string) ($d['fecha_inicio'] ?? ''));
 
         if ($fin !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $fin)) {
-            throw new InvalidArgumentException('La fecha de fin tiene que ser una fecha (AAAA-MM-DD).');
+            throw new InvalidArgumentException('El vencimiento del contrato tiene que ser una fecha (AAAA-MM-DD).');
+        }
+
+        if ($inicio !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $inicio)) {
+            throw new InvalidArgumentException('El inicio del contrato tiene que ser una fecha (AAAA-MM-DD).');
+        }
+
+        if ($inicio !== '' && $fin !== '' && $inicio > $fin) {
+            throw new InvalidArgumentException('El inicio del contrato no puede ser posterior a su vencimiento.');
+        }
+
+        $modo = strtoupper(trim((string) ($d['modo'] ?? '')));
+        $modo = ($modo === '') ? self::MODO_APERTURA : $modo;
+
+        if (!isset(self::MODOS[$modo])) {
+            throw new InvalidArgumentException('Proyecta según: tiene que ser apertura o vigencia del contrato.');
+        }
+
+        if ($modo === self::MODO_VIGENCIA && $fin === '') {
+            throw new InvalidArgumentException('Para proyectar según la vigencia del contrato hace falta su '
+                . 'vencimiento (y, si no arranca ya, su inicio).');
         }
 
         $venta = trim(str_replace(',', '.', (string) ($d['venta_mensual_estimada'] ?? '')));
@@ -188,6 +225,8 @@ class AlquileresParametros {
             'pct_percepcion' => self::porcentaje($d['pct_percepcion'] ?? null, 'El % percepción'),
             'pct_retencion' => self::porcentaje($d['pct_retencion'] ?? null, 'El % retención'),
             'fecha_fin' => ($fin === '') ? null : $fin,
+            'fecha_inicio' => ($inicio === '') ? null : $inicio,
+            'modo' => $modo,
             'venta_mensual_estimada' => ($venta === '') ? null : round((float) $venta, 2)
         ];
     }
@@ -301,6 +340,17 @@ class AlquileresParametros {
         return empty($this->tablasFaltantes());
     }
 
+    /** @return bool Si ya se corrio el script 59 (proyectar segun apertura o vigencia) */
+    public function columnasVigenciaCreadas() {
+        if ($this->columnasVigencia === null) {
+            $row = $this->fila("SELECT COL_LENGTH(?, 'MODO_PROYECCION') AS M, COL_LENGTH(?, 'FECHA_INICIO') AS I",
+                ['dbo.' . self::T_LOCAL, 'dbo.' . self::T_LOCAL], 'Error al verificar las columnas de vigencia');
+            $this->columnasVigencia = ($row !== null && $row['M'] !== null && $row['I'] !== null);
+        }
+
+        return $this->columnasVigencia;
+    }
+
     /** @return bool Si ya se corrio el script de las razones adicionales de un local */
     public function tablaRazonesLocalCreada() {
         if ($this->tablaRazonesLocal === null) {
@@ -397,8 +447,11 @@ class AlquileresParametros {
             return [];
         }
 
+        /* Sin el script 59 no hay MODO_PROYECCION ni FECHA_INICIO: todos son APERTURA. */
+        $vig = $this->columnasVigenciaCreadas();
         $sql = "SELECT NRO_SUCURS, COD_PROVEE, FRECUENCIA_MESES, MES_ULT_AJUSTE, PCT_IVA, PCT_PERCEPCION,
-                       PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, USUARIO_MODIF, FECHA_MODIF
+                       PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, USUARIO_MODIF, FECHA_MODIF"
+              . ($vig ? ", MODO_PROYECCION, FECHA_INICIO" : ", NULL AS MODO_PROYECCION, NULL AS FECHA_INICIO") . "
                 FROM dbo." . self::T_LOCAL . " WHERE VIGENTE = 1";
 
         $out = [];
@@ -413,6 +466,9 @@ class AlquileresParametros {
                 'pct_retencion' => self::numero($r['PCT_RETENCION']),
                 'fecha_fin' => ($r['FECHA_FIN'] instanceof DateTime) ? $r['FECHA_FIN']->format('Y-m-d')
                     : (($r['FECHA_FIN'] === null) ? null : substr((string) $r['FECHA_FIN'], 0, 10)),
+                'fecha_inicio' => ($r['FECHA_INICIO'] instanceof DateTime) ? $r['FECHA_INICIO']->format('Y-m-d')
+                    : (($r['FECHA_INICIO'] === null) ? null : substr((string) $r['FECHA_INICIO'], 0, 10)),
+                'modo' => ($r['MODO_PROYECCION'] === self::MODO_VIGENCIA) ? self::MODO_VIGENCIA : self::MODO_APERTURA,
                 'venta_mensual_estimada' => self::numero($r['VENTA_MENSUAL_ESTIMADA']),
                 'adicionales' => [],
                 'usuario' => $r['USUARIO_MODIF'],
@@ -603,16 +659,25 @@ class AlquileresParametros {
         }
 
         $nombre = mb_substr((string) $universo[$n]['nombre'], 0, 100);
+        $vig = $this->columnasVigenciaCreadas();
 
-        $this->enTransaccion(function () use ($n, $v, $nombre, $usuario) {
+        /* SIN EL SCRIPT 59 se guarda como siempre; lo unico que no se puede es
+           elegir VIGENCIA o cargar el inicio, y se dice por que. */
+        if (!$vig && ($v['modo'] === self::MODO_VIGENCIA || $v['fecha_inicio'] !== null)) {
+            throw new InvalidArgumentException('Todavía no se puede proyectar según la vigencia del contrato: falta '
+                . 'correr ' . self::SCRIPT_VIGENCIA . ' contra la base central.');
+        }
+
+        $this->enTransaccion(function () use ($n, $v, $nombre, $usuario, $vig) {
             $this->darDeBaja(self::T_LOCAL, "NRO_SUCURS = ? AND VIGENTE = 1", [$n], $usuario);
             $this->ejecutar("INSERT INTO dbo." . self::T_LOCAL
                 . " (NRO_SUCURS, DESC_SUCURS, COD_PROVEE, FRECUENCIA_MESES, MES_ULT_AJUSTE, PCT_IVA, PCT_PERCEPCION,
-                     PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-                [$n, $nombre, $v['cod_provee'], $v['frecuencia'], $v['mes_ajuste'], $v['pct_iva'],
+                     PCT_RETENCION, FECHA_FIN, VENTA_MENSUAL_ESTIMADA, VIGENTE, USUARIO_ALTA, USUARIO_MODIF"
+                . ($vig ? ", MODO_PROYECCION, FECHA_INICIO" : "") . ")
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?" . ($vig ? ", ?, ?" : "") . ")",
+                array_merge([$n, $nombre, $v['cod_provee'], $v['frecuencia'], $v['mes_ajuste'], $v['pct_iva'],
                  $v['pct_percepcion'], $v['pct_retencion'], $v['fecha_fin'], $v['venta_mensual_estimada'],
-                 $usuario, $usuario],
+                 $usuario, $usuario], $vig ? [$v['modo'], $v['fecha_inicio']] : []),
                 'Error al guardar los datos del local');
         });
 

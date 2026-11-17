@@ -52,6 +52,7 @@ App de alquileres (central, SÓLO SE LEE)        Parámetros › Alquileres (cas
 | 54 | `sql/cashflow_prov_exclusion_modulos_ampliar.sql` | `central` | Amplía el `CHECK` de la exclusión por módulo a `TARJETAS_CORP` y `ALQUILERES` | Excluir de Tarjetas o de Alquileres falla con un mensaje que nombra el script |
 | 55 | `sql/cashflow_alquileres_fila.sql` | `central` | Reemplaza la fila *Alquileres* (`ALQUILERES/PAGOS`) por dos filas agrupadas, `REAL` y `PROYECTADO`, en una transacción, con el control de doble conteo al pie | La fila de antes sigue activa y muestra el total, sin abrir |
 | 58 | `sql/cashflow_alquileres_local_razones.sql` | `central` | Las razones sociales **adicionales** de un local (parte 3.c), con historial. No migra nada | Una razón por local, como antes; el *+ otra razón social* queda deshabilitado y nombra el script |
+| 59 | `sql/cashflow_alquileres_local_vigencia.sql` | `central` | Agrega a `RO_T_CASHFLOW_ALQ_LOCAL` **`MODO_PROYECCION`** (`APERTURA` / `VIGENCIA`, NULL = apertura) y **`FECHA_INICIO`**, con sus `CHECK` (parte 3.c). No migra nada | Todos proyectan según apertura, como hoy; *Proyecta según* e *Inicio contrato* quedan deshabilitados y nombran el script |
 
 El 51 va después de `sql/cashflow_prov_locales.sql` (el maestro de proveedores): sin el maestro crea las tablas igual pero no siembra a nadie, y lo dice. El 52 es independiente. **53 → 54 → 55**; el **58**, en cualquier momento después del 51. El 53 después del 51, el 54 después de `sql/cashflow_prov_exclusion_modulo.sql`, el 55 después del 53 y de `sql/cashflow_estructura_grupos.sql`.
 
@@ -133,7 +134,16 @@ Al 10/11/2026 el rubro trae **23** proveedores: los 21 del rubro económico *Alq
 
 Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trimestral, semestral), **mes del último ajuste** (obligatorio salvo mensual), **% IVA** (arranca sugiriendo la alícuota de Generales y se puede subir o bajar: hay locales con otros cargos), **% percepción** y **% retención** (obligatorios; 0 es un valor, vacío no), **vencimiento del contrato** (opcional; la columna `FECHA_FIN`) y **venta mensual estimada** (neta; sólo para locales nuevos).
 
-**El vencimiento del contrato no corta la proyección**: se asume que se renueva con las condiciones de hoy. Un contrato vencido da un aviso de atención (*actualizá la fecha si se renovó*) y uno que vence dentro del horizonte, uno informativo (`Alquileres::avisoContratos()`). Un local deja de proyectar sólo si **cerró en Lakers** (`HABILITADO = 0`). Hasta el 17/11/2026 la fecha cortaba todo desde el mes siguiente; con 8 locales con fecha dentro del horizonte (Distrito Arcos y MDP Gallegos al 31/12/2026, Alto Palermo, Abasto, Parque Brown, San Justo, Gurruchaga, Tortugas), el total del horizonte pasó de $ 3.311,4 M a $ 4.204,1 M.
+**Proyecta según** (script 59, `AlquileresPago::vigente()`), por local:
+
+| Modo | Proyecta | El vencimiento del contrato |
+| --- | --- | --- |
+| **Apertura** (el de siempre; vacío = apertura) | Mientras el local esté abierto en Lakers | Sólo avisa: se asume la renovación |
+| **Vigencia del contrato** | Sólo los meses entre el **inicio** (vacío = desde siempre) y el **vencimiento**, ambos incluidos. Un variable de un mes vigente que se paga diferido después sí se paga: la venta existió. En la venta, reparte sólo en esos meses | Corta: desde el mes siguiente el local queda *Contrato finalizado* (no es incompleto) y no se muestra en la pestaña salvo que le quede algo por pagar |
+
+Es para los **locales temporales**: XL RURAL tiene un contrato de un mes y proyecta según su vigencia. Según vigencia el vencimiento es obligatorio, y el inicio no puede ser posterior a él.
+
+Según apertura, **el vencimiento del contrato no corta la proyección**: se asume que se renueva con las condiciones de hoy. Un contrato vencido da un aviso de atención (*actualizá la fecha si se renovó*) y uno que vence dentro del horizonte, uno informativo (`Alquileres::avisoContratos()`). Un local deja de proyectar sólo si **cerró en Lakers** (`HABILITADO = 0`). Hasta el 17/11/2026 la fecha cortaba todo desde el mes siguiente; con 8 locales con fecha dentro del horizonte (Distrito Arcos y MDP Gallegos al 31/12/2026, Alto Palermo, Abasto, Parque Brown, San Justo, Gurruchaga, Tortugas), el total del horizonte pasó de $ 3.311,4 M a $ 4.204,1 M.
 
 - **Más de una razón social por local** (script 58). La del desplegable es la **principal**: la única que da el **día de vencimiento y el diferimiento** del local en la proyección. Debajo, *+ otra razón social* agrega **adicionales**: las que le facturan algo más. San Justo (80): SASANJ (CONTINENTAL URBANA) factura el alquiler y SAUCCS (URBANA CENTROS COMERCIALES) las expensas y el fondo. Una adicional **no cambia ninguna fecha proyectada**; sirve para que **sus facturas se imputen al local** (también con *todos los locales de X*) y para que **sus extraordinarios lo alcancen**. Hace falta la principal para agregar una; se quita con la ✕ (baja lógica, con historial). La columna *Locales* de Razones sociales cuenta las principales y, aparte (*+N*), las adicionales. `AlquileresPago::razonesDelLocal()` es la lista; `AlquileresParametros::validarRazonLocal()`, la validación.
 - El **mes del último ajuste es un mes del año**, no un año-mes: ancla el ciclo, y como las frecuencias dividen a 12 el dato no envejece. Trimestral con septiembre ajusta en diciembre, marzo, junio y septiembre.
@@ -145,6 +155,7 @@ Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trim
 | *Proyecta* | Tiene razón social dada de alta, frecuencia (y mes, si no es mensual), IVA, percepción, retención y un día de vencimiento | No. Un **local nuevo sin venta manual** proyecta fijos y expensas, pero no variables: figura en *Incompletos* con eso como faltante |
 | *Incompleto* | Le falta algo de lo anterior | Sí |
 | *Cerrado en Lakers* | `HABILITADO = 0` en `SUCURSALES_LAKERS` | **No**: no falta ningún dato, el local cerró. No se muestra ni en la Proyección ni en Ventas. Flores 1 es este caso |
+| *Contrato finalizado* | Proyecta **según la vigencia** y su contrato venció en un mes anterior al actual | **No**. No se muestra, salvo que le quede algo por pagar (un variable diferido) |
 
 ### 3.d Pagos extraordinarios
 

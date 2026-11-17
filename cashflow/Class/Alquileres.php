@@ -129,6 +129,9 @@ class Alquileres {
             'tabla_creada' => $this->par->tablaCreada(),
             'script' => AlquileresParametros::SCRIPT,
             'tabla_razones_local' => $base['tablas_ok'] && $this->tablaRazonesLocal($avisos),
+            'modos' => AlquileresParametros::MODOS,
+            'columnas_vigencia' => $base['tablas_ok'] && $this->columnasVigencia($avisos),
+            'script_vigencia' => AlquileresParametros::SCRIPT_VIGENCIA,
             'script_razones_local' => AlquileresParametros::SCRIPT_RAZONES_LOCAL,
             'general' => $base['general'],
             'razones' => array_values($razonesAlta),
@@ -442,7 +445,8 @@ class Alquileres {
         foreach ($locales as $l) {
             $fin = $l['params']['fecha_fin'] ?? null;
 
-            if (empty($fin) || !$l['habilitado']) {
+            /* Un local que proyecta segun la vigencia ya corta en su fecha: no se avisa. */
+            if (empty($fin) || !$l['habilitado'] || AlquileresPago::porVigencia($l['params'])) {
                 continue;
             }
 
@@ -470,6 +474,18 @@ class Alquileres {
         }
 
         return $out;
+    }
+
+    /** Si se puede proyectar segun la vigencia del contrato (script 59). Nunca lanza. */
+    protected function columnasVigencia(&$avisos) {
+        try {
+            return $this->par->columnasVigenciaCreadas();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron verificar las columnas de vigencia ('
+                . $e->getMessage() . ').', 'Locales');
+
+            return false;
+        }
     }
 
     /** Si se puede agregar mas de una razon social a un local (script 58). Nunca lanza. */
@@ -565,11 +581,15 @@ class Alquileres {
 
         foreach ($base['locales'] as $nro => $l) {
             $p = $l['params'];
-            /* LA FECHA DE FIN ES EL VENCIMIENTO DEL CONTRATO: no corta, se asume
-               renovacion. Un local deja de repartir solo si cerro en Lakers. */
+            /* SEGUN APERTURA el vencimiento del contrato no corta: se asume la
+               renovacion, y deja de repartir solo si cerro en Lakers. SEGUN
+               VIGENCIA (un local temporal) reparte solo en los meses del
+               contrato. */
+            $vig = ($p !== null) && AlquileresPago::porVigencia($p);
             $entradaVenta[$nro] = [
-                'activo' => $l['habilitado'],
-                'activo_hasta' => null,
+                'activo' => $l['habilitado'] && $l['estado'] !== AlquileresPago::FINALIZADO,
+                'activo_desde' => ($vig && !empty($p['fecha_inicio'])) ? substr($p['fecha_inicio'], 0, 7) : null,
+                'activo_hasta' => ($vig && !empty($p['fecha_fin'])) ? substr($p['fecha_fin'], 0, 7) : null,
                 'manual' => $p['venta_mensual_estimada'] ?? null
             ];
         }

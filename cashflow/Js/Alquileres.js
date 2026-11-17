@@ -78,7 +78,11 @@
 
         var meses = datos.meses;
         var locales = datos.locales.filter(function(l) {
-            return l.estado !== 'CERRADO_LAKERS' && coincide(l);
+            /* Ni los cerrados en Lakers ni un temporal con el contrato terminado, salvo
+               que le quede algo por pagar en el horizonte (un variable diferido). */
+            return l.estado !== 'CERRADO_LAKERS'
+                && !(l.estado === 'FINALIZADO' && !(l.total && l.total.a_pagar))
+                && coincide(l);
         });
 
         document.getElementById('alqThead').innerHTML = '<tr>'
@@ -304,7 +308,10 @@
 
         /* ORDENADO POR NUMERO DE SUCURSAL por defecto; el encabezado lo cambia. */
         /* LOS CERRADOS EN LAKERS NO SE MUESTRAN: no pagan alquiler. */
-        var filas = v.filas.filter(function(f) { return f.estado !== 'CERRADO_LAKERS'; })
+        var filas = v.filas.filter(function(f) {
+            return f.estado !== 'CERRADO_LAKERS' && !(f.estado === 'FINALIZADO'
+                && !Object.keys(f.meses).some(function(m) { return f.meses[m]; }));
+        })
             .sort(function(a, b) { return a.nro - b.nro; });
 
         document.getElementById('alqVentasBody').innerHTML = filas.map(function(f) {
