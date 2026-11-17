@@ -169,7 +169,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'ALQUILERES');
                             <th style="width: 90px;">% IVA</th>
                             <th style="width: 90px;">% Percep.</th>
                             <th style="width: 90px;">% Ret.</th>
-                            <th style="width: 150px;">Fecha de fin</th>
+                            <th style="width: 150px;" title="Informativa: después del vencimiento el local sigue proyectando (se asume la renovación). Un cierre se toma de Lakers.">Vto. contrato</th>
                             <th style="width: 150px;" title="Neta, sin IVA. Sólo locales nuevos">Venta mensual est.</th>
                             <th>Último cambio</th>
                         </tr>

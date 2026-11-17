@@ -159,14 +159,6 @@
                 </small>
             </div>
         </div>
-
-        <!-- Los cerrados en Lakers no proyectan y no son incompletos: van aparte. -->
-        <div class="card mb-4" id="alqCerradosCard" style="display: none;">
-            <div class="card-body py-2">
-                <small class="text-muted"><strong>Cerrados en Lakers</strong> (no proyectan):
-                    <span id="alqCerrados"></span>. Su venta real se sigue viendo en la sub-pestaña Ventas.</small>
-            </div>
-        </div>
     </div>
 
     <!-- ============================================================

@@ -162,13 +162,13 @@ chequear('un extraordinario de la adicional alcanza al local', true,
     AlquileresPago::alcanza($cencosud, 80, ['SASANJ', 'SAUNIC']));
 chequear('y uno de otra razon no', false, AlquileresPago::alcanza($cencosud, 80, ['SASANJ', 'SAUCCS']));
 
-seccion('Fecha de fin');
+seccion('Fecha de fin: es el vencimiento del contrato y no corta');
 
 $fin = $base;
 $fin['local']['fecha_fin'] = '2026-11-30';
 $pf = porConcepto(AlquileresPago::pagosLocal($fin));
 chequear('noviembre todavia se paga', true, isset($pf[8]['2026-11']));
-chequear('desde diciembre no', false, isset($pf[8]['2026-12']));
+chequear('y despues tambien: se asume la renovacion', true, isset($pf[8]['2026-12']));
 
 seccion('El estado de un local');
 
@@ -182,7 +182,7 @@ chequear('percepcion y retencion en 0 son validas', 'PROYECTA',
     AlquileresPago::estadoLocal($completo, true, $razones, 10, '2026-11')['estado']);
 chequear('cerrado en Lakers: no proyecta y no es incompleto', ['estado' => 'CERRADO_LAKERS', 'faltan' => []],
     AlquileresPago::estadoLocal($completo, false, $razones, 10, '2026-11'));
-chequear('fecha de fin pasada: finalizado, no incompleto', 'FINALIZADO',
+chequear('contrato vencido: sigue proyectando', 'PROYECTA',
     AlquileresPago::estadoLocal(['fecha_fin' => '2026-10-31'] + $completo, true, $razones, 10, '2026-11')['estado']);
 chequear('sin fila en Parametros: falta todo', ['razón social', 'frecuencia de actualización', '% IVA', '% percepción', '% retención'],
     AlquileresPago::estadoLocal(null, true, $razones, 10, '2026-11')['faltan']);

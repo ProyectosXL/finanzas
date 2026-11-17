@@ -301,7 +301,7 @@
                 + '<td>' + input('pct_percepcion', p.pct_percepcion, 'decimal', cerrado, '0 es un valor; vacío es incompleto') + '</td>'
                 + '<td>' + input('pct_retencion', p.pct_retencion, 'decimal', cerrado, 'Sobre el neto. 0 es un valor; vacío es incompleto') + '</td>'
                 + '<td><input type="date" class="form-control form-control-sm palq-local" data-campo="fecha_fin" value="'
-                    + esc(p.fecha_fin || '') + '"' + (cerrado ? ' disabled' : '') + ' title="Desde el mes siguiente deja de proyectar"></td>'
+                    + esc(p.fecha_fin || '') + '"' + (cerrado ? ' disabled' : '') + ' title="Vencimiento del contrato: informativo, no corta la proyección (se asume la renovación). Avisa cuando vence."></td>'
                 + '<td>' + input('venta_mensual_estimada', p.venta_mensual_estimada, 'decimal', cerrado || !l.nuevo,
                         l.nuevo ? 'Neta, sin IVA' : 'Sólo para locales nuevos: este tiene 12 meses de venta') + '</td>'
                 + '<td><small class="text-muted">' + (p.usuario ? esc(Auditoria.linea('modif', p.usuario, p.fecha)) : '') + '</small></td>'

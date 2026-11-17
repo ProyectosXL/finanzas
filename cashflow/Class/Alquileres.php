@@ -425,6 +425,53 @@ class Alquileres {
                 'locales' => $locales, 'dias' => $f['dias'] ?? [], 'avisos' => $f['avisos']];
     }
 
+    /**
+     * Los contratos vencidos o que vencen dentro del horizonte (la "fecha de fin"
+     * de Parametros). No cortan la proyeccion: se asume que se renuevan con las
+     * mismas condiciones, y el aviso es para revisarlos. Pura.
+     *
+     * @param array $locales Los de leerBase()
+     * @param string $hoy 'Y-m-d'
+     * @param string $ultimoMes 'Y-m' del horizonte
+     * @return array Avisos
+     */
+    public static function avisoContratos($locales, $hoy, $ultimoMes) {
+        $vencidos = [];
+        $porVencer = [];
+
+        foreach ($locales as $l) {
+            $fin = $l['params']['fecha_fin'] ?? null;
+
+            if (empty($fin) || !$l['habilitado']) {
+                continue;
+            }
+
+            $txt = $l['nombre'] . ' (' . date('d/m/Y', strtotime($fin)) . ')';
+
+            if ($fin < $hoy) {
+                $vencidos[] = $txt;
+            } elseif (substr($fin, 0, 7) <= $ultimoMes) {
+                $porVencer[] = $txt;
+            }
+        }
+
+        $out = [];
+
+        if (!empty($vencidos)) {
+            $out[] = Aviso::nuevo(Aviso::WARNING, 'Contrato vencido según Parámetros › Alquileres: '
+                . implode(', ', $vencidos) . '. Se sigue proyectando con las condiciones de hoy; actualizá la '
+                . 'fecha si se renovó. Si el local cerró, se ve como cerrado cuando Lakers lo deshabilita.', 'Locales');
+        }
+
+        if (!empty($porVencer)) {
+            $out[] = Aviso::nuevo(Aviso::INFO, 'Contratos que vencen dentro del horizonte: ' . implode(', ', $porVencer)
+                . '. Después del vencimiento se sigue proyectando con las condiciones de hoy (se asume la renovación).',
+                'Locales');
+        }
+
+        return $out;
+    }
+
     /** Si se puede agregar mas de una razon social a un local (script 58). Nunca lanza. */
     protected function tablaRazonesLocal(&$avisos) {
         try {
@@ -518,12 +565,16 @@ class Alquileres {
 
         foreach ($base['locales'] as $nro => $l) {
             $p = $l['params'];
+            /* LA FECHA DE FIN ES EL VENCIMIENTO DEL CONTRATO: no corta, se asume
+               renovacion. Un local deja de repartir solo si cerro en Lakers. */
             $entradaVenta[$nro] = [
-                'activo' => $l['habilitado'] && $l['estado'] !== AlquileresPago::FINALIZADO,
-                'activo_hasta' => empty($p['fecha_fin']) ? null : substr($p['fecha_fin'], 0, 7),
+                'activo' => $l['habilitado'],
+                'activo_hasta' => null,
                 'manual' => $p['venta_mensual_estimada'] ?? null
             ];
         }
+
+        $avisos = array_merge($avisos, self::avisoContratos($base['locales'], $hoy, end($mesesPago)));
 
         $ventas = ($ins['iva'] === null) ? null : AlquileresVenta::calcular([
             'meses' => $mesesConcepto, 'locales' => $entradaVenta, 'netas' => $netas, 'brutas' => $brutas,
@@ -531,21 +582,33 @@ class Alquileres {
         ]);
         $out['ventas'] = $ventas;
 
+        /* LOS MESES SIN VENTA PROYECTADA DEL CANAL (los anteriores al horizonte)
+           se estiman con la venta real de los demas (AlquileresVenta). Quedan
+           sin venta solo los que no tienen participacion ni venta manual: se
+           nombran, con los meses. */
+        $sinVentaMes = [];
+
         foreach ($mesesConcepto as $m) {
             if (!isset($ins['canal'][$m]) && $ventas !== null) {
-                $sinReal = false;
-
                 foreach ($ventas['ventas'] as $nro => $vm) {
-                    if (($vm[$m] ?? null) === null && $base['locales'][$nro]['estado'] === AlquileresPago::PROYECTA) {
-                        $sinReal = true;
+                    /* Solo importa si tiene conceptos variables en la app. */
+                    $tieneVariables = !empty(array_intersect_key($pct[$nro] ?? [],
+                        array_flip(AlquileresConceptos::delGrupo(AlquileresConceptos::VARIABLES))));
+
+                    if (($vm[$m] ?? null) === null && $base['locales'][$nro]['estado'] === AlquileresPago::PROYECTA
+                        && $tieneVariables) {
+                        $sinVentaMes[$base['locales'][$nro]['nombre']][] = $m;
                     }
                 }
-
-                if ($sinReal) {
-                    $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No hay venta proyectada del canal LOCALES para '
-                        . $m . ' y algún local no tiene venta real: sus conceptos variables de ese mes no se proyectan.');
-                }
             }
+        }
+
+        if (!empty($sinVentaMes)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Sin venta para estimar los variables de meses sin proyección '
+                . 'del canal LOCALES: ' . implode('; ', array_map(function ($n, $ms) {
+                    return $n . ' (' . implode(', ', $ms) . ')';
+                }, array_keys($sinVentaMes), $sinVentaMes)) . '. No tienen venta en la app ni participación: se '
+                . 'resuelve cargando su venta mensual estimada en Parámetros › Alquileres.');
         }
 
         /* Las tasas de las expensas: la de cada local y la general. */
@@ -1034,7 +1097,8 @@ class Alquileres {
                VARIABLES: no es un incompleto del todo, y por eso va en
                'faltan' sin cambiar el estado. El filtro Incompletos lo muestra. */
             if ($nuevo && $estado['estado'] === AlquileresPago::PROYECTA
-                && ($p['venta_mensual_estimada'] ?? null) === null) {
+                && ($p['venta_mensual_estimada'] ?? null) === null
+                && $mesesVenta < AlquileresVenta::MESES_MIN_PROPIA) {
                 $estado['faltan'][] = 'venta mensual estimada (local nuevo, sin 12 meses de venta)';
             }
 

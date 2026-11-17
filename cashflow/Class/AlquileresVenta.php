@@ -25,10 +25,11 @@ require_once __DIR__ . '/Inflacion.php';
  *             pestaña Ventas (con IVA, por mes completo: ver
  *             Ventas::ventaMensualCanal()), repartida por la participacion del
  *             local en la venta NETA real de los ultimos 12 meses cerrados.
- *   MANUAL    un local nuevo, sin 12 meses de venta en esa ventana, no entra
- *             al reparto: usa la venta mensual estimada de Parametros (neta;
- *             la bruta es x 1 + IVA). Sin ella no tiene venta y no proyecta
- *             conceptos variables.
+ *   MANUAL    un local nuevo, sin 12 meses de venta en esa ventana, usa la
+ *             venta mensual estimada de Parametros (neta; la bruta es x 1 +
+ *             IVA). Sin ella, si tiene al menos MESES_MIN_PROPIA meses de
+ *             venta, es ESTIMADA con su PARTICIPACION PROPIA (ver calcular());
+ *             con menos, no tiene venta y no proyecta conceptos variables.
  *
  *   REAL_PROYECTADA  el MES EN CURSO con venta real: la real de la app (lo
  *             vendido hasta ayer) MAS la estimada (o la manual) del mes completo
@@ -45,10 +46,11 @@ require_once __DIR__ . '/Inflacion.php';
  * pestaña mostraria una diferencia que no es tal.
  *
  * EL DENOMINADOR ES LA VENTA DE LOS QUE SIGUEN PROYECTANDO. Un local cerrado
- * (en Lakers, o con fecha de fin ya pasada) no entra al reparto aunque haya
- * vendido en la ventana: si entrara, su parte de la venta del canal quedaria
- * asignada a un local que ya no paga alquiler, y no la pagaria nadie. Un local
- * con fecha de fin futura reparte hasta ese mes.
+ * en Lakers no entra al reparto aunque haya vendido en la ventana: si
+ * entrara, su parte de la venta del canal quedaria asignada a un local que ya
+ * no paga alquiler, y no la pagaria nadie. ('activo_hasta' sigue soportado,
+ * pero Alquileres ya no lo usa: la fecha de fin de Parametros es el
+ * vencimiento del contrato y no corta.)
  */
 class AlquileresVenta {
 
@@ -62,6 +64,9 @@ class AlquileresVenta {
 
     /** Los meses de venta que hacen falta para entrar al reparto */
     const MESES_PARTICIPACION = 12;
+
+    /** Los que necesita un local nuevo sin venta manual para repartir con su participacion propia */
+    const MESES_MIN_PROPIA = 3;
 
     /**
      * La ventana de la participacion: los ultimos 12 meses cerrados en la app.
@@ -143,6 +148,55 @@ class AlquileresVenta {
             $participacion[$nro] = ($totalVenta12 > 0) ? $v / $totalVenta12 : 0.0;
         }
 
+        /* UN NUEVO SIN VENTA MANUAL, CON AL MENOS MESES_MIN_PROPIA MESES DE VENTA,
+           ENTRA AL REPARTO CON SU PARTICIPACION PROPIA: su venta sobre la de los
+           locales de 12 meses EN LOS MISMOS MESES que el tiene. Asi la
+           estacionalidad del canal no lo infla ni lo achica. Se suma a las de
+           los de 12 meses y se normaliza todo: la suma sigue siendo el canal. La
+           venta manual de Parametros, si esta, manda. */
+        $propia = [];
+
+        foreach ($nuevos as $nro) {
+            $l = $e['locales'][$nro];
+
+            if ($l['manual'] !== null || $totalVenta12 <= 0) {
+                continue;
+            }
+
+            $suyo = 0.0;
+            $deLosOtros = 0.0;
+            $meses = 0;
+
+            foreach ($ventana as $m) {
+                if (!isset($netas[$nro][$m])) {
+                    continue;
+                }
+
+                $meses++;
+                $suyo += $netas[$nro][$m];
+
+                foreach ($venta12 as $otro => $v) {
+                    $deLosOtros += $netas[$otro][$m] ?? 0.0;
+                }
+            }
+
+            if ($meses >= self::MESES_MIN_PROPIA && $suyo > 0 && $deLosOtros > 0) {
+                $propia[$nro] = ['peso' => $suyo / $deLosOtros, 'meses' => $meses];
+            }
+        }
+
+        if (!empty($propia)) {
+            $suma = 1.0 + array_sum(array_column($propia, 'peso'));
+
+            foreach ($participacion as $nro => $p) {
+                $participacion[$nro] = $p / $suma;
+            }
+
+            foreach ($propia as $nro => $x) {
+                $participacion[$nro] = $x['peso'] / $suma;
+            }
+        }
+
         /* 2. Mes a mes. */
         $out = [];
         $manualMes = [];
@@ -193,8 +247,35 @@ class AlquileresVenta {
                 }
             }
 
+            /* SIN VENTA PROYECTADA DEL CANAL (los meses anteriores al horizonte,
+               que pagan los variables diferidos): el canal se arma con la venta
+               REAL de los que la tienen, dividida por su participacion. Asi el
+               que no tiene real ese mes se estima igual que en un mes
+               proyectado. Si todos tienen real, no hace falta. */
+            $canalReal = false;
+
+            if ($canal === null && !empty($part)) {
+                $conReal = 0.0;
+                $pesoConReal = 0.0;
+                $falta = false;
+
+                foreach ($part as $nro => $p) {
+                    if (self::tieneReal($netas, $brutas, $nro, $mes)) {
+                        $conReal += self::real($netas[$nro][$mes] ?? null, $brutas[$nro][$mes] ?? null, $iva)['bruta'];
+                        $pesoConReal += $p;
+                    } else {
+                        $falta = true;
+                    }
+                }
+
+                if ($falta && $pesoConReal > 0 && $conReal > 0) {
+                    $canal = round($conReal / $pesoConReal * array_sum($part) + $manualMes[$mes], 2);
+                    $canalReal = true;
+                }
+            }
+
             $estimadas = ($canal === null) ? [] : self::repartir($canal - $manualMes[$mes], $part);
-            $estimadaMes[$mes] = array_sum($estimadas);
+            $estimadaMes[$mes] = $canalReal ? 0.0 : array_sum($estimadas);
 
             foreach ($e['locales'] as $nro => $l) {
                 if (self::tieneReal($netas, $brutas, $nro, $mes)) {
@@ -220,7 +301,10 @@ class AlquileresVenta {
                         'origen' => self::ESTIMADA,
                         'derivada' => false,
                         'participacion' => $part[$nro] / array_sum($part),
-                        'canal' => $canal
+                        'canal' => $canal,
+                        'meses_propia' => isset($propia[$nro]) ? $propia[$nro]['meses'] : null,
+                        /* El canal salio de la venta real de los demas (mes sin proyeccion del canal) */
+                        'canal_de_reales' => $canalReal
                     ];
                 } elseif (!isset($out[$nro][$mes])) {
                     $out[$nro][$mes] = null;
@@ -232,6 +316,7 @@ class AlquileresVenta {
             'ventas' => $out,
             'participacion' => $participacion,
             'nuevos' => $nuevos,
+            'propia' => array_map(function ($x) { return $x['meses']; }, $propia),
             'canal' => array_intersect_key($e['canal'], array_flip($e['meses'])),
             'manual' => $manualMes,
             'estimada' => $estimadaMes,

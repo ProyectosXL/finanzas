@@ -57,6 +57,7 @@ class AlquileresPago {
     const PROYECTA = 'PROYECTA';
     const INCOMPLETO = 'INCOMPLETO';
     const CERRADO_LAKERS = 'CERRADO_LAKERS';
+    /** Ya no se usa: la fecha de fin es el vencimiento del contrato y no corta. Queda por las filas viejas. */
     const FINALIZADO = 'FINALIZADO';
 
     const NOMBRE_ESTADO = [
@@ -75,9 +76,6 @@ class AlquileresPago {
      *
      *   CERRADO_LAKERS  HABILITADO = 0 en SUCURSALES_LAKERS. No proyecta y NO es
      *                   un incompleto: no falta ningun dato, el local cerro.
-     *   FINALIZADO      su fecha de fin es de un mes anterior al actual: desde el
-     *                   mes siguiente a la fecha de fin no proyecta. Tampoco es
-     *                   un incompleto.
      *   INCOMPLETO      le falta algun dato para proyectar; 'faltan' dice cual y
      *                   donde se carga.
      *   PROYECTA
@@ -95,10 +93,6 @@ class AlquileresPago {
     public static function estadoLocal($local, $habilitado, $razones, $diaGeneral, $mesActual) {
         if (!$habilitado) {
             return ['estado' => self::CERRADO_LAKERS, 'faltan' => []];
-        }
-
-        if ($local !== null && !empty($local['fecha_fin']) && substr($local['fecha_fin'], 0, 7) < $mesActual) {
-            return ['estado' => self::FINALIZADO, 'faltan' => []];
         }
 
         $faltan = [];
@@ -296,7 +290,9 @@ class AlquileresPago {
      * Todos los pagos de un local que caen en el horizonte.
      *
      * @param array $e [
-     *     'local' => ['pct_iva', 'pct_percepcion', 'pct_retencion', 'fecha_fin', 'cod_provee'],
+     *     'local' => ['pct_iva', 'pct_percepcion', 'pct_retencion', 'cod_provee']. La fecha de fin
+     *                es el VENCIMIENTO DEL CONTRATO: no corta la proyeccion (se asume
+     *                renovacion); un cierre real es HABILITADO = 0 en Lakers,
      *     'razon' => ['dia' => int|null, 'diferimiento' => int],
      *     'dia_general' => int|null,
      *     'proyeccion' => lo de AlquileresCalculo::proyectarLocal(), con los
@@ -314,7 +310,6 @@ class AlquileresPago {
         $dia = $e['razon']['dia'] ?? $e['dia_general'];
         $difer = (int) $e['razon']['diferimiento'];
         $enHorizonte = array_flip($e['meses_pago']);
-        $fin = empty($e['local']['fecha_fin']) ? null : substr($e['local']['fecha_fin'], 0, 7);
         $meses = $e['proyeccion']['meses'];
         $dias = [];
         $pagos = [];
@@ -327,10 +322,6 @@ class AlquileresPago {
         };
 
         foreach ($meses as $mesConcepto => $m) {
-            if ($fin !== null && $mesConcepto > $fin) {
-                continue;
-            }
-
             foreach ($m['conceptos'] as $id => $c) {
                 $grupo = AlquileresConceptos::grupo($id);
                 $mesPago = AlquileresConceptos::seDifiere($id) ? Inflacion::mesMas($mesConcepto, $difer) : $mesConcepto;
@@ -351,7 +342,7 @@ class AlquileresPago {
             foreach ($e['meses_pago'] as $mesPago) {
                 $mesBase = Inflacion::mesMas($mesPago, -(int) $x['diferimiento']);
 
-                if ((int) substr($mesBase, 5, 2) !== (int) $x['mes_base'] || ($fin !== null && $mesBase > $fin)) {
+                if ((int) substr($mesBase, 5, 2) !== (int) $x['mes_base']) {
                     continue;
                 }
 

@@ -131,7 +131,9 @@ Al 10/11/2026 el rubro trae **23** proveedores: los 21 del rubro económico *Alq
 
 ### 3.c Locales
 
-Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trimestral, semestral), **mes del último ajuste** (obligatorio salvo mensual), **% IVA** (arranca sugiriendo la alícuota de Generales y se puede subir o bajar: hay locales con otros cargos), **% percepción** y **% retención** (obligatorios; 0 es un valor, vacío no), **fecha de fin** (opcional) y **venta mensual estimada** (neta; sólo para locales nuevos).
+Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trimestral, semestral), **mes del último ajuste** (obligatorio salvo mensual), **% IVA** (arranca sugiriendo la alícuota de Generales y se puede subir o bajar: hay locales con otros cargos), **% percepción** y **% retención** (obligatorios; 0 es un valor, vacío no), **vencimiento del contrato** (opcional; la columna `FECHA_FIN`) y **venta mensual estimada** (neta; sólo para locales nuevos).
+
+**El vencimiento del contrato no corta la proyección**: se asume que se renueva con las condiciones de hoy. Un contrato vencido da un aviso de atención (*actualizá la fecha si se renovó*) y uno que vence dentro del horizonte, uno informativo (`Alquileres::avisoContratos()`). Un local deja de proyectar sólo si **cerró en Lakers** (`HABILITADO = 0`). Hasta el 17/11/2026 la fecha cortaba todo desde el mes siguiente; con 8 locales con fecha dentro del horizonte (Distrito Arcos y MDP Gallegos al 31/12/2026, Alto Palermo, Abasto, Parque Brown, San Justo, Gurruchaga, Tortugas), el total del horizonte pasó de $ 3.311,4 M a $ 4.204,1 M.
 
 - **Más de una razón social por local** (script 58). La del desplegable es la **principal**: la única que da el **día de vencimiento y el diferimiento** del local en la proyección. Debajo, *+ otra razón social* agrega **adicionales**: las que le facturan algo más. San Justo (80): SASANJ (CONTINENTAL URBANA) factura el alquiler y SAUCCS (URBANA CENTROS COMERCIALES) las expensas y el fondo. Una adicional **no cambia ninguna fecha proyectada**; sirve para que **sus facturas se imputen al local** (también con *todos los locales de X*) y para que **sus extraordinarios lo alcancen**. Hace falta la principal para agregar una; se quita con la ✕ (baja lógica, con historial). La columna *Locales* de Razones sociales cuenta las principales y, aparte (*+N*), las adicionales. `AlquileresPago::razonesDelLocal()` es la lista; `AlquileresParametros::validarRazonLocal()`, la validación.
 - El **mes del último ajuste es un mes del año**, no un año-mes: ancla el ciclo, y como las frecuencias dividen a 12 el dato no envejece. Trimestral con septiembre ajusta en diciembre, marzo, junio y septiembre.
@@ -142,8 +144,7 @@ Por local de la app: **razón social**, **frecuencia** (mensual, bimestral, trim
 | --- | --- | --- |
 | *Proyecta* | Tiene razón social dada de alta, frecuencia (y mes, si no es mensual), IVA, percepción, retención y un día de vencimiento | No. Un **local nuevo sin venta manual** proyecta fijos y expensas, pero no variables: figura en *Incompletos* con eso como faltante |
 | *Incompleto* | Le falta algo de lo anterior | Sí |
-| *Cerrado en Lakers* | `HABILITADO = 0` en `SUCURSALES_LAKERS` | **No**: no falta ningún dato, el local cerró. Se lista aparte y su venta real se sigue viendo. Flores 1 es este caso |
-| *Contrato finalizado* | Su fecha de fin es de un mes anterior al actual | No. La fecha de fin es para los locales habilitados que dejan de pagar alquiler |
+| *Cerrado en Lakers* | `HABILITADO = 0` en `SUCURSALES_LAKERS` | **No**: no falta ningún dato, el local cerró. No se muestra ni en la Proyección ni en Ventas. Flores 1 es este caso |
 
 ### 3.d Pagos extraordinarios
 
@@ -184,13 +185,14 @@ Ejemplo: Cencosud, 75 % del VMA (8) de diciembre, 1 mes de diferimiento: se paga
 | --- | --- |
 | **Real** | El mes ya tiene venta en la app: neta de `RO_T_RENTABILIDAD_BRUTA` y bruta de `RO_V_VENTAS_BRUTAS_IE`. Si hay una y no la otra (hoy no pasa en ningún local), la que falta se deriva con el IVA general y el tooltip lo dice |
 | **Estimada** | La venta proyectada del canal `LOCALES` de la pestaña Ventas, repartida por la participación de cada local en la venta neta real de los **últimos 12 meses cerrados** de la app |
-| **Manual** | Un local **nuevo** (sin 12 meses de venta en esa ventana) no entra al reparto: usa la venta mensual estimada de Parámetros. Sin ella no proyecta variables y se avisa |
+| **Manual** | Un local **nuevo** (sin 12 meses de venta en esa ventana) usa la venta mensual estimada de Parámetros, si está |
+| **Estimada (participación propia)** | Un **nuevo sin venta manual** con al menos **3 meses** de venta en la ventana (`MESES_MIN_PROPIA`) entra al reparto con su **participación propia**: su venta sobre la de los locales de 12 meses **en esos mismos meses**, para que la estacionalidad no lo infle ni lo achique. Se suma a las de los demás y se normaliza todo: la suma sigue cerrando contra el canal. Con menos de 3 meses, no proyecta variables y se avisa. Malvinas (8 meses) es este caso |
 | **Real + proyectada** | **El mes en curso** con venta real: la real de la app (lo vendido hasta ayer) **más** la estimada —o la manual— del mes completo por la fracción de días que faltan, hoy incluido: `(días del mes − día de hoy + 1) / días del mes`. Antes el mes en curso tomaba como venta del mes lo vendido hasta el momento y los variables salían chicos. El tooltip separa la real de la proyectada. Al 17/11/2026 la venta neta de noviembre de los locales pasó de $ 454,0 M (lo vendido) a $ 1.091,4 M, y el total del horizonte subió $ 1,13 M (los variables de noviembre se pagan diferidos). Supone que la real de la app llega hasta ayer: `RO_T_RENTABILIDAD_BRUTA` es mensual y no dice hasta qué día está cargada |
 
 - **La venta del canal es la del mes completo**, `Ventas::ventaMensualCanal()`: la base mensual (`baseMensual()`) por la participación mensual del canal. No es la grilla diaria de Ventas, que en el mes en curso arranca hoy y en los primeros 28 días usa la participación del tramo: los porcentajes del alquiler son sobre el mes entero. Al 10/11/2026, noviembre da **$ 1.652,6 M** contra los $ 1.269,6 M que muestra Ventas desde hoy, y los 12 meses suman **$ 22.372 M**. No se recalcula: se le pide a Ventas.
 - **Las manuales se restan del canal antes de repartir**, así que *estimadas + manuales = canal* al centavo. El redondeo sobrante va al local con más participación. Lo fija una prueba, y el pie de la sub-pestaña Ventas muestra la diferencia, que da 0 en los meses estimados.
-- **Un local cerrado no entra al denominador** (cerrado en Lakers, o con fecha de fin pasada). Un local *incompleto* pero abierto sí reparte: sigue vendiendo.
-- Para los variables diferidos se calculan también los meses de venta **anteriores al horizonte** que se pagan adentro: con diferimiento 2, la venta de dos meses atrás. Esos meses tienen venta real; si a alguno le faltara, no hay venta del canal con qué estimarlo y se avisa.
+- **Un local cerrado en Lakers no entra al denominador.** Un local *incompleto* pero abierto sí reparte: sigue vendiendo.
+- Para los variables diferidos se calculan también los meses de venta **anteriores al horizonte** que se pagan adentro: con diferimiento 2, la venta de dos meses atrás. Esos meses no tienen venta proyectada del canal: si a algún local le falta la real, **el canal se arma con la venta real de los que la tienen, dividida por su participación**, y el que falta se estima con la suya (el tooltip lo dice). Sólo queda sin venta, con un aviso que lo nombra, un local sin venta en la app, sin participación y sin venta manual **que tenga conceptos variables**: OESTE no tiene ventas, pero tampoco porcentajes de variables, así que no se avisa.
 
 ---
 
@@ -236,7 +238,7 @@ a pagar     = neto + IVA + percepción − retención
 - **Mes de pago**: fijos, fondo y expensas, el mismo mes; variables, el mes de la venta + el diferimiento de la razón social; extraordinarios, el mes base + su diferimiento.
 - **Día**: el de la razón social, o el general. Si no es hábil, el siguiente hábil (`DiasHabiles::siguiente()`) y la celda lo anota con `detalle`.
 - **Un vencimiento que ya pasó en el mes en curso** —todavía sin factura— va al **siguiente hábil desde hoy**, nunca apilado en el primer día del eje. Es provisorio: una factura imputada que cubre ese mes lo reemplaza, en su propia fecha.
-- **Fecha de fin**: desde el mes siguiente no se proyectan conceptos del local. Un variable de un mes anterior a la fecha de fin que se paga diferido después sí se paga: la venta existió.
+- **Vencimiento del contrato** (la fecha de fin de Parámetros): no corta; ver 3.c.
 - Cada parte se redondea a centavos una sola vez. La app trunca a pesos; como los meses cerrados se leen tal cual, eso no cambia nada de lo cerrado.
 
 ---
@@ -256,7 +258,7 @@ a pagar     = neto + IVA + percepción − retención
 
 ### Ventas
 
-Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*, *Real + proyectada*), incluidos los meses anteriores al horizonte que pagan los diferidos. La primera columna es el **número de sucursal** y la grilla viene **ordenada por él**; el encabezado cambia el orden. Al pie, el **total de los locales** en todos los meses (neta o bruta, según el selector: antes los meses sólo con venta real, como septiembre y octubre, no totalizaban) y, como control del reparto, estimadas + manuales del mes completo, la venta del canal Locales y la diferencia (0 en los meses estimados). El tooltip de una estimada dice la participación del local y la venta del canal; la sub-pestaña, el período de la participación.
+Los locales **cerrados en Lakers no se muestran** (tampoco en la Proyección, que ya no lleva la tarjeta de cerrados). Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*, *Real + proyectada*), incluidos los meses anteriores al horizonte que pagan los diferidos. La primera columna es el **número de sucursal** y la grilla viene **ordenada por él**; el encabezado cambia el orden. Al pie, el **total de los locales** en todos los meses (neta o bruta, según el selector: antes los meses sólo con venta real, como septiembre y octubre, no totalizaban) y, como control del reparto, estimadas + manuales del mes completo, la venta del canal Locales y la diferencia (0 en los meses estimados). El tooltip de una estimada dice la participación del local y la venta del canal; la sub-pestaña, el período de la participación.
 
 ### Facturas
 

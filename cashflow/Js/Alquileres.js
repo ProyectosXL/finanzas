@@ -107,11 +107,6 @@
 
         aplicarAbiertos();
         pintarPie(locales, meses);
-
-        var cerrados = datos.locales.filter(function(l) { return l.estado === 'CERRADO_LAKERS'; });
-
-        mostrar('alqCerradosCard', cerrados.length > 0);
-        texto('alqCerrados', cerrados.map(function(l) { return l.nombre; }).join(', '));
     }
 
     function coincide(l) {
@@ -308,7 +303,9 @@
             }).join('') + '</tr>';
 
         /* ORDENADO POR NUMERO DE SUCURSAL por defecto; el encabezado lo cambia. */
-        var filas = v.filas.slice().sort(function(a, b) { return a.nro - b.nro; });
+        /* LOS CERRADOS EN LAKERS NO SE MUESTRAN: no pagan alquiler. */
+        var filas = v.filas.filter(function(f) { return f.estado !== 'CERRADO_LAKERS'; })
+            .sort(function(a, b) { return a.nro - b.nro; });
 
         document.getElementById('alqVentasBody').innerHTML = filas.map(function(f) {
             return '<tr' + (f.estado === 'CERRADO_LAKERS' ? ' class="text-muted"' : '') + '>'
@@ -336,7 +333,7 @@
            son el control del reparto contra el canal (bruta), que en los meses
            con venta real no tiene con qué comparar. */
         var total = meses.map(function(m) {
-            return v.filas.reduce(function(s, f) { return s + ((f.meses[m] || {})[tipoVenta] || 0); }, 0);
+            return filas.reduce(function(s, f) { return s + ((f.meses[m] || {})[tipoVenta] || 0); }, 0);
         });
 
         document.getElementById('alqVentasTfoot').innerHTML =
@@ -372,6 +369,15 @@
         if (c.origen === 'ESTIMADA') {
             t += '\nParticipación ' + numero(c.participacion * 100, 2) + ' % de la venta del canal Locales ('
                 + importeTexto(c.canal) + ')';
+
+            if (c.meses_propia) {
+                t += '\nLocal nuevo: participación propia, sobre sus ' + c.meses_propia + ' meses de venta contra '
+                    + 'los locales de 12 meses en esos mismos meses.';
+            }
+
+            if (c.canal_de_reales) {
+                t += '\nMes sin venta proyectada del canal: el canal sale de la venta real de los demás locales.';
+            }
         }
 
         if (c.origen === 'REAL_PROYECTADA') {
