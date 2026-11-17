@@ -17,3 +17,5 @@
 #tablaAlqVentas td.alq-celda-MANUAL { background: rgba(111, 66, 193, .07); }
 #tablaAlqVentas td.alq-antes { border-left: 0; }
 #tablaAlqVentas th.alq-antes { font-style: italic; }
+.alq-origen-REAL_PROYECTADA { background: #e0f5ec; color: #146c43; }
+#tablaAlqVentas td.alq-celda-REAL_PROYECTADA { background: rgba(25, 135, 84, .07); }

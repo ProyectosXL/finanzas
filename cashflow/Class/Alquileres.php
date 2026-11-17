@@ -227,11 +227,12 @@ class Alquileres {
      * Nunca lanza: lo que no se puede leer queda vacio, con su aviso.
      *
      * @param Horizonte $h
-     * @return array ['ctx', 'pendientes', 'excluidas', 'vtos', 'dias', 'imputaciones', 'en_tango', 'avisos']
+     * @return array ['ctx', 'pendientes', 'excluidas', 'vtos', 'dias', 'pagadas_mes', 'imputaciones',
+     *                'en_tango', 'avisos']
      */
     protected function insumosFacturas($h) {
         $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'dias' => [],
-                'imputaciones' => [], 'en_tango' => [], 'avisos' => []];
+                'pagadas_mes' => [], 'imputaciones' => [], 'en_tango' => [], 'avisos' => []];
 
         try {
             require_once __DIR__ . '/AlquileresUniverso.php';
@@ -267,6 +268,20 @@ class Alquileres {
             $out['excluidas'] = $partes[AlquileresFacturas::A_EXCLUIDA];
             $out['vtos'] = (new AlquileresFacturaVto())->vigentes();
             $out['dias'] = $this->diasDeVencimiento();
+
+            /* LAS YA PAGADAS DEL MES: emitidas en el mes en curso y canceladas en
+               Tango. Se ven en Facturas para poder imputarlas: una pagada sin
+               imputar deja la proyeccion de su mes en el flujo. Si no se pueden
+               leer, la grilla sigue con las pendientes y se avisa. */
+            try {
+                $out['pagadas_mes'] = AlquileresFacturas::partir($prov->getCanceladasEmitidas(
+                    array_keys($ctx['razones']), substr($h->hoy(), 0, 8) . '01', date('Y-m-t', strtotime($h->hoy()))),
+                    $ctx)[AlquileresFacturas::A_ALQUILERES];
+            } catch (Throwable $e) {
+                $out['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer de Tango las facturas de '
+                    . 'alquiler ya pagadas este mes (' . $e->getMessage() . '): la grilla muestra sólo las pendientes.',
+                    'Facturas');
+            }
             $out['imputaciones'] = (new AlquileresImputaciones())->vigentes();
 
             $pares = AlquileresImputacion::aConsultarEnTango($out['imputaciones'], $out['pendientes']);
@@ -336,6 +351,7 @@ class Alquileres {
             'excluidas' => $f['excluidas'],
             'vtos' => $f['vtos'],
             'dias' => $f['dias'] ?? [],
+            'pagadas_mes' => $f['pagadas_mes'] ?? [],
             'imputaciones' => $f['imputaciones'],
             'en_tango' => $f['en_tango'],
             'ctx' => $f['ctx'],
@@ -381,6 +397,18 @@ class Alquileres {
 
         foreach ($f['pendientes'] as $p) {
             $pend[AlquileresImputacion::claveCuota($p)] = $p;
+        }
+
+        /* LAS YA PAGADAS DEL MES TAMBIEN SE IMPUTAN, por el importe de la cuota:
+           se validan como si ese fuera su pendiente. Al guardarlas, la proxima
+           carga las ve canceladas en Tango y las marca Pagadas: reemplazan la
+           proyeccion del mes que cubren y no generan pago. */
+        foreach ($f['pagadas_mes'] ?? [] as $p) {
+            $c = AlquileresImputacion::claveCuota($p);
+
+            if (!isset($pend[$c])) {
+                $pend[$c] = AlquileresImputacion::comoPendiente($p);
+            }
         }
 
         $locales = [];
@@ -499,7 +527,7 @@ class Alquileres {
 
         $ventas = ($ins['iva'] === null) ? null : AlquileresVenta::calcular([
             'meses' => $mesesConcepto, 'locales' => $entradaVenta, 'netas' => $netas, 'brutas' => $brutas,
-            'ventana' => $base['ventana'], 'canal' => $ins['canal'], 'iva' => $ins['iva']
+            'ventana' => $base['ventana'], 'canal' => $ins['canal'], 'iva' => $ins['iva'], 'hoy' => $hoy
         ]);
         $out['ventas'] = $ventas;
 

@@ -185,6 +185,7 @@ Ejemplo: Cencosud, 75 % del VMA (8) de diciembre, 1 mes de diferimiento: se paga
 | **Real** | El mes ya tiene venta en la app: neta de `RO_T_RENTABILIDAD_BRUTA` y bruta de `RO_V_VENTAS_BRUTAS_IE`. Si hay una y no la otra (hoy no pasa en ningún local), la que falta se deriva con el IVA general y el tooltip lo dice |
 | **Estimada** | La venta proyectada del canal `LOCALES` de la pestaña Ventas, repartida por la participación de cada local en la venta neta real de los **últimos 12 meses cerrados** de la app |
 | **Manual** | Un local **nuevo** (sin 12 meses de venta en esa ventana) no entra al reparto: usa la venta mensual estimada de Parámetros. Sin ella no proyecta variables y se avisa |
+| **Real + proyectada** | **El mes en curso** con venta real: la real de la app (lo vendido hasta ayer) **más** la estimada —o la manual— del mes completo por la fracción de días que faltan, hoy incluido: `(días del mes − día de hoy + 1) / días del mes`. Antes el mes en curso tomaba como venta del mes lo vendido hasta el momento y los variables salían chicos. El tooltip separa la real de la proyectada. Al 17/11/2026 la venta neta de noviembre de los locales pasó de $ 454,0 M (lo vendido) a $ 1.091,4 M, y el total del horizonte subió $ 1,13 M (los variables de noviembre se pagan diferidos). Supone que la real de la app llega hasta ayer: `RO_T_RENTABILIDAD_BRUTA` es mensual y no dice hasta qué día está cargada |
 
 - **La venta del canal es la del mes completo**, `Ventas::ventaMensualCanal()`: la base mensual (`baseMensual()`) por la participación mensual del canal. No es la grilla diaria de Ventas, que en el mes en curso arranca hoy y en los primeros 28 días usa la participación del tramo: los porcentajes del alquiler son sobre el mes entero. Al 10/11/2026, noviembre da **$ 1.652,6 M** contra los $ 1.269,6 M que muestra Ventas desde hoy, y los 12 meses suman **$ 22.372 M**. No se recalcula: se le pide a Ventas.
 - **Las manuales se restan del canal antes de repartir**, así que *estimadas + manuales = canal* al centavo. El redondeo sobrante va al local con más participación. Lo fija una prueba, y el pie de la sub-pestaña Ventas muestra la diferencia, que da 0 en los meses estimados.
@@ -255,7 +256,7 @@ a pagar     = neto + IVA + percepción − retención
 
 ### Ventas
 
-Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*), incluidos los meses anteriores al horizonte que pagan los diferidos. Al pie, estimadas + manuales, la venta del canal Locales y la diferencia (0 en los meses estimados). El tooltip de una estimada dice la participación del local y la venta del canal; la sub-pestaña, el período de la participación.
+Neta o bruta por local y mes con su origen (chip *Real*, *Estimada*, *Manual*, *Real + proyectada*), incluidos los meses anteriores al horizonte que pagan los diferidos. La primera columna es el **número de sucursal** y la grilla viene **ordenada por él**; el encabezado cambia el orden. Al pie, el **total de los locales** en todos los meses (neta o bruta, según el selector: antes los meses sólo con venta real, como septiembre y octubre, no totalizaban) y, como control del reparto, estimadas + manuales del mes completo, la venta del canal Locales y la diferencia (0 en los meses estimados). El tooltip de una estimada dice la participación del local y la venta del canal; la sub-pestaña, el período de la participación.
 
 ### Facturas
 
@@ -283,7 +284,7 @@ Las facturas salen de Proveedores Locales **sólo si** el módulo `ALQUILERES` e
 
 ### La grilla
 
-Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, vencimiento de Tango, **vencimiento a considerar**, importe, pendiente, retención, **a pagar** y estado (*Sin imputar*, *Imputada*, *Imputada parcialmente* —otra cuota del comprobante sin imputar—, *Pagada*, *Ya no está en Tango*, *Sin dato de Tango*, *Imputación suspendida*). Filtros por razón social y estado, *Ver pagadas*, totales, exportar y tres tarjetas: **sin imputar** (cantidad e importe: plata que no suma en ningún lado), imputadas a pagar y pagos proyectados reemplazados.
+Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, vencimiento de Tango, **vencimiento a considerar**, importe, pendiente, retención, **a pagar** y estado (*Sin imputar*, *Imputada*, *Imputada parcialmente* —otra cuota del comprobante sin imputar—, *Pagada*, *Ya no está en Tango*, *Sin dato de Tango*, *Imputación suspendida*). Filtros por razón social y estado, *Ver pagadas de meses anteriores* (las del mes en curso se ven siempre), totales, exportar y tres tarjetas: **sin imputar** (cantidad e importe: plata que no suma en ningún lado), imputadas a pagar y pagos proyectados reemplazados.
 
 ### El vencimiento a considerar
 
@@ -321,6 +322,7 @@ Una o varias cuotas, **de una o varias razones sociales**, a locales de cualquie
 
 ### Sin imputar, pagada, cambiada
 
+- **Las facturas del mes, pagadas o no.** Además de las pendientes, la grilla trae las cuotas **emitidas en el mes en curso y ya canceladas en Tango** de las razones dadas de alta (`Proveedores::getCanceladasEmitidas()`: CPA54 con `ESTADO_VTO = 'PAG'`, comprobantes que suman deuda, `CPA21.CRE_DEB = 'D'`). Las que nadie imputó quedan **Pagada, sin imputar**: no se pagan otra vez, pero **la proyección de lo que cubren sigue en el flujo** hasta que se imputen. Se tildan e imputan como las demás, **por el importe de la cuota** (`AlquileresImputacion::comoPendiente()`); en la próxima carga Tango las da canceladas, quedan *Pagada* y **reemplazan** la proyección del mes que cubren: **para que el monto desaparezca del flujo, la factura tiene que estar imputada y pagada**. Aviso de atención con la cantidad y el importe, y la tarjeta *sin imputar* lo suma al pie. Al 17/11/2026 eran **40 por $ 317,5 M**, contra $ 321,2 M proyectados a pagar en noviembre. No se les cambia el vencimiento.
 - **Sin imputar no suma** —ni en la pestaña ni en el tablero—: contaría dos veces contra la proyección. Aviso de atención: *"N factura(s) de alquiler sin imputar por $ X: no suman hasta que se imputen"*.
 - **Pagada en Tango**: sale de pendientes; se marca *Pagada* con la fecha de cancelación al cargar la pestaña (usuario del sistema, como la conciliación de Proveedores Locales, con `Proveedores::estadoComprobantesEnTango()`). **Sigue reemplazando** el mes que cubre. Se ve con *Ver pagadas*.
 - **Desaparecida sin pago** (anulada) o sin dato de Tango: **deja de reemplazar**, la proyección vuelve y se avisa para imputar la nueva. En un grupo de varias facturas, cuando **todas** quedaron así.

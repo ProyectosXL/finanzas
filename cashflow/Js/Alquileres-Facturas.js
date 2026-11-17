@@ -27,6 +27,8 @@
 
     var ESTADOS_PENDIENTES = ['SIN_IMPUTAR', 'IMPUTADA', 'PARCIAL', 'SUSPENDIDA'];
     var ESTADOS_PAGADAS = ['PAGADA'];
+    /* Las que se pueden tildar e imputar: las pendientes y las ya pagadas del mes que nadie imputo. */
+    var ESTADOS_IMPUTABLES = ESTADOS_PENDIENTES.concat(['PAGADA_SIN_IMPUTAR']);
 
     function puedeEditar() {
         return Permisos.puedeEditar('alqFactBody') && datos && datos.tablas;
@@ -71,7 +73,9 @@
         var k = datos.kpis || {};
 
         texto('alqFactKpiSin', importe(k.sin_imputar_importe));
-        texto('alqFactKpiSinPie', (k.sin_imputar_n || 0) + ' factura(s): no suman en ningún lado hasta que se imputen');
+        texto('alqFactKpiSinPie', (k.sin_imputar_n || 0) + ' factura(s): no suman en ningún lado hasta que se imputen'
+            + (k.pagadas_sin_imputar_n ? ' · ' + k.pagadas_sin_imputar_n + ' pagada(s) del mes sin imputar por '
+                + importeTexto(k.pagadas_sin_imputar_importe) : ''));
         texto('alqFactKpiImp', importe(k.imputadas_a_pagar));
         texto('alqFactKpiImpPie', (k.imputadas_n || 0) + ' factura(s) · pendiente − retención');
         texto('alqFactKpiReemp', String(datos.reemplazados || 0));
@@ -85,7 +89,8 @@
         return datos.filas.filter(function(f) {
             if (r && f.cod_provee !== r) { return false; }
             if (e && f.estado !== e) { return false; }
-            if (!pagadas && ESTADOS_PAGADAS.indexOf(f.estado) !== -1) { return false; }
+            /* Las pagadas del mes se ven siempre; las anteriores, con "Ver pagadas". */
+            if (!pagadas && !f.del_mes && ESTADOS_PAGADAS.indexOf(f.estado) !== -1) { return false; }
 
             return true;
         });
@@ -107,7 +112,7 @@
         }
 
         html('alqFactBody', filas.map(function(f) {
-            var tildable = edita && ESTADOS_PENDIENTES.indexOf(f.estado) !== -1;
+            var tildable = edita && ESTADOS_IMPUTABLES.indexOf(f.estado) !== -1;
 
             return '<tr data-clave="' + esc(f.clave) + '">'
                 + '<td class="text-center" data-exportar-omitir>' + (tildable
@@ -159,12 +164,18 @@
     function chipEstado(f) {
         var cls = { SIN_IMPUTAR: 'bg-danger', IMPUTADA: 'bg-success', PARCIAL: 'bg-warning text-dark',
                     PAGADA: 'bg-secondary', ANULADA: 'bg-warning text-dark', SIN_DATO: 'bg-warning text-dark',
-                    SUSPENDIDA: 'bg-warning text-dark' }[f.estado] || 'bg-light text-dark';
+                    SUSPENDIDA: 'bg-warning text-dark', PAGADA_SIN_IMPUTAR: 'bg-danger' }[f.estado] || 'bg-light text-dark';
         var t = datos.estados[f.estado] || f.estado;
         var tip = f.imputacion ? 'Imputación ' + f.imputacion + '\n'
             + Auditoria.texto({ alta: { usuario: f.imputacion_usuario, fecha: f.imputacion_fecha } }) : '';
 
-        if (f.estado === 'PAGADA' && f.fecha_pagada) { tip += '\nPagada en Tango el ' + fecha(f.fecha_pagada); }
+        if ((f.estado === 'PAGADA' || f.estado === 'PAGADA_SIN_IMPUTAR') && f.fecha_pagada) {
+            tip += '\nPagada en Tango el ' + fecha(f.fecha_pagada);
+        }
+        if (f.estado === 'PAGADA_SIN_IMPUTAR') {
+            tip += '\nNo se paga otra vez, pero la proyección de lo que cubre sigue en el flujo hasta que se impute '
+                + '(por su importe, ' + importeTexto(f.a_imputar) + ').';
+        }
         if (f.pendiente_al_imputar !== null && f.estado !== 'PAGADA' && Math.abs(f.pendiente_al_imputar - f.pendiente) > 0.005) {
             tip += '\nAl imputar el pendiente era ' + importeTexto(f.pendiente_al_imputar) + ': revisá la imputación.';
         }
@@ -352,10 +363,11 @@
         renglones = [nuevoRenglon(fs)];
         html('alqImpFacturas', fs.map(function(f, i) {
             return '<tr><td>' + esc(f.razon || f.cod_provee) + '</td><td>' + esc(f.t_comp + ' ' + f.n_comp) + '</td>'
-                + '<td>' + fecha(f.vto_considerar) + '</td><td class="text-end">' + importe(f.pendiente) + '</td>'
+                + '<td>' + fecha(f.vto_considerar) + '</td><td class="text-end">' + importe(f.a_imputar)
+                + (f.estado === 'PAGADA_SIN_IMPUTAR' ? ' <span class="badge bg-secondary">pagada</span>' : '') + '</td>'
                 + '<td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end alq-imp-ret" '
                 + 'data-i="' + i + '" value="' + (f.retencion !== null ? f.retencion : '') + '" placeholder="sugerida al previsualizar"></td>'
-                + '<td class="text-end alq-imp-apagar" data-i="' + i + '">' + importe(f.pendiente - (f.retencion || 0)) + '</td></tr>';
+                + '<td class="text-end alq-imp-apagar" data-i="' + i + '">' + importe(f.a_imputar - (f.retencion || 0)) + '</td></tr>';
         }).join(''));
 
         document.querySelectorAll('#alqImpFacturas .alq-imp-ret').forEach(function(inp) {
@@ -376,7 +388,7 @@
     }
 
     function totalFacturas(fs) {
-        return (fs || tildadas()).reduce(function(a, f) { return a + f.pendiente; }, 0);
+        return (fs || tildadas()).reduce(function(a, f) { return a + f.a_imputar; }, 0);
     }
 
     function razonesTildadas() {
@@ -496,7 +508,7 @@
             var f = fs[Number(inp.getAttribute('data-i'))];
             var celda = document.querySelector('#alqImpFacturas .alq-imp-apagar[data-i="' + inp.getAttribute('data-i') + '"]');
 
-            if (celda) { celda.textContent = importeTexto(f.pendiente - (Number(inp.value) || 0)); }
+            if (celda) { celda.textContent = importeTexto(f.a_imputar - (Number(inp.value) || 0)); }
         });
 
         html('alqImpTotales', '<span>Facturas: <strong>' + importe(tf) + '</strong></span>'
@@ -515,7 +527,7 @@
                 var v = rets[i] ? rets[i].value : '';
 
                 return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango,
-                         pendiente: f.pendiente, retencion: v === '' ? null : Number(v) };
+                         pendiente: f.a_imputar, retencion: v === '' ? null : Number(v) };
             }),
             renglones: renglones.map(function(r) {
                 return { conceptos: r.conceptos, locales: r.todos_de ? [] : r.locales, todos_de: r.todos_de || null,

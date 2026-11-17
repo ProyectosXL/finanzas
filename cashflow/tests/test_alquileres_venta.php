@@ -87,6 +87,27 @@ foreach ([1, 2, 3] as $n) {
 }
 chequear('dic: la suma de los locales es el canal al centavo', 1234567.89, round($sumaDic, 2));
 
+seccion('AlquileresVenta: el mes en curso es la real + lo que falta vender');
+
+/* Hoy 21/11 (30 dias): faltan 10, hoy incluido. El local 3 vendio 300000
+   neto (363000 bruto) hasta ayer y estima 700000 bruto el mes completo. */
+$enCurso = $base + ['hoy' => '2026-11-21'];
+$enCurso['netas'][3]['2026-11'] = 300000.0;
+$enCurso['brutas'][3]['2026-11'] = 363000.0;
+$ec = AlquileresVenta::calcular($enCurso)['ventas'][3]['2026-11'];
+chequear('origen Real + proyectada', AlquileresVenta::REAL_PROYECTADA, $ec['origen']);
+chequear('bruta: la real + la estimada del mes x 10/30', round(363000.0 + 700000.0 * 10 / 30, 2), $ec['bruta']);
+chequear('neta: la real + la proyectada bruta / 1,21', round(300000.0 + round(700000.0 * 10 / 30, 2) / 1.21, 2),
+    $ec['neta']);
+chequear('la celda separa la real de la proyectada', [363000.0, 300000.0, 10, 30],
+    [$ec['real_bruta'], $ec['real_neta'], $ec['dias_restantes'], $ec['dias_mes']]);
+chequear('un mes anterior con real sigue siendo Real', 'REAL',
+    AlquileresVenta::calcular($enCurso)['ventas'][1]['2026-10']['origen']);
+chequear('sin hoy, como antes: la real sola', 'REAL',
+    AlquileresVenta::calcular(array_diff_key($enCurso, ['hoy' => 1]))['ventas'][3]['2026-11']['origen']);
+$primero = AlquileresVenta::calcular(['hoy' => '2026-11-01'] + $enCurso)['ventas'][3]['2026-11'];
+chequear('el dia 1 falta el mes entero', round(363000.0 + 700000.0, 2), $primero['bruta']);
+
 seccion('AlquileresVenta: un local nuevo');
 
 $conNuevo = $base;

@@ -242,6 +242,44 @@ chequear('vencida hace dos meses tambien', '2026-11-10', $d['fecha']);
 $d = AlquileresImputacion::fechaDePago('2026-11-21', $HAB, $HOY);
 chequear('un sabado pasa al lunes', ['2026-11-23', true], [$d['fecha'], $d['corrida']]);
 
+seccion('Las facturas del mes, pagadas o no');
+
+/* Una cuota emitida este mes y ya cancelada en Tango, que nadie imputo
+   (Proveedores::getCanceladasEmitidas()). */
+$pm = cuotaP('SAPALA', 'PM1', 0.0, '2026-11-12', ['IMPORTE_VTO' => 1500.0, 'FECHA_CANCELADO' => '2026-11-04']);
+$r = aplicarP($PROY, [], [], ['pagadas_mes' => [$pm]]);
+chequear('se ve en la grilla como Pagada, sin imputar', [AlquileresImputacion::PAGADA_SIN_IMPUTAR, 1500.0, true,
+    '2026-11-04'], [$r['facturas'][0]['estado'], $r['facturas'][0]['a_imputar'], $r['facturas'][0]['del_mes'],
+    $r['facturas'][0]['fecha_pagada']]);
+chequear('no se paga otra vez', 0.0, sumaDe($r['pagos'], 'esFactura'));
+chequear('y la proyeccion sigue entera en el flujo', count($PROY), count($r['pagos']));
+chequear('se avisa con el importe', true, (bool) array_filter($r['avisos'], function ($a) {
+    return strpos($a['texto'], 'ya pagadas en Tango y sin imputar, por $ 1.500,00') !== false; }));
+chequear('y lo cuentan las tarjetas', [1, 1500.0],
+    [$r['kpis']['pagadas_sin_imputar_n'], $r['kpis']['pagadas_sin_imputar_importe']]);
+
+/* Se imputa por el importe de la cuota: comoPendiente() la deja validar. */
+$pmPend = AlquileresImputacion::comoPendiente($pm);
+$vPm = AlquileresImputacion::validar(['facturas' => [['cod_provee' => 'SAPALA', 't_comp' => 'FAC', 'n_comp' => 'PM1',
+    'vto_tango' => '2026-11-12', 'pendiente' => 1500.0, 'retencion' => 0]], 'renglones' => [
+    ['conceptos' => ['1', '8'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 1500.0]]],
+    ['pendientes' => [AlquileresImputacion::claveCuota($pmPend) => $pmPend], 'imputaciones' => [], 'pagos' => $PROY,
+     'locales' => [1 => ['cod_provee' => 'SAPALA', 'nombre' => 'ABASTO', 'pct_iva' => 21.0, 'pct_percepcion' => 3.0,
+                         'pct_retencion' => 2.0]]], true);
+chequear('una pagada del mes se imputa por su importe', [true, 1500.0], [$vPm['ok'], $vPm['total_facturas']]);
+
+/* Imputada y pagada: reemplaza la proyeccion de lo que cubre y no se paga. */
+$impPm = imputacionP(11, [['FECHA_VTO' => '2026-11-12', 'IMPORTE_PENDIENTE' => 1500.0] + $pm],
+    [['conceptos' => ['1', '8'], 'locales' => [1], 'mes' => '2026-11', 'importe' => 1500.0]]);
+$r = aplicarP($PROY, [], [$impPm], ['pagadas_mes' => [$pm],
+    'en_tango' => ['SAPALA|PM1' => [['T_COMP' => 'FAC', 'ESTADO' => 'CAN', 'FECHA_CANCELADO' => '2026-11-04']]]]);
+chequear('imputada y pagada: el monto desaparece del flujo', [2, 0.0],
+    [count($r['reemplazados']), sumaDe($r['pagos'], 'esFactura')]);
+chequear('una sola fila, Pagada, con los datos de Tango y la fecha de pago', [1, AlquileresImputacion::PAGADA, 1500.0,
+    '2026-11-02', '2026-11-04'],
+    [count($r['facturas']), $r['facturas'][0]['estado'], $r['facturas'][0]['importe'], $r['facturas'][0]['emision'],
+     $r['facturas'][0]['fecha_pagada']]);
+
 seccion('Pagada en Tango');
 
 $fp = cuotaP('SAPALA', 'P1', 1600.0);

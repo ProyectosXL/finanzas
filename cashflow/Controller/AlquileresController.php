@@ -110,7 +110,8 @@ try {
             $cuota = ['COD_PROVEE' => $data['cod_provee'] ?? '', 'T_COMP' => $data['t_comp'] ?? '',
                       'N_COMP' => $data['n_comp'] ?? '', 'FECHA_VTO' => $data['vto_tango'] ?? ''];
 
-            if (!isset($e['pendientes'][AlquileresImputacion::claveCuota($cuota)])) {
+            if (!isset($e['pendientes'][AlquileresImputacion::claveCuota($cuota)])
+                || !empty($e['pendientes'][AlquileresImputacion::claveCuota($cuota)]['PAGADA_TANGO'])) {
                 throw new InvalidArgumentException('Esa factura ya no está pendiente en Tango, o no es de alquiler: '
                     . 'volvé a cargar la pestaña. No se guardó nada.');
             }

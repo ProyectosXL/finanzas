@@ -4274,6 +4274,80 @@ class Proveedores {
     }
 
     /**
+     * Las cuotas YA PAGADAS en Tango de unos proveedores, emitidas entre dos
+     * fechas: lo que getPendientes() no trae. La usa Alquileres para mostrar las
+     * facturas del mes esten pagadas o no: una pagada que nadie imputo deja la
+     * proyeccion de su mes en el flujo, y hay que poder imputarla.
+     *
+     * Una fila por vencimiento (CPA54) con ESTADO_VTO = 'PAG', de un comprobante
+     * que suma a la deuda (CPA21.CRE_DEB = 'D': facturas y notas de debito).
+     * Mismas claves que getPendientes() para lo que comparten, con
+     * IMPORTE_PENDIENTE = 0 y la fecha de cancelacion de la cuota (la ultima
+     * imputacion de CPA05 contra ese vencimiento).
+     *
+     * @param string[] $cods COD_PROVEE
+     * @param string $desde 'Y-m-d' (emision, inclusive)
+     * @param string $hasta 'Y-m-d' (emision, inclusive)
+     * @return array Lista de cuotas
+     */
+    public function getCanceladasEmitidas($cods, $desde, $hasta) {
+        $cods = array_values(array_unique(array_filter(array_map(['Planilla', 'codigo'], (array) $cods))));
+
+        if (empty($cods)) {
+            return [];
+        }
+
+        $stmt = sqlsrv_query($this->conectar(), "
+            SELECT a.COD_PROVEE, p.NOM_PROVEE, a.T_COMP, a.N_COMP, a.LEYENDA,
+                   CAST(a.FECHA_EMIS AS DATE) AS FECHA_EMIS,
+                   CAST(v.FECHA_VTO  AS DATE) AS FECHA_VTO,
+                   CAST(v.IMPORT_VTO AS FLOAT) AS IMPORTE_VTO,
+                   CAST(a.SUBT_GRAVA AS FLOAT) AS NETO_GRAVADO_COMP,
+                   CAST(a.IMPORTE_TO AS FLOAT) AS IMPORTE_COMP,
+                   (SELECT MAX(i.F_COMP_CAN) FROM CPA05 i
+                     WHERE i.ID_CPA04 = v.ID_CPA04 AND i.FECHA_VTO = v.FECHA_VTO) AS FECHA_CANCELADO
+            FROM CPA04 a
+            INNER JOIN CPA01 p ON p.COD_PROVEE = a.COD_PROVEE
+            INNER JOIN CPA54 v ON v.ID_CPA04   = a.ID_CPA04
+            INNER JOIN CPA21 tc ON tc.T_COMP   = a.T_COMP
+            WHERE a.COD_PROVEE IN (" . implode(',', array_fill(0, count($cods), '?')) . ")
+              AND a.FECHA_EMIS >= ? AND a.FECHA_EMIS < DATEADD(DAY, 1, CAST(? AS DATE))
+              AND tc.CRE_DEB = 'D'
+              AND v.ESTADO_VTO = 'PAG'
+            ORDER BY a.FECHA_EMIS, a.COD_PROVEE, a.N_COMP",
+            array_merge($cods, [substr((string) $desde, 0, 10), substr((string) $hasta, 0, 10)]));
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al consultar las facturas pagadas'));
+        }
+
+        $out = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $out[] = [
+                'COD_PROVEE' => Planilla::codigo($row['COD_PROVEE']),
+                'RAZON_SOC' => trim((string) $row['NOM_PROVEE']),
+                'T_COMP' => Planilla::codigo($row['T_COMP']),
+                'N_COMP' => Planilla::codigo($row['N_COMP']),
+                'LEYENDA' => trim((string) $row['LEYENDA']),
+                'FECHA_EMIS' => Horizonte::normalizarFecha($row['FECHA_EMIS']),
+                'FECHA_VTO' => Horizonte::normalizarFecha($row['FECHA_VTO']),
+                'IMPORTE_VTO' => round(floatval($row['IMPORTE_VTO']), 2),
+                'IMPORTE_PENDIENTE' => 0.0,
+                'NETO_GRAVADO_COMP' => ($row['NETO_GRAVADO_COMP'] === null)
+                    ? null : round(floatval($row['NETO_GRAVADO_COMP']), 2),
+                'IMPORTE_COMP' => ($row['IMPORTE_COMP'] === null) ? null : round(floatval($row['IMPORTE_COMP']), 2),
+                'FECHA_CANCELADO' => ($row['FECHA_CANCELADO'] === null)
+                    ? null : Horizonte::normalizarFecha($row['FECHA_CANCELADO'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $out;
+    }
+
+    /**
      * Normaliza y valida una fila de la planilla de pagos contra los pendientes.
      *
      * Decide lo que se puede decidir mirando LA FILA SOLA: la fecha, el cruce y
