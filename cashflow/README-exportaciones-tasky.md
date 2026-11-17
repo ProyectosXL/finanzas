@@ -52,13 +52,25 @@ Todos son reejecutables. **No hay tabla nueva**: los datos salen de Tango.
 
 ```sql
 SELECT CAST(A.FECHA_EMIS AS DATE), A.COD_CLIENT, B.RAZON_SOCI, A.T_COMP, A.N_COMP,
-       CAST(A.IMPORTE_EX AS FLOAT), CAST(A.COTIZ AS FLOAT), CAST(A.IMPORTE AS FLOAT)
+       CAST(A.IMPORTE_EX AS FLOAT), CAST(A.COTIZ AS FLOAT), CAST(A.IMPORTE AS FLOAT),
+       CAST(ISNULL(IMPU.IMPUTADO_USD, 0) AS FLOAT) AS IMPUTADO_USD
 FROM GVA12 A
 INNER JOIN GVA14 B ON A.COD_CLIENT = B.COD_CLIENT
+OUTER APPLY (
+    SELECT SUM(CASE GVA07.T_COMP_CAN
+                 WHEN 'REC' THEN GVA07.IMP_CAN_UN
+                 ELSE CASE GVA15.TIPO_COMP WHEN 'D' THEN -GVA07.IMP_CAN_UN
+                                           ELSE           GVA07.IMP_CAN_UN END
+               END) AS IMPUTADO_USD
+    FROM GVA07
+    LEFT JOIN GVA15 ON GVA15.IDENT_COMP = GVA07.T_COMP_CAN
+    WHERE GVA07.T_COMP = A.T_COMP AND GVA07.N_COMP = A.N_COMP
+) AS IMPU
 WHERE A.T_COMP = 'FAC' AND A.COD_CLIENT IN ('EXTASK') AND A.ESTADO = 'PEN'
 ```
 
-- **`IMPORTE_EX` es el importe en dólares.** Es el que se transporta, se valúa y llega al tablero.
+- **Los dólares pendientes son `IMPORTE_EX - IMPUTADO_USD`.** Ese saldo es el que se transporta, se valúa y llega al tablero. `IMPORTE_EX` (lo facturado) e `IMPUTADO_USD` quedan en la fila como `IMPORTE_USD_FACT` e `IMPUTADO_USD`.
+- **`IMPUTADO_USD` sale de las imputaciones (`GVA07.IMP_CAN_UN`), no de `ESTADO`.** `ESTADO` mira los pesos: una factura cobrada completa en dólares a una cotización distinta de la de facturación queda `PEN` por la diferencia de cambio en pesos. Caso real: la `E0011700004149` se facturó a 1.500 y se cobró completa con el `REC 0000300001872` a 1.400. Tiene `ESTADO_UNI = CAN` y sigue con `ESTADO = PEN`. **Una factura sin dólares pendientes no sale** (saldo menor o igual a medio centavo): no es cobranza a proyectar. Los signos son los de Cobranzas May: un `REC` cancela (no está en `GVA15`), un comprobante de tipo `D` suma deuda y las notas de crédito cancelan.
 - **`COTIZ` e `IMPORTE` son la cotización y el importe en pesos al momento de facturar.** Van en la pantalla, atenuados, como referencia histórica. **No entran en ningún cálculo**: si se cambian, ninguna otra columna se mueve (está probado).
 - `'EXTASK'` es el único cliente por ahora. Está en `Ingresos::CLIENTES_EXPORTACION` y no repetido dentro del SQL: si mañana aparece otra exportadora, se agrega ahí.
 

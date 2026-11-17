@@ -2564,6 +2564,18 @@ class Ingresos {
      * PEN. Los importes van a FLOAT y las fechas a DATE en el SELECT, como el
      * resto de las consultas sobre GVA12 del modulo.
      *
+     * IMPUTADO_USD: lo ya cancelado EN DOLARES, de las imputaciones (GVA07,
+     * IMP_CAN_UN). ESTADO = 'PEN' solo no alcanza: ESTADO mira los PESOS, y
+     * una factura cobrada completa en dolares a otra cotizacion que la de
+     * facturacion queda PEN por la diferencia de cambio en pesos (caso
+     * E0011700004149: facturada a 1500, cobrada a 1400 con el REC
+     * 0000300001872, ESTADO_UNI = CAN y ESTADO = PEN). Lo que se cobra son
+     * dolares, asi que el saldo es IMPORTE_EX - IMPUTADO_USD.
+     *
+     * Signos, los mismos que Cobranzas May sobre IMPORT_CAN: un REC cancela
+     * (no esta en GVA15), un comprobante de tipo 'D' suma deuda y el resto
+     * -notas de credito- cancela.
+     *
      * Lo que sale de la consulta lo transforma proyectarExportaciones(), que
      * es estatica y pura: ahi vive la regla de la fecha estimada, la de las
      * facturas vencidas y la de la conversion. Ver esa funcion.
@@ -2585,9 +2597,23 @@ class Ingresos {
                 A.N_COMP,
                 CAST(A.IMPORTE_EX AS FLOAT) AS IMPORTE_EX,
                 CAST(A.COTIZ AS FLOAT) AS COTIZ,
-                CAST(A.IMPORTE AS FLOAT) AS IMPORTE
+                CAST(A.IMPORTE AS FLOAT) AS IMPORTE,
+                CAST(ISNULL(IMPU.IMPUTADO_USD, 0) AS FLOAT) AS IMPUTADO_USD
             FROM GVA12 A
             INNER JOIN GVA14 B ON A.COD_CLIENT = B.COD_CLIENT
+            OUTER APPLY (
+                SELECT SUM(CASE GVA07.T_COMP_CAN
+                             WHEN 'REC' THEN GVA07.IMP_CAN_UN
+                             ELSE CASE GVA15.TIPO_COMP
+                                    WHEN 'D' THEN -GVA07.IMP_CAN_UN
+                                    ELSE           GVA07.IMP_CAN_UN
+                                  END
+                           END) AS IMPUTADO_USD
+                FROM GVA07
+                LEFT JOIN GVA15 ON GVA15.IDENT_COMP = GVA07.T_COMP_CAN
+                WHERE GVA07.T_COMP = A.T_COMP
+                  AND GVA07.N_COMP = A.N_COMP
+            ) AS IMPU
             WHERE A.T_COMP = 'FAC'
               AND A.COD_CLIENT IN (" . self::inSql(self::CLIENTES_EXPORTACION) . ")
               AND A.ESTADO = 'PEN'
@@ -2637,8 +2663,16 @@ class Ingresos {
      * COTIZ e IMPORTE (la cotizacion y los pesos al facturar) se copian tal
      * cual como referencia historica. No entran en ninguna cuenta.
      *
+     *   Dolares pendientes = IMPORTE_EX - IMPUTADO_USD
+     *
+     *   Una factura sin dolares pendientes (saldo <= medio centavo) NO es
+     *   cobranza a proyectar y no sale: esta cancelada en dolares y si sigue
+     *   PEN es por la diferencia de cambio en pesos. Sin IMPUTADO_USD en la
+     *   fila se toma cero.
+     *
      * @param array $filas Filas crudas: FECHA_EMIS, COD_CLIENT, RAZON_SOCI,
-     *                     T_COMP, N_COMP, IMPORTE_EX, COTIZ, IMPORTE
+     *                     T_COMP, N_COMP, IMPORTE_EX, COTIZ, IMPORTE,
+     *                     IMPUTADO_USD
      * @param int $dias Plazo de cobro
      * @param float|null $cotizHoy Dolar de hoy, o null si no hay
      * @param string|null $hoy 'Y-m-d'; por defecto el dia de hoy
@@ -2651,7 +2685,13 @@ class Ingresos {
 
         foreach (is_array($filas) ? $filas : [] as $row) {
             $fEmis = Horizonte::normalizarFecha(isset($row['FECHA_EMIS']) ? $row['FECHA_EMIS'] : null);
-            $usd = isset($row['IMPORTE_EX']) ? round(floatval($row['IMPORTE_EX']), 2) : 0.0;
+            $usdFact = isset($row['IMPORTE_EX']) ? round(floatval($row['IMPORTE_EX']), 2) : 0.0;
+            $usdImputado = isset($row['IMPUTADO_USD']) ? round(floatval($row['IMPUTADO_USD']), 2) : 0.0;
+            $usd = round($usdFact - $usdImputado, 2);
+
+            if ($usdImputado != 0 && $usd <= 0.005) {
+                continue;
+            }
 
             $cobro = self::estimarCobroExportacion($fEmis, $dias, $hoyStr);
 
@@ -2662,6 +2702,8 @@ class Ingresos {
                 'T_COMP' => strtoupper(trim(isset($row['T_COMP']) ? $row['T_COMP'] : 'FAC')),
                 'N_COMP' => strtoupper(trim(isset($row['N_COMP']) ? $row['N_COMP'] : '')),
                 'IMPORTE_USD' => $usd,
+                'IMPORTE_USD_FACT' => $usdFact,
+                'IMPUTADO_USD' => $usdImputado,
                 // Referencia historica: como se facturo. No se usa para nada mas.
                 'COTIZ_FACT' => isset($row['COTIZ']) ? floatval($row['COTIZ']) : null,
                 'IMPORTE_PESOS_FACT' => isset($row['IMPORTE']) ? round(floatval($row['IMPORTE']), 2) : null,

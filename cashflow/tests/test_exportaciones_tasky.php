@@ -148,6 +148,31 @@ chequear('una lista vacia da una lista vacia', [], Ingresos::proyectarExportacio
 chequear('y algo que no es lista tambien', [], Ingresos::proyectarExportaciones(null, 30, 1200.0, $HOY));
 
 /* ================================================================
+   Lo imputado en GVA07: el saldo es en dolares
+   ================================================================ */
+seccion('los dolares pendientes descuentan lo imputado en GVA07');
+
+chequear('sin IMPUTADO_USD el imputado es cero', 0.0, $f['IMPUTADO_USD']);
+chequear('y los dolares facturados quedan como referencia', 1000.0, $f['IMPORTE_USD_FACT']);
+
+// E0011700004149: facturada a 1500, cobrada completa en dolares a 1400. En
+// Tango queda PEN por la diferencia de cambio en pesos.
+$cancelada = [array_merge($CRUDAS[0], ['IMPORTE_EX' => 8379.27, 'COTIZ' => 1500.0,
+    'IMPORTE' => 12568905.0, 'IMPUTADO_USD' => 8379.27])];
+chequear('cancelada en dolares no sale, aunque siga PEN en pesos', [],
+    Ingresos::proyectarExportaciones($cancelada, 30, 1200.0, $HOY));
+
+$parcial = Ingresos::proyectarExportaciones([array_merge($CRUDAS[0], ['IMPUTADO_USD' => 400.0])],
+    30, 1200.0, $HOY);
+chequear('un cobro parcial deja el saldo en dolares', 600.0, $parcial[0]['IMPORTE_USD']);
+chequear('el imputado queda en la fila', 400.0, $parcial[0]['IMPUTADO_USD']);
+chequear('y los pesos de hoy salen del saldo', 720000.0, $parcial[0]['IMPORTE_PESOS_HOY']);
+
+$centavo = [array_merge($CRUDAS[0], ['IMPUTADO_USD' => 999.999])];
+chequear('un resto de redondeo no deja la factura viva', [],
+    Ingresos::proyectarExportaciones($centavo, 30, 1200.0, $HOY));
+
+/* ================================================================
    El reparto en la grilla: cada factura a la columna de su fecha
    ================================================================ */
 seccion('cada factura va a la columna de su fecha de cobro, en pesos de hoy');
