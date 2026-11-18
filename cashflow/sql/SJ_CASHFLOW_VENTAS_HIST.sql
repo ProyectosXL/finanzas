@@ -277,9 +277,11 @@ BEGIN
                     MONTH(E.FECHA),
                     E.COD_CLIENT,
                     LEFT(MAX(C.RAZON_SOCI), 100),
-                    CASE LEFT(E.COD_CLIENT, 2)
-                         WHEN 'OT' THEN 'OTROS INGRESOS'
-                         WHEN 'EX' THEN 'EXPORTACION'
+                    -- ****CF: la NC a consumidor final del canje de puntos
+                    -- ICBC Mall. Es la otra mitad de la FAC a OTICBC: NC + FAC = 0.
+                    CASE WHEN LEFT(E.COD_CLIENT, 2) = 'OT' THEN 'OTROS INGRESOS'
+                         WHEN E.COD_CLIENT = '****CF'   THEN 'OTROS INGRESOS'
+                         WHEN LEFT(E.COD_CLIENT, 2) = 'EX' THEN 'EXPORTACION'
                          ELSE 'SIN CANAL' END,
                     COUNT(*),
                     SUM(E.NETO_GRAVADO),

@@ -335,10 +335,15 @@ Por el **prefijo del código de cliente** de Tango:
 | `000000` | Ecommerce | |
 | *(locales propios)* | Locales | `SUCURSALES_LAKERS.CANAL = 'PROPIOS'` |
 | `OT` | **fuera** — `OTROS INGRESOS` | OTBONG regalías (trimestrales), OTICBC canje de puntos ICBC Mall, OTGIFT gift cards, OTPWAY, OTCHEE, OTSALU |
+| `****CF` | **fuera** — `OTROS INGRESOS` | La NC a consumidor final del canje ICBC: la otra mitad de la FAC a OTICBC (may-26: −843.109,70 y +843.109,69) |
 | `EX` | **fuera** — `EXPORTACION` | EXTASK, exportaciones a Uruguay |
-| cualquier otro | **fuera** — `SIN CANAL` | CLCASI Casino de Rosario (abr-26), \*\*\*\*CF consumidor final (may-26) |
+| cualquier otro | **fuera** — `SIN CANAL` | CLCASI Casino de Rosario (abr-26) |
 
-**`SIN CANAL` hay que mirarlo**: es un cliente que no es de ningún canal, y puede ser un ingreso que no es venta o un canal nuevo que falta agregar a la parte A de los dos SP. CLCASI y \*\*\*\*CF ya se revisaron (18/11/2026): no son venta, quedan solo en la auditoría.
+**`SIN CANAL` hay que mirarlo**: es un cliente que no es de ningún canal, y puede ser un ingreso que no es venta o un canal nuevo que falta agregar a la parte A de los dos SP. CLCASI ya se revisó (18/11/2026): no es venta, queda solo en la auditoría.
+
+**ICBC es una compensación** (contabilidad, 18/11/2026): NC a consumidor final + FAC a ICBC = 0. Las NC no tocan la venta: la de may-26 está en Tango (\*\*\*\*CF) y la única encontrada en locales (dic-25, B0011100006168) es de la sucursal 1, que es canal CENTRAL y no entra en Locales.
+
+**Gift Card no es venta, pero sí es plata**: XL le factura a Gift (OTGIFT) y se descuenta de lo que le paga por sus facturas de gastos (proveedor OGGIFC en Proveedores Locales). Ver *Pendiente: Gift Card en el cashflow*.
 
 `SJ_BI_SALES_LAKERS` (el BI) ya toma `L` como Franquicias, pero su parte D tiene **la misma fórmula de ecommerce** que se corrigió acá: el BI muestra el ecommerce inflado.
 
@@ -370,6 +375,17 @@ Contra el libro IVA ventas que mandó contabilidad (17/11/2026), con los SELECT 
 | oct-26 | 4.933.506.110,51 | 53.592.132,35 | 4.987.098.227,53 | 15,33 | redondeo |
 
 El redondeo es renglón contra encabezado. Las diferencias por comprobante son de Tango: el SP suma lo que dicen los renglones.
+
+### Pendiente: Gift Card en el cashflow
+
+Gift Card está **dos veces en Tango y ninguna bien en el cashflow**:
+
+| | Dónde | En el cashflow hoy |
+| --- | --- | --- |
+| Lo que XL le factura a Gift | Ventas, cliente `OTGIFT` (≈ 31-39 M con IVA por mes en sep/oct-26) | **En ningún lado**: no es venta, y no es de ningún canal de cobranzas |
+| Lo que Gift le factura a XL | Compras, proveedor `OGGIFC`, rubro *Comisión vendedoras*, forma de pago `DEBITO` (≈ 2 facturas por mes, 10-14 M con IVA) | **Como pago** en Proveedores Locales: las de sep y oct-26 están `PEN` |
+
+Según contabilidad, las dos se compensan: lo que XL factura se descuenta del pago a Gift. En Tango, cada mes una O/P cancela las facturas de Gift unas 7-9 semanas después; por ejemplo, la O/P 0000100073821 del 02/11/2026 cancela las de agosto. Entonces el cashflow muestra como egreso algo que no se paga, y no muestra el ingreso neto que sí entra. Falta decidir cómo se modela (ver la conversación de TEST-87).
 
 ---
 

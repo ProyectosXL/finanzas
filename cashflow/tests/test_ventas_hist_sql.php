@@ -116,10 +116,12 @@ chequear('reejecutable: borra el mismo rango expandido antes de insertar', true,
 chequear('si la tabla no esta, la venta se carga igual', true,
     strpos($persist, "IF OBJECT_ID('dbo.RO_T_CASHFLOW_VENTAS_EXCLUIDAS', 'U') IS NOT NULL") !== false);
 chequear('el motivo sale del prefijo, con SIN CANAL para lo desconocido', [1, 1, 1], [
-    substr_count($persist, "WHEN 'OT' THEN 'OTROS INGRESOS'"),
-    substr_count($persist, "WHEN 'EX' THEN 'EXPORTACION'"),
+    substr_count($persist, "WHEN LEFT(E.COD_CLIENT, 2) = 'OT' THEN 'OTROS INGRESOS'"),
+    substr_count($persist, "WHEN LEFT(E.COD_CLIENT, 2) = 'EX' THEN 'EXPORTACION'"),
     substr_count($persist, "ELSE 'SIN CANAL' END"),
 ]);
+chequear('****CF (NC a consumidor final del canje ICBC) es otros ingresos, no sin canal', 1,
+    substr_count($persist, "WHEN E.COD_CLIENT = '****CF'   THEN 'OTROS INGRESOS'"));
 chequear('la razon social se cruza con COLLATE: GVA14 es Latin1_General_BIN y la temporal no', true,
     strpos($persist, 'LEFT JOIN GVA14 C ON C.COD_CLIENT COLLATE DATABASE_DEFAULT = E.COD_CLIENT') !== false);
 chequear('el neto sin IVA es gravado + exento', true,
