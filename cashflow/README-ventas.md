@@ -385,7 +385,7 @@ Gift Card está **dos veces en Tango y ninguna bien en el cashflow**:
 | Lo que XL le factura a Gift | Ventas, cliente `OTGIFT` (≈ 31-39 M con IVA por mes en sep/oct-26) | **En ningún lado**: no es venta, y no es de ningún canal de cobranzas |
 | Lo que Gift le factura a XL | Compras, proveedor `OGGIFC`, rubro *Comisión vendedoras*, forma de pago `DEBITO` (≈ 2 facturas por mes, 10-14 M con IVA) | **Como pago** en Proveedores Locales: las de sep y oct-26 están `PEN` |
 
-Según contabilidad, las dos se compensan: lo que XL factura se descuenta del pago a Gift. En Tango, cada mes una O/P cancela las facturas de Gift unas 7-9 semanas después; por ejemplo, la O/P 0000100073821 del 02/11/2026 cancela las de agosto. Entonces el cashflow muestra como egreso algo que no se paga, y no muestra el ingreso neto que sí entra. Falta decidir cómo se modela (ver la conversación de TEST-87).
+Según contabilidad, las dos se compensan: lo que XL factura se descuenta del pago a Gift. En Tango, cada mes una O/P cancela las facturas de Gift unas 7-9 semanas después; por ejemplo, la O/P 0000100073821 del 02/11/2026 cancela las de agosto. Entonces el cashflow muestra como egreso algo que no se paga, y no muestra el ingreso neto que sí entra. Falta decidir cómo se modela. Lo excluido que no es exportación (Gift, regalías, ICBC y los demás) está relevado en `README-otros-ingresos.md`, para cuando se desarrolle esa pestaña.
 
 ---
 

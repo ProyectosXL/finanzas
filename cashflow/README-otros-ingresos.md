@@ -1,6 +1,69 @@
 # Módulo Otros Ingresos
 
-Los ingresos que **no salen de ningún circuito del sistema** y los carga una persona. Hoy hay dos: los dólares de la cuenta comitente y el saldo de inversiones.
+Los ingresos que entran a XL y **no son venta**. Este README tiene dos partes:
+
+1. **Otros ingresos facturados en Tango** (arriba): lo que XL le factura a clientes que no son de ningún canal de venta. Hoy queda fuera de la venta y solo se ve en la auditoría contra el libro IVA. **Falta la pestaña**: esta sección es el relevamiento para cuando se desarrolle.
+2. **Los conceptos cargados a mano** (más abajo, *RETIRADO*): dólares de la cuenta comitente y saldo de inversiones. La categoría vieja se sacó del menú y esos dos pasaron a ser cuentas de Saldos.
+
+---
+
+## Otros ingresos facturados en Tango — pendiente de pestaña
+
+### De dónde salen
+
+Desde TEST-87 (18/11/2026), la venta del cashflow toma solo los canales de venta. El resto de lo facturado en Tango (`GVA12`) queda fuera y se graba, por mes y por cliente, en **`RO_T_CASHFLOW_VENTAS_EXCLUIDAS`**. Lo graba la parte E de `SJ_CASHFLOW_VENTAS_HIST`, y se ve en Ventas → Control de Facturación → pestaña *Conciliación Libro IVA*. Ver `README-ventas.md`, *Conciliación contra el libro IVA ventas*.
+
+Todo lo excluido es de este módulo **menos las exportaciones** (`EX…`, hoy solo `EXTASK`). Esas tienen su propia pestaña en Ingresos: ver `README-exportaciones-tasky.md`.
+
+```sql
+-- Otros ingresos facturados de un mes (sin exportaciones)
+SELECT COD_CLIENT, RAZON_SOCIAL, MOTIVO, COMPROBANTES, NETO_SIN_IVA, IVA
+FROM RO_T_CASHFLOW_VENTAS_EXCLUIDAS
+WHERE ANIO = 2026 AND MES = 10
+  AND MOTIVO <> 'EXPORTACION'
+ORDER BY COD_CLIENT;
+```
+
+> La tabla es una **auditoría de lo facturado**, no de lo cobrado. Para la pestaña hay que ir a la cuenta corriente (`GVA12` con `ESTADO = 'PEN'` y sus cancelaciones), igual que hacen las cobranzas. Además, el importe está **sin IVA**, y lo que entra es con IVA.
+
+### Los clientes
+
+| Cliente | Qué es | Frecuencia | Neto 2025 | Neto 2026 (ene-oct) |
+| --- | --- | --- | ---: | ---: |
+| `OTGIFT` Gift Card Argentina S.A. | Gift cards: XL le factura a Gift todos los meses | mensual | 254.205.299,96 | 241.130.630,10 |
+| `OTBONG` Bongiorno Lida Edith | Regalías | trimestral (ene, abr, jul, oct) | 20.570.362,87 | 25.570.832,45 |
+| `OTPWAY` Payway SAU | *a relevar* | trimestral en 2025 (feb, may, ago, dic) | 19.315.288,00 | 4.540.288,00 |
+| `OTSALU` Tecnosalud SA | *a relevar* | ocasional (ago-26) | — | 5.244.750,00 |
+| `OTCHEE` Cheek S.A. | *a relevar* | ocasional (may y jun-26) | — | 4.239.030,00 |
+| `OTICBC` ICBC (Argentina) S.A.U. | Canje de puntos ICBC Mall | ocasional | 1.045.423,13 | 1.186.011,47 |
+| `****CF` Consumidor final | La NC del canje ICBC: la otra mitad de la FAC a `OTICBC` | con cada canje | — | −843.109,70 |
+| `CLCASI` Casino de Rosario S.A. | No es venta (revisado el 18/11/2026); motivo `SIN CANAL` | ocasional (abr-26) | — | 1.548.347,11 |
+
+Medido sobre `RO_T_CASHFLOW_VENTAS_EXCLUIDAS` el 18/11/2026. Los importes son netos sin IVA y en pesos, con el signo de la NC. 2026 llega hasta octubre.
+
+### Cómo entra la plata de cada uno
+
+**Gift Card: se compensa, no se cobra.** XL le factura a Gift (`OTGIFT`) y Gift le factura a XL sus gastos: proveedor `OGGIFC`, rubro *Comisión vendedoras*, forma de pago `DEBITO`, unas 2 facturas por mes de 10-14 M con IVA. Según contabilidad (18/11/2026), lo que XL factura **se descuenta del pago a Gift**: *"es plata que voy a tener"*. En Tango, cada mes una O/P cancela las facturas de Gift unas 7-9 semanas después. Por ejemplo, la O/P 0000100073821 del 02/11/2026 cancela las de agosto.
+
+Hoy el cashflow lo muestra mal por los dos lados:
+
+| | En el cashflow hoy | Debería |
+| --- | --- | --- |
+| Lo que XL le factura a Gift (≈ 31-39 M con IVA por mes en sep/oct-26) | En ningún lado | Ingreso |
+| Lo que Gift le factura a XL | Egreso en Proveedores Locales (las de sep y oct-26 están `PEN`) | No es un pago: se compensa |
+
+La propuesta es **una sola fila de ingreso neto** (*Gift Card (neto)* = lo facturado a Gift − sus facturas). Las facturas de `OGGIFC` se sacarían de Proveedores Locales para no contarlas dos veces. Falta confirmar con contabilidad **si Gift transfiere la diferencia y qué día del mes**: de eso depende en qué columna del eje cae.
+
+**ICBC: suma cero.** Es una compensación: una NC a consumidor final (`****CF`) más una FAC a `OTICBC` por el mismo importe (may-26: −843.109,70 y +843.109,69). **No genera ingreso.** La pestaña la tiene que mostrar neteada o directamente no mostrarla. Las NC no tocan la venta de Locales: la única encontrada en locales (dic-25, B0011100006168) es de la sucursal 1 (CENTRAL), que no entra en el canal Locales.
+
+**Regalías (`OTBONG`), Payway, Tecnosalud, Cheek, Casino de Rosario:** facturas comunes. En principio se cobran como cualquier comprobante de la cuenta corriente, pero **no está relevado** con qué medio ni con qué demora. Ninguno de estos clientes está en las cobranzas del cashflow: Franquicias toma `[FL]%` y Mayoristas `M%`.
+
+### Lo que hay que decidir para la pestaña
+
+1. **Gift**: si es neto contra `OGGIFC` (la propuesta) y en qué día del mes cae.
+2. **Proyección**: solo lo facturado pendiente (como las exportaciones), o también una proyección de lo que todavía no se facturó, por ejemplo las regalías trimestrales.
+3. **ICBC**: neteado en cero o fuera de la pestaña.
+4. **Clientes nuevos**: hoy cualquier cliente que no es `FR`, `L`, `MA` ni `000000` cae solo en la auditoría (`OT…` como `OTROS INGRESOS`, cualquier otro como `SIN CANAL`). La pestaña tendría que leer lo mismo, para que un cliente nuevo aparezca sin tocar código, como pasó con `CLCASI`.
 
 ---
 
