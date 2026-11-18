@@ -34,6 +34,9 @@
    alternativa limpia -que el mensual agregue desde esta tabla- toca el SP que
    hoy alimenta la proyeccion y su job, asi que se dejo para un cambio propio.
    Si se toca un filtro aca, hay que tocarlo tambien alla.
+   tests/test_ventas_hist_sql.php verifica que las tres partes sigan iguales.
+   La parte E del mensual (lo que queda fuera de la venta) no se copia: la
+   conciliacion contra el libro IVA es mensual.
 
    Parametros (todos opcionales):
      @Desde  NULL -> DATEADD(DAY, -30, GETDATE())
@@ -96,11 +99,13 @@ BEGIN
 
         /* ------------------------------------------------------------------
            PARTE A: FACTURAS FRANQUICIAS / MAYORISTAS  (GVA12 + GVA53)
+           FR y L -> FRANQUICIAS (L = XL Lomas), MA -> MAYORISTAS.
            ------------------------------------------------------------------ */
         INSERT INTO #TempVentasDia (FECHA, CANAL, TIPO_COMPROBANTE, CANTIDAD, IMPORTE_NETO)
         SELECT
             A.FECHA_EMIS,
             CASE WHEN A.COD_CLIENT LIKE 'FR%' THEN 'FRANQUICIAS'
+                 WHEN A.COD_CLIENT LIKE 'L%'  THEN 'FRANQUICIAS'
                  WHEN A.COD_CLIENT LIKE 'MA%' THEN 'MAYORISTAS'
                  ELSE '' END COLLATE DATABASE_DEFAULT,
             'FACTURA' COLLATE DATABASE_DEFAULT,
@@ -112,7 +117,7 @@ BEGIN
         FROM GVA12 A
         INNER JOIN GVA53 B ON A.T_COMP = B.T_COMP AND A.N_COMP = B.N_COMP
         WHERE A.FECHA_EMIS BETWEEN @Desde AND @Hasta
-          AND A.COD_CLIENT LIKE '[FM][RA]%'
+          AND (A.COD_CLIENT LIKE 'FR%' OR A.COD_CLIENT LIKE 'L%' OR A.COD_CLIENT LIKE 'MA%')
           AND B.COD_ARTICU LIKE '[XO*]%'
           AND B.PROMOCION = 0
           AND A.T_COMP IN ('FAC','NCP','NCR','NDP','NDR');
@@ -148,6 +153,8 @@ BEGIN
 
         /* ------------------------------------------------------------------
            PARTE D: ECOMMERCE  (GVA12 + GVA53, COD_CLIENT = '000000')
+           IMP_NETO_P con el signo de la NC en TODOS los renglones (ver el
+           punto 7 de la cabecera de SJ_CASHFLOW_VENTAS_HIST).
            ------------------------------------------------------------------ */
         INSERT INTO #TempVentasDia (FECHA, CANAL, TIPO_COMPROBANTE, CANTIDAD, IMPORTE_NETO)
         SELECT
@@ -157,9 +164,8 @@ BEGIN
             CASE WHEN B.COD_ARTICU LIKE '*%' THEN 0
                  WHEN A.T_COMP LIKE 'NC%' THEN B.CANTIDAD * -1
                  ELSE B.CANTIDAD END,
-            CASE WHEN B.COD_ARTICU LIKE '*%' THEN B.PRECIO_NET
-                 WHEN A.T_COMP LIKE 'NC%' THEN B.CANTIDAD * -B.PRECIO_NET
-                 ELSE B.CANTIDAD * B.PRECIO_NET END
+            CASE WHEN A.T_COMP LIKE 'NC%' THEN B.IMP_NETO_P * -1
+                 ELSE B.IMP_NETO_P END
         FROM GVA12 A
         INNER JOIN GVA53 B ON A.T_COMP = B.T_COMP AND A.N_COMP = B.N_COMP
         WHERE A.FECHA_EMIS BETWEEN @Desde AND @Hasta
@@ -168,8 +174,8 @@ BEGIN
         /* ------------------------------------------------------------------
            PERSISTENCIA
            DELETE del rango exacto + INSERT agregado -> reejecutable.
-           Se descartan los CANAL vacios: el LIKE '[FM][RA]%' de la parte A
-           admite prefijos FA/MR que el CASE no mapea a ningun canal del modelo.
+           Se descartan los CANAL vacios, por si un prefijo nuevo entrara en
+           el WHERE de la parte A sin su rama en el CASE.
            ------------------------------------------------------------------ */
         BEGIN TRANSACTION;
 

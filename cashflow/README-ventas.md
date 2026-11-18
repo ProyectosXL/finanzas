@@ -111,6 +111,32 @@ Crea tres tablas **vacías** —el modo de cada canal, qué meses tienen mix pro
 
 **Apenas se corre, la proyección da exactamente lo mismo que antes**: con las tablas vacías todos los canales están en constante. Medido contra la base: ver *El invariante del mix por mes*.
 
+### 7. Canales del histórico, ecommerce y lo que queda fuera
+
+**Estos scripts NO se corrieron todavía.** Se corren **en el mismo momento de publicar** `feature/ventas-hist-conciliacion-iva`, contra `central`, en este orden:
+
+```sql
+-- sql/cashflow_ventas_excluidas.sql         crea la tabla de lo que queda fuera (vacía)
+-- sql/SJ_CASHFLOW_VENTAS_HIST.sql           DROP + CREATE del SP mensual
+-- sql/RO_SP_CASHFLOW_VENTAS_HIST_DIA.sql    DROP + CREATE del SP diario
+```
+
+Y después, **recargar TODO el histórico** con los SP nuevos. El job diario solo reprocesa los últimos 30 días, así que sin esto los meses viejos quedan con el ecommerce inflado y sin LALOMA. Los rangos son los que hay cargados (al 18/11/2026: la mensual desde ene-2024, porque la columna *Año Previo* de Venta Cashflow mira dos años atrás; la diaria desde ene-2025):
+
+```sql
+EXEC SJ_CASHFLOW_VENTAS_HIST         @Desde = '2024-01-01', @Hasta = '2026-12-31', @Usuario = '<quien lo corre>';
+EXEC RO_SP_CASHFLOW_VENTAS_HIST_DIA  @Desde = '2025-01-01', @Usuario = '<quien lo corre>';
+```
+
+Es el mismo SP que corre el job, reejecutable: borra y repone mes por mes, en una transacción. Si el mensual tarda demasiado contra el linked server de locales, se puede partir por año.
+
+**A diferencia de los pasos 5 y 6, esto SÍ mueve la proyección.** La base de cálculo es la venta del año anterior: baja el ecommerce (entre 6% y 9,4% en sep/oct-26) y sube franquicias por XL Lomas. Ver *Conciliación contra el libro IVA ventas*.
+
+| Si no se corre | |
+| --- | --- |
+| La tabla | El SP la saltea y carga la venta igual: no hay dónde ver qué quedó fuera |
+| Los SP | El histórico sigue con el ecommerce inflado y sin XL Lomas |
+
 ---
 
 ## Modelo de cálculo
@@ -269,6 +295,74 @@ La grilla de cobranza de la sub-pestaña Proyección es un **árbol que se abre 
 - **Exportar** baja lo que se ve: las ramas cerradas no van, y los importes son los de la medida elegida. La tabla no se ordena por columna: es un árbol, y ordenar separaría cada nodo de su rama.
 
 Un mix inválido —un grupo de hermanos activos que no suma 100%, una hoja sin días en toda su rama o un canal sin hojas— **no corta la proyección**: se calcula con lo que hay y se avisa como **crítico**, arriba de la grilla y en el tablero, diciendo el canal, la rama y cuánta venta de la ventana queda afuera. Una hoja sin días **no se proyecta**: sin plazo no hay fecha, y una fecha inventada sería plata en un día que nadie eligió. Parámetros no deja guardar un árbol así, así que si aparece es porque la tabla se tocó por otro lado.
+
+---
+
+## Conciliación contra el libro IVA ventas
+
+Contabilidad controla la venta contra el **libro IVA ventas** (prueba TEST-87 del plan de testeo). Las dos no son iguales a propósito: la venta del cashflow es la base de la **proyección** y suma solo lo que es venta del negocio; el libro tiene todo lo facturado. La diferencia queda grabada, mes por mes y cliente por cliente:
+
+```
+Libro IVA ventas (neto + no gravado + exento)
+  = venta del cashflow   (RO_T_CASHFLOW_VENTAS_HIST, FACTURA)
+  + lo que queda fuera   (RO_T_CASHFLOW_VENTAS_EXCLUIDAS, NETO_SIN_IVA)
+```
+
+```sql
+-- Lo que explica la diferencia de un mes
+SELECT COD_CLIENT, RAZON_SOCIAL, MOTIVO, COMPROBANTES, NETO_SIN_IVA
+FROM RO_T_CASHFLOW_VENTAS_EXCLUIDAS
+WHERE ANIO = 2026 AND MES = 9
+ORDER BY MOTIVO, COD_CLIENT;
+```
+
+### Qué es venta y qué no
+
+Por el **prefijo del código de cliente** de Tango:
+
+| Prefijo | Canal | Ejemplo |
+| --- | --- | --- |
+| `FR` | Franquicias | |
+| `L` | Franquicias | LALOMA, XL Lomas |
+| `MA` | Mayoristas | |
+| `000000` | Ecommerce | |
+| *(locales propios)* | Locales | `SUCURSALES_LAKERS.CANAL = 'PROPIOS'` |
+| `OT` | **fuera** — `OTROS INGRESOS` | OTBONG regalías (trimestrales), OTICBC canje de puntos ICBC Mall, OTGIFT gift cards, OTPWAY, OTCHEE, OTSALU |
+| `EX` | **fuera** — `EXPORTACION` | EXTASK, exportaciones a Uruguay |
+| cualquier otro | **fuera** — `SIN CANAL` | CLCASI Casino de Rosario (abr-26), \*\*\*\*CF consumidor final (may-26) |
+
+**`SIN CANAL` hay que mirarlo**: es un cliente que no es de ningún canal, y puede ser un ingreso que no es venta o un canal nuevo que falta agregar a la parte A de los dos SP. CLCASI y \*\*\*\*CF ya se revisaron (18/11/2026): no son venta, quedan solo en la auditoría.
+
+`SJ_BI_SALES_LAKERS` (el BI) ya toma `L` como Franquicias, pero su parte D tiene **la misma fórmula de ecommerce** que se corrigió acá: el BI muestra el ecommerce inflado.
+
+El **exento** es venta: son los clientes de Tierra del Fuego (FRUSHA XL Ushuaia, MALAJA), que facturan sin IVA por el régimen de la Ley 19.640. Por eso se compara contra *neto + no gravado + exento*, no contra la columna NETO del libro.
+
+### Cómo se mide lo que queda fuera
+
+La parte E del SP mensual lee el **encabezado** del comprobante (`GVA12`), que es lo que lee el libro, con el signo de la NC y **en pesos**: una exportación (`MON_CTE = 0`) trae gravado y exento en dólares y se convierte por su `COTIZ`. La venta, en cambio, sale de los **renglones** (`GVA53`), con los filtros de artículo de siempre: los kits (`PROMOCION = 1`) quedan fuera porque cada componente ya viene en su propio renglón.
+
+### Lo que se corrigió en el ecommerce
+
+La parte D calculaba `CANTIDAD × PRECIO_NET`, con un primer `WHEN` para los artículos `*`. Dos errores: el precio es **antes de la bonificación**, y las NC de artículos `*` (envíos) **sumaban en vez de restar**, porque el `WHEN '*'` se evaluaba antes que el signo. Ahora usa `IMP_NETO_P` con el signo de la NC en todos los renglones, igual que la parte A. La fórmula venía de `SJ_BI_SALES_LAKERS`, que sigue teniéndola.
+
+### Medido
+
+Contra el libro IVA ventas que mandó contabilidad (17/11/2026), con los SELECT de los SP nuevos corridos **solo lectura** (sin temporales) sobre `central`:
+
+| Mes | Venta nueva | Fuera | Libro | Diferencia | Por qué |
+| --- | ---: | ---: | ---: | ---: | --- |
+| ene-26 | 2.123.551.264,22 | 40.446.593,69 | 2.164.265.874,43 | −268.016,52 | NCR A0011100006944 (FRCITY): renglones ≠ encabezado (−202.008) |
+| feb-26 | 3.020.438.283,04 | 77.815.757,56 | 3.098.253.933,29 | 107,31 | redondeo |
+| mar-26 | 3.996.185.695,32 | 4.423.545,75 | 4.000.697.840,65 | −88.599,58 | menor, sin identificar |
+| abr-26 | 2.991.343.899,77 | 49.459.588,83 | 3.041.221.976,38 | −418.487,78 | FAC A0014400076066 (FRSICT): renglones ≠ encabezado (−418.518) |
+| may-26 | 2.901.346.401,78 | 28.652.077,25 | 2.930.099.197,04 | −100.718,01 | menor, sin identificar |
+| jun-26 | 2.379.843.618,00 | 19.884.523,14 | 2.694.745.099,71 | −295.016.958,57 | **error del Excel**: la parte de Tango de junio repite la de mayo |
+| jul-26 | 2.612.652.403,48 | 34.555.812,83 | 2.647.361.091,50 | −152.875,19 | menor, sin identificar |
+| ago-26 | 3.688.420.412,23 | 23.752.440,08 | 3.712.172.837,60 | 14,71 | redondeo |
+| sep-26 | 3.942.638.693,82 | 35.630.321,95 | 3.978.268.999,46 | 16,31 | redondeo |
+| oct-26 | 4.933.506.110,51 | 53.592.132,35 | 4.987.098.227,53 | 15,33 | redondeo |
+
+El redondeo es renglón contra encabezado. Las diferencias por comprobante son de Tango: el SP suma lo que dicen los renglones.
 
 ---
 
@@ -662,6 +756,9 @@ sql/RO_V_DOLAR_OFICIAL_BCRA.sql         Vista del T/C de cierre por mes
 sql/cashflow_ventas_mix_nodo.sql        El árbol del mix de cobro y la migración del plano
 sql/cashflow_estructura_costos_cobro.sql  La fila "Costos de cobro" del tablero
 sql/cashflow_ventas_mix_mes.sql         El mix de cobro por mes: modo por canal, meses y valores
+sql/cashflow_ventas_excluidas.sql       Lo que queda fuera de la venta, para conciliar contra el libro IVA
+sql/RO_SP_CASHFLOW_VENTAS_HIST_DIA.sql  Stored procedure del histórico diario (tendencias)
+tests/test_ventas_hist_sql.php          Los dos SP calculan igual y la parte E es el complemento de los canales
 cashflow/Class/Ventas.php               Motor de proyección
 cashflow/Class/MixCobro.php             El árbol del mix: la regla, el editor y su escritura
 cashflow/Class/Cotizacion.php           Tipo de cambio — punto de acceso del cashflow
