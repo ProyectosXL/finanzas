@@ -120,6 +120,8 @@ chequear('el motivo sale del prefijo, con SIN CANAL para lo desconocido', [1, 1,
     substr_count($persist, "WHEN 'EX' THEN 'EXPORTACION'"),
     substr_count($persist, "ELSE 'SIN CANAL' END"),
 ]);
+chequear('la razon social se cruza con COLLATE: GVA14 es Latin1_General_BIN y la temporal no', true,
+    strpos($persist, 'LEFT JOIN GVA14 C ON C.COD_CLIENT COLLATE DATABASE_DEFAULT = E.COD_CLIENT') !== false);
 chequear('el neto sin IVA es gravado + exento', true,
     strpos($persist, 'SUM(E.NETO_GRAVADO + E.EXENTO)') !== false);
 

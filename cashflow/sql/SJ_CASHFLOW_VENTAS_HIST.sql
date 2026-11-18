@@ -290,7 +290,8 @@ BEGIN
                     @Usuario,
                     GETDATE()
                 FROM #TempExcluidas E
-                LEFT JOIN GVA14 C ON C.COD_CLIENT = E.COD_CLIENT
+                -- GVA14 es Latin1_General_BIN y la temporal, DATABASE_DEFAULT
+                LEFT JOIN GVA14 C ON C.COD_CLIENT COLLATE DATABASE_DEFAULT = E.COD_CLIENT
                 GROUP BY YEAR(E.FECHA), MONTH(E.FECHA), E.COD_CLIENT;
             END
 
