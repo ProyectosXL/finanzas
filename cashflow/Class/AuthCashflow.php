@@ -353,7 +353,7 @@ class AuthCashflow {
         'Tarjetas' => ['getDatos', 'getHistorialFactura', 'getTarjetas', 'getResumenes',
             'getProveedoresProyectan'],
         'Ventas' => ['getProyeccionVentas', 'getProyeccionCobranzas', 'getAnalisisVentas',
-            'getVentaAcumulada', 'getVentaBalance', 'getParametros']
+            'getVentaAcumulada', 'getVentaBalance', 'getConciliacionIva', 'getParametros']
     ];
 
     private static $inicializado = false;

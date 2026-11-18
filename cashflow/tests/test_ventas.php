@@ -344,3 +344,41 @@ chequear('y cinco proyectados: marzo a julio', 5, $b['totales']['meses_proyectad
 chequear('marzo, el mes en curso, es el primer proyectado',
          'PROYECTADO', $b['filas'][7]['origen']);
 chequear('febrero, el ultimo cerrado, es real', 'REAL', $b['filas'][6]['origen']);
+
+/* ================================================================
+   Conciliacion contra el libro IVA ventas
+   venta + lo que queda fuera = libro (neto + no gravado + exento)
+   ================================================================ */
+seccion('conciliacion: venta + excluidas, por mes');
+
+$histC = [
+    ['ANIO' => 2026, 'MES' => 9, 'CANAL' => 'LOCALES', 'IMPORTE_NETO' => 1000.0],
+    ['ANIO' => 2026, 'MES' => 9, 'CANAL' => 'ECOMMERCE', 'IMPORTE_NETO' => 200.0],
+    ['ANIO' => 2026, 'MES' => 10, 'CANAL' => 'LOCALES', 'IMPORTE_NETO' => 1500.0],
+];
+$exclC = [
+    ['ANIO' => 2026, 'MES' => 9, 'COD_CLIENT' => 'OTGIFT', 'RAZON_SOCIAL' => 'GIFT CARD', 'MOTIVO' => 'OTROS INGRESOS', 'COMPROBANTES' => 1, 'NETO_SIN_IVA' => 30.0],
+    ['ANIO' => 2026, 'MES' => 9, 'COD_CLIENT' => 'CLCASI', 'RAZON_SOCIAL' => 'CASINO', 'MOTIVO' => 'SIN CANAL', 'COMPROBANTES' => 2, 'NETO_SIN_IVA' => 5.0],
+    ['ANIO' => 2026, 'MES' => 9, 'COD_CLIENT' => 'EXTASK', 'RAZON_SOCIAL' => 'TASKY', 'MOTIVO' => 'EXPORTACION', 'COMPROBANTES' => 1, 'NETO_SIN_IVA' => 9.0],
+    ['ANIO' => 2026, 'MES' => 8, 'COD_CLIENT' => 'OTSALU', 'RAZON_SOCIAL' => null, 'MOTIVO' => 'OTROS INGRESOS', 'COMPROBANTES' => 1, 'NETO_SIN_IVA' => 7.0],
+];
+
+$c = Ventas::armarConciliacionIva($histC, $exclC, '2026-10');
+
+chequear('un mes por clave, ordenados: agosto (solo excluidas), septiembre, octubre',
+         ['2026-08', '2026-09', '2026-10'], array_column($c['filas'], 'clave'));
+chequear('septiembre: venta de todos los canales', 1200.0, $c['filas'][1]['venta']);
+chequear('septiembre: lo que queda fuera', 44.0, $c['filas'][1]['excluidas']);
+chequear('septiembre: total = venta + fuera', 1244.0, $c['filas'][1]['total']);
+chequear('un mes sin venta aparece igual si tiene excluidas', [0.0, 7.0], [$c['filas'][0]['venta'], $c['filas'][0]['excluidas']]);
+chequear('un mes sin excluidas no tiene detalle', [], $c['filas'][2]['detalle']);
+chequear('el detalle va por motivo: otros ingresos, exportacion, sin canal',
+         ['OTGIFT', 'EXTASK', 'CLCASI'], array_column($c['filas'][1]['detalle'], 'cod_client'));
+chequear('cuenta los clientes sin canal del mes', 1, $c['filas'][1]['sin_canal']);
+chequear('el mes en curso se marca', [false, false, true], array_column($c['filas'], 'en_curso'));
+chequear('totales', [2700.0, 51.0, 2751.0, 1], [
+    $c['totales']['venta'], $c['totales']['excluidas'], $c['totales']['total'], $c['totales']['sin_canal']]);
+
+$vacio = Ventas::armarConciliacionIva($histC, [], '2026-11');
+chequear('sin la tabla de excluidas: la venta sola, total = venta', [1200.0, 0.0, 1200.0],
+         [$vacio['filas'][0]['venta'], $vacio['filas'][0]['excluidas'], $vacio['filas'][0]['total']]);

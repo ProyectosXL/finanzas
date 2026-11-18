@@ -2929,6 +2929,188 @@ class Ventas {
         return $hist;
     }
 
+    /* ====================================================================
+       CONCILIACION CONTRA EL LIBRO IVA VENTAS
+       ==================================================================== */
+
+    /** Orden de los motivos en el detalle: de lo esperable a lo que hay que mirar */
+    const MOTIVOS_EXCLUIDAS = ['OTROS INGRESOS', 'EXPORTACION', 'SIN CANAL'];
+
+    /**
+     * Venta del cashflow + lo que quedo fuera de la venta, por mes. La suma es
+     * lo que contabilidad compara contra el libro IVA ventas (neto + no gravado
+     * + exento). Ver README-ventas.md, "Conciliacion contra el libro IVA ventas".
+     *
+     *   venta      -> RO_T_CASHFLOW_VENTAS_HIST, solo FACTURA: la misma venta
+     *                 que usa la proyeccion
+     *   excluidas  -> RO_T_CASHFLOW_VENTAS_EXCLUIDAS, que llena la parte E de
+     *                 SJ_CASHFLOW_VENTAS_HIST en la misma corrida
+     *
+     * Si la tabla de excluidas no existe en el entorno, la pantalla sale con la
+     * venta sola y lo avisa, en vez de caerse.
+     *
+     * @param int|null $anioDesde Anio minimo a mostrar, o null para todo
+     * @return array Estructura para el front
+     */
+    public function getConciliacionIva($anioDesde = null) {
+        $this->warnings = [];
+        $excluidas = [];
+        $disponible = true;
+
+        try {
+            $excluidas = $this->leerExcluidas($anioDesde);
+        } catch (Exception $e) {
+            $disponible = false;
+            $this->warnings[] = $e->getMessage();
+        }
+
+        $armado = self::armarConciliacionIva(
+            $this->getHistoricoVentas($anioDesde),
+            $excluidas,
+            (new DateTime('today'))->format('Y-m')
+        );
+
+        $armado['excluidas_disponible'] = $disponible;
+        $armado['warnings'] = $this->warnings;
+
+        return $armado;
+    }
+
+    /**
+     * Lee RO_T_CASHFLOW_VENTAS_EXCLUIDAS.
+     * @param int|null $anioDesde Anio minimo, o null para todo
+     * @return array Filas por mes y cliente
+     * @throws Exception Si la tabla no existe o falla la lectura
+     */
+    private function leerExcluidas($anioDesde = null) {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $existe = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo.RO_T_CASHFLOW_VENTAS_EXCLUIDAS', 'U') AS ID");
+        $fila = $existe ? sqlsrv_fetch_array($existe, SQLSRV_FETCH_ASSOC) : null;
+
+        if (!$fila || $fila['ID'] === null) {
+            throw new Exception('Falta la tabla RO_T_CASHFLOW_VENTAS_EXCLUIDAS '
+                . '(sql/cashflow_ventas_excluidas.sql): se muestra la venta sin lo que queda fuera.');
+        }
+
+        $sql = "SELECT ANIO, MES, COD_CLIENT, RAZON_SOCIAL, MOTIVO, COMPROBANTES, NETO_SIN_IVA
+                FROM RO_T_CASHFLOW_VENTAS_EXCLUIDAS";
+        $params = [];
+
+        if ($anioDesde !== null) {
+            $sql .= " WHERE ANIO >= ?";
+            $params[] = intval($anioDesde);
+        }
+
+        $stmt = sqlsrv_query($cid, $sql, $params);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer lo que queda fuera de la venta'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $v[] = [
+                'ANIO' => intval($row['ANIO']),
+                'MES' => intval($row['MES']),
+                'COD_CLIENT' => trim($row['COD_CLIENT']),
+                'RAZON_SOCIAL' => $row['RAZON_SOCIAL'] !== null ? trim($row['RAZON_SOCIAL']) : null,
+                'MOTIVO' => $row['MOTIVO'],
+                'COMPROBANTES' => intval($row['COMPROBANTES']),
+                'NETO_SIN_IVA' => floatval($row['NETO_SIN_IVA'])
+            ];
+        }
+
+        return $v;
+    }
+
+    /**
+     * Arma la conciliacion a partir de datos ya leidos. Separado de la lectura
+     * para verificarlo sin base, como armarVentaAcumulada().
+     *
+     * Un mes aparece si tiene venta O excluidas. El detalle de cada mes va
+     * ordenado por motivo (MOTIVOS_EXCLUIDAS) y, dentro, por cliente. Un mes con
+     * algun cliente SIN CANAL lo cuenta aparte: es lo que hay que mirar.
+     *
+     * @param array $hist Filas de RO_T_CASHFLOW_VENTAS_HIST (FACTURA)
+     * @param array $excluidas Filas de RO_T_CASHFLOW_VENTAS_EXCLUIDAS
+     * @param string $mesEnCurso 'Y-m' del mes en curso: su fila esta incompleta
+     * @return array ['filas' => [...], 'totales' => [...]]
+     */
+    public static function armarConciliacionIva(array $hist, array $excluidas, $mesEnCurso) {
+        $meses = [];
+
+        $mes = function ($anio, $m) use (&$meses, $mesEnCurso) {
+            $clave = sprintf('%04d-%02d', $anio, $m);
+
+            if (!isset($meses[$clave])) {
+                $meses[$clave] = [
+                    'clave' => $clave,
+                    'anio' => $anio,
+                    'mes' => $m,
+                    'label' => Horizonte::labelMes($anio, $m),
+                    'en_curso' => ($clave === $mesEnCurso),
+                    'venta' => 0.0,
+                    'excluidas' => 0.0,
+                    'total' => 0.0,
+                    'sin_canal' => 0,
+                    'detalle' => []
+                ];
+            }
+
+            return $clave;
+        };
+
+        foreach ($hist as $row) {
+            $clave = $mes(intval($row['ANIO']), intval($row['MES']));
+            $meses[$clave]['venta'] += floatval($row['IMPORTE_NETO']);
+        }
+
+        foreach ($excluidas as $row) {
+            $clave = $mes(intval($row['ANIO']), intval($row['MES']));
+            $meses[$clave]['excluidas'] += floatval($row['NETO_SIN_IVA']);
+            $meses[$clave]['detalle'][] = [
+                'cod_client' => $row['COD_CLIENT'],
+                'razon_social' => $row['RAZON_SOCIAL'],
+                'motivo' => $row['MOTIVO'],
+                'comprobantes' => intval($row['COMPROBANTES']),
+                'neto' => floatval($row['NETO_SIN_IVA'])
+            ];
+
+            if ($row['MOTIVO'] === 'SIN CANAL') {
+                $meses[$clave]['sin_canal']++;
+            }
+        }
+
+        ksort($meses);
+
+        $orden = array_flip(self::MOTIVOS_EXCLUIDAS);
+        $totales = ['venta' => 0.0, 'excluidas' => 0.0, 'total' => 0.0, 'sin_canal' => 0];
+
+        foreach ($meses as $clave => $fila) {
+            usort($meses[$clave]['detalle'], function ($a, $b) use ($orden) {
+                $oa = isset($orden[$a['motivo']]) ? $orden[$a['motivo']] : 99;
+                $ob = isset($orden[$b['motivo']]) ? $orden[$b['motivo']] : 99;
+
+                return ($oa !== $ob) ? $oa - $ob : strcmp($a['cod_client'], $b['cod_client']);
+            });
+
+            $meses[$clave]['total'] = $fila['venta'] + $fila['excluidas'];
+            $totales['venta'] += $fila['venta'];
+            $totales['excluidas'] += $fila['excluidas'];
+            $totales['total'] += $meses[$clave]['total'];
+            $totales['sin_canal'] += $fila['sin_canal'];
+        }
+
+        return ['filas' => array_values($meses), 'totales' => $totales];
+    }
+
     /**
      * Arma una fila vacia del bloque de control de facturacion
      * @param int $anio Anio de la fila

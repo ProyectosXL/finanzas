@@ -252,7 +252,14 @@ Al pie, el total del balance con el desglose de cuánto es real y cuánto proyec
 
 El eje **no** usa `horizonte_meses` —es un parámetro editable y con 6 el balance saldría cortado a la mitad—: son doce meses fijos anclados al inicio del balance (`new Horizonte(0, 12, $feriados, new DateTime($inicioBalance))`). La venta proyectada igual sale de `Ventas::baseMensual()`, el **mismo helper** que la pestaña Cashflow, así que las dos no se pueden desincronizar.
 
-**3. Control de Facturación** — por mes: `Facturas`, `Remitos` y `Total`. Es sólo un bloque de control para contrastar contra el tablero; los remitos **no** entran en la proyección.
+**3. Control de Facturación** — dos pestañas en el mismo card, ninguna entra en la proyección. El subtítulo y *Exportar* siguen a la pestaña activa.
+
+| Pestaña | Qué muestra |
+| --- | --- |
+| **Facturas y Remitos** *(abre por defecto)* | Por mes: `Facturas`, `Remitos` y `Total`, para contrastar contra el tablero |
+| **Conciliación Libro IVA** | Por mes: `Venta Cashflow` + `Fuera de la Venta` = `Total = Libro IVA` (neto + no gravado + exento). Cada mes se abre con el chevron al detalle por cliente, con su motivo (*Otros ingresos*, *Exportación*, *Sin canal*). Un mes con algún cliente **sin canal** lleva un badge de aviso, y el mes en curso, *en curso* |
+
+La conciliación se pide **lazy** (`getConciliacionIva`), recién al abrir su pestaña, y la arma `Ventas::armarConciliacionIva()`, separada de la lectura para probarla sin base. Si falta `RO_T_CASHFLOW_VENTAS_EXCLUIDAS`, sale la venta sola con un aviso. Ver *Conciliación contra el libro IVA ventas*.
 
 ### Superposición tramo / meses
 

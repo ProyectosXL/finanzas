@@ -17,6 +17,15 @@
     var datosProyeccion = null;
     var datosAcumulada = null;
     var datosBalance = null;
+    var datosConciliacion = null;
+
+    // Pestaña activa del card Control de Facturación: 'facturacion' |
+    // 'conciliacion'. De esto dependen el subtítulo y el export.
+    var vistaControl = 'facturacion';
+    var subtituloFacturacion = '';
+
+    // Meses abiertos de la conciliación: sobreviven a un redibujo
+    var concilAbiertos = {};
 
     /**
      * Las tres vistas del eje temporal de la grilla de proyección, manejadas por
@@ -139,6 +148,7 @@
         }
 
         inicializarVistasAnuales();
+        inicializarControl();
         cargarAnalisis();
     }
 
@@ -415,6 +425,205 @@
             '<td class="currency">' + formatCurrency(totales.facturas) + '</td>' +
             '<td class="currency">' + formatCurrency(totales.remitos) + '</td>' +
             '<td class="currency">' + formatCurrency(totales.total) + '</td>';
+    }
+
+    /* ================================================================
+       CONTROL DE FACTURACIÓN: PESTAÑA CONCILIACIÓN LIBRO IVA
+
+       Venta del cashflow + lo que quedó fuera de la venta = libro IVA
+       ventas de contabilidad (neto + no gravado + exento). Lo que queda
+       fuera lo graba SJ_CASHFLOW_VENTAS_HIST en
+       RO_T_CASHFLOW_VENTAS_EXCLUIDAS; ver README-ventas.md,
+       "Conciliación contra el libro IVA ventas".
+       ================================================================ */
+
+    var MOTIVO_CLASE = {
+        'OTROS INGRESOS': 'bg-secondary-subtle text-secondary-emphasis',
+        'EXPORTACION': 'bg-info-subtle text-info-emphasis',
+        'SIN CANAL': 'bg-warning-subtle text-warning-emphasis'
+    };
+
+    var MOTIVO_TEXTO = {
+        'OTROS INGRESOS': 'Otros ingresos',
+        'EXPORTACION': 'Exportación',
+        'SIN CANAL': 'Sin canal'
+    };
+
+    var SUBTITULO_CONCILIACION =
+        '<strong>Venta Cashflow + Fuera de la Venta = Libro IVA ventas</strong> ' +
+        '(neto + no gravado + exento). Abrí un mes para ver qué clientes quedaron ' +
+        'fuera y por qué.' +
+        '<i class="fas fa-info-circle ms-1" title="Fuera de la venta: regalías, ' +
+        'canjes de puntos, gift cards (Otros ingresos), exportaciones a Uruguay ' +
+        '(Exportación) y clientes que no son de ningún canal (Sin canal, hay que ' +
+        'revisarlos). Las diferencias de centavos son redondeo: la venta suma ' +
+        'renglones y el libro, encabezados."></i>';
+
+    function inicializarControl() {
+        var subtitulo = document.getElementById('controlSubtitulo');
+        var tabFact = document.getElementById('tabFacturacionBtn');
+        var tabConcil = document.getElementById('tabConciliacionBtn');
+        var btnExport = document.getElementById('btnExportControl');
+        var body = document.getElementById('conciliacionBody');
+
+        if (subtitulo) {
+            subtituloFacturacion = subtitulo.innerHTML;
+        }
+
+        if (tabFact) {
+            tabFact.addEventListener('shown.bs.tab', function() {
+                vistaControl = 'facturacion';
+                actualizarSubtituloControl();
+                ajustarStickyHeaders();
+            });
+        }
+
+        if (tabConcil) {
+            tabConcil.addEventListener('shown.bs.tab', function() {
+                vistaControl = 'conciliacion';
+                actualizarSubtituloControl();
+
+                if (!datosConciliacion) {
+                    cargarConciliacion();
+                }
+
+                ajustarStickyHeaders();
+            });
+        }
+
+        if (btnExport) {
+            btnExport.addEventListener('click', function() {
+                if (vistaControl === 'conciliacion') {
+                    exportarExcel('tablaConciliacion', 'Conciliacion_Libro_IVA');
+                } else {
+                    exportarExcel('tablaFacturacion', 'Control_Facturacion');
+                }
+            });
+        }
+
+        // Un solo listener: el tbody se redibuja entero
+        if (body) {
+            body.addEventListener('click', function(e) {
+                var btn = e.target.closest('[data-concil]');
+
+                if (btn) {
+                    alternarConciliacion(btn.dataset.concil);
+                }
+            });
+        }
+    }
+
+    function actualizarSubtituloControl() {
+        var el = document.getElementById('controlSubtitulo');
+
+        if (el) {
+            el.innerHTML = (vistaControl === 'conciliacion')
+                ? SUBTITULO_CONCILIACION
+                : subtituloFacturacion;
+        }
+    }
+
+    function cargarConciliacion() {
+        Cargando.mostrar('loadingConciliacion');
+        mostrar('wrapperConciliacion', false);
+
+        pedir('Controller/VentasController.php?action=getConciliacionIva&anioDesde=2025')
+            .then(function(data) {
+                datosConciliacion = data;
+                generarTablaConciliacion();
+                AvisosPanel.pintar('warningsConciliacion', data.warnings || []);
+                Cargando.ocultar('loadingConciliacion');
+                mostrar('wrapperConciliacion', true);
+                ajustarStickyHeaders();
+            })
+            .catch(function(error) {
+                Cargando.ocultar('loadingConciliacion');
+                mostrarError('Error al cargar la conciliación: ' + error.message);
+            });
+    }
+
+    function generarTablaConciliacion() {
+        var filas = datosConciliacion.filas || [];
+        var totales = datosConciliacion.totales;
+        var body = document.getElementById('conciliacionBody');
+
+        if (!filas.length) {
+            body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">' +
+                'No hay venta cargada en el período.</td></tr>';
+            document.getElementById('conciliacionTotals').innerHTML = '';
+            return;
+        }
+
+        var html = '';
+
+        filas.forEach(function(fila) {
+            var abierto = !!concilAbiertos[fila.clave];
+            var conDetalle = fila.detalle.length > 0;
+
+            html += '<tr class="concil-mes">';
+            html += '<td class="col-canal fw-semibold">' +
+                (conDetalle
+                    ? '<button type="button" class="arbol-chevron" data-concil="' + fila.clave + '"' +
+                      ' title="Ver qué quedó fuera de la venta">' +
+                      '<i class="fas fa-chevron-' + (abierto ? 'down' : 'right') + '"></i></button>'
+                    : '<span class="arbol-chevron arbol-chevron-vacio"></span>') +
+                fila.label +
+                (fila.en_curso
+                    ? ' <span class="badge-parcial" title="Mes en curso: la venta y lo que ' +
+                      'queda fuera están incompletos hasta que cierre.">en curso</span>'
+                    : '') +
+                (fila.sin_canal > 0
+                    ? ' <span class="badge ' + MOTIVO_CLASE['SIN CANAL'] + '" title="' +
+                      fila.sin_canal + ' cliente(s) que no son de ningún canal: revisar si ' +
+                      'es venta o un canal nuevo."><i class="fas fa-triangle-exclamation me-1">' +
+                      '</i>sin canal</span>'
+                    : '') +
+                '</td>';
+            html += '<td class="currency">' + formatCurrency(fila.venta) + '</td>';
+            html += '<td class="currency">' + formatCurrency(fila.excluidas) + '</td>';
+            html += '<td class="currency fw-semibold">' + formatCurrency(fila.total) + '</td>';
+            html += '</tr>';
+
+            fila.detalle.forEach(function(d) {
+                var tip = d.comprobantes + ' comprobante(s) en el mes';
+
+                html += '<tr class="concil-detalle" data-padre="' + fila.clave + '"' +
+                        (abierto ? '' : ' style="display: none;"') + '>';
+                html += '<td class="col-canal concil-cliente" title="' + escapar(tip) + '">' +
+                        '<span class="badge ' + (MOTIVO_CLASE[d.motivo] || 'bg-light text-dark') + ' me-2">' +
+                        (MOTIVO_TEXTO[d.motivo] || escapar(d.motivo)) + '</span>' +
+                        '<span class="fw-semibold">' + escapar(d.cod_client) + '</span>' +
+                        (d.razon_social ? ' <span class="text-muted">' + escapar(d.razon_social) + '</span>' : '') +
+                        '</td>';
+                html += '<td></td>';
+                html += '<td class="currency">' + formatCurrency(d.neto) + '</td>';
+                html += '<td></td>';
+                html += '</tr>';
+            });
+        });
+
+        body.innerHTML = html;
+
+        document.getElementById('conciliacionTotals').innerHTML =
+            '<td class="col-canal total-label">TOTALES</td>' +
+            '<td class="currency">' + formatCurrency(totales.venta) + '</td>' +
+            '<td class="currency">' + formatCurrency(totales.excluidas) + '</td>' +
+            '<td class="currency">' + formatCurrency(totales.total) + '</td>';
+    }
+
+    function alternarConciliacion(clave) {
+        var abierto = !concilAbiertos[clave];
+        var btn = document.querySelector('#conciliacionBody [data-concil="' + clave + '"]');
+
+        concilAbiertos[clave] = abierto;
+
+        document.querySelectorAll('#conciliacionBody tr[data-padre="' + clave + '"]').forEach(function(tr) {
+            tr.style.display = abierto ? '' : 'none';
+        });
+
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-chevron-' + (abierto ? 'down' : 'right') + '"></i>';
+        }
     }
 
     /* ================================================================

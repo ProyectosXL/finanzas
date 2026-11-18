@@ -206,34 +206,100 @@ $edita = AuthCashflow::puedeEditar('ventas');
                 </div>
             </div>
 
-            <!-- Bloque de control de facturación. NO entra en la proyección. -->
+            <!-- Bloque de control de facturación. NO entra en la proyección.
+                 Dos pestañas: facturas y remitos contra el tablero, y la
+                 conciliación contra el libro IVA ventas de contabilidad. -->
             <div class="card mb-4 bloque-control">
                 <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="fas fa-clipboard-check me-1"></i>
-                        Control de Facturación
-                    </h5>
-                    <small class="text-muted">
-                        Facturas y remitos por mes. <strong>No entra en la proyección</strong>:
-                        existe únicamente para contrastar el total contra el tablero.
-                    </small>
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h5 class="mb-0">
+                                <i class="fas fa-clipboard-check me-1"></i>
+                                Control de Facturación
+                            </h5>
+                            <!-- Cambia con la pestaña activa -->
+                            <small class="text-muted" id="controlSubtitulo">
+                                Facturas y remitos por mes. <strong>No entra en la proyección</strong>:
+                                existe únicamente para contrastar el total contra el tablero.
+                            </small>
+                        </div>
+                        <button id="btnExportControl" class="btn btn-sm btn-success">
+                            <i class="fas fa-file-excel me-1"></i> Exportar
+                        </button>
+                    </div>
+
+                    <ul class="nav nav-tabs nav-tabs-card mt-3" id="controlTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="tabFacturacionBtn" data-bs-toggle="tab"
+                                    data-bs-target="#paneFacturacion" type="button" role="tab">
+                                <i class="fas fa-file-invoice me-1"></i> Facturas y Remitos
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="tabConciliacionBtn" data-bs-toggle="tab"
+                                    data-bs-target="#paneConciliacion" type="button" role="tab">
+                                <i class="fas fa-scale-balanced me-1"></i> Conciliación Libro IVA
+                            </button>
+                        </li>
+                    </ul>
                 </div>
                 <div class="card-body p-0">
-                    <div class="table-responsive tabla-temporal">
-                        <table id="tablaFacturacion" class="table table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th class="col-canal">Mes-Año</th>
-                                    <th class="text-end">Facturas</th>
-                                    <th class="text-end">Remitos</th>
-                                    <th class="text-end">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody id="facturacionBody"></tbody>
-                            <tfoot class="table-light">
-                                <tr id="facturacionTotals"></tr>
-                            </tfoot>
-                        </table>
+                    <div class="tab-content">
+
+                        <div class="tab-pane fade show active" id="paneFacturacion" role="tabpanel">
+                            <div class="table-responsive tabla-temporal">
+                                <table id="tablaFacturacion" class="table table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th class="col-canal">Mes-Año</th>
+                                            <th class="text-end">Facturas</th>
+                                            <th class="text-end">Remitos</th>
+                                            <th class="text-end">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="facturacionBody"></tbody>
+                                    <tfoot class="table-light">
+                                        <tr id="facturacionTotals"></tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Conciliación: venta del cashflow + lo que queda fuera
+                             = libro IVA ventas (neto + no gravado + exento) -->
+                        <div class="tab-pane fade" id="paneConciliacion" role="tabpanel">
+                            <div id="warningsConciliacion"></div>
+                            <div class="cargando-slot" id="loadingConciliacion" data-cargando="Cargando conciliación…"></div>
+
+                            <div id="wrapperConciliacion" style="display: none;">
+                                <div class="table-responsive tabla-temporal">
+                                    <!-- data-orden="no": cada mes lleva debajo
+                                         su detalle por cliente; ordenar por
+                                         columna separaría el detalle de su mes. -->
+                                    <table id="tablaConciliacion" class="table table-hover mb-0" data-orden="no">
+                                        <thead>
+                                            <tr>
+                                                <th class="col-canal">Mes-Año</th>
+                                                <th class="text-end"
+                                                    title="La venta neta real del mes: la misma que usa la proyección.">
+                                                    Venta Cashflow<span class="th-sub">neto s/ IVA</span></th>
+                                                <th class="text-end"
+                                                    title="Lo facturado que no es venta del negocio: otros ingresos, exportaciones y clientes sin canal. Abrí el mes para ver el detalle.">
+                                                    Fuera de la Venta<span class="th-sub">neto s/ IVA</span></th>
+                                                <th class="text-end"
+                                                    title="Venta + Fuera de la venta. Es lo que tiene que coincidir con el libro IVA ventas: neto + no gravado + exento.">
+                                                    Total = Libro IVA<span class="th-sub">neto + no grav. + exento</span></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="conciliacionBody"></tbody>
+                                        <tfoot class="table-light">
+                                            <tr id="conciliacionTotals"></tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             </div>

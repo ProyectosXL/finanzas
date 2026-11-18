@@ -79,6 +79,17 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        case 'getConciliacionIva':
+            // Lazy, como Venta Acumulada: la pestana del card de Control de
+            // Facturacion se pide recien cuando se abre.
+            $anioDesde = isset($_GET['anioDesde']) ? intval($_GET['anioDesde']) : 2025;
+
+            echo json_encode([
+                'success' => true,
+                'data' => $ventas->getConciliacionIva($anioDesde)
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'getVentaBalance':
             // Tambien lazy: son doce meses de proyeccion que la pestana
             // Analisis no necesita para dibujarse.

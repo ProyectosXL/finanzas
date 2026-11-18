@@ -559,6 +559,27 @@
 }
 
 /* ========================================
+   CONCILIACIÓN LIBRO IVA (card Control de Facturación)
+   Cada mes abre su detalle por cliente: la fila de detalle va con sangría
+   y fondo suave, para que no se lea como un mes más.
+   ======================================== */
+
+.tab-ventas .concil-detalle td {
+    background-color: #fafbfc;
+    font-size: 0.85rem;
+}
+
+.tab-ventas .concil-detalle .concil-cliente {
+    padding-left: 42px;
+}
+
+.tab-ventas .concil-detalle .badge,
+.tab-ventas .concil-mes .badge {
+    font-size: 10px;
+    font-weight: 600;
+}
+
+/* ========================================
    TOOLTIP DE PARTICIPACIÓN POR MES
    Mismo patrón visual que .fecha-tooltip, pero vive en un <th> sticky dentro de
    un contenedor con overflow, y eso cambia tres cosas:
