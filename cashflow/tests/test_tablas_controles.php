@@ -1959,3 +1959,17 @@ chequear('la pestaña no tiene el boton', false, strpos($tabProv, 'id="btnConcil
 chequear('ni el JS su previsualizacion y su confirmacion', [false, false, false],
     [strpos($jsProv, 'btnConciliarProv') !== false, strpos($jsProv, 'previewConciliacion') !== false,
      strpos($jsProv, 'aplicarConciliacion') !== false]);
+
+seccion('Parametros > Alquileres: el selector de conceptos de cada razon social');
+
+$jsPalq = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros-Alquileres.js'));
+chequear('cada adicional lleva su selector de conceptos', true,
+    strpos($jsPalq, '+ selectorConceptos(l, cod, cerrado) +') !== false);
+chequear('guarda la lista entera con guardarConceptosRazon', true,
+    strpos($jsPalq, "escribir('guardarConceptosRazon', {") !== false);
+chequear('la principal muestra "el resto", de solo lectura', true,
+    strpos($jsPalq, "Principal: ' + esc(restoPrincipal(l))") !== false);
+chequear('sin el script 62 el selector se deshabilita y lo nombra', true,
+    strpos($jsPalq, "'Falta correr ' + datos.script_conceptos_razon") !== false);
+chequear('sin permiso, Permisos.soloLectura apaga la grilla de locales', true,
+    strpos($jsPalq, "Permisos.soloLectura(cuerpo);\n    }\n\n    /**\n     * El contrato del local") !== false);

@@ -124,6 +124,21 @@ class Alquileres {
 
         $avisos = array_merge($avisos, AlquileresFacturas::avisoRubroSinFila($sinFila));
 
+        /* UNA ADICIONAL QUE NO FACTURA NINGUN CONCEPTO sigue sirviendo para sus
+           extraordinarios y para imputarle facturas; se avisa por si falta
+           marcarle lo que factura. Solo con el script 62: sin el, ninguna
+           adicional puede facturar nada y el selector ya lo dice. */
+        $conConceptos = $base['tablas_ok'] && $this->tablaConceptosRazon($avisos);
+
+        if ($conConceptos) {
+            foreach ($base['locales'] as $l) {
+                foreach ($l['razones_sin_conceptos'] ?? [] as $cod) {
+                    $avisos[] = Aviso::nuevo(Aviso::INFO, ($vigentes[$cod]['razon'] ?? $cod) . ' es adicional de '
+                        . $l['nombre'] . ' pero no factura ningún concepto.', 'Locales');
+                }
+            }
+        }
+
         return [
             'rubro_sin_fila' => $sinFila,
             'tabla_creada' => $this->par->tablaCreada(),
@@ -133,6 +148,11 @@ class Alquileres {
             'columnas_vigencia' => $base['tablas_ok'] && $this->columnasVigencia($avisos),
             'script_vigencia' => AlquileresParametros::SCRIPT_VIGENCIA,
             'script_razones_local' => AlquileresParametros::SCRIPT_RAZONES_LOCAL,
+            'tabla_conceptos_razon' => $conConceptos,
+            'script_conceptos_razon' => AlquileresParametros::SCRIPT_CONCEPTOS_RAZON,
+            'conceptos_proyectados' => array_map(function ($id) {
+                return ['id' => $id, 'nombre' => AlquileresConceptos::NOMBRE[$id]];
+            }, AlquileresConceptos::proyectados()),
             'general' => $base['general'],
             'razones' => array_values($razonesAlta),
             'historial_razones' => $base['tablas_ok'] ? $this->par->razones(false) : [],
@@ -489,6 +509,18 @@ class Alquileres {
         }
     }
 
+    /** Si se pueden marcar los conceptos de una razon social adicional (script 62). Nunca lanza. */
+    protected function tablaConceptosRazon(&$avisos) {
+        try {
+            return $this->par->tablaConceptosRazonCreada();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo verificar la tabla de conceptos por razón social ('
+                . $e->getMessage() . ').', 'Locales');
+
+            return false;
+        }
+    }
+
     /** Si se puede agregar mas de una razon social a un local (script 58). Nunca lanza. */
     protected function tablaRazonesLocal(&$avisos) {
         try {
@@ -711,6 +743,8 @@ class Alquileres {
             foreach (AlquileresPago::pagosLocal([
                 'local' => $p,
                 'razon' => $razon,
+                'razones' => $base['razones'],
+                'concepto_razon' => $l['concepto_razon'],
                 'dia_general' => $diaGeneral,
                 'proyeccion' => $proy,
                 'extras' => $extras,
@@ -1149,11 +1183,23 @@ class Alquileres {
                 $estado['faltan'][] = 'venta mensual estimada (local nuevo, sin 12 meses de venta)';
             }
 
+            /* DE QUE RAZON SOCIAL ES CADA CONCEPTO: con su dia y su
+               diferimiento se paga, y bajo ella se ve. */
+            $deQuien = AlquileresPago::conceptosPorRazon($p, $out['razones']);
+
+            foreach ($deQuien['devueltos'] as $cod => $ids) {
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, $l['nombre'] . ': ' . $cod . ' está dada de baja en Razones '
+                    . 'sociales y facturaba ' . implode(', ', $ids) . '. Esos conceptos se proyectan con la principal, '
+                    . 'con su día y su diferimiento, hasta que se la vuelva a dar de alta o se le quiten.', 'Locales');
+            }
+
             $out['locales'][$nro] = [
                 'nro' => $nro,
                 'nombre' => $l['nombre'],
                 'habilitado' => $l['habilitado'],
                 'params' => $p,
+                'concepto_razon' => $deQuien['por_concepto'],
+                'razones_sin_conceptos' => $deQuien['sin_conceptos'],
                 /* La principal y, despues, las adicionales dadas de alta: es lo
                    que muestra la columna Razon social de la pestaña. */
                 'razon' => (isset($p['cod_provee']) && isset($out['razones'][$p['cod_provee']]))

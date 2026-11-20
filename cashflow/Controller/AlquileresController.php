@@ -235,14 +235,27 @@ try {
             responder($r, 'Local ' . $universo[$r['nro']]['nombre'] . ' guardado.');
             break;
 
-        /* MAS DE UNA RAZON SOCIAL POR LOCAL: las adicionales. El dia y el
-           diferimiento siguen siendo los de la principal. */
+        /* MAS DE UNA RAZON SOCIAL POR LOCAL: las adicionales, y los conceptos
+           que factura cada una. Cada concepto se paga con el dia y el
+           diferimiento de la razon que lo factura. */
         case 'altaRazonLocal':
             $data = bodyJson();
             $universo = (new AlquileresApp())->locales();
             $r = $par->altaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $universo, $usuario);
             responder($r, $r['cod'] . ' agregada a ' . $universo[$r['nro']]['nombre'] . ': sus facturas se pueden '
-                . 'imputar a este local. El vencimiento y el diferimiento siguen siendo los de la razón principal.');
+                . 'imputar a este local. Todavía no factura ningún concepto: marcale los suyos para que salgan de la '
+                . 'principal.');
+            break;
+
+        case 'guardarConceptosRazon':
+            $data = bodyJson();
+            $universo = (new AlquileresApp())->locales();
+            $r = $par->guardarConceptosRazon($data['nro'] ?? 0, $data['cod_provee'] ?? '', $data['conceptos'] ?? [],
+                                             $universo, $usuario);
+            responder($r, empty($r['conceptos'])
+                ? $r['cod'] . ' ya no factura ningún concepto de ' . $universo[$r['nro']]['nombre'] . ': todos vuelven a la principal.'
+                : $r['cod'] . ' factura ' . implode(', ', $r['conceptos']) . ' en ' . $universo[$r['nro']]['nombre']
+                  . ': se pagan con su día de vencimiento y su diferimiento.');
             break;
 
         case 'bajaRazonLocal':

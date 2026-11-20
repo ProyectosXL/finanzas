@@ -106,13 +106,40 @@ chequearLanza('ni una adicional dos veces', function () use ($razVig) {
     AlquileresParametros::validarRazonLocal('SAUCCS', ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS']],
         $razVig, 'SAN JUSTO');
 });
-chequearLanza('sin principal no: la principal da el vencimiento y el diferimiento', function () use ($razVig) {
+chequearLanza('sin principal no: la principal factura el resto', function () use ($razVig) {
     AlquileresParametros::validarRazonLocal('SAUCCS', ['cod_provee' => null], $razVig, 'SAN JUSTO');
 });
 chequear('la tabla de las adicionales no es obligatoria: sin el script 58 todo sigue como antes', false,
     in_array(AlquileresParametros::T_LOCAL_RAZON, AlquileresParametros::TABLAS, true));
 chequear('el script existe y crea la tabla', true, strpos((string) @file_get_contents(__DIR__ . '/../'
     . AlquileresParametros::SCRIPT_RAZONES_LOCAL), 'CREATE TABLE dbo.' . AlquileresParametros::T_LOCAL_RAZON) !== false);
+
+seccion('AlquileresParametros: los conceptos que factura cada razon social');
+
+$sjLocal = ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS', 'SAOTRA'], 'conceptos_razon' => ['SAOTRA' => [3]]];
+chequear('una adicional marca los suyos, sin repetir y en orden', [6, 7, 11, 16, 17],
+    AlquileresParametros::validarConceptosRazon('sauccs', [17, '6', 7, 11, 16, 6], $sjLocal, 'SAN JUSTO'));
+chequear('una lista vacia vale: todo vuelve a la principal', [],
+    AlquileresParametros::validarConceptosRazon('SAUCCS', [], $sjLocal, 'SAN JUSTO'));
+chequearLanza('a la principal no se le marca nada: factura el resto', function () use ($sjLocal) {
+    AlquileresParametros::validarConceptosRazon('SASANJ', [8], $sjLocal, 'SAN JUSTO');
+});
+chequearLanza('una que no es razon del local tampoco', function () use ($sjLocal) {
+    AlquileresParametros::validarConceptosRazon('SAPALA', [8], $sjLocal, 'SAN JUSTO');
+});
+chequearLanza('un concepto que no se proyecta (4, llave) no', function () use ($sjLocal) {
+    AlquileresParametros::validarConceptosRazon('SAUCCS', [4], $sjLocal, 'SAN JUSTO');
+});
+chequearLanza('un concepto en dos razones sociales del mismo local no', function () use ($sjLocal) {
+    AlquileresParametros::validarConceptosRazon('SAUCCS', [3, 11], $sjLocal, 'SAN JUSTO');
+});
+chequear('la tabla de conceptos no es obligatoria: sin el script 62 todo va a la principal', false,
+    in_array(AlquileresParametros::T_LOCAL_RAZON_CONCEPTO, AlquileresParametros::TABLAS, true));
+$script62 = (string) @file_get_contents(__DIR__ . '/../' . AlquileresParametros::SCRIPT_CONCEPTOS_RAZON);
+chequear('el script existe y crea la tabla con su indice unico filtrado', [true, true], [
+    strpos($script62, 'CREATE TABLE dbo.' . AlquileresParametros::T_LOCAL_RAZON_CONCEPTO) !== false,
+    strpos($script62, 'WHERE VIGENTE = 1') !== false]);
+chequear('el script no borra nada', false, (bool) preg_match('/\b(DROP|DELETE|TRUNCATE)\b/i', $script62));
 
 seccion('AlquileresParametros: el universo del buscador es la columna RUBRO');
 
@@ -140,7 +167,8 @@ chequear('con el controller del modulo', 'Controller/AlquileresController.php', 
 chequear('su permiso es cashflow.editar.parametros.alquileres', 'cashflow.editar.parametros.alquileres',
     AuthCashflow::claveEdicion('parametros', 'ALQUILERES'));
 
-$acciones = ['guardarGeneral', 'altaRazon', 'guardarRazon', 'bajaRazon', 'guardarLocal', 'altaExtra', 'bajaExtra'];
+$acciones = ['guardarGeneral', 'altaRazon', 'guardarRazon', 'bajaRazon', 'guardarLocal', 'altaRazonLocal',
+             'bajaRazonLocal', 'guardarConceptosRazon', 'altaExtra', 'bajaExtra'];
 $malas = [];
 foreach ($acciones as $a) {
     if ((AuthCashflow::ESCRITURAS['Alquileres'][$a] ?? null) !== [['parametros', 'ALQUILERES']]) {
