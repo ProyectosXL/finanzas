@@ -600,7 +600,8 @@ class Alquileres {
         $hoy = $h->hoy();
         $mesesPago = array_column($h->meses(), 'clave');
 
-        $out = ['pagos' => [], 'locales' => $base['locales'], 'ventas' => null, 'meses_pago' => $mesesPago,
+        $out = ['pagos' => [], 'locales' => $base['locales'], 'razones' => $base['razones'], 'ventas' => null,
+                'meses_pago' => $mesesPago,
                 'meses_concepto' => $mesesPago, 'faltan_inflacion' => [], 'avisos' => []];
 
         foreach ($base['razones'] as $cod => $r) {
@@ -852,8 +853,11 @@ class Alquileres {
        ==================================================================== */
 
     /**
-     * La grilla de Proyeccion (local -> grupos -> conceptos, por mes de pago),
-     * la de Ventas, las tarjetas y los avisos, a partir de calcular().
+     * La grilla de Proyeccion (razon social -> local -> grupos -> conceptos,
+     * por mes de pago: armarRazones()), la de Ventas, las tarjetas y los
+     * avisos, a partir de calcular(). 'locales' sigue viniendo plano, un
+     * renglon por local con todos sus pagos: es el que leen la sub-pestaña
+     * Ventas y Facturas.
      *
      * NO CALCULA NADA: agrupa la lista de pagos. Por eso lo que la pestaña dice
      * es lo mismo que dice el tablero, que suma la misma lista.
@@ -893,68 +897,19 @@ class Alquileres {
         $totalHorizonte = 0.0;
         $totalMesActual = 0.0;
 
-        foreach ($c['locales'] as $nro => $l) {
-            $fila = [
-                'nro' => $nro,
-                'nombre' => $l['nombre'],
-                'cod_provee' => $l['params']['cod_provee'] ?? null,
-                'razon' => $l['razon'],
-                'estado' => $l['estado'],
-                'faltan' => $l['faltan'],
-                'nuevo' => $l['nuevo'],
-                'meses' => [],
-                'total' => self::celdaVacia(),
-                'grupos' => []
-            ];
+        foreach ($c['pagos'] as $p) {
+            $totalHorizonte += $p['a_pagar'];
 
-            foreach ($porLocal[$nro] ?? [] as $p) {
-                $grupo = $p['grupo'];
-                $concepto = (string) $p['concepto'];
-                $mes = $p['mes_pago'];
-
-                if (!isset($fila['grupos'][$grupo])) {
-                    $fila['grupos'][$grupo] = ['grupo' => $grupo, 'nombre' => self::nombresGrupo()[$grupo],
-                                               'meses' => [], 'total' => self::celdaVacia(), 'conceptos' => []];
-                }
-
-                $g = &$fila['grupos'][$grupo];
-
-                if (!isset($g['conceptos'][$concepto])) {
-                    $g['conceptos'][$concepto] = ['id' => $concepto, 'nombre' => self::nombreConcepto($p),
-                                                  'meses' => [], 'total' => self::celdaVacia()];
-                }
-
-                $k = &$g['conceptos'][$concepto];
-                $k['meses'][$mes] = self::sumarCelda($k['meses'][$mes] ?? self::celdaVacia(), $p, true);
-                $k['total'] = self::sumarCelda($k['total'], $p, false);
-                $g['meses'][$mes] = self::sumarCelda($g['meses'][$mes] ?? self::celdaVacia(), $p, false);
-                $g['total'] = self::sumarCelda($g['total'], $p, false);
-                $fila['meses'][$mes] = self::sumarCelda($fila['meses'][$mes] ?? self::celdaVacia(), $p, false);
-                $fila['total'] = self::sumarCelda($fila['total'], $p, false);
-                unset($g, $k);
-
-                $totalHorizonte += $p['a_pagar'];
-
-                if ($mes === $mesActual) {
-                    $totalMesActual += $p['a_pagar'];
-                }
+            if ($p['mes_pago'] === $mesActual) {
+                $totalMesActual += $p['a_pagar'];
             }
-
-            /* Los grupos en su orden, y cada uno con sus conceptos en orden. */
-            $ordenados = [];
-
-            foreach (array_keys(self::nombresGrupo()) as $gr) {
-                if (isset($fila['grupos'][$gr])) {
-                    $g = $fila['grupos'][$gr];
-                    ksort($g['conceptos'], SORT_NATURAL);
-                    $g['conceptos'] = array_values($g['conceptos']);
-                    $ordenados[] = $g;
-                }
-            }
-
-            $fila['grupos'] = $ordenados;
-            $locales[] = $fila;
         }
+
+        foreach ($c['locales'] as $nro => $l) {
+            $locales[] = self::filaLocal($nro, $l, $porLocal[$nro] ?? []);
+        }
+
+        $razones = self::armarRazones($c, $porLocal);
 
         $incompletos = count(array_filter($c['locales'], function ($l) {
             return $l['estado'] === AlquileresPago::INCOMPLETO || !empty($l['faltan']);
@@ -968,6 +923,7 @@ class Alquileres {
             'meses' => $meses,
             'mes_actual' => $mesActual,
             'locales' => $locales,
+            'razones' => $razones,
             'ventas' => self::armarVentas($c),
             'kpis' => [
                 'total_horizonte' => round($totalHorizonte, 2),
@@ -980,6 +936,152 @@ class Alquileres {
             'facturas' => self::armarFacturas($c),
             'avisos' => $c['avisos']
         ];
+    }
+
+    /** La clave del grupo de los locales sin razon social dada de alta */
+    const SIN_RAZON = 'SIN_RAZON';
+
+    /**
+     * El renglon de un local con sus grupos y conceptos, a partir de SUS
+     * pagos (todos, o los de una razon social). No calcula: suma celdas.
+     */
+    private static function filaLocal($nro, $l, $pagos) {
+        $fila = [
+            'nro' => $nro,
+            'nombre' => $l['nombre'],
+            'cod_provee' => $l['params']['cod_provee'] ?? null,
+            'razon' => $l['razon'],
+            'estado' => $l['estado'],
+            'faltan' => $l['faltan'],
+            'nuevo' => $l['nuevo'],
+            'meses' => [],
+            'total' => self::celdaVacia(),
+            'grupos' => []
+        ];
+
+        foreach ($pagos as $p) {
+            $grupo = $p['grupo'];
+            $concepto = (string) $p['concepto'];
+            $mes = $p['mes_pago'];
+
+            if (!isset($fila['grupos'][$grupo])) {
+                $fila['grupos'][$grupo] = ['grupo' => $grupo, 'nombre' => self::nombresGrupo()[$grupo],
+                                           'meses' => [], 'total' => self::celdaVacia(), 'conceptos' => []];
+            }
+
+            $g = &$fila['grupos'][$grupo];
+
+            if (!isset($g['conceptos'][$concepto])) {
+                $g['conceptos'][$concepto] = ['id' => $concepto, 'nombre' => self::nombreConcepto($p),
+                                              'meses' => [], 'total' => self::celdaVacia()];
+            }
+
+            $k = &$g['conceptos'][$concepto];
+            $k['meses'][$mes] = self::sumarCelda($k['meses'][$mes] ?? self::celdaVacia(), $p, true);
+            $k['total'] = self::sumarCelda($k['total'], $p, false);
+            $g['meses'][$mes] = self::sumarCelda($g['meses'][$mes] ?? self::celdaVacia(), $p, false);
+            $g['total'] = self::sumarCelda($g['total'], $p, false);
+            $fila['meses'][$mes] = self::sumarCelda($fila['meses'][$mes] ?? self::celdaVacia(), $p, false);
+            $fila['total'] = self::sumarCelda($fila['total'], $p, false);
+            unset($g, $k);
+        }
+
+        /* Los grupos en su orden, y cada uno con sus conceptos en orden. */
+        $ordenados = [];
+
+        foreach (array_keys(self::nombresGrupo()) as $gr) {
+            if (isset($fila['grupos'][$gr])) {
+                $g = $fila['grupos'][$gr];
+                ksort($g['conceptos'], SORT_NATURAL);
+                $g['conceptos'] = array_values($g['conceptos']);
+                $ordenados[] = $g;
+            }
+        }
+
+        $fila['grupos'] = $ordenados;
+
+        return $fila;
+    }
+
+    /** La razon social que factura un pago: la suya, o la de la factura imputada */
+    private static function razonDelPago($p) {
+        $cod = $p['cod_provee'] ?? ($p['detalle']['cod_provee'] ?? null);
+
+        return ($cod === null) ? null : Planilla::codigo($cod);
+    }
+
+    /**
+     * La grilla de Proyeccion: RAZON SOCIAL -> local -> grupo -> concepto.
+     *
+     * POR QUE EL PRIMER NIVEL ES LA RAZON SOCIAL. Es lo que se paga: una
+     * factura es de una razon social, se imputa a sus locales y pisa lo que
+     * ella factura. Agrupar por local mezclaba en un renglon lo que pagan dos
+     * proveedores distintos (San Justo).
+     *
+     * UN LOCAL CON DOS RAZONES SOCIALES APARECE BAJO LAS DOS, cada una con sus
+     * conceptos (AlquileresPago::conceptosPorRazon()). Bajo la principal se ve
+     * siempre, aunque no proyecte -con su estado-; bajo una adicional, solo si
+     * ella le factura algo en el horizonte. Los locales sin razon social dada
+     * de alta van al final, en "Sin razon social", con su aviso de siempre.
+     *
+     * NO CALCULA: reparte la misma lista de pagos que suma el tablero, y la
+     * suma de las razones da el total de la pestaña al centavo.
+     *
+     * @param array $c Lo de calcular(), con 'razones' (cod => ['razon', ...])
+     * @param array $porLocal nro => pagos que se muestran (los conceptos en 0 todo el horizonte, fuera)
+     * @return array Lista de ['cod', 'nombre', 'sin_razon', 'meses', 'total', 'locales' => [filaLocal()]]
+     */
+    private static function armarRazones($c, $porLocal) {
+        $nombres = [];
+
+        foreach ($c['razones'] ?? [] as $cod => $r) {
+            $nombres[Planilla::codigo($cod)] = $r['razon'] ?? $cod;
+        }
+
+        $porRazon = [];
+
+        foreach ($c['locales'] as $nro => $l) {
+            $principal = Planilla::codigo($l['params']['cod_provee'] ?? '');
+            $deEl = isset($nombres[$principal]) ? $principal : self::SIN_RAZON;
+            $porRazon[$deEl][$nro] = $porRazon[$deEl][$nro] ?? [];
+
+            foreach ($porLocal[$nro] ?? [] as $p) {
+                $cod = self::razonDelPago($p);
+                $cod = ($cod !== null && isset($nombres[$cod])) ? $cod : $deEl;
+                $porRazon[$cod][$nro][] = $p;
+            }
+        }
+
+        $out = [];
+
+        foreach ($porRazon as $cod => $locs) {
+            $r = ['cod' => ($cod === self::SIN_RAZON) ? null : $cod,
+                  'nombre' => ($cod === self::SIN_RAZON) ? 'Sin razón social' : $nombres[$cod],
+                  'sin_razon' => $cod === self::SIN_RAZON, 'meses' => [], 'total' => self::celdaVacia(),
+                  'locales' => []];
+
+            /* En el orden de la app, no en el de la lista de pagos. */
+            foreach (array_keys($c['locales']) as $nro) {
+                if (!array_key_exists($nro, $locs)) {
+                    continue;
+                }
+
+                $r['locales'][] = self::filaLocal($nro, $c['locales'][$nro], $locs[$nro]);
+
+                foreach ($locs[$nro] as $p) {
+                    $r['meses'][$p['mes_pago']] = self::sumarCelda($r['meses'][$p['mes_pago']] ?? self::celdaVacia(), $p, false);
+                    $r['total'] = self::sumarCelda($r['total'], $p, false);
+                }
+            }
+
+            $out[] = $r;
+        }
+
+        usort($out, function ($a, $b) {
+            return ($a['sin_razon'] <=> $b['sin_razon']) ?: strcmp($a['nombre'], $b['nombre']);
+        });
+
+        return $out;
     }
 
     /**

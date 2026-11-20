@@ -177,6 +177,74 @@ chequear('la celda de un concepto trae el detalle del pago', true,
 chequear('el renglon del local muestra el a pagar, el grupo el neto', true,
     $unicenter['meses']['2026-11']['a_pagar'] > $fijos['meses']['2026-11']['neto']);
 
+seccion('Alquileres: la grilla por razon social');
+
+$porCod = array_column($p['razones'], null, 'cod');
+chequear('una razon social por renglon, ordenadas por nombre, "Sin razon social" al final',
+    ['CENCOSUD', 'IRSA'], array_column(array_filter($p['razones'], function ($r) { return !$r['sin_razon']; }), 'nombre'));
+chequear('bajo IRSA, sus locales: Alto Palermo y Solar (incompleto, con su estado)', [3, 10],
+    array_column($porCod['SAPALA']['locales'], 'nro'));
+chequear('Flores 1, sin fila en Parametros, va a "Sin razon social"', [40],
+    array_column(array_values(array_filter($p['razones'], function ($r) { return $r['sin_razon']; }))[0]['locales'], 'nro'));
+$sumaRazones = round(array_sum(array_map(function ($r) { return $r['total']['a_pagar']; }, $p['razones'])), 2);
+chequear('las razones suman el total de la pestaña al centavo', $p['kpis']['total_horizonte'], $sumaRazones);
+chequear('y la razon, lo de sus locales', $porCod['SAPALA']['total']['a_pagar'],
+    round(array_sum(array_map(function ($l) { return $l['total']['a_pagar']; }, $porCod['SAPALA']['locales'])), 2));
+
+/* SAN JUSTO: SASANJ es la principal; SAUCCS factura las expensas (11) y el
+   6, con su propio dia (20) y diferimiento (1). */
+class PestAppSJ extends PestAppDoble {
+    public function locales() { return parent::locales() + [80 => ['nro' => 80, 'nombre' => 'SAN JUSTO', 'habilitado' => true]]; }
+    public function detalleCerrados($cerrados, $desde) {
+        $d = parent::detalleCerrados($cerrados, $desde);
+        foreach ($cerrados as $m) {
+            if ($m >= $desde) { $d[80][$m] = [8 => 2741029.0, 9 => 328923.0, 11 => 3323532.0, 6 => 100.0]; }
+        }
+        return $d;
+    }
+    public function porcentajes() { return parent::porcentajes() + [80 => [6 => 6.5, 9 => 12.0]]; }
+    public function ventasNetas($desde) { return parent::ventasNetas($desde) + [80 => ventana12(200)]; }
+}
+
+class PestParSJ extends PestParDoble {
+    public function razonesVigentes() {
+        return parent::razonesVigentes() + [
+            'SASANJ' => ['cod' => 'SASANJ', 'razon' => 'CONTINENTAL URBANA', 'dia' => null, 'diferimiento' => 1],
+            'SAUCCS' => ['cod' => 'SAUCCS', 'razon' => 'URBANA CENTROS COMERCIALES', 'dia' => 20, 'diferimiento' => 2]];
+    }
+    public function locales() {
+        $l = parent::locales();
+        $l[80] = ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS'], 'conceptos_razon' => ['SAUCCS' => [6, 11]]] + $l[3];
+        return $l;
+    }
+}
+
+$cSJ = (new PestAlquileres('2026-11-10', new PestAppSJ(), new PestParSJ()))->calcular($h, $ins);
+$pSJ = Alquileres::armarPestana($cSJ, $h);
+$rSJ = array_column($pSJ['razones'], null, 'cod');
+$conceptosBajo = function ($cod) use ($rSJ) {
+    $ids = [];
+    foreach ($rSJ[$cod]['locales'] as $l) {
+        if ($l['nro'] !== 80) { continue; }
+        foreach ($l['grupos'] as $g) { $ids = array_merge($ids, array_column($g['conceptos'], 'id')); }
+    }
+    sort($ids);
+    return $ids;
+};
+chequear('San Justo aparece bajo las dos razones sociales', [true, true],
+    [in_array(80, array_column($rSJ['SASANJ']['locales'], 'nro'), true),
+     in_array(80, array_column($rSJ['SAUCCS']['locales'], 'nro'), true)]);
+chequear('bajo SASANJ, el VMA y el FPC s/VMA', ['8', '9'], $conceptosBajo('SASANJ'));
+chequear('bajo SAUCCS, lo que se le marco: el 6 y las expensas', ['6', '11'], $conceptosBajo('SAUCCS'));
+$exp = pagosDe($cSJ, 80, 11)['2026-11'];
+chequear('las expensas de SAUCCS vencen su dia (20/11)', ['SAUCCS', '2026-11-20'], [$exp['cod_provee'], $exp['fecha']]);
+chequear('y el VMA, el general (10/11, que es hoy)', ['SASANJ', '2026-11-10'],
+    [pagosDe($cSJ, 80, 8)['2026-11']['cod_provee'], pagosDe($cSJ, 80, 8)['2026-11']['fecha']]);
+chequear('el 6 se difiere con SAUCCS (2): en noviembre se paga el de septiembre', '2026-09',
+    pagosDe($cSJ, 80, 6)['2026-11']['mes_concepto']);
+chequear('la suma por razon sigue siendo el total', $pSJ['kpis']['total_horizonte'],
+    round(array_sum(array_map(function ($r) { return $r['total']['a_pagar']; }, $pSJ['razones'])), 2));
+
 seccion('Alquileres: la venta y su pie');
 
 $pie = $p['ventas']['pie'];

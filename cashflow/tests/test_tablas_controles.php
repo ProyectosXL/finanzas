@@ -1990,3 +1990,18 @@ chequear('muestra quien hizo el ultimo cambio', true,
     strpos($jsPalq, "Auditoria.linea('modif', t.usuario_modif, t.fecha_modif)") !== false);
 chequear('sin el script 60 se deshabilita nombrandolo', true,
     strpos($jsPalq, "'Falta correr ' + datos.script_imputacion") !== false);
+
+seccion('Alquileres > Proyeccion: la grilla por razon social');
+
+$jsAlq = str_replace("\r\n", "\n", file_get_contents($JS . '/Alquileres.js'));
+chequear('dibuja razones sociales y, colgando, sus locales', [true, true], [
+    strpos($jsAlq, 'razones.map(function(x) { return filasRazon(x.r, x.locales, meses); })') !== false,
+    strpos($jsAlq, "locales.forEach(function(l) { h += filasLocal(l, meses, clave); });") !== false]);
+chequear('los hijos viajan con su razon social al ordenar', 3,
+    substr_count($jsAlq, 'data-orden-sigue data-ancestros='));
+chequear('un hijo se ve si todos sus ancestros estan abiertos', true,
+    strpos($jsAlq, "tr.getAttribute('data-ancestros').split(' ').every(function(k) { return !!abiertos[k]; })") !== false);
+chequear('el buscador mira razon social, codigo y local', [true, true], [
+    strpos($jsAlq, "String(r.cod || '').toLowerCase().indexOf(t) !== -1") !== false,
+    strpos($jsAlq, "String(l.nombre).toLowerCase().indexOf(t) !== -1") !== false]);
+chequear('exportar sigue abriendo todo', true, strpos($jsAlq, "abrirTodo(true);\n        exportarTabla('tablaAlquileres'") !== false);

@@ -11,12 +11,15 @@
  * lo que vino. Los totales del pie y los de arriba del eje salen de UNA cuenta
  * sobre las filas visibles (Js/eje-totales.js).
  *
- * LOS GRUPOS Y CONCEPTOS VIAJAN PEGADOS A SU LOCAL. Llevan data-orden-sigue,
- * asi tabla-orden.js ordena por local sin separarlos.
+ * LA GRILLA ES RAZON SOCIAL -> LOCAL -> GRUPO -> CONCEPTO. Un local con dos
+ * razones sociales aparece bajo las dos, cada una con lo suyo (lo arma el
+ * servidor: Alquileres::armarRazones()). Locales, grupos y conceptos llevan
+ * data-orden-sigue, asi tabla-orden.js ordena por razon social sin separarlos,
+ * y data-ancestros con las claves que tienen que estar abiertas para verse.
  *
  * EXPORTAR ABRE TODO. tabla-export.js baja lo que se ve, y la planilla tiene
- * que tener todos los locales con sus grupos y conceptos: se abren, se exporta
- * y se vuelve a como estaba.
+ * que tener todas las razones con sus locales, grupos y conceptos: se abren,
+ * se exporta y se vuelve a como estaba.
  */
 
 (function() {
@@ -73,31 +76,50 @@
        PROYECCION
        ================================================================ */
 
+    /** Un local que no se muestra: cerrado en Lakers, o temporal terminado sin nada por pagar */
+    function seMuestra(l) {
+        return l.estado !== 'CERRADO_LAKERS' && !(l.estado === 'FINALIZADO' && !(l.total && l.total.a_pagar));
+    }
+
+    /**
+     * Las razones sociales que se dibujan, con sus locales visibles. EL
+     * BUSCADOR mira la razón social, su código y el nombre del local: si
+     * coincide la razón, van todos sus locales; si coincide un local, sólo ese.
+     */
+    function razonesVisibles() {
+        var t = filtro.toLowerCase();
+
+        return (datos.razones || []).map(function(r) {
+            var deLaRazon = t === '' || String(r.nombre).toLowerCase().indexOf(t) !== -1
+                || String(r.cod || '').toLowerCase().indexOf(t) !== -1;
+            var locales = r.locales.filter(function(l) {
+                return seMuestra(l) && (deLaRazon || String(l.nombre).toLowerCase().indexOf(t) !== -1);
+            });
+
+            return { r: r, locales: locales };
+        }).filter(function(x) { return x.locales.length > 0; });
+    }
+
     function dibujar() {
         if (!datos) { return; }
 
         var meses = datos.meses;
-        var locales = datos.locales.filter(function(l) {
-            /* Ni los cerrados en Lakers ni un temporal con el contrato terminado, salvo
-               que le quede algo por pagar en el horizonte (un variable diferido). */
-            return l.estado !== 'CERRADO_LAKERS'
-                && !(l.estado === 'FINALIZADO' && !(l.total && l.total.a_pagar))
-                && coincide(l);
-        });
+        var razones = razonesVisibles();
 
         document.getElementById('alqThead').innerHTML = '<tr>'
-            + '<th rowspan="2" class="col-texto">Local</th>'
-            + '<th rowspan="2" class="col-texto">Razón social</th>'
+            + '<th rowspan="2" class="col-texto">Razón social · local</th>'
+            + '<th rowspan="2" class="col-texto">Código</th>'
             + '</tr><tr>'
             + meses.map(function(m) { return '<th class="text-end">' + esc(m.label) + '</th>'; }).join('')
             + '<th class="text-end fw-bold total-column">Total</th></tr>';
 
         var cuerpo = document.getElementById('alqBody');
 
-        cuerpo.innerHTML = locales.length
-            ? locales.map(function(l) { return filasLocal(l, meses); }).join('')
+        cuerpo.innerHTML = razones.length
+            ? razones.map(function(x) { return filasRazon(x.r, x.locales, meses); }).join('')
             : '<tr><td colspan="' + (meses.length + 3) + '" class="text-center text-muted py-4">'
-              + (datos.locales.length ? 'Ningún local coincide con la búsqueda.' : 'No hay locales que mostrar: ver los avisos de arriba.')
+              + ((datos.razones || []).length ? 'Ninguna razón social ni local coincide con la búsqueda.'
+                  : 'No hay locales que mostrar: ver los avisos de arriba.')
               + '</td></tr>';
 
         cuerpo.querySelectorAll('.alq-toggle').forEach(function(t) {
@@ -110,48 +132,58 @@
         });
 
         aplicarAbiertos();
-        pintarPie(locales, meses);
+        pintarPie(razones, meses);
     }
 
-    function coincide(l) {
-        if (filtro === '') { return true; }
-
-        var t = filtro.toLowerCase();
-
-        return String(l.nombre).toLowerCase().indexOf(t) !== -1 || String(l.cod_provee || '').toLowerCase().indexOf(t) !== -1
-            || razonDe(l).toLowerCase().indexOf(t) !== -1;
+    function toggle(clave) {
+        return '<span class="alq-toggle" data-clave="' + clave + '"><i class="fas fa-caret-right"></i></span> ';
     }
 
-    function razonDe(l) {
-        return l.razon || l.cod_provee || '';
+    var SIN_TOGGLE = '<span class="alq-toggle-vacio" style="display:inline-block;width:1rem"></span> ';
+
+    /**
+     * La razón social y, colgando de ella, sus locales, sus grupos y sus
+     * conceptos. Cada hijo lleva data-orden-sigue (tabla-orden.js lo mueve con
+     * su razón) y en data-ancestros la lista de claves que tienen que estar
+     * abiertas para que se vea.
+     */
+    function filasRazon(r, locales, meses) {
+        var clave = 'R' + (r.cod || 'SIN');
+        var h = '<tr class="alq-razon" data-clave="' + clave + '">'
+            + '<td data-orden="' + esc(r.nombre) + '">' + toggle(clave) + '<strong>' + esc(r.nombre) + '</strong>'
+                + (r.sin_razon ? ' <span class="badge bg-warning text-dark" title="Locales sin razón social dada de '
+                    + 'alta: no proyectan. Se completan en Parámetros › Alquileres">sin razón social</span>' : '') + '</td>'
+            + '<td>' + esc(r.cod || '') + '</td>'
+            + celdas(r.meses, r.total, meses, 'a_pagar', null)
+            + '</tr>';
+
+        locales.forEach(function(l) { h += filasLocal(l, meses, clave); });
+
+        return h;
     }
 
-    function filasLocal(l, meses) {
-        var clave = 'L' + l.nro;
+    function filasLocal(l, meses, padre) {
+        var clave = padre + '-L' + l.nro;
         var estado = l.estado === 'PROYECTA'
             ? (l.faltan.length ? ' <span class="badge bg-warning text-dark" title="Falta: ' + esc(l.faltan.join(', ')) + '">parcial</span>' : '')
             : ' <span class="badge bg-warning text-dark" title="Falta: ' + esc(l.faltan.join(', ')) + '">' + esc(datos.estados[l.estado] || l.estado) + '</span>';
-        var tieneGrupos = l.grupos.length > 0;
 
-        var h = '<tr class="alq-local" data-clave="' + clave + '">'
-            + '<td data-orden="' + esc(l.nombre) + '">'
-                + (tieneGrupos ? '<span class="alq-toggle" data-clave="' + clave + '"><i class="fas fa-caret-right"></i></span> ' : '<span class="alq-toggle-vacio" style="display:inline-block;width:1rem"></span> ')
-                + esc(l.nombre) + estado + '</td>'
-            + '<td>' + esc(razonDe(l)) + '</td>'
+        var h = '<tr class="alq-local" data-orden-sigue data-ancestros="' + padre + '" data-clave="' + clave + '">'
+            + '<td>' + (l.grupos.length ? toggle(clave) : SIN_TOGGLE) + esc(l.nombre) + estado + '</td>'
+            + '<td>' + l.nro + '</td>'
             + celdas(l.meses, l.total, meses, 'a_pagar', null)
             + '</tr>';
 
         l.grupos.forEach(function(g) {
             var gClave = clave + '-' + g.grupo;
 
-            h += '<tr class="alq-grupo" data-orden-sigue data-padre="' + clave + '" data-clave="' + gClave + '">'
-                + '<td><span class="alq-toggle" data-clave="' + gClave + '"><i class="fas fa-caret-right"></i></span> '
-                    + esc(g.nombre) + '</td><td></td>'
+            h += '<tr class="alq-grupo" data-orden-sigue data-ancestros="' + padre + ' ' + clave + '" data-clave="' + gClave + '">'
+                + '<td>' + toggle(gClave) + esc(g.nombre) + '</td><td></td>'
                 + celdas(g.meses, g.total, meses, 'neto', null)
                 + '</tr>';
 
             g.conceptos.forEach(function(k) {
-                h += '<tr class="alq-concepto" data-orden-sigue data-padre="' + gClave + '" data-abuelo="' + clave + '">'
+                h += '<tr class="alq-concepto" data-orden-sigue data-ancestros="' + padre + ' ' + clave + ' ' + gClave + '">'
                     + '<td>' + esc(k.nombre) + '</td><td></td>'
                     + celdas(k.meses, k.total, meses, 'neto', g.grupo)
                     + '</tr>';
@@ -229,11 +261,10 @@
         return t;
     }
 
+    /** Un hijo se ve si TODOS sus ancestros (razón, local, grupo) están abiertos. */
     function aplicarAbiertos() {
-        document.querySelectorAll('#alqBody tr[data-padre]').forEach(function(tr) {
-            var padre = tr.getAttribute('data-padre');
-            var abuelo = tr.getAttribute('data-abuelo');
-            var visible = !!abiertos[padre] && (!abuelo || !!abiertos[abuelo]);
+        document.querySelectorAll('#alqBody tr[data-ancestros]').forEach(function(tr) {
+            var visible = tr.getAttribute('data-ancestros').split(' ').every(function(k) { return !!abiertos[k]; });
 
             tr.style.display = visible ? '' : 'none';
         });
@@ -257,9 +288,16 @@
     }
 
     /** Una sola cuenta para el pie y para los totales de arriba del eje. */
-    function pintarPie(locales, meses) {
+    /**
+     * Sobre las razones sociales VISIBLES, con lo que tienen sus locales
+     * visibles: con el buscador puesto, el pie suma lo que se ve. Sin
+     * buscador, da el total de la pestaña (las razones suman la lista entera).
+     */
+    function pintarPie(razones, meses) {
         var valores = meses.map(function(m) {
-            return locales.reduce(function(s, l) { return s + ((l.meses[m.clave] || {}).a_pagar || 0); }, 0);
+            return razones.reduce(function(s, x) {
+                return s + x.locales.reduce(function(t, l) { return t + ((l.meses[m.clave] || {}).a_pagar || 0); }, 0);
+            }, 0);
         });
         var total = valores.reduce(function(s, v) { return s + v; }, 0);
 

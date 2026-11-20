@@ -102,8 +102,8 @@
 
     <!-- ============================================================
          1 — PROYECCIÓN
-         Un renglón por local con lo que se paga cada mes. Se abre en sus
-         grupos y cada grupo en sus conceptos. El mes es el MES DE PAGO: un
+         Un renglón por razón social con lo que se paga cada mes. Se abre en
+         sus locales, cada local en sus grupos y cada grupo en sus conceptos. El mes es el MES DE PAGO: un
          variable diferido aparece en el mes en que se paga.
          ============================================================ -->
     <div class="tab-pane fade show active" id="paneAlqProy" role="tabpanel">
@@ -111,29 +111,30 @@
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <div>
-                        <h5 class="mb-0">Proyección por local</h5>
+                        <h5 class="mb-0">Proyección por razón social</h5>
                         <small class="text-muted">
-                            El renglón del local es el <strong>a pagar</strong>; grupos y conceptos, el
-                            <strong>neto</strong>. Pasá el mouse por un importe para ver el desglose.
+                            Cada razón social se abre en sus locales, y cada local en lo que ella le
+                            factura. Razón social y local muestran el <strong>a pagar</strong>; grupos y
+                            conceptos, el <strong>neto</strong>. Pasá el mouse por un importe para ver el desglose.
                         </small>
                     </div>
                     <div class="search-box-container">
                         <div class="input-group input-group-sm">
                             <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
                             <input type="text" id="busquedaAlq" class="form-control border-start-0 ps-0"
-                                   placeholder="Buscar local o razón social…" style="min-width: 220px;">
+                                   placeholder="Buscar razón social, código o local…" style="min-width: 220px;">
                         </div>
                     </div>
                 </div>
                 <div class="d-flex gap-2">
                     <div id="colFijasAlq"></div>
-                    <button id="btnExpandirAlq" class="btn btn-sm btn-outline-secondary" title="Abrir o cerrar todos los locales">
+                    <button id="btnExpandirAlq" class="btn btn-sm btn-outline-secondary" title="Abrir o cerrar todas las razones sociales y sus locales">
                         <i class="fas fa-up-down me-1"></i> Abrir todo
                     </button>
                     <!-- No es data-exportar: antes de exportar abre todas las
                          filas, porque tabla-export.js baja sólo lo que se ve. -->
                     <button id="btnExportarAlq" class="btn btn-sm btn-success"
-                            title="Exportar a Excel con todos los locales, grupos y conceptos abiertos">
+                            title="Exportar a Excel con todas las razones sociales, locales, grupos y conceptos abiertos">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
                 </div>

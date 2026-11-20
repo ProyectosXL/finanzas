@@ -1,9 +1,12 @@
 /* RRHH y Operativos › Alquileres */
 
-/* Los niveles de la grilla de Proyeccion: local, grupo y concepto. */
-#tablaAlquileres tr.alq-local td:first-child { font-weight: 600; }
-#tablaAlquileres tr.alq-grupo td:first-child { padding-left: 1.5rem; }
-#tablaAlquileres tr.alq-concepto td:first-child { padding-left: 3rem; font-size: .85em; }
+/* Los niveles de la grilla de Proyeccion: razon social, local, grupo y
+   concepto. La sangria dice de quien cuelga cada renglon. */
+#tablaAlquileres tr.alq-razon td:first-child { font-weight: 700; }
+#tablaAlquileres tr.alq-razon { background: rgba(0, 0, 0, .04); }
+#tablaAlquileres tr.alq-local td:first-child { font-weight: 600; padding-left: 1.25rem; }
+#tablaAlquileres tr.alq-grupo td:first-child { padding-left: 2.75rem; }
+#tablaAlquileres tr.alq-concepto td:first-child { padding-left: 4.25rem; font-size: .85em; }
 #tablaAlquileres tr.alq-grupo { background: rgba(0, 0, 0, .02); }
 #tablaAlquileres tr.alq-concepto { font-size: .85em; color: #555; }
 #tablaAlquileres .alq-toggle { cursor: pointer; width: 1rem; display: inline-block; }
