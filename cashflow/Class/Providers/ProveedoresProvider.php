@@ -246,7 +246,8 @@ class ProveedoresProvider extends CashflowProvider {
         $this->avisarTodos($prov->avisosSaldosConNivel($h->hoy()));
 
         $alquiler = array_map(function ($i) { return ['ALQUILER' => true] + $i; },
-            array_merge($partes[AlquileresFacturas::A_ALQUILERES], $partes[AlquileresFacturas::A_EXCLUIDA]));
+            array_merge($partes[AlquileresFacturas::A_ALQUILERES], $partes[AlquileresFacturas::A_EXCLUIDA],
+                $partes[AlquileresFacturas::A_EXCLUIDA_FACTURA]));
 
         return $this->repartir($h, array_merge($items, $alquiler));
     }

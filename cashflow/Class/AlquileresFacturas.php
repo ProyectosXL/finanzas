@@ -51,6 +51,15 @@ require_once __DIR__ . '/Aviso.php';
  * facturas no entran, no se imputan, no suman y TAMPOCO vuelven a Proveedores
  * Locales. Para pasar un proveedor de Alquileres a Proveedores Locales se lo da
  * de baja en Parametros -> Alquileres, no se lo excluye.
+ *
+ * UNA FACTURA SUELTA TAMBIEN SE EXCLUYE
+ * -------------------------------------
+ * Una cuota que no se paga por este circuito (un pago de contrato) se excluye
+ * en Alquileres -> Facturas, con motivo (AlquileresFacturaExclusion, script
+ * 61). Va a A_EXCLUIDA_FACTURA: no suma en Alquileres, ni en el tablero, ni
+ * vuelve a Proveedores Locales. Es destino() quien lo decide, para que todos
+ * digan lo mismo. Con la condicion de seguridad sin cumplir, como todas las de
+ * alquiler, se queda en Proveedores Locales.
  */
 class AlquileresFacturas {
 
@@ -74,6 +83,8 @@ class AlquileresFacturas {
     /** A donde va una factura */
     const A_ALQUILERES = 'ALQUILERES';
     const A_EXCLUIDA = 'ALQUILERES_EXCLUIDA';
+    /** Una cuota excluida a mano en Alquileres -> Facturas (no se paga por aca) */
+    const A_EXCLUIDA_FACTURA = 'ALQUILERES_EXCLUIDA_FACTURA';
     const A_PROV_LOCALES = 'PROV_LOCALES';
 
     /** Por que la condicion de seguridad no se cumple */
@@ -127,10 +138,12 @@ class AlquileresFacturas {
      * @param string[] $razones Codigos dados de alta en Parametros -> Alquileres
      * @param string[] $excluidos Codigos excluidos del modulo ALQUILERES
      * @param array $condicion Lo de condicion()
+     * @param array $facturasExcluidas claveCuota() => fila de la exclusion: las cuotas
+     *        excluidas a mano en Alquileres -> Facturas (script 61)
      * @return array ['razones' => [cod => true], 'excluidos' => [cod => true],
-     *                'condicion' => array]
+     *                'facturas_excluidas' => [claveCuota => fila], 'condicion' => array]
      */
-    public static function contexto($razones, $excluidos, $condicion) {
+    public static function contexto($razones, $excluidos, $condicion, $facturasExcluidas = []) {
         $set = function ($lista) {
             $s = [];
 
@@ -148,8 +161,24 @@ class AlquileresFacturas {
         return [
             'razones' => $set($razones),
             'excluidos' => $set($excluidos),
+            'facturas_excluidas' => is_array($facturasExcluidas) ? $facturasExcluidas : [],
             'condicion' => $condicion
         ];
+    }
+
+    /**
+     * La clave de una cuota: comprobante + vencimiento de Tango. Acepta una fila
+     * de getPendientes() (FECHA_VTO) o de las tablas (FECHA_VTO_TANGO). Es la
+     * misma en el vencimiento a considerar, la imputacion y la exclusion.
+     *
+     * @param array $f
+     * @return string 'COD|T|N|Y-m-d'
+     */
+    public static function claveCuota($f) {
+        $vto = isset($f['FECHA_VTO_TANGO']) ? $f['FECHA_VTO_TANGO'] : (isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : '');
+
+        return Planilla::codigo($f['COD_PROVEE'] ?? '') . '|' . Planilla::codigo($f['T_COMP'] ?? '') . '|'
+            . Planilla::codigo($f['N_COMP'] ?? '') . '|' . substr((string) $vto, 0, 10);
     }
 
     /* ====================================================================
@@ -178,6 +207,8 @@ class AlquileresFacturas {
      *                   seguridad no se cumple: se queda donde estuvo siempre
      *   A_EXCLUIDA      es de alquiler y el proveedor esta excluido de
      *                   Alquileres: no entra a ningun lado, a proposito
+     *   A_EXCLUIDA_FACTURA  es de alquiler y ESTA CUOTA se excluyo a mano (no se
+     *                   paga por aca): tampoco entra a ningun lado
      *   A_ALQUILERES    es de alquiler: la gestiona la pestaña Alquileres
      *
      * @param array $item
@@ -191,7 +222,11 @@ class AlquileresFacturas {
             return self::A_PROV_LOCALES;
         }
 
-        return isset($ctx['excluidos'][$cod]) ? self::A_EXCLUIDA : self::A_ALQUILERES;
+        if (isset($ctx['excluidos'][$cod])) {
+            return self::A_EXCLUIDA;
+        }
+
+        return isset($ctx['facturas_excluidas'][self::claveCuota($item)]) ? self::A_EXCLUIDA_FACTURA : self::A_ALQUILERES;
     }
 
     /**
@@ -199,10 +234,11 @@ class AlquileresFacturas {
      *
      * @param array $items
      * @param array $ctx
-     * @return array [A_ALQUILERES => [], A_EXCLUIDA => [], A_PROV_LOCALES => []]
+     * @return array [A_ALQUILERES => [], A_EXCLUIDA => [], A_EXCLUIDA_FACTURA => [], A_PROV_LOCALES => []]
      */
     public static function partir($items, $ctx) {
-        $out = [self::A_ALQUILERES => [], self::A_EXCLUIDA => [], self::A_PROV_LOCALES => []];
+        $out = [self::A_ALQUILERES => [], self::A_EXCLUIDA => [], self::A_EXCLUIDA_FACTURA => [],
+                self::A_PROV_LOCALES => []];
 
         foreach (is_array($items) ? $items : [] as $item) {
             $out[self::destino($item, $ctx)][] = $item;
@@ -353,18 +389,25 @@ class AlquileresFacturas {
 
         $alq = $partes[self::A_ALQUILERES];
         $exc = $partes[self::A_EXCLUIDA];
+        $excF = $partes[self::A_EXCLUIDA_FACTURA] ?? [];
 
-        if (empty($alq) && empty($exc)) {
+        if (empty($alq) && empty($exc) && empty($excF)) {
             return [];
         }
 
-        $texto = (count($alq) + count($exc)) . ' factura(s) de alquiler por ' . $plata($suma($alq) + $suma($exc))
+        $texto = (count($alq) + count($exc) + count($excF)) . ' factura(s) de alquiler por '
+            . $plata($suma($alq) + $suma($exc) + $suma($excF))
             . ' no se muestran acá ni suman en Cuentas a Pagar Locales: son de razones sociales dadas de alta '
             . 'en Parámetros › Alquileres y se gestionan en la pestaña Alquileres.';
 
         if (!empty($exc)) {
             $texto .= ' De esas, ' . count($exc) . ' por ' . $plata($suma($exc)) . ' son de proveedores '
                 . 'excluidos de Alquileres y no suman en ningún lado, a propósito.';
+        }
+
+        if (!empty($excF)) {
+            $texto .= ' ' . count($excF) . ' por ' . $plata($suma($excF)) . ' se excluyeron a mano en Alquileres › '
+                . 'Facturas (no se pagan por ese circuito) y tampoco suman en ningún lado.';
         }
 
         return [Aviso::nuevo(Aviso::INFO, $texto)];

@@ -49,6 +49,7 @@ try {
     require_once __DIR__ . '/../Class/AlquileresImputaciones.php';
     require_once __DIR__ . '/../Class/AlquileresFacturaVto.php';
     require_once __DIR__ . '/../Class/AlquileresTiposRetencion.php';
+    require_once __DIR__ . '/../Class/AlquileresFacturaExclusion.php';
     require_once __DIR__ . '/../Class/AlquileresUniverso.php';
     require_once __DIR__ . '/../Class/Proveedores.php';
 
@@ -171,6 +172,39 @@ try {
                 ? 'Imputación deshecha: sus facturas vuelven a Sin imputar y la proyección que reemplazaba '
                   . 'vuelve. Queda en el historial; para corregirla, armala de nuevo.'
                 : 'Esa imputación ya no estaba vigente.');
+            break;
+
+        /* EXCLUIR LAS FACTURAS QUE NO SE PAGAN POR ACA (pagos de contrato), por
+           cuota o las tildadas, con motivo obligatorio; y volver a incluirlas.
+           Se valida contra lo de AHORA: una imputada no se excluye (primero se
+           deshace) y una excluida no se imputa. */
+        case 'excluirFacturas':
+        case 'incluirFacturas':
+            $data = bodyJson();
+            $h = horizonteAlq();
+            $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
+            $imputadas = [];
+
+            foreach ($e['imputaciones'] as $imp) {
+                foreach ($imp['facturas'] as $fi) {
+                    $imputadas[AlquileresImputacion::claveCuota($fi)] = $imp['id'];
+                }
+            }
+
+            $excl = new AlquileresFacturaExclusion();
+            $accion = ($action === 'excluirFacturas') ? 'EXCLUIR' : 'INCLUIR';
+            $v = AlquileresFacturaExclusion::validar($accion, $data['cuotas'] ?? [], $data['motivo'] ?? null,
+                ['imputables' => $e['pendientes'], 'imputadas' => $imputadas, 'excluidas' => $e['excluidas']]);
+
+            if (!$v['ok']) {
+                throw new InvalidArgumentException(implode(' ', $v['errores']));
+            }
+
+            $n = ($accion === 'EXCLUIR') ? $excl->excluir($v, $usuario) : $excl->incluir($v, $usuario);
+            AlquileresUniverso::olvidar();
+            responder(['n' => $n], ($accion === 'EXCLUIR')
+                ? $n . ' factura(s) excluida(s): no suman en ningún lado. Se ven con «Ver excluidas».'
+                : $n . ' factura(s) incluida(s) de nuevo: vuelven a Sin imputar. La exclusión queda en el historial.');
             break;
 
         /* ================================================================

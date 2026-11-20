@@ -98,6 +98,12 @@ class AlquileresImputacion {
     const SUSPENDIDA = 'SUSPENDIDA';
 
     /**
+     * Excluida a mano en Alquileres -> Facturas: no se paga por este circuito
+     * (un pago de contrato). No suma en ningun lado; se ve con "Ver excluidas".
+     */
+    const EXCLUIDA = 'EXCLUIDA';
+
+    /**
      * Emitida en el mes en curso y ya cancelada en Tango, SIN IMPUTAR. No genera
      * pago (ya salio la plata), pero la proyeccion del mes sigue en el flujo
      * hasta que se impute: imputada y pagada, la reemplaza.
@@ -112,7 +118,8 @@ class AlquileresImputacion {
         self::ANULADA => 'Ya no está en Tango',
         self::SIN_DATO => 'Sin dato de Tango',
         self::SUSPENDIDA => 'Imputación suspendida',
-        self::PAGADA_SIN_IMPUTAR => 'Pagada, sin imputar'
+        self::PAGADA_SIN_IMPUTAR => 'Pagada, sin imputar',
+        self::EXCLUIDA => 'Excluida'
     ];
 
     /** De donde sale el vencimiento a considerar de una cuota (origenVto()) */
@@ -125,17 +132,15 @@ class AlquileresImputacion {
        ==================================================================== */
 
     /**
-     * La clave de una cuota: comprobante + vencimiento de Tango. Acepta una fila
-     * de getPendientes() (FECHA_VTO) o de las tablas (FECHA_VTO_TANGO).
+     * La clave de una cuota: comprobante + vencimiento de Tango. Es
+     * AlquileresFacturas::claveCuota(): una sola definicion para el
+     * vencimiento, la imputacion y la exclusion.
      *
      * @param array $f
      * @return string 'COD|T|N|Y-m-d'
      */
     public static function claveCuota($f) {
-        $vto = isset($f['FECHA_VTO_TANGO']) ? $f['FECHA_VTO_TANGO'] : (isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : '');
-
-        return Planilla::codigo($f['COD_PROVEE'] ?? '') . '|' . Planilla::codigo($f['T_COMP'] ?? '') . '|'
-            . Planilla::codigo($f['N_COMP'] ?? '') . '|' . substr((string) $vto, 0, 10);
+        return AlquileresFacturas::claveCuota($f);
     }
 
     /**
@@ -607,7 +612,9 @@ class AlquileresImputacion {
      *     'habiles' => 'Y-m-d' => bool, 'hoy' => 'Y-m-d',
      *     'pagadas_mes' => las cuotas del mes ya canceladas en Tango (opcional),
      *     'tipos' => ID => nombre de TODOS los tipos de retencion (opcional),
-     *     'nombres_locales' => nro => nombre (opcional)
+     *     'nombres_locales' => nro => nombre (opcional),
+     *     'excluidas_factura' => las cuotas de destino A_EXCLUIDA_FACTURA (opcional),
+     *     'exclusiones' => claveCuota => fila de la exclusion: motivo, quien, cuando (opcional)
      * ]
      * @return array ['pagos', 'reemplazados', 'facturas', 'imputaciones', 'pagadas_nuevas',
      *                'fuera_horizonte', 'kpis', 'avisos']
@@ -842,7 +849,32 @@ class AlquileresImputacion {
                 self::PAGADA_SIN_IMPUTAR, null, null, null), ['fecha_pagada' => $p['FECHA_CANCELADO'] ?? null]);
         }
 
+        /* LAS EXCLUIDAS A MANO: no suman en ningun lado; se ven con "Ver
+           excluidas", con el motivo, quien y cuando. */
+        $excluidas = ['n' => 0, 'importe' => 0.0];
+
+        foreach ($e['excluidas_factura'] ?? [] as $p) {
+            $c = self::claveCuota($p);
+            $x = $e['exclusiones'][$c] ?? null;
+            $importe = !empty($p['PAGADA_TANGO']) ? (float) $p['IMPORTE_VTO'] : (float) $p['IMPORTE_PENDIENTE'];
+            $excluidas['n']++;
+            $excluidas['importe'] += $importe;
+            $filas[] = array_merge(self::filaFactura($p, $e['vtos'], $dias, $e['habiles'], $hoy, self::EXCLUIDA,
+                null, null, null), [
+                    'a_pagar' => 0.0,
+                    'excluida' => ($x === null) ? null : ['motivo' => $x['MOTIVO'], 'usuario' => $x['USUARIO_ALTA'],
+                                                          'fecha' => $x['FECHA_ALTA']],
+                    'fecha_pagada' => $p['FECHA_CANCELADO'] ?? null
+                ]);
+        }
+
         /* 5. LOS AVISOS. */
+        if ($excluidas['n'] > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $excluidas['n'] . ' factura(s) de alquiler por '
+                . self::plata($excluidas['importe']) . ' están excluidas a mano (no se pagan por este circuito): no '
+                . 'suman en ningún lado. Se ven en Alquileres › Facturas con «Ver excluidas».', 'Facturas');
+        }
+
         if ($sinImputar['n'] > 0) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinImputar['n'] . ' factura(s) de alquiler sin imputar por '
                 . self::plata($sinImputar['importe']) . ': no suman hasta que se imputen.', 'Facturas');
@@ -931,7 +963,9 @@ class AlquileresImputacion {
                 'imputadas_a_pagar' => round(array_sum(array_column($imputadas, 'a_pagar')), 2),
                 'pagadas_sin_imputar_n' => $pagadasSin['n'],
                 'pagadas_sin_imputar_importe' => round($pagadasSin['importe'], 2),
-                'reemplazado_a_pagar' => round(array_sum(array_column($reemplazados, 'a_pagar')), 2)
+                'reemplazado_a_pagar' => round(array_sum(array_column($reemplazados, 'a_pagar')), 2),
+                'excluidas_n' => $excluidas['n'],
+                'excluidas_importe' => round($excluidas['importe'], 2)
             ],
             'avisos' => $avisos
         ];

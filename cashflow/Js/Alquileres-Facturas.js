@@ -47,6 +47,14 @@
         return puedeEditar() && !!datos.tablas;
     }
 
+    /** Excluir y volver a incluir piden la tabla del script 61. */
+    function puedeExcluir() {
+        return puedeEditar() && !!datos.tabla_exclusion;
+    }
+
+    /** Las que se pueden excluir: las que no suman ni estan imputadas. */
+    var ESTADOS_EXCLUIBLES = ['SIN_IMPUTAR', 'PAGADA_SIN_IMPUTAR'];
+
     /* ================================================================
        PINTAR
        ================================================================ */
@@ -95,18 +103,24 @@
         texto('alqFactKpiImp', importe(k.imputadas_a_pagar));
         texto('alqFactKpiImpPie', (k.imputadas_n || 0) + ' factura(s) · pendiente − retención');
         texto('alqFactKpiReemp', String(datos.reemplazados || 0));
+        texto('alqFactKpiExcl', importeTexto(k.excluidas_importe || 0));
+        texto('alqFactKpiExclPie', (k.excluidas_n || 0) + ' factura(s) que no se pagan por acá: no suman');
     }
 
     function visibles() {
         var r = document.getElementById('alqFactRazon').value;
         var e = document.getElementById('alqFactEstado').value;
         var pagadas = document.getElementById('alqFactVerPagadas').checked;
+        var excluidas = document.getElementById('alqFactVerExcluidas');
+        var verExcluidas = excluidas ? excluidas.checked : false;
 
         return datos.filas.filter(function(f) {
             if (r && f.cod_provee !== r) { return false; }
             if (e && f.estado !== e) { return false; }
             /* Las pagadas del mes se ven siempre; las anteriores, con "Ver pagadas". */
             if (!pagadas && !f.del_mes && ESTADOS_PAGADAS.indexOf(f.estado) !== -1) { return false; }
+            /* Las excluidas no suman en ningun lado: se ven con "Ver excluidas". */
+            if (!verExcluidas && f.estado === 'EXCLUIDA' && e !== 'EXCLUIDA') { return false; }
 
             return true;
         });
@@ -151,7 +165,7 @@
                 + '<td class="text-end" data-orden="' + (f.retencion || 0) + '"' + tituloRetencion(f) + '>'
                 +   (f.retencion === null ? '<span class="text-muted">—</span>' : importe(f.retencion)) + '</td>'
                 + '<td class="text-end fw-semibold" data-orden="' + f.a_pagar + '">' + importe(f.a_pagar) + '</td>'
-                + '<td>' + chipEstado(f) + '</td>'
+                + '<td>' + chipEstado(f) + accionExclusion(f) + '</td>'
                 + '</tr>';
         }).join(''));
 
@@ -176,6 +190,18 @@
                 if (antes !== razonTildada()) { dibujar(); }
 
                 actualizarBoton();
+            });
+        });
+
+        document.querySelectorAll('#alqFactBody .alq-fact-excluir').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                excluir([cuotaDeFila(btn)]);
+            });
+        });
+
+        document.querySelectorAll('#alqFactBody .alq-fact-incluir').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                incluir([cuotaDeFila(btn)]);
             });
         });
 
@@ -205,10 +231,73 @@
                 : 'ninguna') + ' (total ' + importeTexto(r.total_retenciones) + ')') + '"';
     }
 
+    /** Excluir (una sin imputar) o volver a incluir (una excluida), por fila */
+    function accionExclusion(f) {
+        if (!puedeExcluir()) { return ''; }
+
+        if (ESTADOS_EXCLUIBLES.indexOf(f.estado) !== -1) {
+            return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 alq-fact-excluir" data-exportar-omitir '
+                + 'title="No se paga por este circuito (por ejemplo, un pago de contrato): sale de todos los totales">'
+                + 'Excluir</button>';
+        }
+
+        if (f.estado === 'EXCLUIDA') {
+            return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 alq-fact-incluir" data-exportar-omitir '
+                + 'title="Vuelve a Sin imputar. La exclusión queda en el historial">Volver a incluir</button>';
+        }
+
+        return '';
+    }
+
+    function cuotaDeFila(el) {
+        var f = datos.filas.filter(function(x) { return x.clave === el.closest('tr').getAttribute('data-clave'); })[0];
+
+        return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango,
+                 a_imputar: f.a_imputar };
+    }
+
+    /**
+     * Excluir una o varias cuotas con UN motivo, obligatorio: una factura que
+     * sale del cashflow tiene que decir por qué. El servidor lo vuelve a validar.
+     */
+    function excluir(cuotas) {
+        var total = cuotas.reduce(function(a, c) { return a + (c.a_imputar || 0); }, 0);
+
+        Notificacion.pedirTexto({
+            titulo: 'Excluir factura(s) de alquiler',
+            mensaje: cuotas.length + ' factura(s) por ' + importeTexto(total) + ' dejan de sumar en Alquileres y en el '
+                + 'tablero, y no vuelven a Proveedores Locales.',
+            detalle: 'Es para las que no se pagan por este circuito (por ejemplo, un pago de contrato). Se puede volver '
+                + 'a incluir: queda en el historial.',
+            etiqueta: 'Motivo',
+            maxlargo: 300,
+            invalido: 'El motivo es obligatorio.',
+            confirmar: 'Excluir',
+            peligro: true
+        }).then(function(motivo) {
+            if (motivo === null) { return; }
+
+            seleccion = {};
+            guardar('excluirFacturas', { cuotas: cuotas, motivo: motivo });
+        });
+    }
+
+    function incluir(cuotas) {
+        Notificacion.confirmar({
+            titulo: 'Volver a incluir',
+            mensaje: '¿Vuelve a Sin imputar?',
+            detalle: 'Mientras no se impute no suma. La exclusión queda en el historial.',
+            confirmar: 'Volver a incluir'
+        }).then(function(si) {
+            if (si) { guardar('incluirFacturas', { cuotas: cuotas }); }
+        });
+    }
+
     function chipEstado(f) {
         var cls = { SIN_IMPUTAR: 'bg-danger', IMPUTADA: 'bg-success', PARCIAL: 'bg-warning text-dark',
                     PAGADA: 'bg-secondary', ANULADA: 'bg-warning text-dark', SIN_DATO: 'bg-warning text-dark',
-                    SUSPENDIDA: 'bg-warning text-dark', PAGADA_SIN_IMPUTAR: 'bg-danger' }[f.estado] || 'bg-light text-dark';
+                    SUSPENDIDA: 'bg-warning text-dark', PAGADA_SIN_IMPUTAR: 'bg-danger',
+                    EXCLUIDA: 'bg-dark' }[f.estado] || 'bg-light text-dark';
         var t = datos.estados[f.estado] || f.estado;
         var r = f.imputacion_resumen;
         var tip = f.imputacion ? 'Imputación #' + f.imputacion
@@ -217,6 +306,10 @@
 
         if ((f.estado === 'PAGADA' || f.estado === 'PAGADA_SIN_IMPUTAR') && f.fecha_pagada) {
             tip += '\nPagada en Tango el ' + fecha(f.fecha_pagada);
+        }
+        if (f.estado === 'EXCLUIDA' && f.excluida) {
+            tip += 'No se paga por este circuito: no suma en ningún lado.\nMotivo: ' + f.excluida.motivo + '\n'
+                + Auditoria.texto({ alta: { usuario: f.excluida.usuario, fecha: f.excluida.fecha } });
         }
         if (f.estado === 'PAGADA_SIN_IMPUTAR') {
             tip += '\nNo se paga otra vez, pero la proyección de lo que cubre sigue en el flujo hasta que se impute '
@@ -316,11 +409,20 @@
 
     function actualizarBoton() {
         var b = document.getElementById('btnAlqImputar');
+        var x = document.getElementById('btnAlqExcluir');
 
-        if (!b) { return; }
+        if (b) {
+            b.style.display = puedeImputar() ? '' : 'none';
+            b.disabled = !Object.keys(seleccion).length;
+        }
 
-        b.style.display = puedeImputar() ? '' : 'none';
-        b.disabled = !Object.keys(seleccion).length;
+        /* EXCLUIR LAS TILDADAS: solo si todas son excluibles (sin imputar). */
+        if (x) {
+            var fs = tildadas();
+
+            x.style.display = puedeExcluir() ? '' : 'none';
+            x.disabled = !fs.length || fs.some(function(f) { return ESTADOS_EXCLUIBLES.indexOf(f.estado) === -1; });
+        }
     }
 
     /* ================================================================
@@ -650,7 +752,7 @@
     }
 
     function iniciar() {
-        ['alqFactRazon', 'alqFactEstado', 'alqFactVerPagadas'].forEach(function(id) {
+        ['alqFactRazon', 'alqFactEstado', 'alqFactVerPagadas', 'alqFactVerExcluidas'].forEach(function(id) {
             var el = document.getElementById(id);
 
             if (el) { el.addEventListener('change', function() { if (datos) { dibujar(); } }); }
@@ -658,6 +760,16 @@
 
         var b = document.getElementById('btnAlqImputar');
         if (b) { b.addEventListener('click', abrirImputar); }
+
+        var x = document.getElementById('btnAlqExcluir');
+        if (x) {
+            x.addEventListener('click', function() {
+                excluir(tildadas().map(function(f) {
+                    return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango,
+                             a_imputar: f.a_imputar };
+                }));
+            });
+        }
 
         var r = document.getElementById('btnAlqImpRetencion');
         if (r) { r.addEventListener('click', function() { retenciones.push({ tipo: '', importe: '' }); dibujarRetenciones(); }); }

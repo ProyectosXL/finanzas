@@ -235,7 +235,7 @@
         <!-- Sin el script 60: no se imputa, y se dice cuál falta. -->
         <div id="alqFactSinScript"></div>
         <div data-kpis="kpisAlqFact" class="row g-3 mb-3" id="kpisAlqFact">
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Sin imputar</span>
@@ -245,7 +245,7 @@
                     <div class="kpi-card-footer"><span class="text-muted" id="alqFactKpiSinPie">No suman en ningún lado hasta que se imputen</span></div>
                 </div>
             </div>
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Imputadas, a pagar</span>
@@ -255,7 +255,7 @@
                     <div class="kpi-card-footer"><span class="text-muted" id="alqFactKpiImpPie">Pendiente − retención</span></div>
                 </div>
             </div>
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Proyección reemplazada</span>
@@ -263,6 +263,16 @@
                     </div>
                     <div class="kpi-card-value" id="alqFactKpiReemp">0</div>
                     <div class="kpi-card-footer"><span class="text-muted">Pagos proyectados que pisa una factura</span></div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <div class="kpi-card">
+                    <div class="kpi-card-header">
+                        <span class="kpi-card-title">Excluidas</span>
+                        <div class="kpi-card-icon orange"><i class="fas fa-ban"></i></div>
+                    </div>
+                    <div class="kpi-card-value" id="alqFactKpiExcl">$ 0,00</div>
+                    <div class="kpi-card-footer"><span class="text-muted" id="alqFactKpiExclPie">No se pagan por acá: no suman</span></div>
                 </div>
             </div>
         </div>
@@ -282,9 +292,19 @@
                         <option value="">Todos los estados</option>
                     </select>
                     <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="alqFactVerExcluidas">
+                        <label class="form-check-label small" for="alqFactVerExcluidas" title="Las que no se pagan por este circuito: no suman en ningún lado">Ver excluidas</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="alqFactVerPagadas">
                         <label class="form-check-label small" for="alqFactVerPagadas" title="Las pagadas de este mes se ven siempre">Ver pagadas de meses anteriores</label>
                     </div>
+                    <!-- Excluir las tildadas, con un motivo. El JS lo muestra sólo con
+                         permiso y con el script 61. -->
+                    <button id="btnAlqExcluir" class="btn btn-sm btn-outline-dark" disabled style="display: none;"
+                            title="Las tildadas no se pagan por este circuito (pagos de contrato): salen de todos los totales">
+                        <i class="fas fa-ban me-1"></i> Excluir
+                    </button>
                     <button id="btnAlqImputar" class="btn btn-sm btn-primary" disabled
                             title="Tildá una o varias facturas de una razón social">
                         <i class="fas fa-file-signature me-1"></i> Imputar

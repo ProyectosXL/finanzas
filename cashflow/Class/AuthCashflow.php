@@ -135,7 +135,9 @@ class AuthCashflow {
             'deshacerVtoFactura' => [['alquileres', null]],
             'previsualizarImputacion' => [['alquileres', null]],
             'guardarImputacion' => [['alquileres', null]],
-            'deshacerImputacion' => [['alquileres', null]]
+            'deshacerImputacion' => [['alquileres', null]],
+            'excluirFacturas' => [['alquileres', null]],
+            'incluirFacturas' => [['alquileres', null]]
         ],
         'CashflowEstructura' => [
             'saveEstructura' => [['parametros', 'CASHFLOW']],

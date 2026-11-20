@@ -8,6 +8,7 @@ require_once __DIR__ . '/AlquileresVenta.php';
 require_once __DIR__ . '/AlquileresPago.php';
 require_once __DIR__ . '/AlquileresImputacion.php';
 require_once __DIR__ . '/AlquileresImputaciones.php';
+require_once __DIR__ . '/AlquileresFacturaExclusion.php';
 require_once __DIR__ . '/AlquileresTiposRetencion.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Inflacion.php';
@@ -263,12 +264,14 @@ class Alquileres {
     protected function insumosFacturas($h) {
         $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'dias' => [],
                 'pagadas_mes' => [], 'imputaciones' => [], 'en_tango' => [], 'avisos' => [],
-                'tabla_imputacion' => false, 'tipos' => [], 'tipos_vigentes' => []];
+                'tabla_imputacion' => false, 'tipos' => [], 'tipos_vigentes' => [], 'excluidas_factura' => [],
+                'tabla_exclusion' => false];
 
         try {
             require_once __DIR__ . '/AlquileresUniverso.php';
             require_once __DIR__ . '/Proveedores.php';
             require_once __DIR__ . '/AlquileresImputaciones.php';
+require_once __DIR__ . '/AlquileresFacturaExclusion.php';
             require_once __DIR__ . '/AlquileresFacturaVto.php';
 
             $ctx = AlquileresUniverso::delPedido();
@@ -297,6 +300,10 @@ class Alquileres {
 
             $out['pendientes'] = $partes[AlquileresFacturas::A_ALQUILERES];
             $out['excluidas'] = $partes[AlquileresFacturas::A_EXCLUIDA];
+            /* LAS EXCLUIDAS A MANO (no se pagan por aca): no suman, pero se ven
+               con "Ver excluidas", con su motivo, para poder volver a incluirlas. */
+            $out['excluidas_factura'] = $partes[AlquileresFacturas::A_EXCLUIDA_FACTURA];
+            $out['tabla_exclusion'] = (new AlquileresFacturaExclusion())->tablaCreada();
             $out['vtos'] = (new AlquileresFacturaVto())->vigentes();
             $out['dias'] = $this->diasDeVencimiento();
 
@@ -305,9 +312,13 @@ class Alquileres {
                imputar deja la proyeccion de su mes en el flujo. Si no se pueden
                leer, la grilla sigue con las pendientes y se avisa. */
             try {
-                $out['pagadas_mes'] = AlquileresFacturas::partir($prov->getCanceladasEmitidas(
+                $pm = AlquileresFacturas::partir($prov->getCanceladasEmitidas(
                     array_keys($ctx['razones']), substr($h->hoy(), 0, 8) . '01', date('Y-m-t', strtotime($h->hoy()))),
-                    $ctx)[AlquileresFacturas::A_ALQUILERES];
+                    $ctx);
+                $out['pagadas_mes'] = $pm[AlquileresFacturas::A_ALQUILERES];
+                $out['excluidas_factura'] = array_merge($out['excluidas_factura'], array_map(function ($p) {
+                    return ['IMPORTE_PENDIENTE' => 0.0, 'PAGADA_TANGO' => true] + $p;
+                }, $pm[AlquileresFacturas::A_EXCLUIDA_FACTURA]));
             } catch (Throwable $e) {
                 $out['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer de Tango las facturas de '
                     . 'alquiler ya pagadas este mes (' . $e->getMessage() . '): la grilla muestra sólo las pendientes.',
@@ -392,6 +403,7 @@ class Alquileres {
         }
 
         $out['tipos_vigentes'] = $f['tipos_vigentes'] ?? [];
+        $out['tabla_exclusion'] = $f['tabla_exclusion'] ?? false;
         $out['tabla_imputacion'] = $f['tabla_imputacion'] ?? false;
 
         /* El nombre de la razon social de cada imputacion, para la grilla y el tooltip. */
@@ -413,6 +425,8 @@ class Alquileres {
             'vtos' => $f['vtos'],
             'dias' => $f['dias'] ?? [],
             'pagadas_mes' => $f['pagadas_mes'] ?? [],
+            'excluidas_factura' => $f['excluidas_factura'] ?? [],
+            'exclusiones' => $f['ctx']['facturas_excluidas'] ?? [],
             'imputaciones' => $imputaciones,
             'en_tango' => $f['en_tango'],
             'ctx' => $f['ctx'],
@@ -484,6 +498,7 @@ class Alquileres {
         return ['pendientes' => $pend, 'imputaciones' => $f['imputaciones'], 'pagos' => $proy['pagos'],
                 'locales' => $locales, 'dias' => $f['dias'] ?? [], 'avisos' => $f['avisos'],
                 'tipos' => $f['tipos_vigentes'] ?? [], 'meses' => self::mesesImputables($h),
+                'excluidas' => $f['ctx']['facturas_excluidas'] ?? [],
                 'tabla_imputacion' => $f['tabla_imputacion'] ?? false];
     }
 
@@ -1215,6 +1230,8 @@ class Alquileres {
                 self::mesesImputables($h)),
             'mes_actual' => substr($h->hoy(), 0, 7),
             'tablas' => !empty($c['tabla_imputacion']),
+            'tabla_exclusion' => !empty($c['tabla_exclusion']),
+            'script_exclusion' => AlquileresFacturaExclusion::SCRIPT,
             'script' => AlquileresImputaciones::SCRIPT,
             'reemplazados' => count($c['reemplazados'])
         ];

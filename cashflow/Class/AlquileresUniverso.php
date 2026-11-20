@@ -6,9 +6,9 @@ require_once __DIR__ . '/Aviso.php';
 /**
  * AlquileresUniverso
  * Lee lo que AlquileresFacturas necesita para decidir: las razones sociales
- * dadas de alta, los proveedores excluidos de Alquileres y si se cumple la
- * condicion de seguridad (modulo disponible, fila del tablero activa, tablas
- * del script).
+ * dadas de alta, los proveedores excluidos de Alquileres, las cuotas excluidas
+ * a mano en Alquileres -> Facturas y si se cumple la condicion de seguridad
+ * (modulo disponible, fila del tablero activa, tabla del script 53).
  *
  * NO DECIDE NADA. La regla es AlquileresFacturas, que es pura; esto solo junta
  * los datos, una vez por pedido. Lo comparten Proveedores Locales, Tarjetas, la
@@ -61,7 +61,8 @@ class AlquileresUniverso {
             $this->razones($avisos),
             $this->excluidos($avisos),
             AlquileresFacturas::condicion($this->disponible(), $this->seriesActivas($avisos),
-                                         $this->tablas($avisos))
+                                         $this->tablas($avisos)),
+            $this->facturasExcluidas($avisos)
         ) + ['avisos' => $avisos];
     }
 
@@ -102,6 +103,28 @@ class AlquileresUniverso {
         } catch (Throwable $e) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los proveedores excluidos de '
                 . 'Alquileres (' . $e->getMessage() . '): mientras tanto se toman como incluidos.');
+
+            return [];
+        }
+    }
+
+    /**
+     * Las cuotas excluidas a mano en Alquileres -> Facturas (script 61): no
+     * se pagan por ese circuito. Sin la tabla no hay ninguna, que es lo
+     * cierto. Si no se puede leer, tampoco, y se avisa: tomarlas como no
+     * excluidas las deja en Alquileres sin imputar, donde no suman, asi que
+     * nada se cuenta dos veces.
+     *
+     * @return array claveCuota => fila de la exclusion
+     */
+    protected function facturasExcluidas(&$avisos) {
+        try {
+            require_once __DIR__ . '/AlquileresFacturaExclusion.php';
+
+            return (new AlquileresFacturaExclusion())->vigentes();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer las facturas de alquiler excluidas ('
+                . $e->getMessage() . '): mientras tanto se toman como no excluidas (sin imputar, no suman).');
 
             return [];
         }
