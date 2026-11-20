@@ -22,3 +22,7 @@
 #tablaAlqVentas th.alq-antes { font-style: italic; }
 .alq-origen-REAL_PROYECTADA { background: #e0f5ec; color: #146c43; }
 #tablaAlqVentas td.alq-celda-REAL_PROYECTADA { background: rgba(25, 135, 84, .07); }
+
+/* La linea "Facturas imputadas" al final de cada razon social: lo real. */
+#tablaAlquileres tr.alq-facturas td:first-child { padding-left: 1.25rem; font-style: italic; }
+#tablaAlquileres tr.alq-facturas { background: rgba(0, 0, 0, .03); }

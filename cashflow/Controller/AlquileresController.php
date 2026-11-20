@@ -91,9 +91,7 @@ try {
                 }
             }
 
-            $out = Alquileres::armarPestana($c, $h);
-            $out['facturas']['tablas'] = (new AlquileresImputaciones())->tablaCreada();
-            responder($out);
+            responder(Alquileres::armarPestana($c, $h));
             break;
 
         /* ================================================================
@@ -136,6 +134,9 @@ try {
                 . 'El cambio queda en el historial.' : 'Ya estaba con el vencimiento sin editar.');
             break;
 
+        /* LA PREVISUALIZACION Y EL GUARDADO SON LA MISMA VALIDACION
+           (AlquileresImputacion::validar()), con lo que hay en Tango ahora. Sin
+           el script 60 no se imputa: se dice cual falta. */
         case 'previsualizarImputacion':
             $h = horizonteAlq();
             $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
@@ -146,15 +147,21 @@ try {
             $data = bodyJson();
             $h = horizonteAlq();
             $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
-            $v = AlquileresImputacion::validar($data, $e, true);
+
+            if (empty($e['tabla_imputacion'])) {
+                throw new InvalidArgumentException((new AlquileresImputaciones())->avisoSinTabla());
+            }
+
+            $v = AlquileresImputacion::validar($data, $e);
 
             if (!$v['ok']) {
                 throw new InvalidArgumentException('No se guardó: ' . implode(' ', $v['errores']));
             }
 
             $r = (new AlquileresImputaciones())->guardar($v, $data['observacion'] ?? null, $usuario);
-            responder($r, 'Imputación ' . $r['id'] . ' guardada.' . (empty($r['reemplazadas']) ? ''
-                : ' Reemplaza a la ' . implode(', ', $r['reemplazadas']) . ', que queda en el historial.'));
+            responder($r, 'Imputación #' . $r['id'] . ' guardada: ' . $v['cod_provee'] . ', '
+                . AlquileresImputacion::mesLargo($v['mes']) . ', a pagar $ '
+                . number_format($v['total_a_pagar'], 2, ',', '.') . '.');
             break;
 
         case 'deshacerImputacion':
@@ -162,7 +169,7 @@ try {
             $habia = (new AlquileresImputaciones())->deshacer((int) ($data['id'] ?? 0), $usuario);
             responder(['habia' => $habia], $habia
                 ? 'Imputación deshecha: sus facturas vuelven a Sin imputar y la proyección que reemplazaba '
-                  . 'vuelve. Queda en el historial.'
+                  . 'vuelve. Queda en el historial; para corregirla, armala de nuevo.'
                 : 'Esa imputación ya no estaba vigente.');
             break;
 

@@ -8,29 +8,37 @@ require_once __DIR__ . '/AlquileresImputacion.php';
 
 /**
  * AlquileresImputaciones
- * Lee y escribe las imputaciones de facturas de alquiler
- * (sql/cashflow_alquileres_facturas.sql).
+ * Lee y escribe las imputaciones de facturas de alquiler por razon social
+ * (sql/cashflow_alquileres_imputacion_razon.sql, el script 60).
  *
  * NO DECIDE NADA. Que es valido, que reemplaza y cuanto se paga es
  * AlquileresImputacion, que es pura; guardar() recibe lo que ella ya valido.
  *
- * SIN BAJAS FISICAS. Reimputar da de baja la anterior (VIGENTE = 0,
- * MOTIVO_BAJA, ID_REEMPLAZO) e inserta la nueva en UNA transaccion; deshacer es
- * la misma baja sin una nueva. El indice unico filtrado de IMP_FACTURA frena a
- * dos pantallas imputando la misma cuota a la vez: la segunda falla.
+ * SIN BAJAS FISICAS. Deshacer es VIGENTE = 0 con quien y cuando, en la
+ * cabecera y en sus cuotas; para corregir una imputacion se deshace y se arma
+ * otra. El indice unico filtrado de las cuotas frena a dos pantallas
+ * imputando la misma cuota a la vez: la segunda falla.
+ *
+ * DOS IMPUTACIONES NO PISAN LO MISMO (misma razon, mismo mes, algun local en
+ * comun). Lo valida AlquileresImputacion::validar() con lo que leyo; guardar()
+ * lo vuelve a mirar DENTRO de la transaccion, con las cabeceras de esa razon y
+ * ese mes bloqueadas (UPDLOCK, HOLDLOCK): entre validar e insertar otra
+ * pantalla pudo haber guardado.
  *
  * LAS CONSULTAS SON POR TABLA Y LOS CRUCES EN PHP, como el resto del modulo.
  *
  * SIN EL SCRIPT, vigentes() devuelve vacio -no hay ninguna imputada, que es lo
- * cierto- y lo que falla, con el nombre del script, es guardar.
+ * cierto- y lo que falla, con el nombre del script, es guardar. Las tablas del
+ * modelo de renglones, si siguen ahi, no se leen.
  */
 class AlquileresImputaciones {
 
-    const T_IMP = 'RO_T_CASHFLOW_ALQ_IMPUTACION';
-    const T_FACTURA = 'RO_T_CASHFLOW_ALQ_IMP_FACTURA';
-    const T_RENGLON = 'RO_T_CASHFLOW_ALQ_IMP_RENGLON';
-    const T_CONCEPTO = 'RO_T_CASHFLOW_ALQ_IMP_RENGLON_CONCEPTO';
-    const T_LOCAL = 'RO_T_CASHFLOW_ALQ_IMP_RENGLON_LOCAL';
+    const SCRIPT = 'sql/cashflow_alquileres_imputacion_razon.sql';
+
+    const T_IMP = 'RO_T_CASHFLOW_ALQ_IMPUTACION_RS';
+    const T_CUOTA = 'RO_T_CASHFLOW_ALQ_IMPRS_CUOTA';
+    const T_LOCAL = 'RO_T_CASHFLOW_ALQ_IMPRS_LOCAL';
+    const T_RETENCION = 'RO_T_CASHFLOW_ALQ_IMPRS_RETENCION';
 
     const LARGO_OBSERVACION = 300;
 
@@ -48,15 +56,17 @@ class AlquileresImputaciones {
         $this->conn = new Conexion;
     }
 
-    /** @return bool Si ya se corrio el script (la cabecera es la que manda: AlquileresFacturas::TABLA_IMPUTACION) */
+    /** @return bool Si ya se corrio el script 60 (mira las cuatro tablas de la imputacion) */
     public function tablaCreada() {
         if ($this->tabla !== null) {
             return $this->tabla;
         }
 
         try {
-            $row = $this->fila("SELECT OBJECT_ID('dbo." . self::T_IMP . "', 'U') AS T", [], 'Error al verificar las tablas');
-            $this->tabla = ($row && $row['T'] !== null);
+            $row = $this->fila("SELECT OBJECT_ID('dbo." . self::T_IMP . "', 'U') AS A, OBJECT_ID('dbo." . self::T_CUOTA
+                . "', 'U') AS B, OBJECT_ID('dbo." . self::T_LOCAL . "', 'U') AS C, OBJECT_ID('dbo." . self::T_RETENCION
+                . "', 'U') AS D", [], 'Error al verificar las tablas');
+            $this->tabla = ($row && $row['A'] !== null && $row['B'] !== null && $row['C'] !== null && $row['D'] !== null);
         } catch (Throwable $e) {
             $this->tabla = false;
         }
@@ -66,16 +76,18 @@ class AlquileresImputaciones {
 
     public function avisoSinTabla() {
         return $this->tablaCreada() ? '' : 'Todavía no se pueden imputar facturas de alquiler: falta correr '
-            . AlquileresFacturas::SCRIPT . ' contra la base central.';
+            . self::SCRIPT . ' contra la base central. Mientras tanto las facturas se ven pero no suman, y la '
+            . 'proyección no se reemplaza con nada.';
     }
 
     /**
      * Las imputaciones vigentes, armadas.
      *
-     * @return array Lista de ['id', 'usuario', 'fecha', 'observacion',
+     * @return array Lista de ['id', 'cod_provee', 'mes', 'todos', 'locales' => [nro], 'observacion',
+     *               'total_facturas', 'total_retenciones', 'usuario', 'fecha',
      *               'facturas' => [['ID', 'COD_PROVEE', 'T_COMP', 'N_COMP', 'FECHA_VTO_TANGO', 'PENDIENTE',
-     *                               'NETO_GRAVADO', 'RETENCION', 'RETENCION_SUGERIDA', 'ESTADO', 'FECHA_PAGADA']],
-     *               'renglones' => [['orden', 'mes', 'importe', 'todos_de', 'conceptos' => [], 'locales' => []]]]
+     *                               'RETENCION', 'PAGADA_AL_IMPUTAR', 'ESTADO', 'FECHA_PAGADA']],
+     *               'retenciones' => [['tipo', 'importe']]]
      */
     public function vigentes() {
         if (!$this->tablaCreada()) {
@@ -84,20 +96,30 @@ class AlquileresImputaciones {
 
         $imps = [];
 
-        foreach ($this->filas("SELECT ID, OBSERVACION, USUARIO_ALTA, FECHA_ALTA FROM dbo." . self::T_IMP
-                              . " WHERE VIGENTE = 1 ORDER BY ID", [], 'Error al leer las imputaciones') as $r) {
-            $imps[(int) $r['ID']] = ['id' => (int) $r['ID'], 'usuario' => $r['USUARIO_ALTA'],
-                                     'fecha' => self::momento($r['FECHA_ALTA']), 'observacion' => $r['OBSERVACION'],
-                                     'facturas' => [], 'renglones' => []];
+        foreach ($this->filas("SELECT ID, COD_PROVEE, MES_CUBRE, TODOS_LOCALES, OBSERVACION, TOTAL_FACTURAS,
+                                      TOTAL_RETENCIONES, USUARIO_ALTA, FECHA_ALTA
+                               FROM dbo." . self::T_IMP . " WHERE VIGENTE = 1 ORDER BY ID", [],
+                              'Error al leer las imputaciones') as $r) {
+            $imps[(int) $r['ID']] = [
+                'id' => (int) $r['ID'], 'cod_provee' => Planilla::codigo($r['COD_PROVEE']),
+                'mes' => trim((string) $r['MES_CUBRE']), 'todos' => ((int) $r['TODOS_LOCALES']) === 1,
+                'locales' => [], 'observacion' => $r['OBSERVACION'],
+                'total_facturas' => (float) $r['TOTAL_FACTURAS'], 'total_retenciones' => (float) $r['TOTAL_RETENCIONES'],
+                'usuario' => $r['USUARIO_ALTA'], 'fecha' => self::momento($r['FECHA_ALTA']),
+                'facturas' => [], 'retenciones' => []
+            ];
         }
 
         if (empty($imps)) {
             return [];
         }
 
+        $ids = array_keys($imps);
+        $marcas = implode(',', array_fill(0, count($ids), '?'));
+
         foreach ($this->filas("SELECT ID, ID_IMPUTACION, COD_PROVEE, T_COMP, N_COMP, FECHA_VTO_TANGO, PENDIENTE,
-                                      NETO_GRAVADO, RETENCION, RETENCION_SUGERIDA, ESTADO, FECHA_PAGADA
-                               FROM dbo." . self::T_FACTURA . " WHERE VIGENTE = 1", [],
+                                      RETENCION, PAGADA_AL_IMPUTAR, ESTADO, FECHA_PAGADA
+                               FROM dbo." . self::T_CUOTA . " WHERE VIGENTE = 1 ORDER BY ID", [],
                               'Error al leer las facturas imputadas') as $r) {
             $id = (int) $r['ID_IMPUTACION'];
 
@@ -109,51 +131,25 @@ class AlquileresImputaciones {
                     'N_COMP' => Planilla::codigo($r['N_COMP']),
                     'FECHA_VTO_TANGO' => self::dia($r['FECHA_VTO_TANGO']),
                     'PENDIENTE' => (float) $r['PENDIENTE'],
-                    'NETO_GRAVADO' => ($r['NETO_GRAVADO'] === null) ? null : (float) $r['NETO_GRAVADO'],
                     'RETENCION' => (float) $r['RETENCION'],
-                    'RETENCION_SUGERIDA' => ($r['RETENCION_SUGERIDA'] === null) ? null : (float) $r['RETENCION_SUGERIDA'],
+                    'PAGADA_AL_IMPUTAR' => ((int) $r['PAGADA_AL_IMPUTAR']) === 1,
                     'ESTADO' => trim((string) $r['ESTADO']),
                     'FECHA_PAGADA' => self::dia($r['FECHA_PAGADA'])
                 ];
             }
         }
 
-        $ids = array_keys($imps);
-        $marcas = implode(',', array_fill(0, count($ids), '?'));
-        $renglones = [];
-
-        foreach ($this->filas("SELECT ID, ID_IMPUTACION, ORDEN, MES_CUBRE, IMPORTE, TODOS_DE_RAZON FROM dbo."
-                              . self::T_RENGLON . " WHERE ID_IMPUTACION IN ($marcas) ORDER BY ID_IMPUTACION, ORDEN",
-                              $ids, 'Error al leer los renglones') as $r) {
-            $renglones[(int) $r['ID']] = ['id_imputacion' => (int) $r['ID_IMPUTACION'], 'orden' => (int) $r['ORDEN'],
-                                          'mes' => trim((string) $r['MES_CUBRE']), 'importe' => (float) $r['IMPORTE'],
-                                          'todos_de' => ($r['TODOS_DE_RAZON'] === null) ? null
-                                              : Planilla::codigo($r['TODOS_DE_RAZON']),
-                                          'conceptos' => [], 'locales' => []];
+        foreach ($this->filas("SELECT ID_IMPUTACION, NRO_LOCAL FROM dbo." . self::T_LOCAL
+                              . " WHERE ID_IMPUTACION IN ($marcas) ORDER BY NRO_LOCAL", $ids,
+                              'Error al leer los locales de las imputaciones') as $r) {
+            $imps[(int) $r['ID_IMPUTACION']]['locales'][] = (int) $r['NRO_LOCAL'];
         }
 
-        if (!empty($renglones)) {
-            $idsR = array_keys($renglones);
-            $marcasR = implode(',', array_fill(0, count($idsR), '?'));
-
-            foreach ($this->filas("SELECT ID_RENGLON, CONCEPTO FROM dbo." . self::T_CONCEPTO
-                                  . " WHERE ID_RENGLON IN ($marcasR)", $idsR, 'Error al leer los conceptos') as $r) {
-                $renglones[(int) $r['ID_RENGLON']]['conceptos'][] = trim((string) $r['CONCEPTO']);
-            }
-
-            foreach ($this->filas("SELECT ID_RENGLON, NRO_LOCAL FROM dbo." . self::T_LOCAL
-                                  . " WHERE ID_RENGLON IN ($marcasR)", $idsR, 'Error al leer los locales') as $r) {
-                $renglones[(int) $r['ID_RENGLON']]['locales'][] = (int) $r['NRO_LOCAL'];
-            }
-        }
-
-        foreach ($renglones as $r) {
-            $id = $r['id_imputacion'];
-            unset($r['id_imputacion']);
-            $orden = array_values(array_intersect(AlquileresImputacion::CONCEPTOS, $r['conceptos']));
-            $r['conceptos'] = $orden;
-            sort($r['locales']);
-            $imps[$id]['renglones'][] = $r;
+        foreach ($this->filas("SELECT ID_IMPUTACION, ID_TIPO, IMPORTE FROM dbo." . self::T_RETENCION
+                              . " WHERE ID_IMPUTACION IN ($marcas)", $ids,
+                              'Error al leer las retenciones de las imputaciones') as $r) {
+            $imps[(int) $r['ID_IMPUTACION']]['retenciones'][] = ['tipo' => (int) $r['ID_TIPO'],
+                                                                 'importe' => (float) $r['IMPORTE']];
         }
 
         return array_values($imps);
@@ -161,18 +157,18 @@ class AlquileresImputaciones {
 
     /**
      * Guarda una imputacion ya validada (AlquileresImputacion::validar() con los
-     * pendientes de AHORA), y da de baja las que reemplaza. Una transaccion.
+     * pendientes de AHORA). Una transaccion.
      *
      * @param array $v Lo de validar(), con 'ok' = true
      * @param string|null $observacion
      * @param string $usuario
-     * @return array ['id', 'reemplazadas' => [id]]
+     * @return array ['id']
      */
     public function guardar($v, $observacion, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
 
         if (!$this->tablaCreada()) {
-            throw new Exception($this->avisoSinTabla());
+            throw new InvalidArgumentException($this->avisoSinTabla());
         }
 
         if (empty($v['ok'])) {
@@ -184,54 +180,63 @@ class AlquileresImputaciones {
         $id = null;
 
         $this->transaccion(function () use ($v, $obs, $usuario, &$id) {
-            $row = $this->fila("INSERT INTO dbo." . self::T_IMP . " (OBSERVACION, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
-                                OUTPUT INSERTED.ID VALUES (?, 1, ?, ?)", [$obs, $usuario, $usuario],
-                               'Error al guardar la imputación');
-            $id = (int) $row['ID'];
+            /* LA SUPERPOSICION, OTRA VEZ, CON LAS CABECERAS BLOQUEADAS: otra
+               pantalla pudo guardar entre la validacion y este momento. */
+            $ids = array_map('intval', array_column($this->filas("SELECT ID FROM dbo." . self::T_IMP
+                . " WITH (UPDLOCK, HOLDLOCK) WHERE VIGENTE = 1 AND COD_PROVEE = ? AND MES_CUBRE = ?",
+                [$v['cod_provee'], $v['mes']], 'Error al verificar las imputaciones del mes'), 'ID'));
 
-            foreach ($v['reemplaza'] as $viejo) {
-                $this->darDeBaja((int) $viejo, 'Reemplazada por la imputación ' . $id, $id, $usuario);
+            if (!empty($ids)) {
+                $marcas = implode(',', array_fill(0, count($ids), '?'));
+
+                foreach ($this->filas("SELECT ID_IMPUTACION, NRO_LOCAL FROM dbo." . self::T_LOCAL
+                                      . " WHERE ID_IMPUTACION IN ($marcas)", $ids,
+                                      'Error al verificar los locales del mes') as $o) {
+                    if (in_array((int) $o['NRO_LOCAL'], array_map('intval', $v['locales']), true)) {
+                        throw new InvalidArgumentException('Mientras armabas esta, otra pantalla imputó '
+                            . $v['cod_provee'] . ' en ' . $v['mes'] . ' a un local en común (imputación #'
+                            . $o['ID_IMPUTACION'] . '). Volvé a cargar la pestaña. No se guardó nada.');
+                    }
+                }
             }
+
+            $row = $this->fila("INSERT INTO dbo." . self::T_IMP . "
+                    (COD_PROVEE, MES_CUBRE, TODOS_LOCALES, OBSERVACION, TOTAL_FACTURAS, TOTAL_RETENCIONES, VIGENTE,
+                     USUARIO_ALTA, USUARIO_MODIF)
+                 OUTPUT INSERTED.ID VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                [$v['cod_provee'], $v['mes'], $v['todos'] ? 1 : 0, $obs, $v['total_facturas'], $v['total_retenciones'],
+                 $usuario, $usuario], 'Error al guardar la imputación');
+            $id = (int) $row['ID'];
 
             foreach ($v['facturas'] as $f) {
                 $p = $f['fila'];
-                $this->ejecutar("INSERT INTO dbo." . self::T_FACTURA . "
-                        (ID_IMPUTACION, COD_PROVEE, T_COMP, N_COMP, FECHA_VTO_TANGO, PENDIENTE, NETO_GRAVADO,
-                         RETENCION, RETENCION_SUGERIDA, VIGENTE, ESTADO, USUARIO_ALTA, USUARIO_MODIF)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'PENDIENTE', ?, ?)",
+                $this->ejecutar("INSERT INTO dbo." . self::T_CUOTA . "
+                        (ID_IMPUTACION, COD_PROVEE, T_COMP, N_COMP, FECHA_VTO_TANGO, PENDIENTE, RETENCION,
+                         PAGADA_AL_IMPUTAR, VIGENTE, ESTADO, USUARIO_ALTA, USUARIO_MODIF)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'PENDIENTE', ?, ?)",
                     [$id, Planilla::codigo($p['COD_PROVEE']), Planilla::codigo($p['T_COMP']),
                      Planilla::codigo($p['N_COMP']), substr((string) $p['FECHA_VTO'], 0, 10), $f['pendiente'],
-                     $f['neto_usado'], ($f['retencion'] === null) ? 0.0 : $f['retencion'],
-                     $f['retencion_sugerida'], $usuario, $usuario],
+                     $f['retencion'], $f['pagada'] ? 1 : 0, $usuario, $usuario],
                     'Error al guardar una factura de la imputación');
             }
 
-            foreach ($v['renglones'] as $r) {
-                $ren = $this->fila("INSERT INTO dbo." . self::T_RENGLON . "
-                        (ID_IMPUTACION, ORDEN, MES_CUBRE, IMPORTE, TODOS_DE_RAZON, USUARIO_ALTA)
-                     OUTPUT INSERTED.ID VALUES (?, ?, ?, ?, ?, ?)",
-                    [$id, $r['orden'], $r['mes'], $r['importe'], $r['todos_de'], $usuario],
-                    'Error al guardar un renglón');
-                $idR = (int) $ren['ID'];
+            foreach ($v['locales'] as $nro) {
+                $this->ejecutar("INSERT INTO dbo." . self::T_LOCAL . " (ID_IMPUTACION, NRO_LOCAL) VALUES (?, ?)",
+                    [$id, (int) $nro], 'Error al guardar un local de la imputación');
+            }
 
-                foreach ($r['conceptos'] as $c) {
-                    $this->ejecutar("INSERT INTO dbo." . self::T_CONCEPTO . " (ID_RENGLON, CONCEPTO) VALUES (?, ?)",
-                        [$idR, $c], 'Error al guardar un concepto');
-                }
-
-                foreach ($r['locales'] as $nro) {
-                    $this->ejecutar("INSERT INTO dbo." . self::T_LOCAL . " (ID_RENGLON, NRO_LOCAL) VALUES (?, ?)",
-                        [$idR, $nro], 'Error al guardar un local');
-                }
+            foreach ($v['retenciones'] as $r) {
+                $this->ejecutar("INSERT INTO dbo." . self::T_RETENCION . " (ID_IMPUTACION, ID_TIPO, IMPORTE) VALUES (?, ?, ?)",
+                    [$id, $r['tipo'], $r['importe']], 'Error al guardar una retención');
             }
         });
 
-        return ['id' => $id, 'reemplazadas' => array_values($v['reemplaza'])];
+        return ['id' => $id];
     }
 
     /**
-     * Deshace una imputacion: baja logica. Sus cuotas vuelven a Sin imputar y la
-     * proyeccion que reemplazaba reaparece.
+     * Deshace una imputacion: baja logica de la cabecera y de sus cuotas. Las
+     * cuotas vuelven a Sin imputar y la proyeccion que reemplazaba reaparece.
      *
      * @return bool Si estaba vigente
      */
@@ -239,13 +244,20 @@ class AlquileresImputaciones {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
 
         if (!$this->tablaCreada()) {
-            throw new Exception($this->avisoSinTabla());
+            throw new InvalidArgumentException($this->avisoSinTabla());
         }
 
         $habia = false;
 
         $this->transaccion(function () use ($id, $usuario, &$habia) {
-            $habia = $this->darDeBaja((int) $id, 'Deshecha', null, $usuario) > 0;
+            $habia = $this->ejecutar("UPDATE dbo." . self::T_IMP . "
+                 SET VIGENTE = 0, MOTIVO_BAJA = 'Deshecha', " . Auditoria::SET_BAJA . "
+                 WHERE ID = ? AND VIGENTE = 1",
+                [$usuario, $usuario, (int) $id], 'Error al deshacer la imputación') > 0;
+
+            $this->ejecutar("UPDATE dbo." . self::T_CUOTA . " SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+                 WHERE ID_IMPUTACION = ? AND VIGENTE = 1",
+                [$usuario, $usuario, (int) $id], 'Error al deshacer las facturas de la imputación');
         });
 
         return $habia;
@@ -268,7 +280,7 @@ class AlquileresImputaciones {
         $n = 0;
 
         foreach ($lista as $p) {
-            $n += $this->ejecutar("UPDATE dbo." . self::T_FACTURA . "
+            $n += $this->ejecutar("UPDATE dbo." . self::T_CUOTA . "
                  SET ESTADO = 'PAGADA', FECHA_PAGADA = ?, FECHA_DETECTADA = GETDATE(), " . Auditoria::SET_MODIF . "
                  WHERE ID = ? AND VIGENTE = 1 AND ESTADO <> 'PAGADA'",
                 [$p['fecha'], $usuario, (int) $p['id']], 'Error al marcar una factura pagada');
@@ -280,20 +292,6 @@ class AlquileresImputaciones {
     /** El usuario con el que el sistema marca las pagadas */
     public static function usuarioSistema() {
         return AuthCashflow::origen('AlquileresImputaciones.marcarPagadas');
-    }
-
-    /** Baja de la cabecera y de sus cuotas. @return int filas de cabecera */
-    private function darDeBaja($id, $motivo, $reemplazo, $usuario) {
-        $n = $this->ejecutar("UPDATE dbo." . self::T_IMP . "
-             SET VIGENTE = 0, MOTIVO_BAJA = ?, ID_REEMPLAZO = ?, " . Auditoria::SET_BAJA . "
-             WHERE ID = ? AND VIGENTE = 1",
-            [$motivo, $reemplazo, $usuario, $usuario, $id], 'Error al dar de baja la imputación');
-
-        $this->ejecutar("UPDATE dbo." . self::T_FACTURA . " SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
-             WHERE ID_IMPUTACION = ? AND VIGENTE = 1",
-            [$usuario, $usuario, $id], 'Error al dar de baja las facturas de la imputación');
-
-        return $n;
     }
 
     /* ====================================================================
@@ -388,7 +386,7 @@ class AlquileresImputaciones {
 
         foreach (sqlsrv_errors() ?: [] as $e) {
             /* El indice unico: otra pantalla imputo la misma cuota. */
-            if (strpos($e['message'], 'UX_RO_T_CF_ALQIMPF_VIGENTE') !== false) {
+            if (strpos($e['message'], 'UX_RO_T_CF_ALQIRC_VIGENTE') !== false) {
                 return 'Alguna de esas facturas ya se imputó desde otra pantalla mientras armabas esta. '
                     . 'Volvé a cargar la pestaña. No se guardó nada.';
             }

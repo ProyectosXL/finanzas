@@ -159,7 +159,61 @@
 
         locales.forEach(function(l) { h += filasLocal(l, meses, clave); });
 
+        /* AL FINAL, LAS FACTURAS IMPUTADAS de la razón social: el total a
+           pagar por mes de pago. No se reparten entre locales. */
+        if (r.facturas) {
+            h += '<tr class="alq-facturas" data-orden-sigue data-ancestros="' + clave + '">'
+                + '<td><i class="fas fa-file-invoice me-1"></i>Facturas imputadas</td><td></td>'
+                + meses.map(function(m) {
+                    var c = r.facturas.meses[m.clave];
+
+                    if (!c) { return '<td class="text-end text-muted">—</td>'; }
+
+                    return '<td class="text-end" data-orden="' + c.a_pagar + '" title="'
+                        + esc(tooltipFacturas(c, r.facturas.imputaciones)) + '">' + importe(c.a_pagar) + '</td>';
+                }).join('')
+                + '<td class="text-end fw-bold" title="' + esc(tooltipImputaciones(r.facturas.imputaciones)) + '">'
+                + importe(r.facturas.total.a_pagar) + '</td></tr>';
+        }
+
         return h;
+    }
+
+    /**
+     * Las facturas de una celda de "Facturas imputadas": cada una con su
+     * pendiente, vencimiento a considerar y fecha de pago; y de cada
+     * imputación, las retenciones por tipo, el total a pagar, el mes y los
+     * locales que cubre, quién la cargó y cuándo.
+     */
+    function tooltipFacturas(c, imputaciones) {
+        var ids = {};
+        var t = 'A pagar ' + importeTexto(c.a_pagar) + ' (facturas ' + importeTexto(c.neto) + ' − retenciones '
+            + importeTexto(c.retencion) + ')';
+
+        (c.pagos || []).forEach(function(p) {
+            var d = p.detalle || {};
+
+            ids[d.imputacion] = true;
+            t += '\n\n' + d.factura + ': pendiente ' + importeTexto(p.neto) + ', su parte de retenciones '
+                + importeTexto(p.retencion) + '\nVence (a considerar) ' + fecha(p.vencimiento) + ' · se paga el '
+                + fecha(p.fecha) + (p.nota_dia ? ' — ' + p.nota_dia : '');
+        });
+
+        return t + '\n\n' + tooltipImputaciones(imputaciones.filter(function(i) { return ids[i.id]; }));
+    }
+
+    function tooltipImputaciones(imputaciones) {
+        return (imputaciones || []).map(function(i) {
+            return 'Imputación #' + i.id + ' · cubre ' + rotuloMes(i.mes)
+                + (i.fuera_horizonte ? ', fuera del horizonte' : '')
+                + '\nLocales: ' + (i.todos ? 'todos (' : '') + i.locales.map(function(l) { return l.nombre; }).join(', ')
+                + (i.todos ? ')' : '')
+                + '\nFacturas ' + importeTexto(i.total_facturas) + ' · retenciones '
+                + (i.retenciones.length ? i.retenciones.map(function(x) { return x.nombre + ' ' + importeTexto(x.importe); }).join(', ')
+                    : 'ninguna')
+                + ' · a pagar ' + importeTexto(i.total_a_pagar)
+                + '\n' + Auditoria.texto({ alta: { usuario: i.usuario, fecha: i.fecha } });
+        }).join('\n\n');
     }
 
     function filasLocal(l, meses, padre) {
@@ -216,17 +270,6 @@
 
             t += '\n\nPago: ' + fecha(p.fecha) + (p.nota_dia ? ' — ' + p.nota_dia : '')
                 + '\nOrigen: ' + (datos.origenes[p.origen] || p.origen);
-
-            /* UNA FACTURA IMPUTADA: cual, que renglon, y que parte le toca a
-               este local. El importe es el de la factura, con IVA. */
-            if (p.origen === 'FACTURA') {
-                t += '\nFactura ' + d.factura + ' de ' + (d.razon || d.cod_provee)
-                    + '\nImputación ' + d.imputacion + ', renglón ' + d.renglon + ' · cubre ' + rotuloMes(d.mes_cubre)
-                    + '\nImporte con IVA y percepciones (la factura no se abre en impuestos)'
-                    + '\nParte de este local: ' + numero(d.peso * 100, 1) + ' % '
-                    + (d.reparto === 'IGUAL' ? '(partes iguales: no había nada proyectado)'
-                        : '(en proporción a lo proyectado)');
-            }
 
             if (grupo === 'VARIABLES' && d.venta !== undefined) {
                 t += '\nVenta del mes ' + rotuloMes(p.mes_concepto) + ': ' + importeTexto(d.venta)
@@ -296,7 +339,10 @@
     function pintarPie(razones, meses) {
         var valores = meses.map(function(m) {
             return razones.reduce(function(s, x) {
-                return s + x.locales.reduce(function(t, l) { return t + ((l.meses[m.clave] || {}).a_pagar || 0); }, 0);
+                var facturas = x.r.facturas ? ((x.r.facturas.meses[m.clave] || {}).a_pagar || 0) : 0;
+
+                return s + facturas
+                    + x.locales.reduce(function(t, l) { return t + ((l.meses[m.clave] || {}).a_pagar || 0); }, 0);
             }, 0);
         });
         var total = valores.reduce(function(s, v) { return s + v; }, 0);

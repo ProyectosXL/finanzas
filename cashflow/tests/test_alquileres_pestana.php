@@ -296,10 +296,10 @@ $hDias = new Horizonte(28, 4, [], new DateTime('2026-11-10'));
 $alqDias = new PestAlquileresConInsumos('2026-11-10', new PestAppDoble(), new PestParDoble());
 
 /* Con UNA FACTURA IMPUTADA: tiene que haber de las dos partes. Se arma sobre
-   la proyeccion real de los dobles: el primer pago de noviembre del primer
-   local, reemplazado por una factura que vence el 20/11. */
+   la proyeccion real de los dobles: noviembre de Cencosud en el local de su
+   primer pago, reemplazado por una factura que vence el 20/11. */
 $proySola = $alqDias->calcular($hDias, $ins)['pagos'];
-$blanco = array_values(array_filter($proySola, function ($p) { return $p['mes_pago'] === '2026-11'; }))[0];
+$blanco = array_values(array_filter($proySola, function ($p) { return $p['mes_pago'] === '2026-11' && $p['cod_provee'] === 'SAUNIC'; }))[0];
 $facturaT = ['COD_PROVEE' => 'SAUNIC', 'RAZON_SOC' => 'CENCOSUD', 'T_COMP' => 'FAC', 'N_COMP' => 'A0193000155679',
              'FECHA_VTO' => '2026-11-20', 'FECHA_EMIS' => '2026-11-02', 'IMPORTE_VTO' => 1000.0,
              'IMPORTE_PENDIENTE' => 1000.0, 'NETO_GRAVADO_COMP' => null, 'IMPORTE_COMP' => 1000.0, 'LEYENDA' => ''];
@@ -308,12 +308,16 @@ $sinImputarT['N_COMP'] = 'A0193000155680';
 $insF = $ins + ['facturas' => [
     'ctx' => AlquileresFacturas::contexto(['SAUNIC'], [], AlquileresFacturas::condicion(true, ['REAL'], true)),
     'pendientes' => [$facturaT, $sinImputarT], 'excluidas' => [], 'vtos' => [], 'en_tango' => [], 'avisos' => [],
-    'imputaciones' => [['id' => 1, 'usuario' => 'ANA', 'fecha' => '2026-11-09 10:00', 'observacion' => null,
+    /* La imputacion de Cencosud en noviembre, en el local del primer pago: pisa
+       todo lo de Cencosud ahi ese mes. */
+    'imputaciones' => [['id' => 1, 'cod_provee' => 'SAUNIC', 'mes' => '2026-11', 'todos' => false,
+        'locales' => [$blanco['nro']], 'usuario' => 'ANA', 'fecha' => '2026-11-09 10:00', 'observacion' => null,
+        'total_facturas' => 1000.0, 'total_retenciones' => 20.0,
         'facturas' => [['ID' => 1, 'COD_PROVEE' => 'SAUNIC', 'T_COMP' => 'FAC', 'N_COMP' => 'A0193000155679',
-            'FECHA_VTO_TANGO' => '2026-11-20', 'PENDIENTE' => 1000.0, 'NETO_GRAVADO' => null, 'RETENCION' => 20.0,
-            'RETENCION_SUGERIDA' => null, 'ESTADO' => 'PENDIENTE', 'FECHA_PAGADA' => null]],
-        'renglones' => [['orden' => 1, 'mes' => '2026-11', 'importe' => 1000.0, 'todos_de' => null,
-            'conceptos' => [(string) $blanco['concepto']], 'locales' => [$blanco['nro']]]]]]
+            'FECHA_VTO_TANGO' => '2026-11-20', 'PENDIENTE' => 1000.0, 'RETENCION' => 20.0, 'PAGADA_AL_IMPUTAR' => false,
+            'ESTADO' => 'PENDIENTE', 'FECHA_PAGADA' => null]],
+        'retenciones' => [['tipo' => 1, 'importe' => 20.0]]]],
+    'tipos' => [1 => 'Ganancias'], 'tabla_imputacion' => true
 ]];
 $alqDias->ins = $insF;
 $prov = new PestProveedor('ALQUILERES');
@@ -346,6 +350,28 @@ chequear('y en total, lo mismo que la pestaña', $pestDias['kpis']['total_horizo
     round($totalSerie($series['REAL']) + $totalSerie($series['PROYECTADO']), 2));
 chequear('la pestaña dice cuanto sin imputar', [1, 1000.0],
     [$pestDias['facturas']['kpis']['sin_imputar_n'], $pestDias['facturas']['kpis']['sin_imputar_importe']]);
+
+$cenc = array_column($pestDias['razones'], null, 'cod')['SAUNIC'];
+chequear('la factura va en "Facturas imputadas", al final de Cencosud, no en un local', [980.0, 1],
+    [$cenc['facturas']['meses']['2026-11']['a_pagar'], count($cenc['facturas']['imputaciones'])]);
+chequear('ese mes el local queda sin proyeccion de Cencosud', false,
+    isset(array_column($cenc['locales'], null, 'nro')[$blanco['nro']]['meses']['2026-11']));
+chequear('con la factura, las razones siguen sumando el total de la pestaña', $pestDias['kpis']['total_horizonte'],
+    round(array_sum(array_map(function ($r) { return $r['total']['a_pagar']; }, $pestDias['razones'])), 2));
+
+/* SIN IMPUTACIONES (sin el script 60): la pestaña y el tablero siguen
+   sumando lo mismo, todo proyectado. */
+$insSin = $insF;
+$insSin['facturas']['imputaciones'] = [];
+$insSin['facturas']['tabla_imputacion'] = false;
+$alqDias->ins = $insSin;
+$provSin = new PestProveedor('ALQUILERES');
+$provSin->alq = $alqDias;
+$seriesSin = $provSin->series($hDias);
+$pestSin = Alquileres::armarPestana($alqDias->calcular($hDias, $insSin), $hDias);
+chequear('sin imputaciones: REAL vacio y PAGOS = la pestaña', [0.0, $pestSin['kpis']['total_horizonte']],
+    [$totalSerie($seriesSin['REAL']), $totalSerie($seriesSin['PAGOS'])]);
+chequear('sin el script 60 la sub-pestaña no deja imputar', false, $pestSin['facturas']['tablas']);
 
 $movidos = array_filter($cF['pagos'], function ($x) { return $x['nota_dia'] !== ''; });
 chequear('un pago corrido de dia anota su celda con detalle', true,

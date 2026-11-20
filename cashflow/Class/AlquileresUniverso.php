@@ -154,11 +154,11 @@ class AlquileresUniverso {
         }
     }
 
-    /** @return bool Si existen las tablas de sql/cashflow_alquileres_facturas.sql */
+    /** @return bool Si existe la tabla de sql/cashflow_alquileres_facturas.sql que mira la condicion (TABLA_CONDICION) */
     protected function tablas(&$avisos) {
         try {
             $stmt = sqlsrv_query($this->conectar(),
-                "SELECT OBJECT_ID('dbo." . AlquileresFacturas::TABLA_IMPUTACION . "', 'U') AS T");
+                "SELECT OBJECT_ID('dbo." . AlquileresFacturas::TABLA_CONDICION . "', 'U') AS T");
 
             if ($stmt === false) {
                 throw new Exception(self::errores());

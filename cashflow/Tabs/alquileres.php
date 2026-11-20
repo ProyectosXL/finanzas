@@ -226,11 +226,14 @@
          Las facturas pendientes de Tango de las razones sociales dadas de alta
          en Parámetros › Alquileres, una fila por vencimiento (cuota). SIN
          IMPUTAR NO SUMAN: contarían dos veces contra la proyección del local.
-         Imputar es repartirlas en renglones de conceptos × locales × mes que
-         cubre; cada renglón reemplaza esa proyección. La regla está en
+         Imputar es elegir facturas de una razón social, sus locales (todos o
+         uno), el mes y las retenciones por tipo: la imputación reemplaza todo lo
+         proyectado de esa razón social ahí ese mes. La regla está en
          Class/AlquileresImputacion.php; acá sólo se dibuja y se arma el pedido.
     -->
     <div class="tab-pane fade" id="paneAlqFact" role="tabpanel">
+        <!-- Sin el script 60: no se imputa, y se dice cuál falta. -->
+        <div id="alqFactSinScript"></div>
         <div data-kpis="kpisAlqFact" class="row g-3 mb-3" id="kpisAlqFact">
             <div class="col-md-6 col-lg-4">
                 <div class="kpi-card">
@@ -283,7 +286,7 @@
                         <label class="form-check-label small" for="alqFactVerPagadas" title="Las pagadas de este mes se ven siempre">Ver pagadas de meses anteriores</label>
                     </div>
                     <button id="btnAlqImputar" class="btn btn-sm btn-primary" disabled
-                            title="Tildá una o varias facturas, de una o varias razones sociales">
+                            title="Tildá una o varias facturas de una razón social">
                         <i class="fas fa-file-signature me-1"></i> Imputar
                     </button>
                     <button class="btn btn-sm btn-success" data-exportar="tablaAlqFact"
@@ -319,41 +322,56 @@
 
         <div class="card mb-4">
             <div class="card-header"><h6 class="mb-0">Imputaciones vigentes</h6>
-                <small class="text-muted">Cada renglón reemplaza la proyección de sus conceptos, en sus locales,
-                    del mes que cubre. Deshacer devuelve las facturas a Sin imputar y la proyección vuelve.</small>
+                <small class="text-muted">Cada una reemplaza todo lo proyectado de su razón social en sus locales
+                    en el mes que cubre, y manda lo real. Deshacer devuelve las facturas a Sin imputar y la
+                    proyección vuelve; para corregir una imputación, se deshace y se arma de nuevo.</small>
             </div>
             <div class="card-body p-0" id="alqImputaciones"></div>
         </div>
     </div>
 
-    <!-- EL ARMADO DE UNA IMPUTACIÓN. El navegador suma y muestra la diferencia
-         para guiar; lo que vale es la previsualización del servidor, que se
-         vuelve a correr al guardar contra los pendientes de ese momento. -->
+    <!-- EL ARMADO DE UNA IMPUTACIÓN: facturas de UNA razón social, todos sus
+         locales o uno, el mes de pago y las retenciones por tipo. No se eligen
+         conceptos: pisa todo lo que esa razón social factura ahí ese mes. El
+         navegador suma para guiar; lo que vale es la previsualización del
+         servidor, que se vuelve a correr al guardar con los pendientes de ese
+         momento. -->
     <div class="modal fade" id="modalAlqImputar" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Imputar facturas de alquiler</h5>
+                    <h5 class="modal-title">Imputar facturas de <span id="alqImpRazon"></span></h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
                     <h6>Facturas</h6>
                     <table id="tablaAlqImpFacturas" class="table table-sm small">
-                        <thead><tr><th>Razón social</th><th>Comprobante</th><th>Vence</th>
-                            <th class="text-end">Pendiente</th><th class="text-end" style="width: 170px;">Retención</th>
-                            <th class="text-end">A pagar</th></tr></thead>
+                        <thead><tr><th>Comprobante</th><th>Vence</th><th class="text-end">Pendiente</th></tr></thead>
                         <tbody id="alqImpFacturas"></tbody>
                     </table>
 
+                    <div class="row g-2">
+                        <div class="col-md-7">
+                            <label class="form-label small mb-0" for="alqImpLocal">Locales</label>
+                            <select class="form-select form-select-sm" id="alqImpLocal"></select>
+                            <div class="form-text">Donde la razón social es principal o adicional.</div>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small mb-0" for="alqImpMes">Mes</label>
+                            <select class="form-select form-select-sm" id="alqImpMes"></select>
+                            <div class="form-text">El mes de pago cuya proyección reemplaza.</div>
+                        </div>
+                    </div>
+
                     <div class="d-flex justify-content-between align-items-center mt-3">
-                        <h6 class="mb-0">Renglones</h6>
-                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnAlqImpRenglon">
-                            <i class="fas fa-plus me-1"></i> Agregar renglón
+                        <h6 class="mb-0">Retenciones</h6>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnAlqImpRetencion">
+                            <i class="fas fa-plus me-1"></i> Retención
                         </button>
                     </div>
-                    <div id="alqImpRenglones" class="mt-2"></div>
+                    <div id="alqImpRetenciones" class="mt-2"></div>
 
-                    <div class="d-flex justify-content-end gap-3 small mt-2" id="alqImpTotales"></div>
+                    <div class="d-flex justify-content-end gap-3 small mt-3" id="alqImpTotales"></div>
                     <div class="mt-2">
                         <input type="text" class="form-control form-control-sm" id="alqImpObs" maxlength="300"
                                placeholder="Observación (opcional)">

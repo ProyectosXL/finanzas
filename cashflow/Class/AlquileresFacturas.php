@@ -35,8 +35,9 @@ require_once __DIR__ . '/Aviso.php';
  *   - el modulo ALQUILERES esta disponible en CashflowRegistry;
  *   - hay una fila ACTIVA del tablero que lee ALQUILERES con REAL o PAGOS (las
  *     dos series que llevan las facturas imputadas);
- *   - existen las tablas de sql/cashflow_alquileres_facturas.sql: sin ellas no
- *     se puede imputar nada, y una factura que no se puede imputar no suma.
+ *   - existe la tabla de sql/cashflow_alquileres_facturas.sql (el vencimiento
+ *     a considerar, TABLA_CONDICION): sin ella las facturas no tienen fecha de
+ *     pago en Alquileres.
  *
  * Si falta cualquiera, se quedan en Proveedores Locales como siempre y el aviso
  * critico de avisoCondicion() dice cual falta. "Se quedan" es para TODOS: la
@@ -53,14 +54,18 @@ require_once __DIR__ . '/Aviso.php';
  */
 class AlquileresFacturas {
 
-    /** El script de las imputaciones y los vencimientos editados */
+    /** El script de los vencimientos editados: el que la condicion de seguridad exige */
     const SCRIPT = 'sql/cashflow_alquileres_facturas.sql';
 
     /**
-     * La tabla que dice que el script ya se corrio. Es la cabecera de las
-     * imputaciones: sin ella no hay donde guardar una.
+     * La tabla que dice que el script 53 ya se corrio: el vencimiento a
+     * considerar. Hasta el 20/11/2026 era la cabecera de las imputaciones por
+     * renglones, que el script 60 borra; si la condicion siguiera mirandola,
+     * correr el 60 devolveria todas las facturas a Proveedores Locales. Sin
+     * las tablas del 60 las facturas quedan en Alquileres sin imputar -no
+     * suman- y la pestaña lo avisa: ninguna desaparece ni se cuenta dos veces.
      */
-    const TABLA_IMPUTACION = 'RO_T_CASHFLOW_ALQ_IMPUTACION';
+    const TABLA_CONDICION = 'RO_T_CASHFLOW_ALQ_FACTURA_VTO';
 
     /** El modulo del registro y las series que llevan las facturas imputadas */
     const MODULO = 'ALQUILERES';

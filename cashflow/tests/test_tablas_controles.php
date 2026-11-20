@@ -1997,7 +1997,7 @@ $jsAlq = str_replace("\r\n", "\n", file_get_contents($JS . '/Alquileres.js'));
 chequear('dibuja razones sociales y, colgando, sus locales', [true, true], [
     strpos($jsAlq, 'razones.map(function(x) { return filasRazon(x.r, x.locales, meses); })') !== false,
     strpos($jsAlq, "locales.forEach(function(l) { h += filasLocal(l, meses, clave); });") !== false]);
-chequear('los hijos viajan con su razon social al ordenar', 3,
+chequear('los hijos viajan con su razon social al ordenar', 4,
     substr_count($jsAlq, 'data-orden-sigue data-ancestros='));
 chequear('un hijo se ve si todos sus ancestros estan abiertos', true,
     strpos($jsAlq, "tr.getAttribute('data-ancestros').split(' ').every(function(k) { return !!abiertos[k]; })") !== false);
@@ -2005,3 +2005,16 @@ chequear('el buscador mira razon social, codigo y local', [true, true], [
     strpos($jsAlq, "String(r.cod || '').toLowerCase().indexOf(t) !== -1") !== false,
     strpos($jsAlq, "String(l.nombre).toLowerCase().indexOf(t) !== -1") !== false]);
 chequear('exportar sigue abriendo todo', true, strpos($jsAlq, "abrirTodo(true);\n        exportarTabla('tablaAlquileres'") !== false);
+
+seccion('Alquileres > Proyeccion: la linea "Facturas imputadas"');
+
+$jsAlq = str_replace("\r\n", "\n", file_get_contents($JS . '/Alquileres.js'));
+chequear('va al final de cada razon social, colgando de ella', true,
+    strpos($jsAlq, "h += '<tr class=\"alq-facturas\" data-orden-sigue data-ancestros=\"' + clave + '\">'") !== false);
+chequear('dice "Facturas imputadas"', true, strpos($jsAlq, 'Facturas imputadas</td>') !== false);
+chequear('el tooltip: facturas, retenciones por tipo, locales, quien y cuando, y si el mes queda fuera', [true, true, true, true], [
+    strpos($jsAlq, "' · se paga el '") !== false,
+    strpos($jsAlq, "i.retenciones.map(function(x) { return x.nombre + ' ' + importeTexto(x.importe); })") !== false,
+    strpos($jsAlq, "nLocales: ' + (i.todos ? 'todos (' : '')") !== false,
+    strpos($jsAlq, "(i.fuera_horizonte ? ', fuera del horizonte' : '')") !== false]);
+chequear('el pie suma tambien las facturas', true, strpos($jsAlq, 'var facturas = x.r.facturas ?') !== false);

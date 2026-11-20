@@ -17,47 +17,53 @@ require_once __DIR__ . '/AlquileresFacturas.php';
  *
  * ESTATICA Y PURA. Los pendientes de Tango, las imputaciones guardadas, los
  * vencimientos editados, la proyeccion, el calendario y la fecha de hoy entran
- * como parametros. Quien lee es AlquileresImputaciones; quien arma, Alquileres.
+ * como parametros. Quien lee y escribe es AlquileresImputaciones; quien arma,
+ * Alquileres.
  *
  * QUE ES UNA IMPUTACION
  * ---------------------
- * UN GRUPO de cuotas pendientes -de una o varias razones sociales- repartido en
- * RENGLONES. Cada renglon tiene conceptos, locales, un MES QUE CUBRE (el mes de
- * pago cuya proyeccion reemplaza) y un importe con IVA y percepciones. La suma
- * de los renglones tiene que dar el pendiente de las cuotas (+-TOLERANCIA). La
- * retencion se carga por factura.
+ * Una o varias cuotas de UNA RAZON SOCIAL, imputadas a TODOS sus locales (los
+ * que la tienen como principal o como adicional) o a UNO, en UN MES DE PAGO
+ * (el mes cuya proyeccion se reemplaza), con sus RETENCIONES POR TIPO. El total
+ * a pagar es el pendiente de las cuotas menos las retenciones. No se eligen
+ * conceptos: una factura de alquiler es de una razon social y paga todo lo que
+ * ella factura en esos locales ese mes. Antes se abria en renglones de
+ * conceptos x locales, y armarlos era trabajo que no cambiaba lo que se paga.
  *
  * QUE REEMPLAZA
  * -------------
- * Cada renglon saca de la proyeccion los pagos de SUS conceptos (o de los
- * extraordinarios, con EXTRA), en SUS locales, cuyo MES DE PAGO es el que
- * cubre. Va sobre la lista de pagos y no sobre el calculo del concepto
- * (AlquileresCalculo::conceptosDelMes()) porque reemplaza por mes de pago y con
- * el importe final: los variables de septiembre de IRSA se pagan en noviembre,
- * y una factura de variables con mes que cubre noviembre es la que los pisa.
+ * TODO LO PROYECTADO DE ESA RAZON SOCIAL, EN ESOS LOCALES, EN ESE MES DE PAGO:
+ * fijos, fondo, expensas, variables y extraordinarios. "De esa razon social" es
+ * el cod_provee de cada pago, que dice quien factura cada concepto
+ * (AlquileresPago::conceptosPorRazon()) y de quien es cada extraordinario. Va
+ * sobre la lista de pagos y no sobre el calculo del concepto porque reemplaza
+ * por mes de pago: los variables de septiembre de IRSA se pagan en noviembre, y
+ * una factura con mes noviembre es la que los pisa.
  *
  *   - MANDA LO REAL: menor o mayor que lo proyectado, no queda saldo.
- *   - OTROS (no proyectados) suma en real y no reemplaza nada.
- *   - LO QUE NO SE IMPUTO SIGUE PROYECTADO: una factura de los fijos de un local
- *     deja sus expensas y variables como estaban.
+ *   - LO QUE NO SE IMPUTO SIGUE PROYECTADO: los otros meses, los otros locales
+ *     (si se eligio uno) y lo que otra razon social factura en el mismo local
+ *     (San Justo: una factura de SAUCCS no pisa el VMA de SASANJ).
+ *   - DOS IMPUTACIONES VIGENTES NO PISAN LO MISMO: misma razon social, mismo
+ *     mes y algun local en comun no se puede guardar. Con locales distintos si
+ *     (una factura por local).
+ *   - UN MES FUERA DEL HORIZONTE (el anterior) no pisa nada que se vea: la
+ *     factura se paga igual en su fecha.
  *
  * CUANTO Y CUANDO
  * ---------------
  * Cada cuota pendiente se paga en su VENCIMIENTO A CONSIDERAR (el editado, o el
  * dia de Parametros de su razon social en el mes del vencimiento de Tango:
- * vtoAConsiderar()), corrido al siguiente habil, y si ya paso, el siguiente habil desde
- * hoy: nunca apilado en el primer dia del eje. Se paga por su a pagar, pendiente
- * menos retencion. La proyeccion reemplazada deja de pagarse en SU fecha: el
- * importe real va en la de la factura.
+ * vtoAConsiderar()), corrido al siguiente habil, y si ya paso, el siguiente
+ * habil desde hoy: nunca apilado en el primer dia del eje. Paga su pendiente
+ * menos SU PARTE DE LAS RETENCIONES: el total de retenciones se reparte entre
+ * las cuotas en proporcion a su pendiente, por resto mayor al centavo
+ * (repartirCentavos()), y las partes suman exacto el total a pagar.
  *
- * Para la grilla por local, cada cuota se reparte en PIEZAS (renglon x local):
- *   - entre renglones, por su importe;
- *   - dentro de un renglon con varios locales, por lo que tenia proyectado cada
- *     local para esos conceptos en ese mes; si lo proyectado da 0, en partes
- *     iguales, con aviso;
- *   - la retencion de la cuota, con los mismos pesos.
- * Los centavos se reparten por resto mayor (repartirCentavos()): cada cuota
- * suma exacto su pendiente y su retencion.
+ * SIN REPARTO ENTRE LOCALES. La factura es de la razon social: en la grilla se
+ * ve como una linea "Facturas imputadas" al final de la razon social, y cada
+ * pieza va con nro null. Abrirla por local era inventar un reparto que la
+ * factura no dice.
  *
  * CUANDO TANGO LA CANCELA
  * -----------------------
@@ -65,29 +71,22 @@ require_once __DIR__ . '/AlquileresFacturas.php';
  * PAGADA: deja de pagarse (la plata ya salio) y SIGUE REEMPLAZANDO, para que el
  * mes no vuelva a proyectarse. Si no aparece pagada (anulada) o Tango no se pudo
  * leer, deja de reemplazar y la proyeccion vuelve, con aviso: es el lado que
- * muestra la salida de caja, no el que la esconde. En un grupo de varias
- * facturas, el grupo deja de reemplazar solo si TODAS quedaron asi.
+ * muestra la salida de caja, no el que la esconde. Con varias facturas, la
+ * imputacion deja de reemplazar solo si TODAS quedaron asi.
  *
  * Si el pendiente cambia sin cancelarse (nota de credito, pago parcial en
- * Tango), se paga el pendiente nuevo menos la retencion y se avisa.
+ * Tango), se paga el pendiente nuevo menos su retencion y se avisa.
+ *
+ * PARA CORREGIR UNA IMPUTACION SE DESHACE Y SE ARMA DE NUEVO: no se edita, y
+ * una cuota ya imputada no se puede imputar otra vez.
  */
 class AlquileresImputacion {
 
-    const EXTRA = 'EXTRA';
-    const OTROS = 'OTROS';
+    /** Lo que puede diferir un importe visto del de ahora, y las retenciones del total */
+    const CENTAVO = 0.005;
 
-    /**
-     * Los conceptos que puede tener un renglon. LA LISTA DEL CHECK de
-     * RO_T_CASHFLOW_ALQ_IMP_RENGLON_CONCEPTO Y ESTA CAMBIAN JUNTAS.
-     */
-    const CONCEPTOS = ['1', '2', '3', '6', '7', '8', '9', '11', '14', '16', '17', self::EXTRA, self::OTROS];
-
-    /** Cuanto puede diferir la suma de los renglones del pendiente de las facturas */
-    const TOLERANCIA = 1.0;
-
-    /** Los grupos de la grilla de Proyeccion para las piezas que no caen en uno solo */
-    const GRUPO_VARIOS = 'FACTURA_VARIOS';
-    const GRUPO_OTROS = 'OTROS';
+    /** El grupo de la grilla de la linea "Facturas imputadas" */
+    const GRUPO_FACTURAS = 'FACTURAS';
 
     /** El estado de una cuota en la sub-pestaña Facturas */
     const SIN_IMPUTAR = 'SIN_IMPUTAR';
@@ -100,8 +99,8 @@ class AlquileresImputacion {
 
     /**
      * Emitida en el mes en curso y ya cancelada en Tango, SIN IMPUTAR. No genera
-     * pago (ya salio la plata), pero la proyeccion del mes que cubre sigue en el
-     * flujo hasta que se impute: imputada y pagada, la reemplaza.
+     * pago (ya salio la plata), pero la proyeccion del mes sigue en el flujo
+     * hasta que se impute: imputada y pagada, la reemplaza.
      */
     const PAGADA_SIN_IMPUTAR = 'PAGADA_SIN_IMPUTAR';
 
@@ -207,22 +206,6 @@ class AlquileresImputacion {
         return isset($vtos[$c]) ? $vtos[$c]['FECHA_VTO'] : self::vtoDeParametro($cuota, $dias);
     }
 
-    /**
-     * Las razones sociales de un local del contexto de validar(): la principal y
-     * las adicionales. Una factura de CUALQUIERA de ellas se puede imputar al
-     * local (San Justo: SASANJ el alquiler, SAUCCS las expensas y el fondo).
-     *
-     * @param array $l ['cod_provee', 'razones' => [...]]
-     * @return string[]
-     */
-    private static function razonesDe($l) {
-        $cods = isset($l['razones']) ? $l['razones'] : [$l['cod_provee'] ?? null];
-
-        return array_values(array_filter(array_map(['Planilla', 'codigo'], $cods), function ($c) {
-            return $c !== '';
-        }));
-    }
-
     /** De donde sale el vencimiento a considerar: EDITADO, PARAMETRO o TANGO */
     public static function origenVto($cuota, $vtos, $dias = []) {
         if (isset($vtos[self::claveCuota($cuota)])) {
@@ -277,60 +260,49 @@ class AlquileresImputacion {
     }
 
     /* ====================================================================
-       CONCEPTOS Y GRUPOS
+       QUE CUBRE
        ==================================================================== */
 
     /**
-     * Si un pago de la proyeccion es de alguno de estos conceptos.
+     * Si un pago de la proyeccion lo pisa una imputacion: de SU razon social,
+     * en uno de SUS locales, en SU mes de pago. Las facturas imputadas (nro
+     * null) no se pisan entre si.
      *
-     * @param array $pago De AlquileresPago::pagosLocal()
-     * @param string[] $conceptos
+     * @param array $pago De AlquileresPago::pagosLocal(), con 'nro' y 'cod_provee'
+     * @param array $imp ['cod_provee', 'mes', 'locales' => [nro]]
      * @return bool
      */
-    public static function cubre($pago, $conceptos) {
-        foreach ($conceptos as $c) {
-            if ($c === self::OTROS) {
-                continue;
-            }
-
-            if ($c === self::EXTRA ? $pago['grupo'] === AlquileresConceptos::EXTRA
-                                   : (string) $pago['concepto'] === (string) $c) {
-                return true;
-            }
+    public static function cubre($pago, $imp) {
+        if (($pago['nro'] ?? null) === null || ($pago['origen'] ?? null) === AlquileresCalculo::FACTURA) {
+            return false;
         }
 
-        return false;
+        return $pago['mes_pago'] === $imp['mes']
+            && Planilla::codigo($pago['cod_provee'] ?? '') === Planilla::codigo($imp['cod_provee'])
+            && in_array((int) $pago['nro'], array_map('intval', $imp['locales']), true);
     }
 
     /**
-     * El grupo de la grilla de Proyeccion donde va un renglon: el de sus
-     * conceptos si son todos de uno, OTROS, o uno aparte si abarca varios.
+     * Los locales de una razon social: donde es principal o adicional. Es la
+     * lista de "todos los locales de X" y contra la que se valida un local.
      *
-     * @param string[] $conceptos
-     * @return string
+     * @param string $cod
+     * @param array $locales nro => ['razones' => [cod]] (AlquileresPago::razonesDelLocal())
+     * @return int[]
      */
-    public static function grupoDeRenglon($conceptos) {
-        if (in_array(self::OTROS, $conceptos, true)) {
-            return self::GRUPO_OTROS;
+    public static function localesDeRazon($cod, $locales) {
+        $c = Planilla::codigo($cod);
+        $out = [];
+
+        foreach ($locales as $nro => $l) {
+            if (in_array($c, array_map(['Planilla', 'codigo'], $l['razones'] ?? []), true)) {
+                $out[] = (int) $nro;
+            }
         }
 
-        $grupos = [];
+        sort($out);
 
-        foreach ($conceptos as $c) {
-            $grupos[$c === self::EXTRA ? AlquileresConceptos::EXTRA : AlquileresConceptos::grupo($c)] = true;
-        }
-
-        return (count($grupos) === 1) ? key($grupos) : self::GRUPO_VARIOS;
-    }
-
-    /** Los atajos de la pantalla: un grupo entero de conceptos */
-    public static function atajos() {
-        return [
-            AlquileresConceptos::FIJOS => array_map('strval', AlquileresConceptos::delGrupo(AlquileresConceptos::FIJOS)),
-            AlquileresConceptos::FONDO => array_map('strval', AlquileresConceptos::delGrupo(AlquileresConceptos::FONDO)),
-            AlquileresConceptos::EXPENSAS => array_map('strval', AlquileresConceptos::delGrupo(AlquileresConceptos::EXPENSAS)),
-            AlquileresConceptos::VARIABLES => array_map('strval', AlquileresConceptos::delGrupo(AlquileresConceptos::VARIABLES))
-        ];
+        return $out;
     }
 
     /* ====================================================================
@@ -384,38 +356,6 @@ class AlquileresImputacion {
         return array_map(function ($c) { return round($c / 100, 2) + 0.0; }, $partes);
     }
 
-    /**
-     * Cuanto le toca a cada local de un renglon: lo que tenia proyectado para
-     * esos conceptos en el mes que cubre. Si da 0 -o es OTROS, que no tiene
-     * proyeccion-, partes iguales.
-     *
-     * @param array $renglon ['conceptos', 'locales', 'mes']
-     * @param array $pagos La proyeccion ORIGINAL, sin reemplazos
-     * @return array ['pesos' => [nro => float], 'proyectado' => [nro => float],
-     *                'iguales' => bool]
-     */
-    public static function pesosLocales($renglon, $pagos) {
-        $proy = array_fill_keys(array_map('intval', $renglon['locales']), 0.0);
-
-        foreach ($pagos as $p) {
-            if (isset($proy[(int) $p['nro']]) && $p['mes_pago'] === $renglon['mes']
-                && self::cubre($p, $renglon['conceptos'])) {
-                $proy[(int) $p['nro']] += (float) $p['a_pagar'];
-            }
-        }
-
-        $suma = array_sum($proy);
-        $n = count($proy);
-
-        if ($suma <= 0 || $n === 0) {
-            return ['pesos' => $n ? array_fill_keys(array_keys($proy), 1 / $n) : [],
-                    'proyectado' => $proy, 'iguales' => true];
-        }
-
-        return ['pesos' => array_map(function ($v) use ($suma) { return $v / $suma; }, $proy),
-                'proyectado' => $proy, 'iguales' => false];
-    }
-
     /* ====================================================================
        LA VALIDACION DE UNA IMPUTACION
        ==================================================================== */
@@ -428,30 +368,38 @@ class AlquileresImputacion {
      * guardo, frena.
      *
      * @param array $b [
-     *     'facturas' => [['cod_provee', 't_comp', 'n_comp', 'vto_tango', 'pendiente' (el visto),
-     *                     'retencion' (float|null)]],
-     *     'renglones' => [['conceptos' => [string], 'locales' => [nro], 'todos_de' => cod|null,
-     *                      'mes' => 'Y-m', 'importe' => float]]
+     *     'facturas' => [['cod_provee', 't_comp', 'n_comp', 'vto_tango', 'pendiente' (el visto)]],
+     *     'todos' => bool  todos los locales de la razon social,
+     *     'local' => nro   si no es todos,
+     *     'mes' => 'Y-m'   el mes de pago que reemplaza,
+     *     'retenciones' => [['tipo' => ID, 'importe' => float]]
      * ]
      * @param array $e [
-     *     'pendientes' => claveCuota => fila de getPendientes() (solo las de destino A_ALQUILERES),
+     *     'pendientes' => claveCuota => fila de getPendientes() (de destino A_ALQUILERES, y
+     *                     las pagadas del mes vistas con comoPendiente()),
      *     'imputaciones' => las vigentes (AlquileresImputaciones::vigentes()),
-     *     'pagos' => la proyeccion ORIGINAL,
-     *     'locales' => nro => ['cod_provee', 'razones' (la principal y las adicionales:
-     *                  AlquileresPago::razonesDelLocal()), 'nombre', 'pct_iva', 'pct_percepcion',
-     *                  'pct_retencion']
+     *     'locales' => nro => ['nombre', 'razones' (AlquileresPago::razonesDelLocal())],
+     *     'tipos' => ID => nombre, los VIGENTES: los que se pueden elegir,
+     *     'meses' => ['Y-m'] los que se pueden imputar (el anterior y los del horizonte),
+     *     'excluidas' => claveCuota => fila de la exclusion (opcional),
+     *     'pagos' => la proyeccion ORIGINAL (opcional: para decir cuanto pisa)
      * ]
-     * @param bool $guardar Al guardar, la retencion de cada factura es
-     *        obligatoria (0 es un valor; vacio no): en la previsualizacion todavia
-     *        se esta armando y se sugiere
-     * @return array ['ok', 'errores', 'facturas', 'renglones', 'total_facturas', 'total_renglones',
-     *                'diferencia', 'reemplaza' => [id], 'avisos']
+     * @return array ['ok', 'errores', 'cod_provee', 'razon', 'todos', 'locales', 'mes', 'facturas',
+     *                'retenciones', 'total_facturas', 'total_retenciones', 'total_a_pagar',
+     *                'proyectado', 'pisa_n', 'avisos']
      */
-    public static function validar($b, $e, $guardar = false) {
+    public static function validar($b, $e) {
         $errores = [];
         $avisos = [];
         $facturas = [];
         $razones = [];
+        $yaImputadas = [];
+
+        foreach ($e['imputaciones'] ?? [] as $imp) {
+            foreach ($imp['facturas'] as $fi) {
+                $yaImputadas[self::claveCuota($fi)] = $imp['id'];
+            }
+        }
 
         foreach (is_array($b['facturas'] ?? null) ? $b['facturas'] : [] as $f) {
             $cuota = ['COD_PROVEE' => $f['cod_provee'] ?? '', 'T_COMP' => $f['t_comp'] ?? '',
@@ -464,6 +412,18 @@ class AlquileresImputacion {
                 continue;
             }
 
+            if (isset($yaImputadas[$clave])) {
+                $errores[] = 'La factura ' . $nombre . ' ya está imputada en la #' . $yaImputadas[$clave]
+                    . ': deshacé primero la #' . $yaImputadas[$clave] . '.';
+                continue;
+            }
+
+            if (isset($e['excluidas'][$clave])) {
+                $errores[] = 'La factura ' . $nombre . ' está excluida (no se paga por acá): volvé a incluirla '
+                    . 'para imputarla.';
+                continue;
+            }
+
             if (!isset($e['pendientes'][$clave])) {
                 $errores[] = 'La factura ' . $nombre . ' ya no está pendiente en Tango, o no es de alquiler: '
                     . 'volvé a cargar la pestaña.';
@@ -473,213 +433,155 @@ class AlquileresImputacion {
             $p = $e['pendientes'][$clave];
             $pend = round((float) $p['IMPORTE_PENDIENTE'], 2);
 
-            if (abs($pend - round((float) ($f['pendiente'] ?? 0), 2)) > 0.005) {
+            if (abs($pend - round((float) ($f['pendiente'] ?? 0), 2)) > self::CENTAVO) {
                 $errores[] = 'La factura ' . $nombre . ' cambió de pendiente en Tango mientras armabas la '
                     . 'imputación (' . self::plata((float) ($f['pendiente'] ?? 0)) . ' → ' . self::plata($pend)
                     . '): volvé a cargar la pestaña y armala de nuevo.';
             }
 
-            $ret = ($f['retencion'] ?? null);
-            $ret = ($ret === null || $ret === '') ? null : round((float) $ret, 2);
-
-            if ($ret !== null && ($ret < 0 || $ret > $pend)) {
-                $errores[] = 'La retención de ' . $nombre . ' tiene que estar entre $ 0 y su pendiente.';
-            } elseif ($ret === null && $guardar) {
-                $errores[] = 'Falta la retención de ' . $nombre . ' (0 si no lleva).';
-            }
-
-            $facturas[$clave] = ['clave' => $clave, 'fila' => $p, 'pendiente' => $pend, 'retencion' => $ret,
-                                 'neto' => AlquileresFacturas::netoDeCuota($p)];
-            $razones[Planilla::codigo($p['COD_PROVEE'])] = true;
+            $facturas[$clave] = ['clave' => $clave, 'fila' => $p, 'pendiente' => $pend,
+                                 'pagada' => !empty($p['PAGADA_TANGO']), 'nombre' => $nombre];
+            $razones[Planilla::codigo($p['COD_PROVEE'])] = $p['RAZON_SOC'] ?? '';
         }
 
         if (empty($facturas) && empty($errores)) {
             $errores[] = 'Tildá al menos una factura.';
         }
 
-        /* LOS RENGLONES */
-        $renglones = [];
-        $locales = $e['locales'] ?? [];
-
-        foreach (is_array($b['renglones'] ?? null) ? $b['renglones'] : [] as $i => $r) {
-            $n = 'Renglón ' . ($i + 1);
-            $conceptos = array_values(array_unique(array_map('strval', is_array($r['conceptos'] ?? null)
-                ? $r['conceptos'] : [])));
-            $malos = array_diff($conceptos, self::CONCEPTOS);
-
-            if (empty($conceptos)) {
-                $errores[] = $n . ': elegí al menos un concepto.';
-            } elseif (!empty($malos)) {
-                $errores[] = $n . ': concepto no válido (' . implode(', ', $malos) . ').';
-            } elseif (in_array(self::OTROS, $conceptos, true) && count($conceptos) > 1) {
-                $errores[] = $n . ': «Otros (no proyectados)» va solo en su renglón: no reemplaza nada, y '
-                    . 'mezclado con conceptos que sí reemplazan no se sabría qué parte es cuál.';
-            }
-
-            $todos = Planilla::codigo($r['todos_de'] ?? '');
-            $lista = [];
-
-            if ($todos !== '') {
-                if (!isset($razones[$todos])) {
-                    $errores[] = $n . ': «todos los locales de ' . $todos . '» tiene que ser de una razón '
-                        . 'social de las facturas tildadas.';
-                }
-
-                foreach ($locales as $nro => $l) {
-                    if (in_array($todos, self::razonesDe($l), true)) {
-                        $lista[] = (int) $nro;
-                    }
-                }
-            } else {
-                $lista = array_values(array_unique(array_map('intval', is_array($r['locales'] ?? null)
-                    ? $r['locales'] : [])));
-            }
-
-            if (empty($lista)) {
-                $errores[] = $n . ': elegí al menos un local.';
-            }
-
-            foreach ($lista as $nro) {
-                if (!isset($locales[$nro])) {
-                    $errores[] = $n . ': el local ' . $nro . ' no existe en la app de alquileres.';
-                } elseif (empty(array_intersect(self::razonesDe($locales[$nro]), array_keys($razones)))) {
-                    $errores[] = $n . ': ' . $locales[$nro]['nombre'] . ' no es de ninguna de las razones '
-                        . 'sociales de las facturas tildadas.';
-                }
-            }
-
-            $mes = substr(trim((string) ($r['mes'] ?? '')), 0, 7);
-            $d = DateTime::createFromFormat('Y-m-d', $mes . '-01');
-
-            if (!$d || $d->format('Y-m') !== $mes) {
-                $errores[] = $n . ': el mes que cubre no es válido.';
-            }
-
-            $importe = round((float) ($r['importe'] ?? 0), 2);
-
-            if ($importe <= 0) {
-                $errores[] = $n . ': el importe tiene que ser mayor que cero.';
-            }
-
-            $renglones[] = ['orden' => $i + 1, 'conceptos' => $conceptos, 'locales' => $lista,
-                            'todos_de' => ($todos === '') ? null : $todos, 'mes' => $mes, 'importe' => $importe];
+        /* UNA SOLA RAZON SOCIAL: lo que se pisa es lo que ELLA factura. */
+        if (count($razones) > 1) {
+            $errores[] = 'Las facturas tienen que ser de una sola razón social, y hay de '
+                . implode(', ', array_keys($razones)) . ': imputá cada razón social por separado.';
         }
 
-        if (empty($renglones)) {
-            $errores[] = 'Agregá al menos un renglón.';
+        $cod = (count($razones) === 1) ? key($razones) : null;
+        $locales = [];
+        $todos = !empty($b['todos']);
+
+        /* LOS LOCALES: todos los de la razon social, o uno de ellos. */
+        if ($cod !== null) {
+            $deLaRazon = self::localesDeRazon($cod, $e['locales'] ?? []);
+
+            if ($todos) {
+                $locales = $deLaRazon;
+
+                if (empty($locales)) {
+                    $errores[] = $cod . ' no es razón social de ningún local (ni principal ni adicional): asignásela '
+                        . 'en Parámetros › Alquileres › Locales.';
+                }
+            } else {
+                $nro = (int) ($b['local'] ?? 0);
+
+                if (!isset($e['locales'][$nro])) {
+                    $errores[] = 'Elegí «Todos los locales» o un local.';
+                } elseif (!in_array($nro, $deLaRazon, true)) {
+                    $errores[] = $e['locales'][$nro]['nombre'] . ' no es un local de ' . $cod . '.';
+                } else {
+                    $locales = [$nro];
+                }
+            }
+        }
+
+        /* EL MES: el anterior o uno del horizonte. */
+        $mes = substr(trim((string) ($b['mes'] ?? '')), 0, 7);
+
+        if (!in_array($mes, $e['meses'] ?? [], true)) {
+            $errores[] = 'Elegí el mes que cubre: el mes anterior o uno del horizonte.';
+        }
+
+        /* LAS RETENCIONES: por tipo, sin repetir, cada una mayor que 0. */
+        $retenciones = [];
+
+        foreach (is_array($b['retenciones'] ?? null) ? $b['retenciones'] : [] as $i => $r) {
+            $tipo = (int) ($r['tipo'] ?? 0);
+            $imp = round((float) str_replace(',', '.', (string) ($r['importe'] ?? 0)), 2);
+
+            if (!isset($e['tipos'][$tipo])) {
+                $errores[] = 'Retención ' . ($i + 1) . ': elegí un tipo de retención vigente.';
+                continue;
+            }
+
+            if (isset($retenciones[$tipo])) {
+                $errores[] = 'La retención «' . $e['tipos'][$tipo] . '» está dos veces: un tipo va una sola vez.';
+                continue;
+            }
+
+            if ($imp <= 0) {
+                $errores[] = 'La retención «' . $e['tipos'][$tipo] . '» tiene que ser mayor que cero (si no lleva, quitala).';
+            }
+
+            $retenciones[$tipo] = ['tipo' => $tipo, 'nombre' => $e['tipos'][$tipo], 'importe' => $imp];
         }
 
         $totalF = round(array_sum(array_column($facturas, 'pendiente')), 2);
-        $totalR = round(array_sum(array_column($renglones, 'importe')), 2);
-        $dif = round($totalR - $totalF, 2);
+        $totalR = round(array_sum(array_column($retenciones, 'importe')), 2);
 
-        if (!empty($facturas) && !empty($renglones) && abs($dif) > self::TOLERANCIA) {
-            $errores[] = 'Los renglones suman ' . self::plata($totalR) . ' y las facturas ' . self::plata($totalF)
-                . ': la diferencia es ' . self::plata($dif) . '. Tiene que dar el total de las facturas (±$ 1).';
+        if ($totalR > $totalF + self::CENTAVO && !empty($facturas)) {
+            $errores[] = 'Las retenciones (' . self::plata($totalR) . ') no pueden superar el total de las facturas ('
+                . self::plata($totalF) . ').';
         }
 
-        /* QUE REEMPLAZA, por renglon y local, con la proyeccion original. */
-        foreach ($renglones as $k => $r) {
-            $pl = self::pesosLocales($r, $e['pagos'] ?? []);
-            $renglones[$k]['pesos'] = $pl['pesos'];
-            $renglones[$k]['proyectado'] = $pl['proyectado'];
-            $renglones[$k]['iguales'] = $pl['iguales'];
+        /* DOS IMPUTACIONES NO PISAN LO MISMO: misma razon, mismo mes y algun
+           local en comun. Con locales distintos, si. */
+        foreach ($e['imputaciones'] ?? [] as $imp) {
+            if ($cod === null || Planilla::codigo($imp['cod_provee']) !== $cod || $imp['mes'] !== $mes) {
+                continue;
+            }
 
-            if ($pl['iguales'] && !in_array(self::OTROS, $r['conceptos'], true) && count($r['locales']) > 1) {
-                $avisos[] = Aviso::nuevo(Aviso::INFO, 'Renglón ' . $r['orden'] . ': esos locales no tenían nada '
-                    . 'proyectado de esos conceptos en ' . $r['mes'] . ', así que el importe se reparte en partes '
-                    . 'iguales entre ellos.');
+            $comunes = array_values(array_intersect(array_map('intval', $imp['locales']), $locales));
+
+            if (!empty($comunes)) {
+                $errores[] = 'Se superpone con la imputación #' . $imp['id'] . ' (' . $cod . ', ' . self::mesLargo($mes)
+                    . ', la cargó ' . ($imp['usuario'] ?: '—') . ' el ' . $imp['fecha'] . '): tienen en común '
+                    . implode(', ', array_map(function ($n) use ($e) { return $e['locales'][$n]['nombre'] ?? $n; }, $comunes))
+                    . '. Deshacela primero, o elegí un local que no cubra.';
             }
         }
 
-        /* LA RETENCION SUGERIDA: la alicuota de retencion de los locales,
-           ponderada por como se reparte la imputacion, sobre el neto. El neto es
-           el de Tango; si no lo trae, el importe sin el IVA ni la percepcion de
-           los locales. */
-        $pond = self::ponderados($renglones, $locales);
+        /* LAS RETENCIONES SE REPARTEN ENTRE LAS CUOTAS por su pendiente, al
+           centavo: cada una paga su pendiente menos su parte. */
+        $partes = self::repartirCentavos($totalR, array_map(function ($f) { return $f['pendiente']; }, $facturas));
 
         foreach ($facturas as $c => $f) {
-            $neto = $f['neto'];
-
-            if ($neto === null && $pond['iva'] !== null && $pond['percepcion'] !== null) {
-                $neto = round($f['pendiente'] / (1 + ($pond['iva'] + $pond['percepcion']) / 100), 2);
-            }
-
-            $facturas[$c]['neto_usado'] = $neto;
-            $facturas[$c]['neto_de'] = ($f['neto'] !== null) ? 'TANGO' : (($neto === null) ? null : 'LOCALES');
-            $facturas[$c]['retencion_sugerida'] = ($neto === null || $pond['retencion'] === null)
-                ? null : round($neto * $pond['retencion'] / 100, 2);
+            $facturas[$c]['retencion'] = $partes[$c] ?? 0.0;
+            $facturas[$c]['a_pagar'] = round($f['pendiente'] - ($partes[$c] ?? 0.0), 2);
         }
 
-        /* QUE IMPUTACIONES REEMPLAZA: las vigentes que tienen alguna de estas
-           cuotas. Las otras cuotas de esas imputaciones vuelven a Sin imputar. */
-        $reemplaza = [];
+        /* CUANTO PISA, para que quien imputa vea contra que se compara. */
+        $proyectado = 0.0;
+        $pisa = 0;
+        $imp = ['cod_provee' => $cod ?? '', 'mes' => $mes, 'locales' => $locales];
 
-        foreach ($e['imputaciones'] ?? [] as $imp) {
-            foreach ($imp['facturas'] as $fi) {
-                if (isset($facturas[self::claveCuota($fi)])) {
-                    $reemplaza[$imp['id']] = true;
-                }
+        foreach ($e['pagos'] ?? [] as $p) {
+            if ($cod !== null && self::cubre($p, $imp)) {
+                $proyectado += $p['a_pagar'];
+                $pisa++;
             }
         }
 
-        foreach (array_keys($reemplaza) as $id) {
-            $otras = [];
-
-            foreach ($e['imputaciones'] as $imp) {
-                if ($imp['id'] === $id) {
-                    foreach ($imp['facturas'] as $fi) {
-                        if (!isset($facturas[self::claveCuota($fi)])) {
-                            $otras[] = $fi['T_COMP'] . ' ' . $fi['N_COMP'];
-                        }
-                    }
-                }
-            }
-
-            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Reemplaza la imputación ' . $id . '.'
-                . (empty($otras) ? '' : ' Sus otras facturas (' . implode(', ', $otras) . ') vuelven a Sin imputar.'));
+        if ($cod !== null && empty($errores) && $pisa === 0) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'No hay nada proyectado de ' . $cod . ' en esos locales en '
+                . self::mesLargo($mes) . ' (o es un mes fuera del horizonte): la factura se paga en su fecha y no '
+                . 'pisa nada.');
         }
 
         return [
             'ok' => empty($errores),
             'errores' => array_values(array_unique($errores)),
+            'cod_provee' => $cod,
+            'razon' => ($cod === null) ? null : $razones[$cod],
+            'todos' => $todos,
+            'locales' => $locales,
+            'mes' => $mes,
             'facturas' => array_values($facturas),
-            'renglones' => $renglones,
+            'retenciones' => array_values($retenciones),
             'total_facturas' => $totalF,
-            'total_renglones' => $totalR,
-            'diferencia' => $dif,
-            'reemplaza' => array_keys($reemplaza),
+            'total_retenciones' => $totalR,
+            'total_a_pagar' => round($totalF - $totalR, 2),
+            'proyectado' => round($proyectado, 2),
+            'pisa_n' => $pisa,
             'avisos' => $avisos
         ];
-    }
-
-    /**
-     * El % de IVA, percepcion y retencion de los locales, ponderado por el peso
-     * de cada local en la imputacion (importe del renglon x su peso). Null si
-     * ningun local tiene el dato.
-     */
-    private static function ponderados($renglones, $locales) {
-        $out = [];
-
-        foreach (['iva' => 'pct_iva', 'percepcion' => 'pct_percepcion', 'retencion' => 'pct_retencion'] as $k => $campo) {
-            $suma = 0.0;
-            $peso = 0.0;
-
-            foreach ($renglones as $r) {
-                foreach ($r['pesos'] ?? [] as $nro => $w) {
-                    $v = $locales[$nro][$campo] ?? null;
-
-                    if ($v !== null) {
-                        $suma += $r['importe'] * $w * (float) $v;
-                        $peso += $r['importe'] * $w;
-                    }
-                }
-            }
-
-            $out[$k] = ($peso > 0) ? $suma / $peso : null;
-        }
-
-        return $out;
     }
 
     /* ====================================================================
@@ -691,10 +593,10 @@ class AlquileresImputacion {
      * y el tablero acumula por dia. Y la grilla de Facturas.
      *
      * @param array $e [
-     *     'pagos' => la proyeccion (Alquileres::calcular()), con 'nro',
+     *     'pagos' => la proyeccion (Alquileres::calcular()), con 'nro' y 'cod_provee',
      *     'meses_pago' => los meses del horizonte,
      *     'pendientes' => [filas de getPendientes() con destino A_ALQUILERES],
-     *     'excluidas' => [las de destino A_EXCLUIDA],
+     *     'excluidas' => [las de destino A_EXCLUIDA: proveedores excluidos de Alquileres],
      *     'vtos' => claveCuota => ['FECHA_VTO', 'MOTIVO', 'USUARIO_ALTA', 'FECHA_ALTA'],
      *     'dias' => COD_PROVEE => dia de vencimiento de Parametros (diasDeVencimiento()),
      *               opcional: sin el, el de Tango,
@@ -703,7 +605,9 @@ class AlquileresImputacion {
      *                   ya no estan pendientes; null si no se pudo leer,
      *     'ctx' => AlquileresFacturas::contexto(),
      *     'habiles' => 'Y-m-d' => bool, 'hoy' => 'Y-m-d',
-     *     'nombres' => nro => nombre del local
+     *     'pagadas_mes' => las cuotas del mes ya canceladas en Tango (opcional),
+     *     'tipos' => ID => nombre de TODOS los tipos de retencion (opcional),
+     *     'nombres_locales' => nro => nombre (opcional)
      * ]
      * @return array ['pagos', 'reemplazados', 'facturas', 'imputaciones', 'pagadas_nuevas',
      *                'fuera_horizonte', 'kpis', 'avisos']
@@ -711,6 +615,8 @@ class AlquileresImputacion {
     public static function aplicar($e) {
         $hoy = $e['hoy'];
         $dias = $e['dias'] ?? [];
+        $tipos = $e['tipos'] ?? [];
+        $nombresLoc = $e['nombres_locales'] ?? [];
         $avisos = [];
         $pend = [];
 
@@ -721,7 +627,7 @@ class AlquileresImputacion {
         $enHorizonte = array_flip($e['meses_pago']);
         $ctx = $e['ctx'];
 
-        /* 1. EL ESTADO DE CADA CUOTA IMPUTADA, y que grupos se leen. */
+        /* 1. EL ESTADO DE CADA CUOTA IMPUTADA, y que imputaciones se leen. */
         $grupos = [];
         $cuotaImp = [];
         $pagadasNuevas = [];
@@ -754,17 +660,8 @@ class AlquileresImputacion {
             $grupos[$imp['id']] = $g;
         }
 
-        /* 2. LOS PESOS DE CADA RENGLON, con la proyeccion ORIGINAL. */
-        foreach ($grupos as $id => $g) {
-            foreach ($g['renglones'] as $k => $r) {
-                $pl = self::pesosLocales($r, $e['pagos']);
-                $grupos[$id]['renglones'][$k]['pesos'] = $pl['pesos'];
-                $grupos[$id]['renglones'][$k]['iguales'] = $pl['iguales'];
-            }
-        }
-
-        /* 3. EL REEMPLAZO: fuera de la proyeccion lo que cubre algun renglon
-              de un grupo que reemplaza. */
+        /* 2. EL REEMPLAZO: fuera de la proyeccion lo que cubre una imputacion
+              que reemplaza. */
         $proyeccion = [];
         $reemplazados = [];
 
@@ -772,16 +669,9 @@ class AlquileresImputacion {
             $por = null;
 
             foreach ($grupos as $id => $g) {
-                if (!$g['reemplaza']) {
-                    continue;
-                }
-
-                foreach ($g['renglones'] as $r) {
-                    if ($r['mes'] === $p['mes_pago'] && in_array((int) $p['nro'], array_map('intval', $r['locales']), true)
-                        && self::cubre($p, $r['conceptos'])) {
-                        $por = ['imputacion' => $id, 'renglon' => $r['orden']];
-                        break 2;
-                    }
+                if ($g['reemplaza'] && self::cubre($p, $g)) {
+                    $por = $id;
+                    break;
                 }
             }
 
@@ -792,95 +682,75 @@ class AlquileresImputacion {
             }
         }
 
-        /* 4. LAS PIEZAS: cada cuota pendiente de un grupo que se lee, repartida
-              en renglon x local, en la fecha de la cuota. */
+        /* 3. LAS PIEZAS: una por cuota pendiente de una imputacion que se lee,
+              en la fecha de la cuota, por su pendiente menos su retencion. */
         $piezas = [];
         $fuera = 0.0;
-        $iguales = [];
+        $resumen = [];
 
         foreach ($grupos as $id => $g) {
+            $resumen[$id] = self::resumen($g, $tipos, $nombresLoc, $enHorizonte);
+
             if ($g['suspendida']) {
                 continue;
             }
 
             foreach ($g['facturas'] as $k => $f) {
+                $fila = $pend[self::claveCuota($f)] ?? null;
+                $dia = ($fila === null) ? null
+                    : self::fechaDePago(self::vtoAConsiderar($fila, $e['vtos'], $dias), $e['habiles'], $hoy);
+                $resumen[$id]['facturas'][$k]['fecha_pago'] = ($dia === null) ? null : $dia['fecha'];
+                $resumen[$id]['facturas'][$k]['vto_considerar'] = ($fila === null) ? null
+                    : self::vtoAConsiderar($fila, $e['vtos'], $dias);
+
                 if ($g['estados'][$k]['estado'] !== self::IMPUTADA) {
                     continue;
                 }
 
-                $fila = $pend[self::claveCuota($f)];
                 $total = round((float) $fila['IMPORTE_PENDIENTE'], 2);
                 $ret = min(round((float) $f['RETENCION'], 2), $total);
-                $dia = self::fechaDePago(self::vtoAConsiderar($fila, $e['vtos'], $dias), $e['habiles'], $hoy);
-                $nota = self::notaFecha($dia);
-                $pesos = [];
+                $mesPago = substr($dia['fecha'], 0, 7);
+                $pago = [
+                    'nro' => null,
+                    'cod_provee' => Planilla::codigo($g['cod_provee']),
+                    'mes_pago' => $mesPago,
+                    'fecha' => $dia['fecha'],
+                    'concepto' => 'FACTURA:' . $id . ':' . self::claveCuota($f),
+                    'grupo' => self::GRUPO_FACTURAS,
+                    'mes_concepto' => $g['mes'],
+                    'origen' => AlquileresCalculo::FACTURA,
+                    'vencimiento' => $dia['vencimiento'],
+                    'corrida' => $dia['corrida'],
+                    'vencido' => $dia['vencido'],
+                    'faltan_calendario' => $dia['faltan_calendario'],
+                    'nota_dia' => self::notaFecha($dia),
+                    /* EL NETO DE UNA FACTURA ES SU IMPORTE, con IVA y
+                       percepciones: no se abre en impuestos. 'con_iva' se lo
+                       dice al tooltip. */
+                    'neto' => $total,
+                    'iva' => 0.0,
+                    'percepcion' => 0.0,
+                    'retencion' => $ret,
+                    'a_pagar' => round($total - $ret, 2),
+                    'detalle' => [
+                        'imputacion' => $id,
+                        'factura' => $f['T_COMP'] . ' ' . $f['N_COMP'],
+                        'cod_provee' => Planilla::codigo($g['cod_provee']),
+                        'mes_cubre' => $g['mes'],
+                        'con_iva' => true
+                    ]
+                ];
 
-                foreach ($g['renglones'] as $r) {
-                    foreach ($r['pesos'] as $nro => $w) {
-                        $pesos[$r['orden'] . '|' . $nro] = $r['importe'] * $w;
-                    }
-
-                    if ($r['iguales'] && $r['conceptos'] !== [self::OTROS] && count($r['locales']) > 1) {
-                        $iguales[$id . '|' . $r['orden']] = 'imputación ' . $id . ', renglón ' . $r['orden']
-                            . ' (' . $r['mes'] . ')';
-                    }
+                if (!isset($enHorizonte[$mesPago])) {
+                    $fuera += $pago['a_pagar'];
+                    continue;
                 }
 
-                $importes = self::repartirCentavos($total, $pesos);
-                $retenciones = self::repartirCentavos($ret, $pesos);
-                $porOrden = array_column($g['renglones'], null, 'orden');
-
-                foreach ($importes as $pk => $imp) {
-                    list($orden, $nro) = explode('|', $pk);
-                    $r = $porOrden[(int) $orden];
-                    $rt = $retenciones[$pk];
-                    $mesPago = substr($dia['fecha'], 0, 7);
-                    $pago = [
-                        'nro' => (int) $nro,
-                        'mes_pago' => $mesPago,
-                        'fecha' => $dia['fecha'],
-                        'concepto' => 'FACTURA:' . $id . ':' . $orden,
-                        'grupo' => self::grupoDeRenglon($r['conceptos']),
-                        'mes_concepto' => $r['mes'],
-                        'origen' => AlquileresCalculo::FACTURA,
-                        'vencimiento' => $dia['vencimiento'],
-                        'corrida' => $dia['corrida'],
-                        'vencido' => $dia['vencido'],
-                        'faltan_calendario' => $dia['faltan_calendario'],
-                        'nota_dia' => $nota,
-                        /* EL NETO DE UNA PIEZA ES EL IMPORTE DE LA FACTURA, con IVA y
-                           percepciones: la factura no se abre en impuestos por
-                           local. 'con_iva' se lo dice al tooltip. */
-                        'neto' => $imp,
-                        'iva' => 0.0,
-                        'percepcion' => 0.0,
-                        'retencion' => $rt,
-                        'a_pagar' => round($imp - $rt, 2),
-                        'detalle' => [
-                            'imputacion' => $id,
-                            'renglon' => (int) $orden,
-                            'conceptos' => $r['conceptos'],
-                            'mes_cubre' => $r['mes'],
-                            'factura' => $fila['T_COMP'] . ' ' . $fila['N_COMP'],
-                            'cod_provee' => $fila['COD_PROVEE'],
-                            'razon' => $fila['RAZON_SOC'] ?? '',
-                            'reparto' => $r['iguales'] ? 'IGUAL' : 'PROYECTADO',
-                            'peso' => $r['pesos'][(int) $nro],
-                            'con_iva' => true
-                        ]
-                    ];
-
-                    if (!isset($enHorizonte[$mesPago])) {
-                        $fuera += $pago['a_pagar'];
-                        continue;
-                    }
-
-                    $piezas[] = $pago;
-                }
+                $piezas[] = $pago;
             }
         }
 
-        /* 5. LA GRILLA DE FACTURAS. */
+        /* 4. LA GRILLA DE FACTURAS. */
         $filas = [];
         $sinImputar = ['n' => 0, 'importe' => 0.0];
         $porComp = [];
@@ -917,14 +787,13 @@ class AlquileresImputacion {
                 }
             }
 
-            $pendiente = round((float) $p['IMPORTE_PENDIENTE'], 2);
-
             if ($estado === self::SIN_IMPUTAR || $estado === self::SUSPENDIDA) {
                 $sinImputar['n']++;
-                $sinImputar['importe'] += $pendiente;
+                $sinImputar['importe'] += round((float) $p['IMPORTE_PENDIENTE'], 2);
             }
 
-            $filas[] = self::filaFactura($p, $e['vtos'], $dias, $e['habiles'], $hoy, $estado, $g, $f);
+            $filas[] = self::filaFactura($p, $e['vtos'], $dias, $e['habiles'], $hoy, $estado, $g, $f,
+                ($id === null) ? null : $resumen[$id]);
         }
 
         /* Las ya pagadas del mes, por cuota: con ellas se completan las filas de
@@ -948,18 +817,18 @@ class AlquileresImputacion {
 
                 $c = self::claveCuota($f);
                 $fila = isset($pagadasMes[$c]) ? ['IMPORTE_PENDIENTE' => 0.0] + $pagadasMes[$c]
-                    : ['COD_PROVEE' => $f['COD_PROVEE'], 'RAZON_SOC' => $f['RAZON_SOC'] ?? '',
+                    : ['COD_PROVEE' => $f['COD_PROVEE'], 'RAZON_SOC' => $resumen[$id]['razon'] ?? '',
                        'T_COMP' => $f['T_COMP'], 'N_COMP' => $f['N_COMP'], 'FECHA_VTO' => $f['FECHA_VTO_TANGO'],
                        'FECHA_EMIS' => null, 'IMPORTE_VTO' => null, 'IMPORTE_PENDIENTE' => 0.0, 'LEYENDA' => ''];
 
                 $filas[] = array_merge(self::filaFactura($fila, $e['vtos'], $dias, $e['habiles'], $hoy, $s['estado'],
-                    $g, $f), ['fecha_pagada' => $s['fecha']]);
+                    $g, $f, $resumen[$id]), ['fecha_pagada' => $s['fecha']]);
             }
         }
 
         /* LAS PAGADAS DEL MES QUE NADIE IMPUTO: no se pagan (la plata ya salio),
-           pero la proyeccion del mes que cubren sigue en el flujo. Se imputan
-           por el importe de la cuota; imputadas y pagadas, la reemplazan. */
+           pero la proyeccion de su mes sigue en el flujo. Se imputan por el
+           importe de la cuota; imputadas y pagadas, la reemplazan. */
         $pagadasSin = ['n' => 0, 'importe' => 0.0];
 
         foreach ($pagadasMes as $c => $p) {
@@ -970,10 +839,10 @@ class AlquileresImputacion {
             $pagadasSin['n']++;
             $pagadasSin['importe'] += (float) $p['IMPORTE_VTO'];
             $filas[] = array_merge(self::filaFactura($p, $e['vtos'], $dias, $e['habiles'], $hoy,
-                self::PAGADA_SIN_IMPUTAR, null, null), ['fecha_pagada' => $p['FECHA_CANCELADO'] ?? null]);
+                self::PAGADA_SIN_IMPUTAR, null, null, null), ['fecha_pagada' => $p['FECHA_CANCELADO'] ?? null]);
         }
 
-        /* 6. LOS AVISOS. */
+        /* 5. LOS AVISOS. */
         if ($sinImputar['n'] > 0) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinImputar['n'] . ' factura(s) de alquiler sin imputar por '
                 . self::plata($sinImputar['importe']) . ': no suman hasta que se imputen.', 'Facturas');
@@ -993,7 +862,7 @@ class AlquileresImputacion {
 
         foreach ($grupos as $id => $g) {
             if ($g['suspendida']) {
-                $suspendidas[] = $id;
+                $suspendidas[] = '#' . $id;
             }
 
             foreach ($g['facturas'] as $k => $f) {
@@ -1003,7 +872,7 @@ class AlquileresImputacion {
                 if ($s['estado'] === self::IMPUTADA && $s['cambio'] !== null) {
                     $cambios[] = $nom . ' (' . self::plata((float) $f['PENDIENTE']) . ' → ' . self::plata($s['cambio']) . ')';
                 } elseif ($s['estado'] === self::ANULADA) {
-                    $anuladas[] = $nom . ' (imputación ' . $id . ($g['reemplaza'] ? '' : ', ya no reemplaza') . ')';
+                    $anuladas[] = $nom . ' (imputación #' . $id . ($g['reemplaza'] ? '' : ', ya no reemplaza') . ')';
                 } elseif ($s['estado'] === self::SIN_DATO) {
                     $sinDato[] = $nom;
                 }
@@ -1013,7 +882,7 @@ class AlquileresImputacion {
         if (!empty($cambios)) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Cambió en Tango el pendiente de ' . count($cambios)
                 . ' factura(s) imputada(s) sin cancelarse: ' . implode('; ', $cambios) . '. Se proyecta el '
-                . 'pendiente nuevo menos la retención; revisá la imputación.', 'Facturas');
+                . 'pendiente nuevo menos su retención; revisá la imputación.', 'Facturas');
         }
 
         if (!empty($anuladas)) {
@@ -1035,11 +904,6 @@ class AlquileresImputacion {
                 . 'facturas no suman. Deshacelas.', 'Facturas');
         }
 
-        if (!empty($iguales)) {
-            $avisos[] = Aviso::nuevo(Aviso::INFO, 'Sin nada proyectado para repartir, se repartió en partes '
-                . 'iguales entre los locales: ' . implode('; ', $iguales) . '.', 'Facturas');
-        }
-
         if (!empty($e['excluidas'])) {
             $avisos[] = Aviso::nuevo(Aviso::INFO, count($e['excluidas']) . ' factura(s) por '
                 . self::plata(array_sum(array_map(function ($p) { return (float) $p['IMPORTE_PENDIENTE']; },
@@ -1057,10 +921,7 @@ class AlquileresImputacion {
             'pagos' => array_merge($proyeccion, $piezas),
             'reemplazados' => $reemplazados,
             'facturas' => $filas,
-            'imputaciones' => array_values(array_map(function ($g) {
-                return array_intersect_key($g, array_flip(['id', 'usuario', 'fecha', 'observacion',
-                    'facturas', 'renglones', 'suspendida', 'reemplaza']));
-            }, $grupos)),
+            'imputaciones' => array_values($resumen),
             'pagadas_nuevas' => $pagadasNuevas,
             'fuera_horizonte' => round($fuera, 2),
             'kpis' => [
@@ -1069,9 +930,52 @@ class AlquileresImputacion {
                 'imputadas_n' => count($imputadas),
                 'imputadas_a_pagar' => round(array_sum(array_column($imputadas, 'a_pagar')), 2),
                 'pagadas_sin_imputar_n' => $pagadasSin['n'],
-                'pagadas_sin_imputar_importe' => round($pagadasSin['importe'], 2)
+                'pagadas_sin_imputar_importe' => round($pagadasSin['importe'], 2),
+                'reemplazado_a_pagar' => round(array_sum(array_column($reemplazados, 'a_pagar')), 2)
             ],
             'avisos' => $avisos
+        ];
+    }
+
+    /**
+     * Lo que se muestra de una imputacion: en la lista de vigentes, en el
+     * tooltip de "Facturas imputadas" y en la grilla de Facturas.
+     */
+    private static function resumen($g, $tipos, $nombresLoc, $enHorizonte) {
+        $facturas = [];
+
+        foreach ($g['facturas'] as $k => $f) {
+            $facturas[$k] = ['comprobante' => $f['T_COMP'] . ' ' . $f['N_COMP'], 'pendiente' => (float) $f['PENDIENTE'],
+                             'retencion' => (float) $f['RETENCION'], 'estado' => $g['estados'][$k]['estado'],
+                             'fecha_pago' => null, 'vto_considerar' => null];
+        }
+
+        $totalF = round((float) ($g['total_facturas'] ?? array_sum(array_column($g['facturas'], 'PENDIENTE'))), 2);
+        $totalR = round((float) ($g['total_retenciones'] ?? array_sum(array_column($g['facturas'], 'RETENCION'))), 2);
+
+        return [
+            'id' => $g['id'],
+            'cod_provee' => Planilla::codigo($g['cod_provee']),
+            'razon' => $g['razon'] ?? '',
+            'mes' => $g['mes'],
+            'fuera_horizonte' => !isset($enHorizonte[$g['mes']]),
+            'todos' => !empty($g['todos']),
+            'locales' => array_map(function ($n) use ($nombresLoc) {
+                return ['nro' => (int) $n, 'nombre' => $nombresLoc[(int) $n] ?? (string) $n];
+            }, $g['locales']),
+            'retenciones' => array_map(function ($r) use ($tipos) {
+                return ['tipo' => (int) $r['tipo'], 'nombre' => $tipos[(int) $r['tipo']] ?? ('tipo ' . $r['tipo']),
+                        'importe' => (float) $r['importe']];
+            }, $g['retenciones'] ?? []),
+            'total_facturas' => $totalF,
+            'total_retenciones' => $totalR,
+            'total_a_pagar' => round($totalF - $totalR, 2),
+            'usuario' => $g['usuario'] ?? null,
+            'fecha' => $g['fecha'] ?? null,
+            'observacion' => $g['observacion'] ?? null,
+            'facturas' => $facturas,
+            'suspendida' => $g['suspendida'],
+            'reemplaza' => $g['reemplaza']
         ];
     }
 
@@ -1088,7 +992,7 @@ class AlquileresImputacion {
             $ahora = round((float) $pend[$c]['IMPORTE_PENDIENTE'], 2);
 
             return ['estado' => self::IMPUTADA, 'fecha' => null,
-                    'cambio' => (abs($ahora - round((float) $f['PENDIENTE'], 2)) > 0.005) ? $ahora : null];
+                    'cambio' => (abs($ahora - round((float) $f['PENDIENTE'], 2)) > self::CENTAVO) ? $ahora : null];
         }
 
         if (($f['ESTADO'] ?? null) === self::PAGADA) {
@@ -1133,8 +1037,7 @@ class AlquileresImputacion {
             foreach ($imp['facturas'] as $f) {
                 if (Planilla::codigo($f['COD_PROVEE']) === $cod && isset($pendientes[self::claveCuota($f)])) {
                     $out[] = ['imputacion' => $imp['id'], 'factura' => $f['T_COMP'] . ' ' . $f['N_COMP'],
-                              'meses' => array_values(array_unique(array_column($imp['renglones'], 'mes'))),
-                              'usuario' => $imp['usuario'], 'fecha' => $imp['fecha']];
+                              'meses' => [$imp['mes']], 'usuario' => $imp['usuario'], 'fecha' => $imp['fecha']];
                 }
             }
         }
@@ -1147,7 +1050,7 @@ class AlquileresImputacion {
         return 'No se puede dar de baja ' . $cod . ': tiene imputaciones de facturas todavía pendientes, que '
             . 'volverían a Proveedores Locales. Deshacelas primero en Alquileres › Facturas: '
             . implode('; ', array_map(function ($b) {
-                return 'imputación ' . $b['imputacion'] . ' — ' . $b['factura'] . ', cubre '
+                return 'imputación #' . $b['imputacion'] . ' — ' . $b['factura'] . ', cubre '
                     . implode(', ', $b['meses']) . ', la cargó ' . ($b['usuario'] ?: '—') . ' el ' . $b['fecha'];
             }, $bloquean)) . '.';
     }
@@ -1174,8 +1077,12 @@ class AlquileresImputacion {
         return array_values($pares);
     }
 
-    /** Una fila de la grilla de Facturas */
-    private static function filaFactura($p, $vtos, $dias, $habiles, $hoy, $estado, $g, $f) {
+    /**
+     * Una fila de la grilla de Facturas. La retencion es LA PARTE DE ESTA
+     * CUOTA del total de retenciones de su imputacion; el tooltip abre los
+     * tipos con lo de 'imputacion_resumen'.
+     */
+    private static function filaFactura($p, $vtos, $dias, $habiles, $hoy, $estado, $g, $f, $resumen) {
         $c = self::claveCuota($p);
         $vto = self::vtoAConsiderar($p, $vtos, $dias);
         $pendiente = round((float) $p['IMPORTE_PENDIENTE'], 2);
@@ -1204,13 +1111,13 @@ class AlquileresImputacion {
             'a_imputar' => ($estado === self::PAGADA_SIN_IMPUTAR) ? round((float) $p['IMPORTE_VTO'], 2) : $pendiente,
             /* Emitida en el mes en curso: las pagadas del mes se ven sin "Ver pagadas". */
             'del_mes' => substr((string) ($p['FECHA_EMIS'] ?? ''), 0, 7) === substr($hoy, 0, 7),
-            'neto_gravado' => AlquileresFacturas::netoDeCuota($p),
             'retencion' => $ret,
-            'a_pagar' => round($pendiente - ($ret ?? 0.0), 2),
+            'a_pagar' => round($pendiente - min($ret ?? 0.0, $pendiente), 2),
             'estado' => $estado,
             'imputacion' => ($g === null) ? null : $g['id'],
             'imputacion_usuario' => ($g === null) ? null : ($g['usuario'] ?? null),
             'imputacion_fecha' => ($g === null) ? null : ($g['fecha'] ?? null),
+            'imputacion_resumen' => ($resumen === null) ? null : array_diff_key($resumen, ['facturas' => true]),
             'pendiente_al_imputar' => ($f === null) ? null : round((float) $f['PENDIENTE'], 2),
             'fecha_pagada' => null
         ];
@@ -1224,5 +1131,14 @@ class AlquileresImputacion {
         $f = substr((string) $fecha, 0, 10);
 
         return (strlen($f) === 10) ? substr($f, 8, 2) . '/' . substr($f, 5, 2) . '/' . substr($f, 0, 4) : $f;
+    }
+
+    /** '2026-11' -> 'noviembre de 2026' */
+    public static function mesLargo($mes) {
+        $nombres = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre',
+                    'octubre', 'noviembre', 'diciembre'];
+        $n = (int) substr((string) $mes, 5, 2);
+
+        return ($n >= 1 && $n <= 12) ? $nombres[$n - 1] . ' de ' . substr((string) $mes, 0, 4) : (string) $mes;
     }
 }

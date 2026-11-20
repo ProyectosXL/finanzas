@@ -11,8 +11,9 @@ require_once __DIR__ . '/../Alquileres.php';
  *
  *   REAL        las facturas de Tango imputadas en la pestaña, en su fecha de
  *               pago (el vencimiento a considerar, o el siguiente habil desde
- *               hoy si ya paso) y por su a pagar (pendiente - retencion)
- *   PROYECTADO  la proyeccion por local que ninguna factura reemplazo
+ *               hoy si ya paso) y por su a pagar (pendiente menos su parte de
+ *               las retenciones de la imputacion)
+ *   PROYECTADO  la proyeccion que ninguna factura reemplazo
  *   PAGOS       las dos juntas: la serie de la fila de antes del split
  *
  * La fila del tablero es AGRUPADA: REAL y PROYECTADO en un renglon que se abre
