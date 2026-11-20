@@ -123,6 +123,9 @@ class AuthCashflow {
             'altaRazonLocal' => [['parametros', 'ALQUILERES']],
             'bajaRazonLocal' => [['parametros', 'ALQUILERES']],
             'guardarConceptosRazon' => [['parametros', 'ALQUILERES']],
+            'altaTipoRetencion' => [['parametros', 'ALQUILERES']],
+            'renombrarTipoRetencion' => [['parametros', 'ALQUILERES']],
+            'bajaTipoRetencion' => [['parametros', 'ALQUILERES']],
             'altaExtra' => [['parametros', 'ALQUILERES']],
             'bajaExtra' => [['parametros', 'ALQUILERES']],
             /* La sub-pestaña Facturas: el vencimiento a considerar y la

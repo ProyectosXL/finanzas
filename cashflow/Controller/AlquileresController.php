@@ -48,6 +48,7 @@ try {
     require_once __DIR__ . '/../Class/Alquileres.php';
     require_once __DIR__ . '/../Class/AlquileresImputaciones.php';
     require_once __DIR__ . '/../Class/AlquileresFacturaVto.php';
+    require_once __DIR__ . '/../Class/AlquileresTiposRetencion.php';
     require_once __DIR__ . '/../Class/AlquileresUniverso.php';
     require_once __DIR__ . '/../Class/Proveedores.php';
 
@@ -262,6 +263,28 @@ try {
             $data = bodyJson();
             $r = $par->bajaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $usuario);
             responder($r, $r['cod'] . ' ya no es razón social de ese local. No se borra: queda en el historial.');
+            break;
+
+        /* LOS TIPOS DE RETENCION de las imputaciones. Renombrar es baja y alta:
+           una imputacion vieja sigue mostrando el nombre con el que se cargo. */
+        case 'altaTipoRetencion':
+            $data = bodyJson();
+            $r = (new AlquileresTiposRetencion())->alta($data['nombre'] ?? '', $usuario);
+            responder($r, 'Tipo de retención «' . $r['nombre'] . '» dado de alta: ya se puede elegir al imputar.');
+            break;
+
+        case 'renombrarTipoRetencion':
+            $data = bodyJson();
+            $r = (new AlquileresTiposRetencion())->renombrar($data['id'] ?? 0, $data['nombre'] ?? '', $usuario);
+            responder($r, $r['igual'] ? 'El nombre no cambió.' : 'Tipo de retención renombrado a «' . $r['nombre']
+                . '». Las imputaciones que ya lo usan siguen mostrando el nombre anterior.');
+            break;
+
+        case 'bajaTipoRetencion':
+            $data = bodyJson();
+            $r = (new AlquileresTiposRetencion())->baja($data['id'] ?? 0, $usuario);
+            responder($r, 'Tipo de retención dado de baja: ya no se ofrece para imputar. Las imputaciones que lo '
+                . 'usan lo siguen mostrando, y queda en el historial.');
             break;
 
         case 'altaExtra':

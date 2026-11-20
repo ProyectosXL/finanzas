@@ -141,6 +141,48 @@ chequear('el script existe y crea la tabla con su indice unico filtrado', [true,
     strpos($script62, 'WHERE VIGENTE = 1') !== false]);
 chequear('el script no borra nada', false, (bool) preg_match('/\b(DROP|DELETE|TRUNCATE)\b/i', $script62));
 
+seccion('Tipos de retencion: el nombre');
+
+require_once __DIR__ . '/../Class/AlquileresTiposRetencion.php';
+
+$tiposVig = [['id' => 1, 'nombre' => 'Ganancias'], ['id' => 2, 'nombre' => 'IIBB Santa Fe'],
+             ['id' => 3, 'nombre' => 'IIBB CABA'], ['id' => 4, 'nombre' => 'IIBB Bs As']];
+chequear('alta: un nombre nuevo, con los espacios limpios', 'IIBB Córdoba',
+    AlquileresTiposRetencion::validarNombre('  IIBB   Córdoba ', $tiposVig));
+chequearLanza('alta: un nombre repetido no', function () use ($tiposVig) {
+    AlquileresTiposRetencion::validarNombre('Ganancias', $tiposVig);
+});
+chequearLanza('sin distinguir mayusculas', function () use ($tiposVig) {
+    AlquileresTiposRetencion::validarNombre('iibb caba', $tiposVig);
+});
+chequearLanza('ni acentos', function () use ($tiposVig) {
+    AlquileresTiposRetencion::validarNombre('Gananciás', $tiposVig);
+});
+chequearLanza('vacio no', function () use ($tiposVig) {
+    AlquileresTiposRetencion::validarNombre('   ', $tiposVig);
+});
+chequear('edicion: el propio nombre no choca consigo mismo', 'GANANCIAS',
+    AlquileresTiposRetencion::validarNombre('GANANCIAS', $tiposVig, 1));
+chequearLanza('edicion: pero si con otro vigente', function () use ($tiposVig) {
+    AlquileresTiposRetencion::validarNombre('IIBB CABA', $tiposVig, 1);
+});
+chequear('un dado de baja no cuenta: su nombre se puede volver a usar', 'Viejo',
+    AlquileresTiposRetencion::validarNombre('Viejo', $tiposVig));
+
+$script60 = (string) @file_get_contents(__DIR__ . '/../' . AlquileresTiposRetencion::SCRIPT);
+chequear('el script 60 crea la tabla, con nombre CI_AI e indice unico filtrado', [true, true, true], [
+    strpos($script60, 'CREATE TABLE dbo.' . AlquileresTiposRetencion::T_TIPO) !== false,
+    strpos($script60, 'COLLATE Latin1_General_CI_AI NOT NULL') !== false,
+    (bool) preg_match('/UX_RO_T_CF_ALQTRET_VIGENTE\s+ON dbo\.RO_T_CASHFLOW_ALQ_TIPO_RETENCION \(NOMBRE\)\s+WHERE VIGENTE = 1/', $script60)]);
+chequear('y siembra los cuatro sin pisar', [true, true],
+    [strpos($script60, "('Ganancias'), ('IIBB Santa Fe'), ('IIBB CABA'), ('IIBB Bs As')") !== false,
+     strpos($script60, 'WHERE NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_ALQ_TIPO_RETENCION T WHERE T.NOMBRE = S.NOMBRE)') !== false]);
+$clsTipos = file_get_contents(__DIR__ . '/../Class/AlquileresTiposRetencion.php');
+chequear('toda escritura de tipos pasa por usuarioDeEscritura', 3,
+    substr_count($clsTipos, '$usuario = AuthCashflow::usuarioDeEscritura($usuario);'));
+chequear('renombrar es baja y alta, no un UPDATE del nombre', false,
+    (bool) preg_match('/SET NOMBRE\s*=/', $clsTipos));
+
 seccion('AlquileresParametros: el universo del buscador es la columna RUBRO');
 
 $mapa = [
@@ -168,7 +210,8 @@ chequear('su permiso es cashflow.editar.parametros.alquileres', 'cashflow.editar
     AuthCashflow::claveEdicion('parametros', 'ALQUILERES'));
 
 $acciones = ['guardarGeneral', 'altaRazon', 'guardarRazon', 'bajaRazon', 'guardarLocal', 'altaRazonLocal',
-             'bajaRazonLocal', 'guardarConceptosRazon', 'altaExtra', 'bajaExtra'];
+             'bajaRazonLocal', 'guardarConceptosRazon', 'altaTipoRetencion', 'renombrarTipoRetencion',
+             'bajaTipoRetencion', 'altaExtra', 'bajaExtra'];
 $malas = [];
 foreach ($acciones as $a) {
     if ((AuthCashflow::ESCRITURAS['Alquileres'][$a] ?? null) !== [['parametros', 'ALQUILERES']]) {

@@ -1973,3 +1973,20 @@ chequear('sin el script 62 el selector se deshabilita y lo nombra', true,
     strpos($jsPalq, "'Falta correr ' + datos.script_conceptos_razon") !== false);
 chequear('sin permiso, Permisos.soloLectura apaga la grilla de locales', true,
     strpos($jsPalq, "Permisos.soloLectura(cuerpo);\n    }\n\n    /**\n     * El contrato del local") !== false);
+
+seccion('Parametros > Alquileres: la seccion Tipos de retencion');
+
+$tabPalq = file_get_contents($TABS . '/parametros_alquileres.php');
+$jsPalq = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros-Alquileres.js'));
+chequear('la seccion esta, con su grilla', [true, true],
+    [strpos($tabPalq, '<h5 class="mb-0">Tipos de retención</h5>') !== false, strpos($tabPalq, 'id="palqTiposBody"') !== false]);
+chequear('el alta solo se dibuja con permiso', true,
+    (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<div class="card-body border-bottom" id="palqTipoForm">/', $tabPalq));
+chequear('el JS da de alta, renombra y da de baja', [true, true, true], [
+    strpos($jsPalq, "escribir('altaTipoRetencion'") !== false,
+    strpos($jsPalq, "escribir('renombrarTipoRetencion'") !== false,
+    strpos($jsPalq, "escribir('bajaTipoRetencion'") !== false]);
+chequear('muestra quien hizo el ultimo cambio', true,
+    strpos($jsPalq, "Auditoria.linea('modif', t.usuario_modif, t.fecha_modif)") !== false);
+chequear('sin el script 60 se deshabilita nombrandolo', true,
+    strpos($jsPalq, "'Falta correr ' + datos.script_imputacion") !== false);

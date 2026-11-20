@@ -7,6 +7,7 @@ require_once __DIR__ . '/AlquileresCalculo.php';
 require_once __DIR__ . '/AlquileresVenta.php';
 require_once __DIR__ . '/AlquileresPago.php';
 require_once __DIR__ . '/AlquileresImputacion.php';
+require_once __DIR__ . '/AlquileresTiposRetencion.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Inflacion.php';
 
@@ -139,7 +140,12 @@ class Alquileres {
             }
         }
 
+        $tipos = $this->tiposRetencion($avisos);
+
         return [
+            'tipos_retencion' => $tipos['todos'],
+            'tabla_tipos_retencion' => $tipos['tabla'],
+            'script_imputacion' => AlquileresTiposRetencion::SCRIPT,
             'rubro_sin_fila' => $sinFila,
             'tabla_creada' => $this->par->tablaCreada(),
             'script' => AlquileresParametros::SCRIPT,
@@ -507,6 +513,37 @@ class Alquileres {
 
             return false;
         }
+    }
+
+    /**
+     * Los tipos de retencion (script 60): todos, con los dados de baja, para
+     * que Parametros muestre el historial y una imputacion vieja su nombre.
+     * Nunca lanza: sin el script, vacio y el aviso que lo nombra.
+     *
+     * @return array ['tabla' => bool, 'todos' => [...], 'vigentes' => [...], 'nombres' => [id => nombre]]
+     */
+    protected function tiposRetencion(&$avisos) {
+        $out = ['tabla' => false, 'todos' => [], 'vigentes' => [], 'nombres' => []];
+
+        try {
+            $t = new AlquileresTiposRetencion();
+            $out['tabla'] = $t->tablaCreada();
+
+            if (!$out['tabla']) {
+                $avisos[] = Aviso::nuevo(Aviso::DANGER, $t->avisoSinTabla(), 'Tipos de retención');
+
+                return $out;
+            }
+
+            $out['todos'] = $t->todos();
+            $out['vigentes'] = array_values(array_filter($out['todos'], function ($x) { return $x['vigente']; }));
+            $out['nombres'] = array_column($out['todos'], 'nombre', 'id');
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los tipos de retención ('
+                . $e->getMessage() . ').', 'Tipos de retención');
+        }
+
+        return $out;
     }
 
     /** Si se pueden marcar los conceptos de una razon social adicional (script 62). Nunca lanza. */

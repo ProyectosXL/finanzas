@@ -1,8 +1,9 @@
 /**
  * Parametros -> Alquileres
  *
- * Cuatro secciones: el dia de vencimiento general, las razones sociales dadas
- * de alta, los datos de cada local de la app de alquileres y los pagos
+ * Cinco secciones: el dia de vencimiento general, las razones sociales dadas
+ * de alta, los datos de cada local de la app de alquileres (con los conceptos
+ * que factura cada razon social), los tipos de retencion y los pagos
  * extraordinarios.
  *
  * LA VALIDACION MANDA EN EL SERVIDOR (AlquileresParametros). Aca solo se
@@ -72,6 +73,7 @@
         pintarGeneral();
         pintarRazones();
         pintarLocales();
+        pintarTipos();
         pintarExtraForm();
         pintarExtras();
         bloquearSinTabla();
@@ -83,7 +85,7 @@
 
         var titulo = 'Falta correr ' + datos.script;
 
-        document.querySelectorAll('.palq-modulo input:not(#palqFiltroIncompletos), .palq-modulo select, .palq-modulo button:not([data-lectura])')
+        document.querySelectorAll('.palq-modulo input:not(#palqFiltroIncompletos):not(#palqTiposHistorial), .palq-modulo select, .palq-modulo button:not([data-lectura])')
             .forEach(function(el) {
                 el.disabled = true;
                 el.title = titulo;
@@ -529,7 +531,97 @@
     }
 
     /* ================================================================
-       4. PAGOS EXTRAORDINARIOS
+       4. TIPOS DE RETENCION
+       ================================================================ */
+
+    /**
+     * Los tipos con los que se cargan las retenciones de una imputación. El
+     * nombre se edita en la grilla y se guarda al salir del campo; renombrar
+     * es baja y alta en el servidor, así una imputación vieja sigue con el
+     * nombre que tenía. Sin el script 60, la sección se deshabilita y lo dice.
+     */
+    function pintarTipos() {
+        var cuerpo = document.getElementById('palqTiposBody');
+
+        if (!cuerpo) { return; }
+
+        var conHistorial = document.getElementById('palqTiposHistorial').checked;
+        var tipos = (datos.tipos_retencion || []).filter(function(t) { return conHistorial || t.vigente; });
+
+        if (!datos.tabla_tipos_retencion) {
+            cuerpo.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Falta correr '
+                + esc(datos.script_imputacion) + ' contra la base central.</td></tr>';
+            document.querySelectorAll('#palqTipoForm input, #palqTipoForm button').forEach(function(el) {
+                el.disabled = true;
+                el.title = 'Falta correr ' + datos.script_imputacion;
+            });
+            return;
+        }
+
+        if (!tipos.length) {
+            cuerpo.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Ningún tipo de retención.</td></tr>';
+            return;
+        }
+
+        cuerpo.innerHTML = tipos.map(function(t) {
+            var audit = t.vigente ? Auditoria.linea('modif', t.usuario_modif, t.fecha_modif)
+                : Auditoria.linea('baja', t.usuario_baja, t.fecha_baja);
+
+            return '<tr data-id="' + t.id + '" class="' + (t.vigente ? '' : 'text-muted') + '">'
+                + '<td>' + (t.vigente
+                    ? '<input type="text" class="form-control form-control-sm palq-tipo" maxlength="60" value="'
+                        + esc(t.nombre) + '">'
+                    : esc(t.nombre) + (t.id_reemplazo ? ' <small>(renombrado)</small>' : '')) + '</td>'
+                + '<td>' + (t.vigente ? '<span class="badge bg-success">vigente</span>'
+                    : '<span class="badge bg-secondary">dado de baja</span>') + '</td>'
+                + '<td><small class="text-muted">' + esc(audit) + '</small></td>'
+                + '<td class="text-center">' + (t.vigente ? '<button class="btn btn-sm btn-link text-danger p-0 '
+                    + 'palq-tipo-baja" title="Dar de baja"><i class="fas fa-xmark"></i></button>' : '') + '</td>'
+                + '</tr>';
+        }).join('');
+
+        cuerpo.querySelectorAll('.palq-tipo').forEach(function(input) {
+            input.addEventListener('change', function() {
+                escribir('renombrarTipoRetencion', {
+                    id: parseInt(input.closest('tr').getAttribute('data-id'), 10),
+                    nombre: input.value
+                });
+            });
+        });
+
+        cuerpo.querySelectorAll('.palq-tipo-baja').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var id = parseInt(btn.closest('tr').getAttribute('data-id'), 10);
+
+                Notificacion.confirmar({
+                    titulo: 'Dar de baja el tipo de retención',
+                    mensaje: '¿Deja de ofrecerse al imputar?',
+                    detalle: 'Las imputaciones que ya lo usan lo siguen mostrando. No se borra: queda en el historial.',
+                    confirmar: 'Dar de baja',
+                    peligro: true
+                }).then(function(si) {
+                    if (si) { escribir('bajaTipoRetencion', { id: id }); }
+                });
+            });
+        });
+
+        Permisos.soloLectura(cuerpo);
+    }
+
+    function agregarTipo() {
+        var nombre = String(document.getElementById('palqTipoNombre').value || '').trim();
+
+        if (!nombre) {
+            Notificacion.advertencia('Escribí el nombre del tipo de retención.');
+            return;
+        }
+
+        valor('palqTipoNombre', '');
+        escribir('altaTipoRetencion', { nombre: nombre });
+    }
+
+    /* ================================================================
+       5. PAGOS EXTRAORDINARIOS
        ================================================================ */
 
     function pintarExtraForm() {
@@ -765,6 +857,8 @@
         enganchar('palqExtraRazon', 'change', localesDeLaRazon);
         enganchar('palqExtraTodos', 'change', localesDeLaRazon);
         enganchar('palqBtnExtra', 'click', agregarExtra);
+        enganchar('palqBtnTipo', 'click', agregarTipo);
+        enganchar('palqTiposHistorial', 'change', function() { if (datos) { pintarTipos(); } });
 
         document.addEventListener('click', function(ev) {
             var caja = document.getElementById('palqRazonSugerencias');

@@ -8,9 +8,11 @@ $edita = AuthCashflow::puedeEditar('parametros', 'ALQUILERES');
 /**
  * Parametros -> Alquileres
  *
- * Cuatro secciones: el dia de vencimiento general, las razones sociales dadas
- * de alta, los datos de cada local de la app de alquileres y los pagos
- * extraordinarios. Archivo y JS propios, y clases con prefijo palq-.
+ * Cinco secciones: el dia de vencimiento general, las razones sociales dadas
+ * de alta, los datos de cada local de la app de alquileres (con los conceptos
+ * que factura cada razon social), los tipos de retencion de las imputaciones
+ * de facturas y los pagos extraordinarios. Archivo y JS propios, y clases con
+ * prefijo palq-.
  *
  * LAS RAZONES SOCIALES SE DAN DE ALTA. La seccion arranca vacia y el buscador
  * ofrece los proveedores con RUBRO = ALQUILER del maestro de Proveedores
@@ -182,7 +184,61 @@ $edita = AuthCashflow::puedeEditar('parametros', 'ALQUILERES');
     </div>
 
     <!-- ================================================================
-         4. PAGOS EXTRAORDINARIOS
+         4. TIPOS DE RETENCION
+         ================================================================ -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Tipos de retención</h5>
+            <small class="text-muted">
+                Con estos tipos se cargan las retenciones al imputar facturas de alquiler: una línea por
+                tipo. El nombre no puede repetirse (sin distinguir mayúsculas ni acentos). Un tipo
+                <strong>dado de baja</strong> ya no se ofrece para imputar, pero las imputaciones que lo
+                usan lo siguen mostrando. Renombrar también deja el nombre anterior en esas imputaciones.
+            </small>
+        </div>
+
+        <?php if ($edita): ?>
+        <div class="card-body border-bottom" id="palqTipoForm">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label form-label-sm" for="palqTipoNombre">Nuevo tipo</label>
+                    <input type="text" id="palqTipoNombre" class="form-control form-control-sm" maxlength="60"
+                           placeholder="IIBB Córdoba…" autocomplete="off">
+                </div>
+                <div class="col-auto">
+                    <button id="palqBtnTipo" class="btn btn-sm btn-primary">
+                        <i class="fas fa-plus me-1"></i> Agregar
+                    </button>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table id="palqTiposTabla" class="table table-sm table-hover mb-0 align-middle" data-orden="no">
+                    <thead>
+                        <tr>
+                            <th>Tipo</th>
+                            <th style="width: 110px;">Estado</th>
+                            <th>Último cambio</th>
+                            <th style="width: 50px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="palqTiposBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-body py-2 border-top">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="palqTiposHistorial">
+                <label class="form-check-label small" for="palqTiposHistorial">Ver los dados de baja</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         5. PAGOS EXTRAORDINARIOS
          ================================================================ -->
     <div class="card mb-4">
         <div class="card-header">
