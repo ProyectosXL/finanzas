@@ -260,41 +260,6 @@ class AlquileresFacturas {
     }
 
     /* ====================================================================
-       EL NETO GRAVADO
-       ==================================================================== */
-
-    /**
-     * El neto gravado de UNA CUOTA, para sugerir la retencion.
-     *
-     * Tango guarda el neto gravado por COMPROBANTE (CPA04.SUBT_GRAVA) y el
-     * vencimiento por cuota (CPA54), asi que el de la cuota es la parte del neto
-     * que le toca por su importe. Las facturas de alquiler tienen hoy una sola
-     * cuota (10/11/2026) y ahi da el neto entero.
-     *
-     * NULL SI NO HAY DATO, nunca 0: un neto en cero es "Tango no lo trae", y
-     * con null quien sugiere la retencion sabe que tiene que deducirlo del
-     * importe con el IVA y la percepcion de los locales.
-     *
-     * Estatica y pura.
-     *
-     * @param array $item Fila de getPendientes() con NETO_GRAVADO_COMP,
-     *        IMPORTE_COMP e IMPORTE_VTO
-     * @return float|null
-     */
-    public static function netoDeCuota($item) {
-        $neto = isset($item['NETO_GRAVADO_COMP']) ? $item['NETO_GRAVADO_COMP'] : null;
-        $total = isset($item['IMPORTE_COMP']) ? $item['IMPORTE_COMP'] : null;
-        $vto = isset($item['IMPORTE_VTO']) ? $item['IMPORTE_VTO'] : null;
-
-        if ($neto === null || $total === null || $vto === null
-            || floatval($neto) <= 0 || floatval($total) <= 0) {
-            return null;
-        }
-
-        return round(floatval($neto) * floatval($vto) / floatval($total), 2);
-    }
-
-    /* ====================================================================
        LOS QUE NO ESTAN EN NINGUNA FILA
        ==================================================================== */
 

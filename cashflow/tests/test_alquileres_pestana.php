@@ -331,7 +331,7 @@ $proySola = $alqDias->calcular($hDias, $ins)['pagos'];
 $blanco = array_values(array_filter($proySola, function ($p) { return $p['mes_pago'] === '2026-11' && $p['cod_provee'] === 'SAUNIC'; }))[0];
 $facturaT = ['COD_PROVEE' => 'SAUNIC', 'RAZON_SOC' => 'CENCOSUD', 'T_COMP' => 'FAC', 'N_COMP' => 'A0193000155679',
              'FECHA_VTO' => '2026-11-20', 'FECHA_EMIS' => '2026-11-02', 'IMPORTE_VTO' => 1000.0,
-             'IMPORTE_PENDIENTE' => 1000.0, 'NETO_GRAVADO_COMP' => null, 'IMPORTE_COMP' => 1000.0, 'LEYENDA' => ''];
+             'IMPORTE_PENDIENTE' => 1000.0, 'LEYENDA' => ''];
 $sinImputarT = $facturaT;
 $sinImputarT['N_COMP'] = 'A0193000155680';
 $insF = $ins + ['facturas' => [

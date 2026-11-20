@@ -30,7 +30,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ## Para pasar a producción: los scripts, en orden
 
-**Todos van contra `central`, salvo los de permisos**, que van contra `apps`: el de la sección que sigue y el 52, de Alquileres. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
+**Todos van contra `central`, salvo los de permisos**, que van contra `apps`: el de la sección que sigue y el 52, de Alquileres. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. **La única excepción es el 60**, de Alquileres, que borra las imputaciones del modelo de renglones y sus tablas (ver *Alquileres: la imputación por razón social*, más abajo). Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
 
 ### Primero que nada: auditoría y permisos de escritura (`feature/cashflow-auditoria-usuario`)
 
@@ -413,7 +413,7 @@ Las facturas de Tango de las razones sociales dadas de alta en Parámetros › A
 
 | # | Script | Qué hace | Si no se corre |
 | --- | --- | --- | --- |
-| 53 | `sql/cashflow_alquileres_facturas.sql` | El vencimiento a considerar por cuota y la imputación: cabecera, facturas (pendiente al imputar, retención, `PAGADA`), renglones, conceptos y locales, con auditoría e historial | **Las facturas de alquiler siguen en Cuentas a Pagar Locales** (es la condición de seguridad) y las pantallas lo avisan en crítico; no se puede imputar ni cambiar un vencimiento |
+| 53 | `sql/cashflow_alquileres_facturas.sql` | El vencimiento a considerar por cuota (`RO_T_CASHFLOW_ALQ_FACTURA_VTO`), con auditoría e historial. Hasta el 20/11/2026 creaba también la imputación por renglones; esas tablas ahora las borra el 60, y el 53 ya no las crea | **Las facturas de alquiler siguen en Cuentas a Pagar Locales** (es la condición de seguridad) y las pantallas lo avisan en crítico; no se puede cambiar un vencimiento |
 | 54 | `sql/cashflow_prov_exclusion_modulos_ampliar.sql` | Amplía el `CHECK` de `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO` a `PROV_LOCALES`, `TARJETAS_CORP` y `ALQUILERES` | Excluir de Tarjetas o de Alquileres falla con un mensaje que nombra el script; Proveedores Locales funciona como hoy |
 | 55 | `sql/cashflow_alquileres_fila.sql` | Reemplaza la fila *Alquileres* (`ALQUILERES/PAGOS`) por dos filas agrupadas, `ALQUILERES/REAL` y `ALQUILERES/PROYECTADO`, en una transacción; controla al pie que Proveedores Locales no lea `PAGOS_ALQUILERES` | La fila de antes sigue activa y muestra el total, sin abrir |
 
@@ -445,7 +445,7 @@ Para verificar después de correrlos:
 Dos cambios en Alquileres (ver `README-alquileres.md`, partes 3.c y 12):
 
 - **El vencimiento a considerar de una factura sale de Parámetros**: fecha manual > día de la razón social (o el general) en el mes del vencimiento de Tango. **No lleva script.** Al 17/11/2026 mueve 2 de las 4 cuotas pendientes (SAGALL A0005000027187 del 20/11 al 18/11; SACORR A0000200000467 del 18/11 al 15/11, vencida).
-- **Un local puede tener razones sociales adicionales** (San Justo: SASANJ y SAUCCS). La principal sigue mandando en la proyección (día y diferimiento); una adicional permite imputar sus facturas al local y que sus extraordinarios lo alcancen.
+- **Un local puede tener razones sociales adicionales** (San Justo: SASANJ y SAUCCS): sus facturas se imputan al local y sus extraordinarios lo alcanzan. Desde `feature/alquileres-imputacion-razon-social`, cada una factura los conceptos que se le marcan (script 62) y esos se pagan con su día y su diferimiento.
 
 | # | Script | Qué hace | Si no se corre |
 | --- | --- | --- | --- |
@@ -455,6 +455,29 @@ Dos cambios en Alquileres (ver `README-alquileres.md`, partes 3.c y 12):
 Los dos contra `central`, después del 51, en cualquier orden. Reejecutables. **Ningún número cambia al correrlos**: lo que cambia algo es agregar una razón adicional a un local, o pasar un local a *Vigencia del contrato* (XL RURAL, el temporal de La Rural).
 
 Para verificar después de correrlo: en Parámetros › Alquileres › Locales, San Justo → *+ otra razón social* → URBANA CENTROS COMERCIALES; en Alquileres › Facturas, tildar una factura de SAUCCS e imputarla a San Justo.
+
+### Alquileres: la imputación por razón social, la exclusión de facturas y el origen de cada importe (`feature/alquileres-imputacion-razon-social`)
+
+Cuatro cambios en Alquileres (ver `README-alquileres.md`, partes 2, 3, 8, 10, 12, 13 y 15):
+
+- **La imputación es por razón social**: facturas de una razón, todos sus locales o uno, el mes y las retenciones por tipo; pisa todo lo proyectado de esa razón en esos locales ese mes. Los tipos de retención se editan en Parámetros › Alquileres.
+- **Se excluyen facturas** que no se pagan por este circuito (pagos de contrato), con motivo: no suman en ningún lado.
+- **Cada razón social de un local factura sus conceptos** (San Justo) y la Proyección se agrupa por razón social.
+- **Cada importe dice de dónde sale** (chip), y **los fijos cargados en un período abierto de la app se usan** en lugar de estimarlos.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 60 | `sql/cashflow_alquileres_imputacion_razon.sql` | Crea y siembra los tipos de retención (Ganancias, IIBB Santa Fe, IIBB CABA, IIBB Bs As). En una transacción, **borra físicamente las imputaciones del modelo de renglones y sus cinco tablas** (imprime antes cuántas filas tenía cada una) y crea la cabecera, las cuotas, los locales y las retenciones del modelo nuevo. No toca `RO_T_CASHFLOW_ALQ_FACTURA_VTO` | Alquileres › Facturas carga, avisa en crítico nombrando el script y no deja imputar; la proyección no se reemplaza con nada (todo proyectado) y las facturas no suman hasta que se imputen |
+| 61 | `sql/cashflow_alquileres_excluir_factura.sql` | Crea `RO_T_CASHFLOW_ALQ_FACTURA_EXCLUIDA` (una exclusión vigente por cuota, motivo obligatorio, volver a incluir es baja lógica) | No se excluye nada: *Excluir* no se dibuja; todo lo demás anda |
+| 62 | `sql/cashflow_alquileres_local_razon_conceptos.sql` | Crea `RO_T_CASHFLOW_ALQ_LOCAL_RAZON_CONCEPTO`: qué conceptos factura cada razón social adicional de un local | Todo va a la principal, como hasta ahora; el selector de conceptos queda deshabilitado y nombra el script |
+
+Los tres contra `central`, reejecutables: el 60 después del 53, el 61 después del 53 y el 62 después del 58. **El 60 es la única excepción a "ninguno borra nada"**, autorizada para este cambio.
+
+**Qué se mueve.** Medido el 20/11/2026, con el código de `develop` y el de la rama en el mismo momento:
+
+- **Sin imputaciones y sin los fijos del período abierto, la pestaña y el tablero dan lo mismo que antes**: $ 4.300.965.611,94 en el horizonte, diferencia $ 0.
+- **Las imputaciones viejas dejan de leerse con el código** (y el 60 las borra): hasta que se reimputen las dos vigentes —SACORR A0000200000467 y SAARCO A0001300017366, ya pagadas—, noviembre sube **$ 42.294.950,15** (Gurruchaga y Distrito Arcos).
+- **Los fijos cargados en el período abierto** (noviembre) suben el horizonte **$ 12.866.764,43**.
 
 ## Ejecución de los scripts — la instalación completa
 
@@ -518,6 +541,9 @@ En este orden, contra `central`:
 -- 56. sql/cashflow_parametros_calendario.sql       (Parametros > Calendario: ajustes de feriados bancarios)
 -- 58. sql/cashflow_alquileres_local_razones.sql  (Alquileres: mas de una razon social por local)
 -- 59. sql/cashflow_alquileres_local_vigencia.sql  (Alquileres: proyectar segun apertura o vigencia del contrato)
+-- 60. sql/cashflow_alquileres_imputacion_razon.sql  (Alquileres: tipos de retencion e imputacion por razon social; BORRA las imputaciones viejas)
+-- 61. sql/cashflow_alquileres_excluir_factura.sql  (Alquileres: excluir facturas que no se pagan por aca)
+-- 62. sql/cashflow_alquileres_local_razon_conceptos.sql  (Alquileres: que conceptos factura cada razon social de un local)
 ```
 
 **El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento. **El 57, `sql/cashflow_calendario_permisos.sql`, también va contra `apps`**, antes de publicar el código de Calendario: le da la edición de Calendario a quien hoy edita Generales.

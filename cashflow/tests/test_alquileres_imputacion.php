@@ -54,7 +54,7 @@ function pagoP($nro, $cod, $mes, $concepto, $aPagar, $grupo = null) {
 function cuotaP($cod, $n, $pend, $vto = '2026-11-20', $extra = []) {
     return array_merge(['COD_PROVEE' => $cod, 'RAZON_SOC' => 'N ' . $cod, 'T_COMP' => 'FAC', 'N_COMP' => $n,
         'FECHA_VTO' => $vto, 'FECHA_EMIS' => '2026-11-02', 'IMPORTE_VTO' => $pend, 'IMPORTE_PENDIENTE' => $pend,
-        'NETO_GRAVADO_COMP' => null, 'IMPORTE_COMP' => $pend, 'LEYENDA' => ''], $extra);
+        'LEYENDA' => ''], $extra);
 }
 
 /** Una imputacion guardada, como la devuelve AlquileresImputaciones::vigentes() */
