@@ -246,6 +246,34 @@ chequear('el 6 se difiere con SAUCCS (2): en noviembre se paga el de septiembre'
 chequear('la suma por razon sigue siendo el total', $pSJ['kpis']['total_horizonte'],
     round(array_sum(array_map(function ($r) { return $r['total']['a_pagar']; }, $pSJ['razones'])), 2));
 
+seccion('Alquileres: el origen de cada importe (el chip)');
+
+$pagoO = function ($origen, $detalle = []) { return ['origen' => $origen, 'detalle' => $detalle]; };
+chequear('cada origen da su chip', [
+    ['clave' => 'APP_CERRADA', 'texto' => 'Real (cerrado)'],
+    ['clave' => 'APP_ABIERTA', 'texto' => 'Cargado en app (abierto)'],
+    ['clave' => 'VENTA_REAL', 'texto' => 'Venta real'],
+    ['clave' => 'INFLACION:2026-10', 'texto' => 'Estimado · inflación desde oct-26'],
+    ['clave' => 'ESTIMADO', 'texto' => 'Estimado'],
+    ['clave' => 'FACTURA', 'texto' => 'Factura']], [
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::APP_CERRADA)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::APP_ABIERTA)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::VENTA_REAL)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::ESTIMADO, ['inflacion_desde' => '2026-10'])),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::ESTIMADO)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::FACTURA))]);
+
+$uni = array_values(array_filter($p['locales'], function ($l) { return $l['nro'] === 2; }))[0];
+$vmaNov = $uni['grupos'][0]['conceptos'][0]['meses']['2026-11'];
+chequear('la celda del VMA estimado tiene un solo origen: inflacion desde el ultimo cerrado', ['INFLACION:2026-09'],
+    array_keys($vmaNov['origenes']));
+chequear('el subtotal del local mezcla origenes (fijos por inflacion, expensas estimadas): mixto', true,
+    count($uni['meses']['2026-11']['origenes']) > 1);
+chequear('y el desglose suma el a pagar de la celda', $uni['meses']['2026-11']['a_pagar'],
+    round(array_sum(array_column($uni['meses']['2026-11']['origenes'], 'a_pagar')), 2));
+chequear('la leyenda trae los siete', ['APP_CERRADA', 'APP_ABIERTA', 'VENTA_REAL', 'INFLACION', 'ESTIMADO', 'FACTURA', 'MIXTO'],
+    array_column($p['leyenda_origenes'], 'clave'));
+
 seccion('Alquileres: la venta y su pie');
 
 $pie = $p['ventas']['pie'];

@@ -47,6 +47,7 @@
                    ALQUILERES le dice al cuadro. */
                 AvisosPanel.pintarPestana('avisosAlquileres', datos.avisos || [], { tab: 'alquileres' });
                 pintarKpis();
+                pintarLeyenda();
                 dibujar();
                 dibujarVentas();
 
@@ -169,8 +170,9 @@
 
                     if (!c) { return '<td class="text-end text-muted">—</td>'; }
 
-                    return '<td class="text-end" data-orden="' + c.a_pagar + '" title="'
-                        + esc(tooltipFacturas(c, r.facturas.imputaciones)) + '">' + importe(c.a_pagar) + '</td>';
+                    return '<td class="text-end" data-orden="' + c.a_pagar + '" data-origen="Factura" title="'
+                        + esc(tooltipFacturas(c, r.facturas.imputaciones) + '\nOrigen: Factura') + '">' + importe(c.a_pagar)
+                        + '<span class="alq-chip alq-chip-FACTURA" data-etiqueta="factura"></span></td>';
                 }).join('')
                 + '<td class="text-end fw-bold" title="' + esc(tooltipImputaciones(r.facturas.imputaciones)) + '">'
                 + importe(r.facturas.total.a_pagar) + '</td></tr>';
@@ -253,10 +255,53 @@
 
             if (!c) { return '<td class="text-end text-muted">—</td>'; }
 
-            return '<td class="text-end" data-orden="' + c[campo] + '" title="' + esc(tooltip(c, grupo)) + '">'
-                + importe(c[campo]) + '</td>';
+            var o = origen(c);
+
+            /* EL CHIP VA EN data-etiqueta Y LO DIBUJA EL CSS: el Excel se queda
+               con el número limpio. El origen baja en su propia columna, que
+               exportar() agrega sólo mientras exporta (data-origen). */
+            return '<td class="text-end" data-orden="' + c[campo] + '" data-origen="' + esc(o.texto) + '" title="'
+                + esc(tooltip(c, grupo) + '\nOrigen: ' + o.detalle) + '">' + importe(c[campo])
+                + '<span class="alq-chip alq-chip-' + o.clase + '" data-etiqueta="' + esc(o.chip) + '"></span></td>';
         }).join('')
-            + '<td class="text-end fw-bold" title="' + esc(tooltip(total, null)) + '">' + importe(total[campo]) + '</td>';
+            + '<td class="text-end fw-bold" title="' + esc(tooltip(total, null) + '\nOrigen: ' + origen(total).detalle) + '">'
+            + importe(total[campo]) + '</td>';
+    }
+
+    /* La etiqueta corta del chip de cada origen. El texto entero va en el
+       tooltip y en el Excel. */
+    var CHIP = { APP_CERRADA: 'cerrado', APP_ABIERTA: 'app', VENTA_REAL: 'venta', ESTIMADO: 'est.', FACTURA: 'factura' };
+
+    /**
+     * El origen de una celda, con lo que trae del servidor ('origenes': clave
+     * => texto y a pagar). Uno solo: su chip. Varios: "mixto", con el
+     * desglose en el tooltip.
+     */
+    function origen(c) {
+        var claves = Object.keys(c.origenes || {});
+
+        if (claves.length === 1) {
+            var k = claves[0];
+            var infl = k.indexOf('INFLACION:') === 0;
+
+            return { clase: infl ? 'INFLACION' : k, texto: c.origenes[k].texto, detalle: c.origenes[k].texto,
+                     chip: infl ? 'est. ' + rotuloMes(k.substring(10)) : (CHIP[k] || k) };
+        }
+
+        return { clase: 'MIXTO', texto: 'Mixto', chip: 'mixto',
+                 detalle: 'mixto — ' + claves.map(function(k) {
+                     return c.origenes[k].texto + ' ' + importeTexto(c.origenes[k].a_pagar);
+                 }).join('; ') };
+    }
+
+    /** La leyenda de los chips, arriba de la grilla. */
+    function pintarLeyenda() {
+        html('alqLeyenda', (datos.leyenda_origenes || []).map(function(l) {
+            var chip = l.clave === 'INFLACION' ? 'est. mes' : (l.clave === 'MIXTO' ? 'mixto' : (CHIP[l.clave] || l.clave));
+
+            return '<span class="me-3 text-nowrap" title="' + esc(l.ayuda) + '"><span class="alq-chip alq-chip-'
+                + esc(l.clave) + '" data-etiqueta="' + esc(chip) + '"></span> ' + esc(l.texto) + '</span>';
+        }).join(''));
     }
 
     /** El desglose de una celda, con lo que explica cada pago. */
@@ -357,11 +402,44 @@
         });
     }
 
+    /**
+     * EXPORTAR ABRE TODO Y BAJA EL ORIGEN. Al lado de cada mes agrega, sólo
+     * mientras exporta, una columna "Origen mm/aa" con data-exportar-solo: en
+     * pantalla no puede estar, porque eje-totales.js pide una celda de
+     * encabezado por columna del eje y una de más correría los totales.
+     */
     function exportar() {
         var previo = JSON.parse(JSON.stringify(abiertos));
+        var tabla = document.getElementById('tablaAlquileres');
+        var meses = datos.meses.length;
 
         abrirTodo(true);
+
+        Array.prototype.forEach.call(tabla.querySelectorAll('tr'), function(tr) {
+            var enHead = tr.parentNode.tagName === 'THEAD';
+            var cols = Array.prototype.slice.call(tr.cells);
+            /* En el encabezado sólo la fila de los meses; en el cuerpo y el pie, las celdas del eje. */
+            var desde = enHead ? 0 : (tr.parentNode.tagName === 'TFOOT' ? 1 : 2);
+
+            if (enHead && cols.length !== meses + 1) { return; }
+
+            for (var i = desde + meses - 1; i >= desde; i--) {
+                var td = cols[i];
+
+                if (!td) { continue; }
+
+                var nueva = document.createElement(enHead ? 'th' : 'td');
+
+                nueva.className = 'alq-solo-export';
+                nueva.setAttribute('data-exportar-solo', '');
+                nueva.textContent = enHead ? 'Origen ' + td.textContent : (td.getAttribute('data-origen') || '');
+                td.parentNode.insertBefore(nueva, td.nextSibling);
+            }
+        });
+
         exportarTabla('tablaAlquileres', 'Alquileres_Proyeccion');
+
+        Array.prototype.forEach.call(tabla.querySelectorAll('.alq-solo-export'), function(c) { c.parentNode.removeChild(c); });
         abiertos = previo;
         aplicarAbiertos();
     }

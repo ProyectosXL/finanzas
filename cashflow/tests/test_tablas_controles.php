@@ -2004,7 +2004,8 @@ chequear('un hijo se ve si todos sus ancestros estan abiertos', true,
 chequear('el buscador mira razon social, codigo y local', [true, true], [
     strpos($jsAlq, "String(r.cod || '').toLowerCase().indexOf(t) !== -1") !== false,
     strpos($jsAlq, "String(l.nombre).toLowerCase().indexOf(t) !== -1") !== false]);
-chequear('exportar sigue abriendo todo', true, strpos($jsAlq, "abrirTodo(true);\n        exportarTabla('tablaAlquileres'") !== false);
+chequear('exportar sigue abriendo todo, y despues vuelve a como estaba', true,
+    (bool) preg_match("/function exportar\(\) \{.*?abrirTodo\(true\);.*?exportarTabla\('tablaAlquileres'.*?abiertos = previo;/s", $jsAlq));
 
 seccion('Alquileres > Proyeccion: la linea "Facturas imputadas"');
 
@@ -2018,3 +2019,23 @@ chequear('el tooltip: facturas, retenciones por tipo, locales, quien y cuando, y
     strpos($jsAlq, "nLocales: ' + (i.todos ? 'todos (' : '')") !== false,
     strpos($jsAlq, "(i.fuera_horizonte ? ', fuera del horizonte' : '')") !== false]);
 chequear('el pie suma tambien las facturas', true, strpos($jsAlq, 'var facturas = x.r.facturas ?') !== false);
+
+seccion('Alquileres > Proyeccion: el chip de origen y la leyenda');
+
+$jsAlq = str_replace("\r\n", "\n", file_get_contents($JS . '/Alquileres.js'));
+$tabAlq = file_get_contents($TABS . '/alquileres.php');
+$cssAlq = file_get_contents(__DIR__ . '/../Css/Alquileres.css');
+chequear('cada celda lleva su chip en data-etiqueta, que dibuja el CSS', [true, true], [
+    strpos($jsAlq, "'<span class=\"alq-chip alq-chip-' + o.clase + '\" data-etiqueta=\"' + esc(o.chip) + '\"></span></td>'") !== false,
+    strpos($cssAlq, 'content: attr(data-etiqueta);') !== false]);
+chequear('un subtotal con origenes mezclados dice mixto, con el desglose', true,
+    strpos($jsAlq, "return { clase: 'MIXTO', texto: 'Mixto', chip: 'mixto',") !== false);
+chequear('el tooltip suma la linea Origen', true, strpos($jsAlq, "Origen: ' + o.detalle") !== false);
+chequear('la leyenda arriba de la grilla', [true, true],
+    [strpos($tabAlq, 'id="alqLeyenda"') !== false, strpos($jsAlq, 'function pintarLeyenda()') !== false]);
+chequear('el Excel baja el origen en su columna, solo al exportar', [true, true, true], [
+    strpos($jsAlq, "nueva.setAttribute('data-exportar-solo', '');") !== false,
+    strpos($jsAlq, "'Origen ' + td.textContent") !== false,
+    strpos($cssAlq, '#tablaAlquileres .alq-solo-export { display: none; }') !== false]);
+chequear('la linea de facturas lleva el chip Factura', true,
+    strpos($jsAlq, "'<span class=\"alq-chip alq-chip-FACTURA\" data-etiqueta=\"factura\"></span></td>'") !== false);

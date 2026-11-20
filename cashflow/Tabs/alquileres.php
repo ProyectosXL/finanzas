@@ -139,6 +139,8 @@
                     </button>
                 </div>
             </div>
+            <!-- La leyenda de los chips de origen (Js/Alquileres.js, pintarLeyenda()). -->
+            <div class="card-body py-2 border-bottom small text-muted" id="alqLeyenda"></div>
             <div class="card-body p-0">
                 <div class="cargando-slot" id="alqSpinner" data-cargando="Proyectando los alquileres de los locales…"></div>
                 <div class="table-wrapper table-responsive tabla-temporal" id="alqWrapper" style="display: none;">
@@ -151,10 +153,12 @@
             </div>
             <div class="card-body py-2 border-top">
                 <small class="text-muted">
-                    <strong>De dónde sale cada importe</strong>, de mayor a menor prioridad: un mes
-                    <em>cerrado en la app</em> se toma tal cual; si no está cerrado pero ya tiene
-                    <em>venta real</em>, el cashflow calcula los conceptos con esa venta; si no, todo es
-                    <em>estimado</em>. Un período abierto en la app nunca se lee. Los pagos que ya
+                    <strong>De dónde sale cada importe</strong>, de mayor a menor prioridad: la
+                    <em>factura</em> imputada pisa todo lo de su razón social en sus locales ese mes; un
+                    mes <em>cerrado en la app</em> se toma tal cual; de un período <em>abierto</em> se
+                    toman sólo los fijos cargados (los variables se calculan, con el VMA de la app); si
+                    el mes ya tiene <em>venta real</em>, el cashflow calcula los variables con esa venta;
+                    si no, todo es <em>estimado</em>. Cada celda lo dice con su chip. Los pagos que ya
                     vencieron en el mes en curso y todavía no tienen factura van al siguiente día hábil
                     desde hoy.
                 </small>

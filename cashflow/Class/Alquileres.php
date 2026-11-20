@@ -1038,6 +1038,20 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
                 'locales_incompletos' => $incompletos
             ],
             'origenes' => AlquileresCalculo::NOMBRE_ORIGEN,
+            /* LA LEYENDA de los chips, en el orden de la jerarquia. */
+            'leyenda_origenes' => [
+                ['clave' => AlquileresCalculo::APP_CERRADA, 'texto' => 'Real (cerrado)',
+                 'ayuda' => 'El período está cerrado en la app de alquileres.'],
+                ['clave' => AlquileresCalculo::APP_ABIERTA, 'texto' => 'Cargado en app (abierto)',
+                 'ayuda' => 'El período está abierto y el fijo ya está cargado en la app.'],
+                ['clave' => AlquileresCalculo::VENTA_REAL, 'texto' => 'Venta real',
+                 'ayuda' => 'Variable calculado por el cashflow con la venta real del mes.'],
+                ['clave' => 'INFLACION', 'texto' => 'Estimado · inflación desde [mes]',
+                 'ayuda' => 'Un fijo proyectado por inflación desde el último valor tomado de la app.'],
+                ['clave' => AlquileresCalculo::ESTIMADO, 'texto' => 'Estimado', 'ayuda' => 'Todo estimado.'],
+                ['clave' => AlquileresCalculo::FACTURA, 'texto' => 'Factura', 'ayuda' => 'La factura imputada.'],
+                ['clave' => 'MIXTO', 'texto' => 'Mixto', 'ayuda' => 'Un subtotal con pagos de distinto origen: el desglose, en el tooltip.']
+            ],
             'estados' => AlquileresPago::NOMBRE_ESTADO,
             'facturas' => self::armarFacturas($c, $h),
             'avisos' => $c['avisos']
@@ -1317,14 +1331,60 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
     }
 
     private static function celdaVacia() {
-        return ['neto' => 0.0, 'iva' => 0.0, 'percepcion' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0];
+        return ['neto' => 0.0, 'iva' => 0.0, 'percepcion' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0,
+                'origenes' => []];
     }
 
-    /** Suma un pago a una celda; en la de concepto, ademas guarda el detalle. */
+    /**
+     * El origen de un pago, como lo dice el chip de su celda. Pura.
+     *
+     *   FACTURA       la factura imputada (la linea "Facturas imputadas")
+     *   APP_CERRADA   Real (cerrado): el periodo esta cerrado en la app
+     *   APP_ABIERTA   Cargado en app (abierto): un fijo cargado con el periodo
+     *                 abierto (y el 9 calculado con ese VMA)
+     *   VENTA_REAL    un variable calculado con la venta real del mes
+     *   INFLACION:Y-m Estimado · inflacion desde [mes]: un fijo (o el 9
+     *                 actualizado como fijo) proyectado por inflacion desde el
+     *                 ultimo valor tomado de la app
+     *   ESTIMADO      todo estimado
+     *
+     * La clave lleva el mes de la inflacion: dos fijos que ajustan desde meses
+     * distintos no tienen el mismo origen, y su subtotal dice "mixto".
+     *
+     * @param array $p Un pago de la lista
+     * @return array ['clave' => string, 'texto' => string]
+     */
+    public static function origenDelPago($p) {
+        $o = $p['origen'] ?? AlquileresCalculo::ESTIMADO;
+        $desde = $p['detalle']['inflacion_desde'] ?? null;
+
+        if ($o === AlquileresCalculo::ESTIMADO && $desde !== null) {
+            return ['clave' => 'INFLACION:' . $desde, 'texto' => 'Estimado · inflación desde ' . self::mesCorto($desde)];
+        }
+
+        return ['clave' => $o, 'texto' => AlquileresCalculo::NOMBRE_ORIGEN[$o] ?? $o];
+    }
+
+    /** '2026-10' -> 'oct-26' */
+    private static function mesCorto($mes) {
+        $n = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+        return $n[(int) substr($mes, 5, 2) - 1] . '-' . substr($mes, 2, 2);
+    }
+
+    /**
+     * Suma un pago a una celda; en la de concepto, ademas guarda el detalle.
+     * Toda celda lleva SUS ORIGENES (clave => texto y a pagar): con uno solo,
+     * la pestaña dibuja su chip; con varios, "mixto" y el desglose.
+     */
     private static function sumarCelda($celda, $p, $conDetalle) {
         foreach (['neto', 'iva', 'percepcion', 'retencion', 'a_pagar'] as $k) {
             $celda[$k] = round($celda[$k] + $p[$k], 2);
         }
+
+        $o = self::origenDelPago($p);
+        $celda['origenes'][$o['clave']] = ['texto' => $o['texto'],
+            'a_pagar' => round(($celda['origenes'][$o['clave']]['a_pagar'] ?? 0.0) + $p['a_pagar'], 2)];
 
         if ($conDetalle) {
             $celda['pagos'][] = array_intersect_key($p, array_flip([
