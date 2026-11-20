@@ -33,12 +33,14 @@ require_once __DIR__ . '/Inflacion.php';
  * ------
  *   - Fijos, fondo de promocion y expensas: el mismo mes del concepto.
  *   - Variables: el mes de la venta + los meses de diferimiento de la razon
- *     social. Por eso para pagar dentro del horizonte hacen falta meses de
- *     venta ANTERIORES al horizonte (con diferimiento 2, la venta de hace dos
- *     meses): mesesDeConcepto() los incluye.
+ *     social QUE LOS FACTURA. Por eso para pagar dentro del horizonte hacen
+ *     falta meses de venta ANTERIORES al horizonte (con diferimiento 2, la
+ *     venta de hace dos meses): mesesDeConcepto() los incluye.
  *   - Extraordinarios: el mes base + su diferimiento.
- *   - El dia: el de vencimiento de la razon social, o el general. Si cae en
- *     fin de semana o feriado, el siguiente dia habil (DiasHabiles::siguiente()).
+ *   - El dia: el de vencimiento de la razon social que factura el concepto (o
+ *     el extraordinario), o el general. Un local con dos razones sociales paga
+ *     cada concepto en el dia de la suya (conceptosPorRazon()). Si cae en fin de
+ *     semana o feriado, el siguiente dia habil (DiasHabiles::siguiente()).
  *   - Si ese dia YA PASO dentro del mes en curso -vencio y no hay factura-, el
  *     pago va al siguiente dia habil desde hoy, nunca apilado en el primer dia
  *     del eje. Es provisorio: una factura imputada que cubre ese mes lo
@@ -122,6 +124,20 @@ class AlquileresPago {
             $faltan[] = 'razón social dada de baja';
         } elseif ($razones[$cod]['dia'] === null && $diaGeneral === null) {
             $faltan[] = 'día de vencimiento (ni la razón social ni el general)';
+        }
+
+        /* CADA RAZON SOCIAL QUE FACTURA CONCEPTOS PAGA EN SU DIA: una adicional
+           sin dia propio y sin general deja el local incompleto, igual que la
+           principal. Una adicional que no factura nada no necesita dia. */
+        if ($local !== null && $cod !== null && $cod !== '' && isset($razones[$cod])) {
+            $deQuien = self::conceptosPorRazon($local, $razones);
+
+            foreach (array_unique(array_values($deQuien['por_concepto'])) as $c) {
+                if ($c !== Planilla::codigo($cod) && ($razones[$c]['dia'] ?? null) === null && $diaGeneral === null) {
+                    $faltan[] = 'día de vencimiento de ' . $c . ' (factura conceptos de este local; ni la razón '
+                        . 'social ni el general)';
+                }
+            }
         }
 
         $frecuencia = ($local === null) ? null : ($local['frecuencia'] ?? null);
@@ -313,9 +329,10 @@ class AlquileresPago {
 
     /**
      * Las razones sociales de un local: la principal primero y despues las
-     * adicionales, sin repetir. La principal es la unica que da el dia de
-     * vencimiento y el diferimiento; las adicionales sirven para imputarle
-     * facturas y para que sus extraordinarios lo alcancen.
+     * adicionales, sin repetir. Cada una factura sus conceptos
+     * (conceptosPorRazon()) y esos se pagan con SU dia de vencimiento y SU
+     * diferimiento; sus facturas se imputan a sus locales y sus extraordinarios
+     * los alcanzan.
      *
      * @param array|null $local La fila de Parametros (['cod_provee', 'adicionales'])
      * @return string[]
@@ -332,6 +349,81 @@ class AlquileresPago {
 
             if ($c !== '' && !in_array($c, $out, true)) {
                 $out[] = $c;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * De que razon social es cada concepto proyectado de un local.
+     *
+     * POR DEFECTO TODO ES DE LA PRINCIPAL. Una adicional factura los conceptos
+     * que se le marcaron en Parametros (script 62), y esos SALEN de la
+     * principal: San Justo, SAUCCS el 6, 7, 11, 16 y 17 y SASANJ el resto. Es lo
+     * que decide con que dia y diferimiento se paga cada concepto, bajo que
+     * razon social se ve y que pisa una factura imputada de esa razon.
+     *
+     * UNA ADICIONAL DADA DE BAJA en Razones sociales no se lleva sus conceptos:
+     * vuelven a la principal, con su dia y su diferimiento, y quedan en
+     * 'devueltos' para el aviso. Un alquiler no puede desaparecer del flujo
+     * porque se dio de baja una razon social.
+     *
+     * Si dos adicionales dijeran el mismo concepto (el servidor no lo deja
+     * guardar, pero la tabla no lo impide), gana la primera que se agrego.
+     *
+     * @param array|null $local La fila de Parametros (['cod_provee', 'adicionales',
+     *        'conceptos_razon' => [cod => [ID_CA]]])
+     * @param array $razones COD_PROVEE => ... de las dadas de alta
+     * @return array ['por_concepto' => [ID_CA => cod], 'devueltos' => [cod => [ID_CA]],
+     *                'sin_conceptos' => [cod] (adicionales dadas de alta que no facturan nada)]
+     */
+    public static function conceptosPorRazon($local, $razones) {
+        $out = ['por_concepto' => [], 'devueltos' => [], 'sin_conceptos' => []];
+        $todas = self::razonesDelLocal($local);
+
+        if (empty($todas)) {
+            return $out;
+        }
+
+        $alta = [];
+
+        foreach (array_keys($razones) as $c) {
+            $alta[Planilla::codigo($c)] = true;
+        }
+
+        $principal = $todas[0];
+        $proyectados = AlquileresConceptos::proyectados();
+
+        foreach ($proyectados as $id) {
+            $out['por_concepto'][$id] = $principal;
+        }
+
+        $marcados = [];
+
+        foreach ($local['conceptos_razon'] ?? [] as $c => $ids) {
+            $marcados[Planilla::codigo($c)] = array_values(array_intersect(array_map('intval', $ids), $proyectados));
+        }
+
+        foreach (array_slice($todas, 1) as $cod) {
+            $ids = $marcados[$cod] ?? [];
+
+            if (!isset($alta[$cod])) {
+                if (!empty($ids)) {
+                    $out['devueltos'][$cod] = $ids;
+                }
+                continue;
+            }
+
+            if (empty($ids)) {
+                $out['sin_conceptos'][] = $cod;
+                continue;
+            }
+
+            foreach ($ids as $id) {
+                if ($out['por_concepto'][$id] === $principal) {
+                    $out['por_concepto'][$id] = $cod;
+                }
             }
         }
 
@@ -373,7 +465,11 @@ class AlquileresPago {
      *                (se asume la renovacion; un cierre real es HABILITADO = 0 en
      *                Lakers); segun VIGENCIA solo se proyectan los meses de sus
      *                contratos de la app (vigente()),
-     *     'razon' => ['dia' => int|null, 'diferimiento' => int],
+     *     'razon' => ['dia' => int|null, 'diferimiento' => int]  la principal,
+     *     'razones' => COD_PROVEE => ['dia', 'diferimiento']  opcional: las dadas de
+     *                  alta. Sin el, todo se paga con 'razon',
+     *     'concepto_razon' => ID_CA => COD_PROVEE  opcional: conceptosPorRazon()['por_concepto'].
+     *                  Sin el, todo es de la principal,
      *     'dia_general' => int|null,
      *     'proyeccion' => lo de AlquileresCalculo::proyectarLocal(), con los
      *                     meses de mesesDeConcepto(),
@@ -384,21 +480,37 @@ class AlquileresPago {
      *     'hoy' => 'Y-m-d'
      * ]
      * @return array Lista de pagos: ['mes_pago', 'fecha', 'concepto', 'grupo',
-     *         'mes_concepto', 'origen', + importes() + diaPago() + 'detalle']
+     *         'mes_concepto', 'origen', 'cod_provee' (la razon que lo factura),
+     *         + importes() + diaPago() + 'detalle']
      */
     public static function pagosLocal($e) {
-        $dia = $e['razon']['dia'] ?? $e['dia_general'];
-        $difer = (int) $e['razon']['diferimiento'];
+        /* CADA CONCEPTO SE PAGA CON EL DIA Y EL DIFERIMIENTO DE LA RAZON SOCIAL
+           QUE LO FACTURA, no con los de la principal: en San Justo las
+           expensas son de SAUCCS y se pagan cuando vence SAUCCS. */
+        $principal = Planilla::codigo($e['local']['cod_provee'] ?? '');
+        $razones = [];
+
+        foreach ($e['razones'] ?? [] as $c => $r) {
+            $razones[Planilla::codigo($c)] = $r;
+        }
+
+        $razones[$principal] = $razones[$principal] ?? $e['razon'];
+        $deConcepto = $e['concepto_razon'] ?? [];
         $enHorizonte = array_flip($e['meses_pago']);
         $meses = $e['proyeccion']['meses'];
         $dias = [];
         $pagos = [];
 
-        $diaDe = function ($mesPago) use (&$dias, $dia, $e) {
-            if (!isset($dias[$mesPago])) {
-                $dias[$mesPago] = self::diaPago($mesPago, $dia, $e['habiles'], $e['hoy']);
+        $razonDe = function ($cod) use ($razones, $principal) {
+            return isset($razones[$cod]) ? $cod : $principal;
+        };
+
+        $diaDe = function ($mesPago, $cod) use (&$dias, $razones, $e) {
+            if (!isset($dias[$cod][$mesPago])) {
+                $dia = $razones[$cod]['dia'] ?? $e['dia_general'];
+                $dias[$cod][$mesPago] = self::diaPago($mesPago, $dia, $e['habiles'], $e['hoy']);
             }
-            return $dias[$mesPago];
+            return $dias[$cod][$mesPago];
         };
 
         foreach ($meses as $mesConcepto => $m) {
@@ -410,6 +522,8 @@ class AlquileresPago {
 
             foreach ($m['conceptos'] as $id => $c) {
                 $grupo = AlquileresConceptos::grupo($id);
+                $cod = $razonDe($deConcepto[$id] ?? $principal);
+                $difer = (int) $razones[$cod]['diferimiento'];
                 $mesPago = AlquileresConceptos::seDifiere($id) ? Inflacion::mesMas($mesConcepto, $difer) : $mesConcepto;
 
                 if (!isset($enHorizonte[$mesPago])) {
@@ -419,8 +533,8 @@ class AlquileresPago {
                 $detalle = $c;
                 unset($detalle['importe']);
 
-                $pagos[] = self::pago($mesPago, $diaDe($mesPago), $id, $grupo, $mesConcepto,
-                                      $m['origen'], $c['importe'], $e['local'], $detalle);
+                $pagos[] = ['cod_provee' => $cod] + self::pago($mesPago, $diaDe($mesPago, $cod), $id, $grupo,
+                    $mesConcepto, $c['origen'] ?? $m['origen'], $c['importe'], $e['local'], $detalle);
             }
         }
 
@@ -447,10 +561,13 @@ class AlquileresPago {
                     $suma += $v;
                 }
 
-                $pagos[] = self::pago($mesPago, $diaDe($mesPago), 'EXTRA:' . $x['id'], AlquileresConceptos::EXTRA,
-                                      $mesBase, $base['origen'], $suma * (float) $x['pct'] / 100, $e['local'],
-                                      ['extra' => $x['id'], 'pct' => (float) $x['pct'], 'base' => $partes,
-                                       'base_total' => $suma]);
+                /* EL EXTRAORDINARIO ES DE SU RAZON SOCIAL: se paga en su dia y
+                   lo pisa una factura de ella, no de la principal. */
+                $cod = $razonDe(Planilla::codigo($x['cod_provee'] ?? $principal));
+
+                $pagos[] = ['cod_provee' => $cod] + self::pago($mesPago, $diaDe($mesPago, $cod), 'EXTRA:' . $x['id'],
+                    AlquileresConceptos::EXTRA, $mesBase, $base['origen'], $suma * (float) $x['pct'] / 100, $e['local'],
+                    ['extra' => $x['id'], 'pct' => (float) $x['pct'], 'base' => $partes, 'base_total' => $suma]);
             }
         }
 

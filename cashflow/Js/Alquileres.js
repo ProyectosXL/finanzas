@@ -11,12 +11,15 @@
  * lo que vino. Los totales del pie y los de arriba del eje salen de UNA cuenta
  * sobre las filas visibles (Js/eje-totales.js).
  *
- * LOS GRUPOS Y CONCEPTOS VIAJAN PEGADOS A SU LOCAL. Llevan data-orden-sigue,
- * asi tabla-orden.js ordena por local sin separarlos.
+ * LA GRILLA ES RAZON SOCIAL -> LOCAL -> GRUPO -> CONCEPTO. Un local con dos
+ * razones sociales aparece bajo las dos, cada una con lo suyo (lo arma el
+ * servidor: Alquileres::armarRazones()). Locales, grupos y conceptos llevan
+ * data-orden-sigue, asi tabla-orden.js ordena por razon social sin separarlos,
+ * y data-ancestros con las claves que tienen que estar abiertas para verse.
  *
  * EXPORTAR ABRE TODO. tabla-export.js baja lo que se ve, y la planilla tiene
- * que tener todos los locales con sus grupos y conceptos: se abren, se exporta
- * y se vuelve a como estaba.
+ * que tener todas las razones con sus locales, grupos y conceptos: se abren,
+ * se exporta y se vuelve a como estaba.
  */
 
 (function() {
@@ -44,6 +47,7 @@
                    ALQUILERES le dice al cuadro. */
                 AvisosPanel.pintarPestana('avisosAlquileres', datos.avisos || [], { tab: 'alquileres' });
                 pintarKpis();
+                pintarLeyenda();
                 dibujar();
                 dibujarVentas();
 
@@ -73,31 +77,50 @@
        PROYECCION
        ================================================================ */
 
+    /** Un local que no se muestra: cerrado en Lakers, o temporal terminado sin nada por pagar */
+    function seMuestra(l) {
+        return l.estado !== 'CERRADO_LAKERS' && !(l.estado === 'FINALIZADO' && !(l.total && l.total.a_pagar));
+    }
+
+    /**
+     * Las razones sociales que se dibujan, con sus locales visibles. EL
+     * BUSCADOR mira la razón social, su código y el nombre del local: si
+     * coincide la razón, van todos sus locales; si coincide un local, sólo ese.
+     */
+    function razonesVisibles() {
+        var t = filtro.toLowerCase();
+
+        return (datos.razones || []).map(function(r) {
+            var deLaRazon = t === '' || String(r.nombre).toLowerCase().indexOf(t) !== -1
+                || String(r.cod || '').toLowerCase().indexOf(t) !== -1;
+            var locales = r.locales.filter(function(l) {
+                return seMuestra(l) && (deLaRazon || String(l.nombre).toLowerCase().indexOf(t) !== -1);
+            });
+
+            return { r: r, locales: locales };
+        }).filter(function(x) { return x.locales.length > 0; });
+    }
+
     function dibujar() {
         if (!datos) { return; }
 
         var meses = datos.meses;
-        var locales = datos.locales.filter(function(l) {
-            /* Ni los cerrados en Lakers ni un temporal con el contrato terminado, salvo
-               que le quede algo por pagar en el horizonte (un variable diferido). */
-            return l.estado !== 'CERRADO_LAKERS'
-                && !(l.estado === 'FINALIZADO' && !(l.total && l.total.a_pagar))
-                && coincide(l);
-        });
+        var razones = razonesVisibles();
 
         document.getElementById('alqThead').innerHTML = '<tr>'
-            + '<th rowspan="2" class="col-texto">Local</th>'
-            + '<th rowspan="2" class="col-texto">Razón social</th>'
+            + '<th rowspan="2" class="col-texto">Razón social · local</th>'
+            + '<th rowspan="2" class="col-texto">Código</th>'
             + '</tr><tr>'
             + meses.map(function(m) { return '<th class="text-end">' + esc(m.label) + '</th>'; }).join('')
             + '<th class="text-end fw-bold total-column">Total</th></tr>';
 
         var cuerpo = document.getElementById('alqBody');
 
-        cuerpo.innerHTML = locales.length
-            ? locales.map(function(l) { return filasLocal(l, meses); }).join('')
+        cuerpo.innerHTML = razones.length
+            ? razones.map(function(x) { return filasRazon(x.r, x.locales, meses); }).join('')
             : '<tr><td colspan="' + (meses.length + 3) + '" class="text-center text-muted py-4">'
-              + (datos.locales.length ? 'Ningún local coincide con la búsqueda.' : 'No hay locales que mostrar: ver los avisos de arriba.')
+              + ((datos.razones || []).length ? 'Ninguna razón social ni local coincide con la búsqueda.'
+                  : 'No hay locales que mostrar: ver los avisos de arriba.')
               + '</td></tr>';
 
         cuerpo.querySelectorAll('.alq-toggle').forEach(function(t) {
@@ -110,48 +133,113 @@
         });
 
         aplicarAbiertos();
-        pintarPie(locales, meses);
+        pintarPie(razones, meses);
     }
 
-    function coincide(l) {
-        if (filtro === '') { return true; }
-
-        var t = filtro.toLowerCase();
-
-        return String(l.nombre).toLowerCase().indexOf(t) !== -1 || String(l.cod_provee || '').toLowerCase().indexOf(t) !== -1
-            || razonDe(l).toLowerCase().indexOf(t) !== -1;
+    function toggle(clave) {
+        return '<span class="alq-toggle" data-clave="' + clave + '"><i class="fas fa-caret-right"></i></span> ';
     }
 
-    function razonDe(l) {
-        return l.razon || l.cod_provee || '';
+    var SIN_TOGGLE = '<span class="alq-toggle-vacio" style="display:inline-block;width:1rem"></span> ';
+
+    /**
+     * La razón social y, colgando de ella, sus locales, sus grupos y sus
+     * conceptos. Cada hijo lleva data-orden-sigue (tabla-orden.js lo mueve con
+     * su razón) y en data-ancestros la lista de claves que tienen que estar
+     * abiertas para que se vea.
+     */
+    function filasRazon(r, locales, meses) {
+        var clave = 'R' + (r.cod || 'SIN');
+        var h = '<tr class="alq-razon" data-clave="' + clave + '">'
+            + '<td data-orden="' + esc(r.nombre) + '">' + toggle(clave) + '<strong>' + esc(r.nombre) + '</strong>'
+                + (r.sin_razon ? ' <span class="badge bg-warning text-dark" title="Locales sin razón social dada de '
+                    + 'alta: no proyectan. Se completan en Parámetros › Alquileres">sin razón social</span>' : '') + '</td>'
+            + '<td>' + esc(r.cod || '') + '</td>'
+            + celdas(r.meses, r.total, meses, 'a_pagar', null)
+            + '</tr>';
+
+        locales.forEach(function(l) { h += filasLocal(l, meses, clave); });
+
+        /* AL FINAL, LAS FACTURAS IMPUTADAS de la razón social: el total a
+           pagar por mes de pago. No se reparten entre locales. */
+        if (r.facturas) {
+            h += '<tr class="alq-facturas" data-orden-sigue data-ancestros="' + clave + '">'
+                + '<td><i class="fas fa-file-invoice me-1"></i>Facturas imputadas</td><td></td>'
+                + meses.map(function(m) {
+                    var c = r.facturas.meses[m.clave];
+
+                    if (!c) { return '<td class="text-end text-muted">—</td>'; }
+
+                    return '<td class="text-end" data-orden="' + c.a_pagar + '" data-origen="Factura" title="'
+                        + esc(tooltipFacturas(c, r.facturas.imputaciones) + '\nOrigen: Factura') + '">' + importe(c.a_pagar)
+                        + '<span class="alq-chip alq-chip-FACTURA" data-etiqueta="factura"></span></td>';
+                }).join('')
+                + '<td class="text-end fw-bold" title="' + esc(tooltipImputaciones(r.facturas.imputaciones)) + '">'
+                + importe(r.facturas.total.a_pagar) + '</td></tr>';
+        }
+
+        return h;
     }
 
-    function filasLocal(l, meses) {
-        var clave = 'L' + l.nro;
+    /**
+     * Las facturas de una celda de "Facturas imputadas": cada una con su
+     * pendiente, vencimiento a considerar y fecha de pago; y de cada
+     * imputación, las retenciones por tipo, el total a pagar, el mes y los
+     * locales que cubre, quién la cargó y cuándo.
+     */
+    function tooltipFacturas(c, imputaciones) {
+        var ids = {};
+        var t = 'A pagar ' + importeTexto(c.a_pagar) + ' (facturas ' + importeTexto(c.neto) + ' − retenciones '
+            + importeTexto(c.retencion) + ')';
+
+        (c.pagos || []).forEach(function(p) {
+            var d = p.detalle || {};
+
+            ids[d.imputacion] = true;
+            t += '\n\n' + d.factura + ': pendiente ' + importeTexto(p.neto) + ', su parte de retenciones '
+                + importeTexto(p.retencion) + '\nVence (a considerar) ' + fecha(p.vencimiento) + ' · se paga el '
+                + fecha(p.fecha) + (p.nota_dia ? ' — ' + p.nota_dia : '');
+        });
+
+        return t + '\n\n' + tooltipImputaciones(imputaciones.filter(function(i) { return ids[i.id]; }));
+    }
+
+    function tooltipImputaciones(imputaciones) {
+        return (imputaciones || []).map(function(i) {
+            return 'Imputación #' + i.id + ' · cubre ' + rotuloMes(i.mes)
+                + (i.fuera_horizonte ? ', fuera del horizonte' : '')
+                + '\nLocales: ' + (i.todos ? 'todos (' : '') + i.locales.map(function(l) { return l.nombre; }).join(', ')
+                + (i.todos ? ')' : '')
+                + '\nFacturas ' + importeTexto(i.total_facturas) + ' · retenciones '
+                + (i.retenciones.length ? i.retenciones.map(function(x) { return x.nombre + ' ' + importeTexto(x.importe); }).join(', ')
+                    : 'ninguna')
+                + ' · a pagar ' + importeTexto(i.total_a_pagar)
+                + '\n' + Auditoria.texto({ alta: { usuario: i.usuario, fecha: i.fecha } });
+        }).join('\n\n');
+    }
+
+    function filasLocal(l, meses, padre) {
+        var clave = padre + '-L' + l.nro;
         var estado = l.estado === 'PROYECTA'
             ? (l.faltan.length ? ' <span class="badge bg-warning text-dark" title="Falta: ' + esc(l.faltan.join(', ')) + '">parcial</span>' : '')
             : ' <span class="badge bg-warning text-dark" title="Falta: ' + esc(l.faltan.join(', ')) + '">' + esc(datos.estados[l.estado] || l.estado) + '</span>';
-        var tieneGrupos = l.grupos.length > 0;
 
-        var h = '<tr class="alq-local" data-clave="' + clave + '">'
-            + '<td data-orden="' + esc(l.nombre) + '">'
-                + (tieneGrupos ? '<span class="alq-toggle" data-clave="' + clave + '"><i class="fas fa-caret-right"></i></span> ' : '<span class="alq-toggle-vacio" style="display:inline-block;width:1rem"></span> ')
-                + esc(l.nombre) + estado + '</td>'
-            + '<td>' + esc(razonDe(l)) + '</td>'
+        var h = '<tr class="alq-local" data-orden-sigue data-ancestros="' + padre + '" data-clave="' + clave + '">'
+            + '<td>' + (l.grupos.length ? toggle(clave) : SIN_TOGGLE) + esc(l.nombre) + estado + '</td>'
+            + '<td>' + l.nro + '</td>'
             + celdas(l.meses, l.total, meses, 'a_pagar', null)
             + '</tr>';
 
         l.grupos.forEach(function(g) {
             var gClave = clave + '-' + g.grupo;
 
-            h += '<tr class="alq-grupo" data-orden-sigue data-padre="' + clave + '" data-clave="' + gClave + '">'
-                + '<td><span class="alq-toggle" data-clave="' + gClave + '"><i class="fas fa-caret-right"></i></span> '
-                    + esc(g.nombre) + '</td><td></td>'
+            h += '<tr class="alq-grupo" data-orden-sigue data-ancestros="' + padre + ' ' + clave + '" data-clave="' + gClave + '">'
+                + '<td>' + toggle(gClave) + esc(g.nombre) + '</td><td></td>'
                 + celdas(g.meses, g.total, meses, 'neto', null)
                 + '</tr>';
 
             g.conceptos.forEach(function(k) {
-                h += '<tr class="alq-concepto" data-orden-sigue data-padre="' + gClave + '" data-abuelo="' + clave + '">'
+                h += '<tr class="alq-concepto" data-orden-sigue data-ancestros="' + padre + ' ' + clave + ' ' + gClave + '">'
                     + '<td>' + esc(k.nombre) + '</td><td></td>'
                     + celdas(k.meses, k.total, meses, 'neto', g.grupo)
                     + '</tr>';
@@ -167,10 +255,53 @@
 
             if (!c) { return '<td class="text-end text-muted">—</td>'; }
 
-            return '<td class="text-end" data-orden="' + c[campo] + '" title="' + esc(tooltip(c, grupo)) + '">'
-                + importe(c[campo]) + '</td>';
+            var o = origen(c);
+
+            /* EL CHIP VA EN data-etiqueta Y LO DIBUJA EL CSS: el Excel se queda
+               con el número limpio. El origen baja en su propia columna, que
+               exportar() agrega sólo mientras exporta (data-origen). */
+            return '<td class="text-end" data-orden="' + c[campo] + '" data-origen="' + esc(o.texto) + '" title="'
+                + esc(tooltip(c, grupo) + '\nOrigen: ' + o.detalle) + '">' + importe(c[campo])
+                + '<span class="alq-chip alq-chip-' + o.clase + '" data-etiqueta="' + esc(o.chip) + '"></span></td>';
         }).join('')
-            + '<td class="text-end fw-bold" title="' + esc(tooltip(total, null)) + '">' + importe(total[campo]) + '</td>';
+            + '<td class="text-end fw-bold" title="' + esc(tooltip(total, null) + '\nOrigen: ' + origen(total).detalle) + '">'
+            + importe(total[campo]) + '</td>';
+    }
+
+    /* La etiqueta corta del chip de cada origen. El texto entero va en el
+       tooltip y en el Excel. */
+    var CHIP = { APP_CERRADA: 'cerrado', APP_ABIERTA: 'app', VENTA_REAL: 'venta', ESTIMADO: 'est.', FACTURA: 'factura' };
+
+    /**
+     * El origen de una celda, con lo que trae del servidor ('origenes': clave
+     * => texto y a pagar). Uno solo: su chip. Varios: "mixto", con el
+     * desglose en el tooltip.
+     */
+    function origen(c) {
+        var claves = Object.keys(c.origenes || {});
+
+        if (claves.length === 1) {
+            var k = claves[0];
+            var infl = k.indexOf('INFLACION:') === 0;
+
+            return { clase: infl ? 'INFLACION' : k, texto: c.origenes[k].texto, detalle: c.origenes[k].texto,
+                     chip: infl ? 'est. ' + rotuloMes(k.substring(10)) : (CHIP[k] || k) };
+        }
+
+        return { clase: 'MIXTO', texto: 'Mixto', chip: 'mixto',
+                 detalle: 'mixto — ' + claves.map(function(k) {
+                     return c.origenes[k].texto + ' ' + importeTexto(c.origenes[k].a_pagar);
+                 }).join('; ') };
+    }
+
+    /** La leyenda de los chips, arriba de la grilla. */
+    function pintarLeyenda() {
+        html('alqLeyenda', (datos.leyenda_origenes || []).map(function(l) {
+            var chip = l.clave === 'INFLACION' ? 'est. mes' : (l.clave === 'MIXTO' ? 'mixto' : (CHIP[l.clave] || l.clave));
+
+            return '<span class="me-3 text-nowrap" title="' + esc(l.ayuda) + '"><span class="alq-chip alq-chip-'
+                + esc(l.clave) + '" data-etiqueta="' + esc(chip) + '"></span> ' + esc(l.texto) + '</span>';
+        }).join(''));
     }
 
     /** El desglose de una celda, con lo que explica cada pago. */
@@ -184,17 +315,6 @@
 
             t += '\n\nPago: ' + fecha(p.fecha) + (p.nota_dia ? ' — ' + p.nota_dia : '')
                 + '\nOrigen: ' + (datos.origenes[p.origen] || p.origen);
-
-            /* UNA FACTURA IMPUTADA: cual, que renglon, y que parte le toca a
-               este local. El importe es el de la factura, con IVA. */
-            if (p.origen === 'FACTURA') {
-                t += '\nFactura ' + d.factura + ' de ' + (d.razon || d.cod_provee)
-                    + '\nImputación ' + d.imputacion + ', renglón ' + d.renglon + ' · cubre ' + rotuloMes(d.mes_cubre)
-                    + '\nImporte con IVA y percepciones (la factura no se abre en impuestos)'
-                    + '\nParte de este local: ' + numero(d.peso * 100, 1) + ' % '
-                    + (d.reparto === 'IGUAL' ? '(partes iguales: no había nada proyectado)'
-                        : '(en proporción a lo proyectado)');
-            }
 
             if (grupo === 'VARIABLES' && d.venta !== undefined) {
                 t += '\nVenta del mes ' + rotuloMes(p.mes_concepto) + ': ' + importeTexto(d.venta)
@@ -229,11 +349,10 @@
         return t;
     }
 
+    /** Un hijo se ve si TODOS sus ancestros (razón, local, grupo) están abiertos. */
     function aplicarAbiertos() {
-        document.querySelectorAll('#alqBody tr[data-padre]').forEach(function(tr) {
-            var padre = tr.getAttribute('data-padre');
-            var abuelo = tr.getAttribute('data-abuelo');
-            var visible = !!abiertos[padre] && (!abuelo || !!abiertos[abuelo]);
+        document.querySelectorAll('#alqBody tr[data-ancestros]').forEach(function(tr) {
+            var visible = tr.getAttribute('data-ancestros').split(' ').every(function(k) { return !!abiertos[k]; });
 
             tr.style.display = visible ? '' : 'none';
         });
@@ -257,9 +376,19 @@
     }
 
     /** Una sola cuenta para el pie y para los totales de arriba del eje. */
-    function pintarPie(locales, meses) {
+    /**
+     * Sobre las razones sociales VISIBLES, con lo que tienen sus locales
+     * visibles: con el buscador puesto, el pie suma lo que se ve. Sin
+     * buscador, da el total de la pestaña (las razones suman la lista entera).
+     */
+    function pintarPie(razones, meses) {
         var valores = meses.map(function(m) {
-            return locales.reduce(function(s, l) { return s + ((l.meses[m.clave] || {}).a_pagar || 0); }, 0);
+            return razones.reduce(function(s, x) {
+                var facturas = x.r.facturas ? ((x.r.facturas.meses[m.clave] || {}).a_pagar || 0) : 0;
+
+                return s + facturas
+                    + x.locales.reduce(function(t, l) { return t + ((l.meses[m.clave] || {}).a_pagar || 0); }, 0);
+            }, 0);
         });
         var total = valores.reduce(function(s, v) { return s + v; }, 0);
 
@@ -273,11 +402,44 @@
         });
     }
 
+    /**
+     * EXPORTAR ABRE TODO Y BAJA EL ORIGEN. Al lado de cada mes agrega, sólo
+     * mientras exporta, una columna "Origen mm/aa" con data-exportar-solo: en
+     * pantalla no puede estar, porque eje-totales.js pide una celda de
+     * encabezado por columna del eje y una de más correría los totales.
+     */
     function exportar() {
         var previo = JSON.parse(JSON.stringify(abiertos));
+        var tabla = document.getElementById('tablaAlquileres');
+        var meses = datos.meses.length;
 
         abrirTodo(true);
+
+        Array.prototype.forEach.call(tabla.querySelectorAll('tr'), function(tr) {
+            var enHead = tr.parentNode.tagName === 'THEAD';
+            var cols = Array.prototype.slice.call(tr.cells);
+            /* En el encabezado sólo la fila de los meses; en el cuerpo y el pie, las celdas del eje. */
+            var desde = enHead ? 0 : (tr.parentNode.tagName === 'TFOOT' ? 1 : 2);
+
+            if (enHead && cols.length !== meses + 1) { return; }
+
+            for (var i = desde + meses - 1; i >= desde; i--) {
+                var td = cols[i];
+
+                if (!td) { continue; }
+
+                var nueva = document.createElement(enHead ? 'th' : 'td');
+
+                nueva.className = 'alq-solo-export';
+                nueva.setAttribute('data-exportar-solo', '');
+                nueva.textContent = enHead ? 'Origen ' + td.textContent : (td.getAttribute('data-origen') || '');
+                td.parentNode.insertBefore(nueva, td.nextSibling);
+            }
+        });
+
         exportarTabla('tablaAlquileres', 'Alquileres_Proyeccion');
+
+        Array.prototype.forEach.call(tabla.querySelectorAll('.alq-solo-export'), function(c) { c.parentNode.removeChild(c); });
         abiertos = previo;
         aplicarAbiertos();
     }

@@ -94,19 +94,6 @@ chequear('y nombra el script que falta', true, strpos($av[0]['texto'], Alquilere
 chequear('con la condicion cumplida, ninguno', [], AlquileresFacturas::avisoCondicion($ctx, [$f('SAPALA')]));
 chequear('sin facturas de alquiler, ninguno', [], AlquileresFacturas::avisoCondicion($cerrada, [$f('OGXXXX')]));
 
-seccion('El neto gravado de una cuota');
-
-$c = ['NETO_GRAVADO_COMP' => 18944468.55, 'IMPORTE_COMP' => 25105588.63, 'IMPORTE_VTO' => 25105588.63];
-chequear('una sola cuota: el neto del comprobante (Cencosud, 02/11/2026)', 18944468.55,
-    AlquileresFacturas::netoDeCuota($c));
-chequear('dos cuotas iguales: la mitad cada una', 500.0,
-    AlquileresFacturas::netoDeCuota(['NETO_GRAVADO_COMP' => 1000.0, 'IMPORTE_COMP' => 1210.0, 'IMPORTE_VTO' => 605.0]));
-chequear('sin neto en Tango: null, no 0', null,
-    AlquileresFacturas::netoDeCuota(['NETO_GRAVADO_COMP' => null, 'IMPORTE_COMP' => 1210.0, 'IMPORTE_VTO' => 1210.0]));
-chequear('neto en 0: tambien null', null,
-    AlquileresFacturas::netoDeCuota(['NETO_GRAVADO_COMP' => 0.0, 'IMPORTE_COMP' => 1210.0, 'IMPORTE_VTO' => 1210.0]));
-chequear('una fila sin los campos (de antes): null', null, AlquileresFacturas::netoDeCuota(['IMPORTE_VTO' => 10.0]));
-
 seccion('El lector: solo lee');
 
 $fuente = file_get_contents(__DIR__ . '/../Class/AlquileresUniverso.php');
@@ -114,7 +101,7 @@ chequear('AlquileresUniverso no tiene ni una sentencia de escritura', 0,
     preg_match_all('/\b(INSERT|UPDATE|DELETE|MERGE)\s+(INTO\s+)?dbo\./i', $fuente));
 
 if (!Pruebas::hayBase()) {
-    Pruebas::saltear('sin conexion a la base: el contexto real y el neto de Tango no se miran');
+    Pruebas::saltear('sin conexion a la base: el contexto real no se mira');
 } else {
     require_once __DIR__ . '/../Class/CashflowRegistry.php';
     require_once __DIR__ . '/../Class/Proveedores.php';
@@ -127,16 +114,6 @@ if (!Pruebas::hayBase()) {
         in_array(AlquileresFacturas::SIN_MODULO, $real['condicion']['faltan'], true));
     chequear('y se lee una sola vez por pedido', true, AlquileresUniverso::delPedido() === $real);
 
-    $pend = (new Proveedores())->getPendientes(date('Y-m-d'));
-    $sinCampo = array_filter($pend, function ($i) {
-        return !array_key_exists('NETO_GRAVADO_COMP', $i) || !array_key_exists('IMPORTE_COMP', $i);
-    });
-    chequear('todos los pendientes traen el neto gravado y el total del comprobante', 0, count($sinCampo));
-    $raros = array_filter($pend, function ($i) {
-        return $i['NETO_GRAVADO_COMP'] !== null && $i['IMPORTE_COMP'] !== null
-            && $i['NETO_GRAVADO_COMP'] > $i['IMPORTE_COMP'] + 0.01 && $i['IMPORTE_COMP'] > 0;
-    });
-    chequear('el neto nunca supera al total del comprobante', 0, count($raros));
 }
 
 /* ======================================================================

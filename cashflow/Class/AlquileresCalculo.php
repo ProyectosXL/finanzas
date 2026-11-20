@@ -18,19 +18,31 @@ require_once __DIR__ . '/Inflacion.php';
  * Por local y por mes, de mayor a menor prioridad (ORDEN_ORIGEN):
  *
  *   1. FACTURA      la factura real imputada. NO SE RESUELVE ACA: una
- *                   imputacion reemplaza por MES DE PAGO y con el importe final
- *                   (con IVA, menos retencion), y este calculo es por mes del
- *                   concepto y en neto. La aplica AlquileresImputacion::aplicar()
- *                   sobre la lista de pagos, despues de AlquileresPago; esta
- *                   clase solo declara el origen para que la pestaña y el
- *                   tablero lo nombren.
+ *                   imputacion pisa todo lo de una razon social en sus locales
+ *                   en un MES DE PAGO, con el importe final (con IVA, menos
+ *                   retenciones), y este calculo es por mes del concepto y en
+ *                   neto. La aplica AlquileresImputacion::aplicar() sobre la
+ *                   lista de pagos, despues de AlquileresPago; esta clase solo
+ *                   declara el origen para que la pestaña y el tablero lo
+ *                   nombren.
  *   2. APP_CERRADA  el periodo esta cerrado en la app: sus importes por
  *                   concepto, tal cual, incluidos los variables que ya calculo
- *                   la app. Un periodo ABIERTO nunca se lee (ver AlquileresApp).
- *   3. VENTA_REAL   el mes no esta cerrado pero ya tiene venta en la app: los
- *                   conceptos los calcula el cashflow, con esa venta.
- *   4. ESTIMADO     todo estimado: fijos ajustados, expensas proyectadas y la
+ *                   la app.
+ *   3. APP_ABIERTA  el periodo esta ABIERTO en la app y tiene cargado un fijo
+ *                   (1, 2, 3 u 8) mayor que 0: se usa ese importe, y los meses
+ *                   que siguen ajustan desde el (fijos()). Solo los fijos: los
+ *                   variables guardados con el periodo abierto no tienen
+ *                   restado el VMA (ver AlquileresApp). Los variables de ese
+ *                   mes se calculan, pero con el VMA y el 9 de la app.
+ *   4. VENTA_REAL   el mes no esta cerrado pero ya tiene venta en la app: los
+ *                   variables los calcula el cashflow, con esa venta.
+ *   5. ESTIMADO     todo estimado: fijos ajustados, expensas proyectadas y la
  *                   venta estimada (o la manual de un local nuevo).
+ *
+ * EL ORIGEN ES POR CONCEPTO, no por mes: en un mes abierto el VMA puede venir
+ * de la app, el 6 de la venta real y las expensas estimadas. Cada concepto lo
+ * dice en 'origen', y un fijo estimado dice tambien desde que mes ajusta
+ * ('inflacion_desde'): de ahi sale el chip de la pestaña.
  *
  * FIJOS: EL AJUSTE POR INFLACION
  * ------------------------------
@@ -56,15 +68,17 @@ class AlquileresCalculo {
 
     const FACTURA = 'FACTURA';
     const APP_CERRADA = 'APP_CERRADA';
+    const APP_ABIERTA = 'APP_ABIERTA';
     const VENTA_REAL = 'VENTA_REAL';
     const ESTIMADO = 'ESTIMADO';
 
     /** De mayor a menor prioridad. FACTURA la aplica AlquileresImputacion, no este calculo. */
-    const ORDEN_ORIGEN = [self::FACTURA, self::APP_CERRADA, self::VENTA_REAL, self::ESTIMADO];
+    const ORDEN_ORIGEN = [self::FACTURA, self::APP_CERRADA, self::APP_ABIERTA, self::VENTA_REAL, self::ESTIMADO];
 
     const NOMBRE_ORIGEN = [
         self::FACTURA => 'Factura',
-        self::APP_CERRADA => 'App cerrada',
+        self::APP_CERRADA => 'Real (cerrado)',
+        self::APP_ABIERTA => 'Cargado en app (abierto)',
         self::VENTA_REAL => 'Venta real',
         self::ESTIMADO => 'Estimado'
     ];
@@ -121,26 +135,41 @@ class AlquileresCalculo {
      * @param int $frecuencia
      * @param int|null $mesAjuste
      * @param array $inflacion 'Y-m' => puntos
+     * @param array $abiertos 'Y-m' => [ID_CA => float]: los fijos cargados en la app con
+     *        el periodo ABIERTO (AlquileresApp::detalleAbiertos()), de los meses
+     *        posteriores al ultimo cerrado
      * @return array ['meses' => ['Y-m' => ['valores' => [ID_CA => float],
      *                'ajusta' => bool, 'pct' => float|null, 'ventana' => ['Y-m'],
-     *                'faltan' => ['Y-m']]], 'faltan' => ['Y-m']]
+     *                'faltan' => ['Y-m'], 'origen' => [ID_CA => APP_ABIERTA|ESTIMADO],
+     *                'desde' => [ID_CA => 'Y-m' del ultimo valor tomado de la app]]],
+     *                'faltan' => ['Y-m'],
+     *                'avisos' => [['tipo' => SIN_AJUSTE|AJUSTE_FUERA, 'mes', 'concepto']]]
      */
-    public static function fijos($base, $mesBase, $hasta, $frecuencia, $mesAjuste, $inflacion) {
+    public static function fijos($base, $mesBase, $hasta, $frecuencia, $mesAjuste, $inflacion, $abiertos = []) {
         $valores = [];
+        /* De que mes es el ultimo valor tomado de la app, por concepto: el
+           ultimo cerrado o un abierto cargado. Es el "inflacion desde" del chip. */
+        $desde = [];
+        /* Y cuanto valia: contra eso se mira si la app aplico el ajuste. */
+        $tomado = [];
 
         foreach (AlquileresConceptos::delGrupo(AlquileresConceptos::FIJOS) as $id) {
             $valores[$id] = (float) ($base[$id] ?? 0.0);
+            $desde[$id] = $mesBase;
+            $tomado[$id] = $valores[$id];
         }
 
         $n = max(1, (int) $frecuencia);
         $meses = [];
         $faltanTodos = [];
+        $avisos = [];
 
         for ($mes = Inflacion::mesMas($mesBase, 1); $mes <= $hasta; $mes = Inflacion::mesMas($mes, 1)) {
             $ajusta = self::ajusta($mes, $n, $mesAjuste);
             $pct = null;
             $ventana = [];
             $faltan = [];
+            $origen = [];
 
             if ($ajusta) {
                 $suma = Inflacion::sumada($inflacion, Inflacion::mesMas($mes, -($n - 1)), $n);
@@ -150,12 +179,44 @@ class AlquileresCalculo {
                 $pct = array_sum(array_filter($suma['meses'], function ($v) {
                     return $v !== null;
                 }));
+                $faltanTodos = array_merge($faltanTodos, $faltan);
+            }
 
-                foreach ($valores as $id => $v) {
+            foreach ($valores as $id => $v) {
+                $app = (float) ($abiertos[$mes][$id] ?? 0.0);
+                $igual = abs($app - $tomado[$id]) < 0.005;
+
+                /* CARGADO EN LA APP CON EL PERIODO ABIERTO: se usa, y desde ahi
+                   ajustan los meses que siguen, con la frecuencia y el mes de
+                   ajuste del local, como si fuera el ultimo cerrado. SALVO en un
+                   mes en que el local ajusta, si la app tiene el mismo valor que
+                   el ultimo que se le tomo: la app copia el mes anterior al abrir
+                   el periodo, y ese valor todavia no tiene el ajuste. Se sigue
+                   estimando y se avisa (SIN_AJUSTE). Si la app cambio el valor
+                   en un mes que NO es de ajuste, se usa, pero se avisa
+                   (AJUSTE_FUERA): el mes del ultimo ajuste de Parametros puede
+                   estar mal, y el proximo ajuste se sumaria dos veces. */
+                if ($app > 0 && !($ajusta && $pct > 0 && $igual)) {
+                    if (!$ajusta && !$igual) {
+                        $avisos[] = ['tipo' => 'AJUSTE_FUERA', 'mes' => $mes, 'concepto' => $id];
+                    }
+
+                    $valores[$id] = $app;
+                    $desde[$id] = $mes;
+                    $tomado[$id] = $app;
+                    $origen[$id] = self::APP_ABIERTA;
+                    continue;
+                }
+
+                if ($app > 0) {
+                    $avisos[] = ['tipo' => 'SIN_AJUSTE', 'mes' => $mes, 'concepto' => $id];
+                }
+
+                if ($ajusta) {
                     $valores[$id] = $v * (1 + $pct / 100);
                 }
 
-                $faltanTodos = array_merge($faltanTodos, $faltan);
+                $origen[$id] = self::ESTIMADO;
             }
 
             $meses[$mes] = [
@@ -163,14 +224,16 @@ class AlquileresCalculo {
                 'ajusta' => $ajusta,
                 'pct' => $pct,
                 'ventana' => $ventana,
-                'faltan' => $faltan
+                'faltan' => $faltan,
+                'origen' => $origen,
+                'desde' => $desde
             ];
         }
 
         $faltanTodos = array_values(array_unique($faltanTodos));
         sort($faltanTodos);
 
-        return ['meses' => $meses, 'faltan' => $faltanTodos];
+        return ['meses' => $meses, 'faltan' => $faltanTodos, 'avisos' => $avisos];
     }
 
     /* ====================================================================
@@ -409,11 +472,14 @@ class AlquileresCalculo {
      *     'inflacion' => ['Y-m' => float],
      *     'tasa_expensas' => lo de tasaDelLocal(),
      *     'ventas' => ['Y-m' => ['bruta' => float, 'neta' => float,
-     *                           'origen' => 'REAL'|'ESTIMADA'|'MANUAL'] | null]
+     *                           'origen' => 'REAL'|'ESTIMADA'|'MANUAL'] | null],
+     *     'abiertos' => ['Y-m' => [ID_CA => float]]  opcional: los fijos cargados en la
+     *                   app con el periodo abierto (AlquileresApp::detalleAbiertos())
      * ]
      * @return array ['meses' => ['Y-m' => ['origen' => string|null,
-     *                'motivo' => string|null, 'conceptos' => [ID_CA => [...]]]],
-     *                'ultimo_cerrado' => 'Y-m'|null, 'faltan_inflacion' => ['Y-m']]
+     *                'motivo' => string|null, 'conceptos' => [ID_CA => [..., 'origen']]]],
+     *                'ultimo_cerrado' => 'Y-m'|null, 'faltan_inflacion' => ['Y-m'],
+     *                'avisos_app' => lo de fijos()['avisos']]
      */
     public static function proyectarLocal($e) {
         $meses = $e['meses'];
@@ -421,14 +487,15 @@ class AlquileresCalculo {
         $cerrados = $e['cerrados'];
         ksort($cerrados);
         $ultimo = empty($cerrados) ? null : array_key_last($cerrados);
-        $out = ['meses' => [], 'ultimo_cerrado' => $ultimo, 'faltan_inflacion' => []];
+        $out = ['meses' => [], 'ultimo_cerrado' => $ultimo, 'faltan_inflacion' => [], 'avisos_app' => []];
 
         $serie = null;
 
         if ($ultimo !== null && !empty($meses) && end($meses) > $ultimo) {
             $serie = self::fijos($cerrados[$ultimo], $ultimo, end($meses),
-                                 $e['frecuencia'], $e['mes_ajuste'], $e['inflacion']);
+                                 $e['frecuencia'], $e['mes_ajuste'], $e['inflacion'], $e['abiertos'] ?? []);
             $out['faltan_inflacion'] = $serie['faltan'];
+            $out['avisos_app'] = $serie['avisos'];
         }
 
         foreach ($meses as $mes) {
@@ -451,7 +518,7 @@ class AlquileresCalculo {
 
             foreach (AlquileresConceptos::proyectados() as $id) {
                 if (isset($cerrados[$mes][$id])) {
-                    $conceptos[$id] = ['importe' => (float) $cerrados[$mes][$id]];
+                    $conceptos[$id] = ['importe' => (float) $cerrados[$mes][$id], 'origen' => self::APP_CERRADA];
                 }
             }
 
@@ -472,23 +539,36 @@ class AlquileresCalculo {
         $fijosMes = $serie['meses'][$mes];
         $conceptos = [];
 
+        /* LOS FIJOS: cargados en la app con el periodo abierto, o estimados por
+           inflacion desde el ultimo valor que se le tomo a la app. */
         foreach ($fijosMes['valores'] as $id => $v) {
+            $deApp = ($fijosMes['origen'][$id] ?? self::ESTIMADO) === self::APP_ABIERTA;
             $conceptos[$id] = [
                 'importe' => $v,
+                'origen' => $deApp ? self::APP_ABIERTA : self::ESTIMADO,
+                'inflacion_desde' => $deApp ? null : ($fijosMes['desde'][$id] ?? $ultimo),
                 'ajusta' => $fijosMes['ajusta'],
                 'pct_inflacion' => $fijosMes['pct'],
                 'ventana' => $fijosMes['ventana']
             ];
         }
 
+        /* EL VMA DEL MES, el de la app si esta cargado: con el se calculan el 9
+           y los variables, como hace la app. Asi coincide Avellaneda. */
         $vma = $fijosMes['valores'][8];
+        $vmaDeApp = $conceptos[8]['origen'] === self::APP_ABIERTA;
         $vmaBase = (float) ($base[8] ?? 0.0);
         $c9Base = (float) ($base[9] ?? 0.0);
         /* El 9 actualizado como un fijo: la misma serie que el VMA. */
         $factor = ($vmaBase > 0) ? $vma / $vmaBase : self::factorFijo($serie, $mes);
         $fondo = self::fondo($vma, $e['pct'][9] ?? null, $c9Base, $vmaBase, $c9Base * $factor);
+        /* El 9 no se lee del periodo abierto: se recalcula. Con el VMA de la
+           app dice lo mismo que ella; actualizado como un fijo, dice desde
+           cuando ajusta. */
         $conceptos[9] = ['importe' => $fondo['importe'], 'regla' => $fondo['regla'],
-                         'pct' => $e['pct'][9] ?? null];
+                         'pct' => $e['pct'][9] ?? null,
+                         'origen' => ($fondo['regla'] !== 'FIJO' && $vmaDeApp) ? self::APP_ABIERTA : self::ESTIMADO,
+                         'inflacion_desde' => ($fondo['regla'] === 'FIJO') ? $ultimo : null];
 
         $t = $e['tasa_expensas'];
         $n = Inflacion::distancia($ultimo, $mes);
@@ -496,14 +576,15 @@ class AlquileresCalculo {
 
         if ($expensa !== null) {
             $conceptos[11] = ['importe' => $expensa, 'tasa' => $t['tasa'], 'meses_historia' => $t['meses'],
-                              'tasa_origen' => $t['origen']];
+                              'tasa_origen' => $t['origen'], 'origen' => self::ESTIMADO];
         }
 
         $venta = $e['ventas'][$mes] ?? null;
 
         if ($venta !== null) {
             foreach (self::variables($venta['bruta'], $venta['neta'], $e['pct'], $vma, $fondo['importe']) as $id => $v) {
-                $conceptos[$id] = $v + ['venta_origen' => $venta['origen'], 'mes_venta' => $mes];
+                $conceptos[$id] = $v + ['venta_origen' => $venta['origen'], 'mes_venta' => $mes,
+                    'origen' => ($venta['origen'] === 'REAL') ? self::VENTA_REAL : self::ESTIMADO];
             }
         }
 

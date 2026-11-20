@@ -62,6 +62,7 @@ class PestAppDoble extends AlquileresApp {
         return $d;
     }
     public function porcentajes() { return [3 => [6 => 7.0, 9 => 15.0], 2 => [7 => 8.0, 9 => 10.0]]; }
+    public function detalleAbiertos($meses, $cerrados) { return []; }
     public function ventasNetas($desde) {
         return [3 => ventana12(600), 2 => ventana12(300), 10 => ventana12(100), 40 => ventana12(1000)]
             + [];
@@ -177,6 +178,102 @@ chequear('la celda de un concepto trae el detalle del pago', true,
 chequear('el renglon del local muestra el a pagar, el grupo el neto', true,
     $unicenter['meses']['2026-11']['a_pagar'] > $fijos['meses']['2026-11']['neto']);
 
+seccion('Alquileres: la grilla por razon social');
+
+$porCod = array_column($p['razones'], null, 'cod');
+chequear('una razon social por renglon, ordenadas por nombre, "Sin razon social" al final',
+    ['CENCOSUD', 'IRSA'], array_column(array_filter($p['razones'], function ($r) { return !$r['sin_razon']; }), 'nombre'));
+chequear('bajo IRSA, sus locales: Alto Palermo y Solar (incompleto, con su estado)', [3, 10],
+    array_column($porCod['SAPALA']['locales'], 'nro'));
+chequear('Flores 1, sin fila en Parametros, va a "Sin razon social"', [40],
+    array_column(array_values(array_filter($p['razones'], function ($r) { return $r['sin_razon']; }))[0]['locales'], 'nro'));
+$sumaRazones = round(array_sum(array_map(function ($r) { return $r['total']['a_pagar']; }, $p['razones'])), 2);
+chequear('las razones suman el total de la pestaña al centavo', $p['kpis']['total_horizonte'], $sumaRazones);
+chequear('y la razon, lo de sus locales', $porCod['SAPALA']['total']['a_pagar'],
+    round(array_sum(array_map(function ($l) { return $l['total']['a_pagar']; }, $porCod['SAPALA']['locales'])), 2));
+
+/* SAN JUSTO: SASANJ es la principal; SAUCCS factura las expensas (11) y el
+   6, con su propio dia (20) y diferimiento (1). */
+class PestAppSJ extends PestAppDoble {
+    public function locales() { return parent::locales() + [80 => ['nro' => 80, 'nombre' => 'SAN JUSTO', 'habilitado' => true]]; }
+    public function detalleCerrados($cerrados, $desde) {
+        $d = parent::detalleCerrados($cerrados, $desde);
+        foreach ($cerrados as $m) {
+            if ($m >= $desde) { $d[80][$m] = [8 => 2741029.0, 9 => 328923.0, 11 => 3323532.0, 6 => 100.0]; }
+        }
+        return $d;
+    }
+    public function porcentajes() { return parent::porcentajes() + [80 => [6 => 6.5, 9 => 12.0]]; }
+    public function ventasNetas($desde) { return parent::ventasNetas($desde) + [80 => ventana12(200)]; }
+}
+
+class PestParSJ extends PestParDoble {
+    public function razonesVigentes() {
+        return parent::razonesVigentes() + [
+            'SASANJ' => ['cod' => 'SASANJ', 'razon' => 'CONTINENTAL URBANA', 'dia' => null, 'diferimiento' => 1],
+            'SAUCCS' => ['cod' => 'SAUCCS', 'razon' => 'URBANA CENTROS COMERCIALES', 'dia' => 20, 'diferimiento' => 2]];
+    }
+    public function locales() {
+        $l = parent::locales();
+        $l[80] = ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS'], 'conceptos_razon' => ['SAUCCS' => [6, 11]]] + $l[3];
+        return $l;
+    }
+}
+
+$cSJ = (new PestAlquileres('2026-11-10', new PestAppSJ(), new PestParSJ()))->calcular($h, $ins);
+$pSJ = Alquileres::armarPestana($cSJ, $h);
+$rSJ = array_column($pSJ['razones'], null, 'cod');
+$conceptosBajo = function ($cod) use ($rSJ) {
+    $ids = [];
+    foreach ($rSJ[$cod]['locales'] as $l) {
+        if ($l['nro'] !== 80) { continue; }
+        foreach ($l['grupos'] as $g) { $ids = array_merge($ids, array_column($g['conceptos'], 'id')); }
+    }
+    sort($ids);
+    return $ids;
+};
+chequear('San Justo aparece bajo las dos razones sociales', [true, true],
+    [in_array(80, array_column($rSJ['SASANJ']['locales'], 'nro'), true),
+     in_array(80, array_column($rSJ['SAUCCS']['locales'], 'nro'), true)]);
+chequear('bajo SASANJ, el VMA y el FPC s/VMA', ['8', '9'], $conceptosBajo('SASANJ'));
+chequear('bajo SAUCCS, lo que se le marco: el 6 y las expensas', ['6', '11'], $conceptosBajo('SAUCCS'));
+$exp = pagosDe($cSJ, 80, 11)['2026-11'];
+chequear('las expensas de SAUCCS vencen su dia (20/11)', ['SAUCCS', '2026-11-20'], [$exp['cod_provee'], $exp['fecha']]);
+chequear('y el VMA, el general (10/11, que es hoy)', ['SASANJ', '2026-11-10'],
+    [pagosDe($cSJ, 80, 8)['2026-11']['cod_provee'], pagosDe($cSJ, 80, 8)['2026-11']['fecha']]);
+chequear('el 6 se difiere con SAUCCS (2): en noviembre se paga el de septiembre', '2026-09',
+    pagosDe($cSJ, 80, 6)['2026-11']['mes_concepto']);
+chequear('la suma por razon sigue siendo el total', $pSJ['kpis']['total_horizonte'],
+    round(array_sum(array_map(function ($r) { return $r['total']['a_pagar']; }, $pSJ['razones'])), 2));
+
+seccion('Alquileres: el origen de cada importe (el chip)');
+
+$pagoO = function ($origen, $detalle = []) { return ['origen' => $origen, 'detalle' => $detalle]; };
+chequear('cada origen da su chip', [
+    ['clave' => 'APP_CERRADA', 'texto' => 'Real (cerrado)'],
+    ['clave' => 'APP_ABIERTA', 'texto' => 'Cargado en app (abierto)'],
+    ['clave' => 'VENTA_REAL', 'texto' => 'Venta real'],
+    ['clave' => 'INFLACION:2026-10', 'texto' => 'Estimado · inflación desde oct-26'],
+    ['clave' => 'ESTIMADO', 'texto' => 'Estimado'],
+    ['clave' => 'FACTURA', 'texto' => 'Factura']], [
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::APP_CERRADA)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::APP_ABIERTA)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::VENTA_REAL)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::ESTIMADO, ['inflacion_desde' => '2026-10'])),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::ESTIMADO)),
+    Alquileres::origenDelPago($pagoO(AlquileresCalculo::FACTURA))]);
+
+$uni = array_values(array_filter($p['locales'], function ($l) { return $l['nro'] === 2; }))[0];
+$vmaNov = $uni['grupos'][0]['conceptos'][0]['meses']['2026-11'];
+chequear('la celda del VMA estimado tiene un solo origen: inflacion desde el ultimo cerrado', ['INFLACION:2026-09'],
+    array_keys($vmaNov['origenes']));
+chequear('el subtotal del local mezcla origenes (fijos por inflacion, expensas estimadas): mixto', true,
+    count($uni['meses']['2026-11']['origenes']) > 1);
+chequear('y el desglose suma el a pagar de la celda', $uni['meses']['2026-11']['a_pagar'],
+    round(array_sum(array_column($uni['meses']['2026-11']['origenes'], 'a_pagar')), 2));
+chequear('la leyenda trae los siete', ['APP_CERRADA', 'APP_ABIERTA', 'VENTA_REAL', 'INFLACION', 'ESTIMADO', 'FACTURA', 'MIXTO'],
+    array_column($p['leyenda_origenes'], 'clave'));
+
 seccion('Alquileres: la venta y su pie');
 
 $pie = $p['ventas']['pie'];
@@ -228,24 +325,28 @@ $hDias = new Horizonte(28, 4, [], new DateTime('2026-11-10'));
 $alqDias = new PestAlquileresConInsumos('2026-11-10', new PestAppDoble(), new PestParDoble());
 
 /* Con UNA FACTURA IMPUTADA: tiene que haber de las dos partes. Se arma sobre
-   la proyeccion real de los dobles: el primer pago de noviembre del primer
-   local, reemplazado por una factura que vence el 20/11. */
+   la proyeccion real de los dobles: noviembre de Cencosud en el local de su
+   primer pago, reemplazado por una factura que vence el 20/11. */
 $proySola = $alqDias->calcular($hDias, $ins)['pagos'];
-$blanco = array_values(array_filter($proySola, function ($p) { return $p['mes_pago'] === '2026-11'; }))[0];
+$blanco = array_values(array_filter($proySola, function ($p) { return $p['mes_pago'] === '2026-11' && $p['cod_provee'] === 'SAUNIC'; }))[0];
 $facturaT = ['COD_PROVEE' => 'SAUNIC', 'RAZON_SOC' => 'CENCOSUD', 'T_COMP' => 'FAC', 'N_COMP' => 'A0193000155679',
              'FECHA_VTO' => '2026-11-20', 'FECHA_EMIS' => '2026-11-02', 'IMPORTE_VTO' => 1000.0,
-             'IMPORTE_PENDIENTE' => 1000.0, 'NETO_GRAVADO_COMP' => null, 'IMPORTE_COMP' => 1000.0, 'LEYENDA' => ''];
+             'IMPORTE_PENDIENTE' => 1000.0, 'LEYENDA' => ''];
 $sinImputarT = $facturaT;
 $sinImputarT['N_COMP'] = 'A0193000155680';
 $insF = $ins + ['facturas' => [
     'ctx' => AlquileresFacturas::contexto(['SAUNIC'], [], AlquileresFacturas::condicion(true, ['REAL'], true)),
     'pendientes' => [$facturaT, $sinImputarT], 'excluidas' => [], 'vtos' => [], 'en_tango' => [], 'avisos' => [],
-    'imputaciones' => [['id' => 1, 'usuario' => 'ANA', 'fecha' => '2026-11-09 10:00', 'observacion' => null,
+    /* La imputacion de Cencosud en noviembre, en el local del primer pago: pisa
+       todo lo de Cencosud ahi ese mes. */
+    'imputaciones' => [['id' => 1, 'cod_provee' => 'SAUNIC', 'mes' => '2026-11', 'todos' => false,
+        'locales' => [$blanco['nro']], 'usuario' => 'ANA', 'fecha' => '2026-11-09 10:00', 'observacion' => null,
+        'total_facturas' => 1000.0, 'total_retenciones' => 20.0,
         'facturas' => [['ID' => 1, 'COD_PROVEE' => 'SAUNIC', 'T_COMP' => 'FAC', 'N_COMP' => 'A0193000155679',
-            'FECHA_VTO_TANGO' => '2026-11-20', 'PENDIENTE' => 1000.0, 'NETO_GRAVADO' => null, 'RETENCION' => 20.0,
-            'RETENCION_SUGERIDA' => null, 'ESTADO' => 'PENDIENTE', 'FECHA_PAGADA' => null]],
-        'renglones' => [['orden' => 1, 'mes' => '2026-11', 'importe' => 1000.0, 'todos_de' => null,
-            'conceptos' => [(string) $blanco['concepto']], 'locales' => [$blanco['nro']]]]]]
+            'FECHA_VTO_TANGO' => '2026-11-20', 'PENDIENTE' => 1000.0, 'RETENCION' => 20.0, 'PAGADA_AL_IMPUTAR' => false,
+            'ESTADO' => 'PENDIENTE', 'FECHA_PAGADA' => null]],
+        'retenciones' => [['tipo' => 1, 'importe' => 20.0]]]],
+    'tipos' => [1 => 'Ganancias'], 'tabla_imputacion' => true
 ]];
 $alqDias->ins = $insF;
 $prov = new PestProveedor('ALQUILERES');
@@ -278,6 +379,28 @@ chequear('y en total, lo mismo que la pestaña', $pestDias['kpis']['total_horizo
     round($totalSerie($series['REAL']) + $totalSerie($series['PROYECTADO']), 2));
 chequear('la pestaña dice cuanto sin imputar', [1, 1000.0],
     [$pestDias['facturas']['kpis']['sin_imputar_n'], $pestDias['facturas']['kpis']['sin_imputar_importe']]);
+
+$cenc = array_column($pestDias['razones'], null, 'cod')['SAUNIC'];
+chequear('la factura va en "Facturas imputadas", al final de Cencosud, no en un local', [980.0, 1],
+    [$cenc['facturas']['meses']['2026-11']['a_pagar'], count($cenc['facturas']['imputaciones'])]);
+chequear('ese mes el local queda sin proyeccion de Cencosud', false,
+    isset(array_column($cenc['locales'], null, 'nro')[$blanco['nro']]['meses']['2026-11']));
+chequear('con la factura, las razones siguen sumando el total de la pestaña', $pestDias['kpis']['total_horizonte'],
+    round(array_sum(array_map(function ($r) { return $r['total']['a_pagar']; }, $pestDias['razones'])), 2));
+
+/* SIN IMPUTACIONES (sin el script 60): la pestaña y el tablero siguen
+   sumando lo mismo, todo proyectado. */
+$insSin = $insF;
+$insSin['facturas']['imputaciones'] = [];
+$insSin['facturas']['tabla_imputacion'] = false;
+$alqDias->ins = $insSin;
+$provSin = new PestProveedor('ALQUILERES');
+$provSin->alq = $alqDias;
+$seriesSin = $provSin->series($hDias);
+$pestSin = Alquileres::armarPestana($alqDias->calcular($hDias, $insSin), $hDias);
+chequear('sin imputaciones: REAL vacio y PAGOS = la pestaña', [0.0, $pestSin['kpis']['total_horizonte']],
+    [$totalSerie($seriesSin['REAL']), $totalSerie($seriesSin['PAGOS'])]);
+chequear('sin el script 60 la sub-pestaña no deja imputar', false, $pestSin['facturas']['tablas']);
 
 $movidos = array_filter($cF['pagos'], function ($x) { return $x['nota_dia'] !== ''; });
 chequear('un pago corrido de dia anota su celda con detalle', true,

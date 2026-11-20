@@ -1,8 +1,9 @@
 /**
  * Parametros -> Alquileres
  *
- * Cuatro secciones: el dia de vencimiento general, las razones sociales dadas
- * de alta, los datos de cada local de la app de alquileres y los pagos
+ * Cinco secciones: el dia de vencimiento general, las razones sociales dadas
+ * de alta, los datos de cada local de la app de alquileres (con los conceptos
+ * que factura cada razon social), los tipos de retencion y los pagos
  * extraordinarios.
  *
  * LA VALIDACION MANDA EN EL SERVIDOR (AlquileresParametros). Aca solo se
@@ -72,6 +73,7 @@
         pintarGeneral();
         pintarRazones();
         pintarLocales();
+        pintarTipos();
         pintarExtraForm();
         pintarExtras();
         bloquearSinTabla();
@@ -83,7 +85,7 @@
 
         var titulo = 'Falta correr ' + datos.script;
 
-        document.querySelectorAll('.palq-modulo input:not(#palqFiltroIncompletos), .palq-modulo select, .palq-modulo button:not([data-lectura])')
+        document.querySelectorAll('.palq-modulo input:not(#palqFiltroIncompletos):not(#palqTiposHistorial), .palq-modulo select, .palq-modulo button:not([data-lectura])')
             .forEach(function(el) {
                 el.disabled = true;
                 el.title = titulo;
@@ -328,6 +330,19 @@
             });
         });
 
+        cuerpo.querySelectorAll('.palq-conc-guardar').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var menu = btn.closest('.palq-conc-menu');
+
+                escribir('guardarConceptosRazon', {
+                    nro: parseInt(btn.closest('tr').getAttribute('data-nro'), 10),
+                    cod_provee: menu.getAttribute('data-cod'),
+                    conceptos: Array.prototype.map.call(menu.querySelectorAll('.palq-conc:checked'),
+                        function(c) { return parseInt(c.value, 10); })
+                });
+            });
+        });
+
         cuerpo.querySelectorAll('.palq-adic-baja').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 var nro = parseInt(btn.closest('tr').getAttribute('data-nro'), 10);
@@ -336,7 +351,8 @@
                 Notificacion.confirmar({
                     titulo: 'Quitar razón social del local',
                     mensaje: '¿' + (nombreRazon(cod) || cod) + ' deja de facturarle a este local?',
-                    detalle: 'Sus facturas ya no se van a poder imputar a este local. No se borra: queda en el historial.',
+                    detalle: 'Sus facturas ya no se van a poder imputar a este local y los conceptos que facturaba '
+                        + 'vuelven a la principal. No se borra: queda en el historial.',
                     confirmar: 'Quitar',
                     peligro: true
                 }).then(function(si) {
@@ -387,9 +403,12 @@
 
     /**
      * Las razones sociales ADICIONALES del local: las que le facturan algo
-     * además de la principal (San Justo: SAUCCS las expensas y el fondo). Sus
-     * facturas se pueden imputar al local; el vencimiento y el diferimiento
-     * siguen siendo los de la principal.
+     * además de la principal (San Justo: SAUCCS el % s/ventas, el FPC s/ventas
+     * y las expensas). Cada una lleva el selector de LOS CONCEPTOS QUE FACTURA:
+     * esos salen de la principal y se pagan con el día y el diferimiento de la
+     * adicional. La principal factura "el resto", que se ve de sólo lectura.
+     * Un concepto es de una sola razón social: el servidor lo valida, y acá
+     * los que ya tiene otra adicional se muestran deshabilitados.
      */
     function adicionales(l, cerrado) {
         var p = l.params || {};
@@ -397,16 +416,20 @@
         var chips = actuales.map(function(cod) {
             var nombre = nombreRazon(cod);
 
-            return '<span class="badge bg-light text-dark border me-1 mt-1" title="Razón social adicional: sus '
-                + 'facturas se imputan a este local. Vencimiento y diferimiento: los de la principal.">'
+            return '<div class="mt-1"><span class="badge bg-light text-dark border me-1" title="Razón social adicional: '
+                + 'sus facturas se imputan a este local y factura los conceptos que se le marquen.">'
                 + esc(nombre || cod)
-                + (nombre ? '' : ' <span class="text-danger">(dada de baja)</span>')
+                + (nombre ? '' : ' <span class="text-danger">(dada de baja: sus conceptos vuelven a la principal)</span>')
                 + ' <button type="button" class="btn btn-link btn-sm p-0 text-danger palq-adic-baja" data-cod="'
-                + esc(cod) + '" title="Quitar"' + (cerrado ? ' disabled' : '') + '><i class="fas fa-xmark"></i></button></span>';
+                + esc(cod) + '" title="Quitar"' + (cerrado ? ' disabled' : '') + '><i class="fas fa-xmark"></i></button></span>'
+                + selectorConceptos(l, cod, cerrado) + '</div>';
         }).join('');
 
+        var resto = actuales.length ? '<div class="small text-muted mt-1" title="La principal factura todo lo que '
+            + 'no se le marque a una adicional">Principal: ' + esc(restoPrincipal(l)) + '</div>' : '';
+
         if (cerrado || !p.cod_provee) {
-            return chips ? '<div>' + chips + '</div>' : '';
+            return chips ? '<div>' + resto + chips + '</div>' : '';
         }
 
         var libres = (datos.razones || []).filter(function(r) {
@@ -414,7 +437,7 @@
         });
         var sinTabla = !datos.tabla_razones_local;
 
-        return '<div>' + chips + '</div>'
+        return '<div>' + resto + chips + '</div>'
             + (libres.length ? '<select class="form-select form-select-sm mt-1 palq-adic-alta"'
                 + (sinTabla ? ' disabled title="Falta correr ' + esc(datos.script_razones_local) + '"'
                     : ' title="Otra razón social que le factura a este local (expensas, fondo…)"') + '>'
@@ -422,6 +445,48 @@
                 + libres.map(function(r) {
                     return '<option value="' + esc(r.cod) + '">' + esc(r.nombre) + '</option>';
                 }).join('') + '</select>' : '');
+    }
+
+    /** "el resto": los conceptos que factura la principal, con su número */
+    function restoPrincipal(l) {
+        var principal = (l.params || {}).cod_provee;
+        var mapa = l.concepto_razon || {};
+        var suyos = (datos.conceptos_proyectados || []).filter(function(c) {
+            return !mapa[c.id] || mapa[c.id] === principal;
+        }).map(function(c) { return c.id; });
+
+        return suyos.length ? 'el resto (' + suyos.join(', ') + ')' : 'nada: todo lo facturan las adicionales';
+    }
+
+    /**
+     * Un desplegable con un tilde por concepto y un botón Guardar: la lista
+     * viaja entera y el servidor da de baja la vigente y da de alta la nueva.
+     */
+    function selectorConceptos(l, cod, cerrado) {
+        var marcados = ((l.params || {}).conceptos_razon || {})[cod] || [];
+        var mapa = l.concepto_razon || {};
+        var sinTabla = !datos.tabla_conceptos_razon;
+        var deshabilitado = cerrado || sinTabla || !nombreRazon(cod);
+        var titulo = sinTabla ? 'Falta correr ' + datos.script_conceptos_razon
+            : 'Los conceptos que factura ' + (nombreRazon(cod) || cod) + ' en este local';
+        var opciones = (datos.conceptos_proyectados || []).map(function(c) {
+            var deOtra = mapa[c.id] && mapa[c.id] !== cod && mapa[c.id] !== (l.params || {}).cod_provee;
+
+            return '<div class="form-check small"><input class="form-check-input palq-conc" type="checkbox" value="'
+                + c.id + '"' + (marcados.indexOf(c.id) !== -1 ? ' checked' : '')
+                + (deOtra ? ' disabled title="Lo factura ' + esc(mapa[c.id]) + '"' : '') + '>'
+                + '<label class="form-check-label">' + c.id + ' · ' + esc(c.nombre) + '</label></div>';
+        }).join('');
+
+        return '<div class="dropdown d-inline-block">'
+            + '<button type="button" class="btn btn-sm btn-outline-secondary py-0 dropdown-toggle palq-conc-btn" '
+            + 'data-bs-toggle="dropdown" data-bs-auto-close="outside" title="' + esc(titulo) + '"'
+            + (deshabilitado ? ' disabled' : '') + '>'
+            + (marcados.length ? 'Factura ' + marcados.join(', ') : 'No factura conceptos') + '</button>'
+            + '<div class="dropdown-menu p-2 palq-conc-menu" data-cod="' + esc(cod) + '" style="min-width: 280px;">'
+            + opciones
+            + '<button type="button" class="btn btn-sm btn-primary w-100 mt-2 palq-conc-guardar">Guardar</button>'
+            + '</div></div>';
     }
 
     function select(campo, opciones, val, deshabilitado) {
@@ -466,7 +531,97 @@
     }
 
     /* ================================================================
-       4. PAGOS EXTRAORDINARIOS
+       4. TIPOS DE RETENCION
+       ================================================================ */
+
+    /**
+     * Los tipos con los que se cargan las retenciones de una imputación. El
+     * nombre se edita en la grilla y se guarda al salir del campo; renombrar
+     * es baja y alta en el servidor, así una imputación vieja sigue con el
+     * nombre que tenía. Sin el script 60, la sección se deshabilita y lo dice.
+     */
+    function pintarTipos() {
+        var cuerpo = document.getElementById('palqTiposBody');
+
+        if (!cuerpo) { return; }
+
+        var conHistorial = document.getElementById('palqTiposHistorial').checked;
+        var tipos = (datos.tipos_retencion || []).filter(function(t) { return conHistorial || t.vigente; });
+
+        if (!datos.tabla_tipos_retencion) {
+            cuerpo.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Falta correr '
+                + esc(datos.script_imputacion) + ' contra la base central.</td></tr>';
+            document.querySelectorAll('#palqTipoForm input, #palqTipoForm button').forEach(function(el) {
+                el.disabled = true;
+                el.title = 'Falta correr ' + datos.script_imputacion;
+            });
+            return;
+        }
+
+        if (!tipos.length) {
+            cuerpo.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Ningún tipo de retención.</td></tr>';
+            return;
+        }
+
+        cuerpo.innerHTML = tipos.map(function(t) {
+            var audit = t.vigente ? Auditoria.linea('modif', t.usuario_modif, t.fecha_modif)
+                : Auditoria.linea('baja', t.usuario_baja, t.fecha_baja);
+
+            return '<tr data-id="' + t.id + '" class="' + (t.vigente ? '' : 'text-muted') + '">'
+                + '<td>' + (t.vigente
+                    ? '<input type="text" class="form-control form-control-sm palq-tipo" maxlength="60" value="'
+                        + esc(t.nombre) + '">'
+                    : esc(t.nombre) + (t.id_reemplazo ? ' <small>(renombrado)</small>' : '')) + '</td>'
+                + '<td>' + (t.vigente ? '<span class="badge bg-success">vigente</span>'
+                    : '<span class="badge bg-secondary">dado de baja</span>') + '</td>'
+                + '<td><small class="text-muted">' + esc(audit) + '</small></td>'
+                + '<td class="text-center">' + (t.vigente ? '<button class="btn btn-sm btn-link text-danger p-0 '
+                    + 'palq-tipo-baja" title="Dar de baja"><i class="fas fa-xmark"></i></button>' : '') + '</td>'
+                + '</tr>';
+        }).join('');
+
+        cuerpo.querySelectorAll('.palq-tipo').forEach(function(input) {
+            input.addEventListener('change', function() {
+                escribir('renombrarTipoRetencion', {
+                    id: parseInt(input.closest('tr').getAttribute('data-id'), 10),
+                    nombre: input.value
+                });
+            });
+        });
+
+        cuerpo.querySelectorAll('.palq-tipo-baja').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var id = parseInt(btn.closest('tr').getAttribute('data-id'), 10);
+
+                Notificacion.confirmar({
+                    titulo: 'Dar de baja el tipo de retención',
+                    mensaje: '¿Deja de ofrecerse al imputar?',
+                    detalle: 'Las imputaciones que ya lo usan lo siguen mostrando. No se borra: queda en el historial.',
+                    confirmar: 'Dar de baja',
+                    peligro: true
+                }).then(function(si) {
+                    if (si) { escribir('bajaTipoRetencion', { id: id }); }
+                });
+            });
+        });
+
+        Permisos.soloLectura(cuerpo);
+    }
+
+    function agregarTipo() {
+        var nombre = String(document.getElementById('palqTipoNombre').value || '').trim();
+
+        if (!nombre) {
+            Notificacion.advertencia('Escribí el nombre del tipo de retención.');
+            return;
+        }
+
+        valor('palqTipoNombre', '');
+        escribir('altaTipoRetencion', { nombre: nombre });
+    }
+
+    /* ================================================================
+       5. PAGOS EXTRAORDINARIOS
        ================================================================ */
 
     function pintarExtraForm() {
@@ -702,6 +857,8 @@
         enganchar('palqExtraRazon', 'change', localesDeLaRazon);
         enganchar('palqExtraTodos', 'change', localesDeLaRazon);
         enganchar('palqBtnExtra', 'click', agregarExtra);
+        enganchar('palqBtnTipo', 'click', agregarTipo);
+        enganchar('palqTiposHistorial', 'change', function() { if (datos) { pintarTipos(); } });
 
         document.addEventListener('click', function(ev) {
             var caja = document.getElementById('palqRazonSugerencias');

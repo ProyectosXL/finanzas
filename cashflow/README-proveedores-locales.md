@@ -827,6 +827,7 @@ Las facturas pendientes de los proveedores **dados de alta en Parámetros › Al
 - **En la planilla de pagos**, una fila de un proveedor de alquiler queda en error con *"Factura de alquiler: se gestiona en la pestaña Alquileres"*. La única fecha de pago de esas facturas es el vencimiento a considerar de la pestaña Alquileres. Las escrituras de a una o masivas sobre ellas (fecha, forma, exclusión por factura) se rechazan en el servidor.
 - **Lo que tenían cargado acá queda guardado y deja de leerse.** Al 10/11/2026 no había nada: ninguna fecha, planilla, exclusión por factura ni pago con dos medios de esos proveedores.
 - **Dar de baja la razón social en Parámetros › Alquileres** las devuelve acá. Se bloquea mientras tenga imputaciones de facturas todavía pendientes.
+- **Una factura de alquiler excluida a mano en Alquileres › Facturas** (un pago de contrato, que no se paga por ese circuito) **tampoco vuelve acá**: `destino()` la manda a "excluida" y no suma en ningún lado. El aviso informativo de esta pestaña la cuenta aparte.
 
 **Salen sólo si hay dónde caer.** Mientras no haya una fila activa del tablero con `ALQUILERES` / `REAL` o `PAGOS`, o no se haya corrido `sql/cashflow_alquileres_facturas.sql`, se quedan acá como siempre y un aviso **crítico** dice qué falta: sacarlas antes las haría desaparecer del cuadro.
 

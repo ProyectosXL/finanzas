@@ -53,6 +53,14 @@ class AlquileresParametros {
     const SCRIPT_RAZONES_LOCAL = 'sql/cashflow_alquileres_local_razones.sql';
 
     /**
+     * Los conceptos que factura cada razon social ADICIONAL de un local
+     * (script 62). Tampoco esta en TABLAS: sin ella todo va a la principal, como
+     * antes, y lo que falla -con el nombre del script- es marcar conceptos.
+     */
+    const T_LOCAL_RAZON_CONCEPTO = 'RO_T_CASHFLOW_ALQ_LOCAL_RAZON_CONCEPTO';
+    const SCRIPT_CONCEPTOS_RAZON = 'sql/cashflow_alquileres_local_razon_conceptos.sql';
+
+    /**
      * SEGUN QUE PROYECTA UN LOCAL (script 59, columnas MODO_PROYECCION y
      * FECHA_INICIO de RO_T_CASHFLOW_ALQ_LOCAL):
      *   APERTURA  mientras este abierto en Lakers; el vencimiento del contrato
@@ -89,6 +97,9 @@ class AlquileresParametros {
 
     /** @var bool|null */
     private $columnasVigencia = null;
+
+    /** @var bool|null */
+    private $tablaConceptosRazon = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -361,6 +372,17 @@ class AlquileresParametros {
         return $this->tablaRazonesLocal;
     }
 
+    /** @return bool Si ya se corrio el script 62 (los conceptos de cada razon social de un local) */
+    public function tablaConceptosRazonCreada() {
+        if ($this->tablaConceptosRazon === null) {
+            $row = $this->fila("SELECT OBJECT_ID(?, 'U') AS ID", ['dbo.' . self::T_LOCAL_RAZON_CONCEPTO],
+                               'Error al verificar las tablas de alquileres');
+            $this->tablaConceptosRazon = ($row !== null && $row['ID'] !== null);
+        }
+
+        return $this->tablaConceptosRazon;
+    }
+
     public function avisoSinTabla() {
         return $this->tablaCreada() ? ''
             : 'Falta correr ' . self::SCRIPT . ' contra la base central: no existen '
@@ -487,7 +509,36 @@ class AlquileresParametros {
             }
         }
 
+        /* LO QUE FACTURA CADA ADICIONAL (script 62). Solo la lista vigente; que
+           la razon siga siendo adicional del local y este dada de alta lo
+           resuelve AlquileresPago::conceptosPorRazon(), que es pura. */
+        foreach ($out as $nro => $l) {
+            $out[$nro]['conceptos_razon'] = [];
+        }
+
+        if ($this->tablaConceptosRazonCreada()) {
+            foreach ($this->filas("SELECT NRO_SUCURS, COD_PROVEE, CONCEPTOS, USUARIO_MODIF, FECHA_MODIF FROM dbo."
+                                  . self::T_LOCAL_RAZON_CONCEPTO . " WHERE VIGENTE = 1 ORDER BY ID", [],
+                                  'Error al leer los conceptos de las razones sociales de los locales') as $r) {
+                $nro = (int) $r['NRO_SUCURS'];
+
+                if (isset($out[$nro])) {
+                    $cod = Planilla::codigo($r['COD_PROVEE']);
+                    $out[$nro]['conceptos_razon'][$cod] = self::listaConceptos($r['CONCEPTOS']);
+                    $out[$nro]['conceptos_razon_audit'][$cod] = ['usuario' => $r['USUARIO_MODIF'],
+                                                                 'fecha' => self::momento($r['FECHA_MODIF'])];
+                }
+            }
+        }
+
         return $out;
+    }
+
+    /** '6,7,11' a [6, 7, 11], sin vacios */
+    private static function listaConceptos($texto) {
+        return array_values(array_map('intval', array_filter(explode(',', (string) $texto), function ($c) {
+            return trim($c) !== '';
+        })));
     }
 
     /**
@@ -707,7 +758,7 @@ class AlquileresParametros {
 
         if ($local === null || ($local['cod_provee'] ?? null) === null || $local['cod_provee'] === '') {
             throw new InvalidArgumentException($nombreLocal . ' todavía no tiene razón social principal: elegila '
-                . 'primero. La principal es la que da el día de vencimiento y el diferimiento.');
+                . 'primero. La principal factura todo lo que no se le marque a una adicional.');
         }
 
         if (Planilla::codigo($local['cod_provee']) === $c) {
@@ -722,9 +773,111 @@ class AlquileresParametros {
     }
 
     /**
+     * Valida los conceptos que factura una razon social ADICIONAL de un local.
+     * Pura.
+     *
+     *   - la razon tiene que ser adicional del local (la principal factura "el
+     *     resto": no se le marca nada);
+     *   - solo conceptos que se proyectan (1, 2, 3, 6, 7, 8, 9, 11, 14, 16, 17);
+     *   - UN CONCEPTO ES DE UNA SOLA RAZON SOCIAL POR LOCAL: si otra adicional
+     *     ya lo factura, no. Dos dueños para el mismo concepto harian que una
+     *     factura de cualquiera de las dos pisara la proyeccion de la otra.
+     *
+     * Una lista vacia es valida: la adicional deja de facturar conceptos y
+     * todo vuelve a la principal.
+     *
+     * @param string $cod
+     * @param array $conceptos ID_CA
+     * @param array|null $local La fila vigente del local (locales()), con 'adicionales' y 'conceptos_razon'
+     * @param string $nombreLocal
+     * @return int[] Los conceptos, sin repetir y en orden
+     * @throws InvalidArgumentException
+     */
+    public static function validarConceptosRazon($cod, $conceptos, $local, $nombreLocal) {
+        $c = Planilla::codigo($cod);
+        $adicionales = array_map(['Planilla', 'codigo'], $local['adicionales'] ?? []);
+
+        if ($local === null || !in_array($c, $adicionales, true)) {
+            throw new InvalidArgumentException($c . ' no es una razón social adicional de ' . $nombreLocal
+                . ': los conceptos se marcan en las adicionales, y la principal factura el resto.');
+        }
+
+        $ids = [];
+
+        foreach (is_array($conceptos) ? $conceptos : [] as $id) {
+            $n = (int) $id;
+
+            if (!in_array($n, AlquileresConceptos::proyectados(), true) || (string) $n !== trim((string) $id)) {
+                throw new InvalidArgumentException('El concepto ' . $id . ' no es uno de los que se proyectan ('
+                    . implode(', ', AlquileresConceptos::proyectados()) . ').');
+            }
+
+            $ids[$n] = true;
+        }
+
+        $ids = array_keys($ids);
+        sort($ids);
+
+        foreach ($local['conceptos_razon'] ?? [] as $otra => $suyos) {
+            $otra = Planilla::codigo($otra);
+
+            if ($otra === $c || !in_array($otra, $adicionales, true)) {
+                continue;
+            }
+
+            $choque = array_values(array_intersect($ids, array_map('intval', $suyos)));
+
+            if (!empty($choque)) {
+                throw new InvalidArgumentException('En ' . $nombreLocal . ' ' . implode(', ', $choque)
+                    . ' ya lo factura ' . $otra . ': un concepto es de una sola razón social por local. Sacáselo '
+                    . 'a ' . $otra . ' primero.');
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Guarda los conceptos que factura una razon social adicional: baja de la
+     * lista vigente y alta de la nueva, en una transaccion. Una lista vacia
+     * solo da de baja: todo vuelve a la principal.
+     *
+     * @param array $universo NRO_SUCURS => ['nombre', ...] de AlquileresApp::locales()
+     * @return array ['nro', 'cod', 'conceptos']
+     */
+    public function guardarConceptosRazon($nro, $cod, $conceptos, $universo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablas();
+        $this->exigirTablaConceptosRazon();
+        $n = (int) $nro;
+
+        if (!isset($universo[$n])) {
+            throw new InvalidArgumentException('El local ' . $n . ' no es un local de la app de alquileres.');
+        }
+
+        $c = Planilla::codigo($cod);
+        $ids = self::validarConceptosRazon($c, $conceptos, $this->locales()[$n] ?? null, $universo[$n]['nombre']);
+
+        $this->enTransaccion(function () use ($n, $c, $ids, $usuario) {
+            $this->darDeBaja(self::T_LOCAL_RAZON_CONCEPTO, "NRO_SUCURS = ? AND COD_PROVEE = ? AND VIGENTE = 1",
+                             [$n, $c], $usuario);
+
+            if (!empty($ids)) {
+                $this->ejecutar("INSERT INTO dbo." . self::T_LOCAL_RAZON_CONCEPTO
+                    . " (NRO_SUCURS, COD_PROVEE, CONCEPTOS, VIGENTE, USUARIO_ALTA, USUARIO_MODIF) VALUES (?, ?, ?, 1, ?, ?)",
+                    [$n, $c, implode(',', $ids), $usuario, $usuario], 'Error al guardar los conceptos de la razón social');
+            }
+        });
+
+        return ['nro' => $n, 'cod' => $c, 'conceptos' => $ids];
+    }
+
+    /**
      * Agrega una razon social adicional a un local: sus facturas se pueden
-     * imputar a el y sus extraordinarios lo alcanzan. NO cambia ninguna fecha
-     * proyectada: el dia y el diferimiento son los de la principal.
+     * imputar a el y sus extraordinarios lo alcanzan. Arranca SIN CONCEPTOS:
+     * no cambia ninguna fecha proyectada hasta que se le marque alguno
+     * (guardarConceptosRazon()); desde ahi esos conceptos se pagan con su dia
+     * y su diferimiento.
      *
      * @param array $universo NRO_SUCURS => ['nombre', ...] de AlquileresApp::locales()
      * @return array ['nro', 'cod']
@@ -749,15 +902,30 @@ class AlquileresParametros {
         return ['nro' => $n, 'cod' => $c];
     }
 
-    /** Quita una razon social adicional de un local. No se borra: queda en el historial. */
+    /**
+     * Quita una razon social adicional de un local. No se borra: queda en el
+     * historial. Sus conceptos se dan de baja en la misma transaccion y vuelven
+     * a la principal: si la adicional volviera, arranca sin conceptos.
+     */
     public function bajaRazonLocal($nro, $cod, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTablaRazonesLocal();
         $n = (int) $nro;
         $c = Planilla::codigo($cod);
+        $filas = 0;
+        $conConceptos = $this->tablaConceptosRazonCreada();
 
-        if ($this->darDeBaja(self::T_LOCAL_RAZON, "NRO_SUCURS = ? AND COD_PROVEE = ? AND VIGENTE = 1",
-                             [$n, $c], $usuario) < 1) {
+        $this->enTransaccion(function () use ($n, $c, $usuario, $conConceptos, &$filas) {
+            $filas = $this->darDeBaja(self::T_LOCAL_RAZON, "NRO_SUCURS = ? AND COD_PROVEE = ? AND VIGENTE = 1",
+                                      [$n, $c], $usuario);
+
+            if ($conConceptos) {
+                $this->darDeBaja(self::T_LOCAL_RAZON_CONCEPTO, "NRO_SUCURS = ? AND COD_PROVEE = ? AND VIGENTE = 1",
+                                 [$n, $c], $usuario);
+            }
+        });
+
+        if ($filas < 1) {
             throw new InvalidArgumentException($c . ' no era una razón social adicional de ese local.');
         }
 
@@ -837,6 +1005,13 @@ class AlquileresParametros {
     private function exigirTablas() {
         if (!$this->tablaCreada()) {
             throw new Exception($this->avisoSinTabla());
+        }
+    }
+
+    private function exigirTablaConceptosRazon() {
+        if (!$this->tablaConceptosRazonCreada()) {
+            throw new InvalidArgumentException('Todavía no se pueden marcar los conceptos de una razón social adicional: '
+                . 'falta correr ' . self::SCRIPT_CONCEPTOS_RAZON . ' contra la base central.');
         }
     }
 

@@ -187,7 +187,7 @@ ELSE
     PRINT 'Ninguna fila de Proveedores Locales lee PAGOS_ALQUILERES: sin doble conteo entre las dos pestanas.';
 GO
 
-IF OBJECT_ID('dbo.RO_T_CASHFLOW_ALQ_IMPUTACION', 'U') IS NULL
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_ALQ_FACTURA_VTO', 'U') IS NULL
     PRINT 'ATENCION: falta sql/cashflow_alquileres_facturas.sql. Mientras no se corra, las facturas de '
         + 'alquiler SIGUEN en Cuentas a Pagar Locales (es la condicion de seguridad) y la pestana lo avisa '
         + 'en critico.';

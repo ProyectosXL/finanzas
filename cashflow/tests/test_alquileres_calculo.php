@@ -273,3 +273,91 @@ $sv = AlquileresCalculo::proyectarLocal($sinVenta);
 chequear('sin venta: los fijos igual se proyectan', 1030200.0, $sv['meses']['2026-11']['conceptos'][8]['importe']);
 chequear('sin venta: no hay variables y se dice por que', ['SIN_VENTA', false],
     [$sv['meses']['2026-11']['motivo'], isset($sv['meses']['2026-11']['conceptos'][7])]);
+
+
+seccion('Fijos cargados en un periodo abierto de la app');
+
+$infAb = ['2026-11' => 2.0, '2026-12' => 3.0, '2027-01' => 1.0, '2027-02' => 1.0];
+$baseAb = [1 => 0.0, 2 => 0.0, 3 => 100.0, 8 => 1000.0];
+
+/* Mensual: el VMA de noviembre cargado (abierto) se usa, y diciembre ajusta desde el. */
+$fa = AlquileresCalculo::fijos($baseAb, '2026-10', '2027-01', 1, null, $infAb, ['2026-11' => [8 => 1025.0]]);
+chequear('el VMA cargado en noviembre se usa, con origen "cargado en app"', [1025.0, AlquileresCalculo::APP_ABIERTA],
+    [$fa['meses']['2026-11']['valores'][8], $fa['meses']['2026-11']['origen'][8]]);
+chequear('los meses que siguen ajustan desde ese valor', round(1025.0 * 1.03, 6), round($fa['meses']['2026-12']['valores'][8], 6));
+chequear('y dicen desde que mes', '2026-11', $fa['meses']['2026-12']['desde'][8]);
+chequear('un fijo sin fila (la baulera) se sigue estimando desde el ultimo cerrado', [102.0, AlquileresCalculo::ESTIMADO, '2026-10'],
+    [round($fa['meses']['2026-11']['valores'][3], 6), $fa['meses']['2026-11']['origen'][3], $fa['meses']['2026-11']['desde'][3]]);
+$cero = AlquileresCalculo::fijos($baseAb, '2026-10', '2026-11', 1, null, $infAb, ['2026-11' => [8 => 0.0]]);
+chequear('uno en 0 tambien se estima', [1020.0, AlquileresCalculo::ESTIMADO],
+    [round($cero['meses']['2026-11']['valores'][8], 6), $cero['meses']['2026-11']['origen'][8]]);
+
+/* MES DE AJUSTE CON EL VALOR DE ANTES: la app copio el mes anterior. Gurruchaga,
+   semestral con mayo: ajusta en noviembre, y la app tiene el de octubre. */
+$sa = AlquileresCalculo::fijos([1 => 8884960.0, 8 => 0.0], '2026-10', '2026-12', 6, 5,
+    array_fill_keys(['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12'], 1.5),
+    ['2026-11' => [1 => 8884960.0]]);
+chequear('mes de ajuste y la app igual al ultimo cerrado: se sigue estimando con el ajuste',
+    [round(8884960.0 * 1.09, 2), AlquileresCalculo::ESTIMADO],
+    [round($sa['meses']['2026-11']['valores'][1], 2), $sa['meses']['2026-11']['origen'][1]]);
+chequear('y avisa (informativo): la app todavia no aplico el ajuste', [['tipo' => 'SIN_AJUSTE', 'mes' => '2026-11', 'concepto' => 1]],
+    $sa['avisos']);
+$sa2 = AlquileresCalculo::fijos([1 => 8884960.0, 8 => 0.0], '2026-10', '2026-11', 6, 5,
+    array_fill_keys(['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'], 1.5), ['2026-11' => [1 => 9700000.0]]);
+chequear('si la app ya ajusto, se usa', [9700000.0, AlquileresCalculo::APP_ABIERTA, []],
+    [$sa2['meses']['2026-11']['valores'][1], $sa2['meses']['2026-11']['origen'][1], $sa2['avisos']]);
+
+/* AJUSTE FUERA DE MES: Aldrey, trimestral con octubre (ajusta en enero), y la
+   app subio el VMA en noviembre. Se usa, pero se avisa. */
+$af = AlquileresCalculo::fijos([8 => 4606579.0], '2026-10', '2027-01', 3, 10, $infAb, ['2026-11' => [8 => 4896053.0]]);
+chequear('la app cambio un fijo en un mes que no es de ajuste: se usa', [4896053.0, AlquileresCalculo::APP_ABIERTA],
+    [$af['meses']['2026-11']['valores'][8], $af['meses']['2026-11']['origen'][8]]);
+chequear('y se avisa (atencion) para revisar el mes del ultimo ajuste', [['tipo' => 'AJUSTE_FUERA', 'mes' => '2026-11', 'concepto' => 8]],
+    $af['avisos']);
+chequear('el proximo ajuste corre desde el valor de la app', round(4896053.0 * (1 + (2.0 + 3.0 + 1.0) / 100), 2),
+    round($af['meses']['2027-01']['valores'][8], 2));
+chequear('sin cambio en un mes que no ajusta, sin aviso', [],
+    AlquileresCalculo::fijos([8 => 3709563.0], '2026-10', '2026-11', 3, 9, $infAb, ['2026-11' => [8 => 3709563.0]])['avisos']);
+
+seccion('Avellaneda, octubre: el concepto 6 con el VMA de la app');
+
+/* LOS NUMEROS DE OCTUBRE DE 2026, como si el periodo siguiera abierto (se
+   cerro el 19/11): septiembre cerrado, el VMA de octubre cargado en la app y la
+   venta real de octubre. La app da $ 3.338.515 en el 6 (trunca a pesos). Antes
+   el cashflow usaba un VMA estimado ($ 10.019.614) y daba $ 3.334.499,56. */
+$ave = AlquileresCalculo::proyectarLocal([
+    'meses' => ['2026-10'],
+    'cerrados' => ['2026-09' => [1 => 0.0, 2 => 0.0, 3 => 0.0, 6 => 0.0, 7 => 0.0, 8 => 9852128.0, 9 => 1477819.0,
+                                 11 => 5077614.0, 14 => 0.0, 16 => 0.0, 17 => 0.0]],
+    'frecuencia' => 1, 'mes_ajuste' => null,
+    'pct' => [6 => 7.0, 9 => 15.0, 16 => 1.05],
+    'inflacion' => ['2026-10' => 1.7],
+    'tasa_expensas' => ['tasa' => 0.01, 'meses' => 24, 'origen' => 'LOCAL'],
+    'ventas' => ['2026-10' => ['bruta' => 190773053.33, 'neta' => 157663680.55, 'origen' => 'REAL']],
+    'abiertos' => ['2026-10' => [8 => 10015598.0]]
+]);
+$oct = $ave['meses']['2026-10']['conceptos'];
+chequear('el VMA de octubre es el de la app', [10015598.0, AlquileresCalculo::APP_ABIERTA], [$oct[8]['importe'], $oct[8]['origen']]);
+chequear('el 6 coincide con la app ($ 3.338.515, ±$ 1)', true, abs($oct[6]['importe'] - 3338515.0) <= 1.0);
+chequear('el 9 se recalcula (VMA de la app x %9) y coincide con la app (±$ 1)', [true, AlquileresCalculo::APP_ABIERTA],
+    [abs($oct[9]['importe'] - 1502339.0) <= 1.0, $oct[9]['origen']]);
+chequear('el 16, restando ese 9, tambien (±$ 1)', true, abs($oct[16]['importe'] - 500778.0) <= 1.0);
+chequear('el 6 dice "venta real" y las expensas "estimado"', [AlquileresCalculo::VENTA_REAL, AlquileresCalculo::ESTIMADO],
+    [$oct[6]['origen'], $oct[11]['origen']]);
+$sinApp = AlquileresCalculo::proyectarLocal(['abiertos' => []] + [
+    'meses' => ['2026-10'], 'cerrados' => ['2026-09' => [8 => 9852128.0, 9 => 1477819.0, 11 => 5077614.0]],
+    'frecuencia' => 1, 'mes_ajuste' => null, 'pct' => [6 => 7.0, 9 => 15.0], 'inflacion' => ['2026-10' => 1.7],
+    'tasa_expensas' => ['tasa' => 0.01, 'meses' => 24, 'origen' => 'LOCAL'],
+    'ventas' => ['2026-10' => ['bruta' => 190773053.33, 'neta' => 157663680.55, 'origen' => 'REAL']]]);
+chequear('sin el periodo abierto, el VMA se estima por inflacion desde el ultimo cerrado', [AlquileresCalculo::ESTIMADO, '2026-09'],
+    [$sinApp['meses']['2026-10']['conceptos'][8]['origen'], $sinApp['meses']['2026-10']['conceptos'][8]['inflacion_desde']]);
+chequear('un mes cerrado dice "real (cerrado)" en cada concepto', AlquileresCalculo::APP_CERRADA,
+    AlquileresCalculo::proyectarLocal(['meses' => ['2026-09'], 'cerrados' => ['2026-09' => [8 => 1.0]], 'frecuencia' => 1,
+        'mes_ajuste' => null, 'pct' => [], 'inflacion' => [], 'tasa_expensas' => ['tasa' => null, 'meses' => 0, 'origen' => 'GENERAL'],
+        'ventas' => []])['meses']['2026-09']['conceptos'][8]['origen']);
+
+seccion('La jerarquia, con el periodo abierto');
+
+chequear('Factura > Real (cerrado) > Cargado en app (abierto) > Venta real > Estimado',
+    [AlquileresCalculo::FACTURA, AlquileresCalculo::APP_CERRADA, AlquileresCalculo::APP_ABIERTA, AlquileresCalculo::VENTA_REAL,
+     AlquileresCalculo::ESTIMADO], AlquileresCalculo::ORDEN_ORIGEN);

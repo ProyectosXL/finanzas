@@ -1,9 +1,12 @@
 /* RRHH y Operativos › Alquileres */
 
-/* Los niveles de la grilla de Proyeccion: local, grupo y concepto. */
-#tablaAlquileres tr.alq-local td:first-child { font-weight: 600; }
-#tablaAlquileres tr.alq-grupo td:first-child { padding-left: 1.5rem; }
-#tablaAlquileres tr.alq-concepto td:first-child { padding-left: 3rem; font-size: .85em; }
+/* Los niveles de la grilla de Proyeccion: razon social, local, grupo y
+   concepto. La sangria dice de quien cuelga cada renglon. */
+#tablaAlquileres tr.alq-razon td:first-child { font-weight: 700; }
+#tablaAlquileres tr.alq-razon { background: rgba(0, 0, 0, .04); }
+#tablaAlquileres tr.alq-local td:first-child { font-weight: 600; padding-left: 1.25rem; }
+#tablaAlquileres tr.alq-grupo td:first-child { padding-left: 2.75rem; }
+#tablaAlquileres tr.alq-concepto td:first-child { padding-left: 4.25rem; font-size: .85em; }
 #tablaAlquileres tr.alq-grupo { background: rgba(0, 0, 0, .02); }
 #tablaAlquileres tr.alq-concepto { font-size: .85em; color: #555; }
 #tablaAlquileres .alq-toggle { cursor: pointer; width: 1rem; display: inline-block; }
@@ -19,3 +22,28 @@
 #tablaAlqVentas th.alq-antes { font-style: italic; }
 .alq-origen-REAL_PROYECTADA { background: #e0f5ec; color: #146c43; }
 #tablaAlqVentas td.alq-celda-REAL_PROYECTADA { background: rgba(25, 135, 84, .07); }
+
+/* La linea "Facturas imputadas" al final de cada razon social: lo real. */
+#tablaAlquileres tr.alq-facturas td:first-child { padding-left: 1.25rem; font-style: italic; }
+#tablaAlquileres tr.alq-facturas { background: rgba(0, 0, 0, .03); }
+
+/* EL ORIGEN DE CADA IMPORTE: un chip chico al lado del numero, en la linea
+   blanco y negro de XL. Lo dibuja el CSS desde data-etiqueta, asi el Excel se
+   queda con el numero limpio (el origen baja en su columna, ver exportar()).
+   Va despues del importe y en letra chica: no tapa el numero. */
+.alq-chip { display: inline-block; margin-left: .35rem; vertical-align: middle; }
+.alq-chip::after {
+    content: attr(data-etiqueta);
+    display: inline-block; padding: 0 .3rem; border-radius: .6rem; border: 1px solid transparent;
+    font-size: .65rem; line-height: 1.2; font-weight: 500; white-space: nowrap;
+}
+.alq-chip-APP_CERRADA::after { background: #343a40; color: #fff; }
+.alq-chip-APP_ABIERTA::after { background: #fff; color: #343a40; border-color: #343a40; }
+.alq-chip-VENTA_REAL::after { background: #adb5bd; color: #212529; }
+.alq-chip-INFLACION::after { background: #f1f3f5; color: #495057; border-color: #ced4da; }
+.alq-chip-ESTIMADO::after { background: #f8f9fa; color: #6c757d; border-color: #dee2e6; }
+.alq-chip-FACTURA::after { background: #000; color: #fff; }
+.alq-chip-MIXTO::after { background: #fff; color: #6c757d; border: 1px dashed #6c757d; }
+
+/* La columna del origen existe solo mientras se exporta (data-exportar-solo). */
+#tablaAlquileres .alq-solo-export { display: none; }

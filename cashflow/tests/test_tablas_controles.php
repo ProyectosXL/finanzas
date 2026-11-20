@@ -1959,3 +1959,83 @@ chequear('la pestaña no tiene el boton', false, strpos($tabProv, 'id="btnConcil
 chequear('ni el JS su previsualizacion y su confirmacion', [false, false, false],
     [strpos($jsProv, 'btnConciliarProv') !== false, strpos($jsProv, 'previewConciliacion') !== false,
      strpos($jsProv, 'aplicarConciliacion') !== false]);
+
+seccion('Parametros > Alquileres: el selector de conceptos de cada razon social');
+
+$jsPalq = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros-Alquileres.js'));
+chequear('cada adicional lleva su selector de conceptos', true,
+    strpos($jsPalq, '+ selectorConceptos(l, cod, cerrado) +') !== false);
+chequear('guarda la lista entera con guardarConceptosRazon', true,
+    strpos($jsPalq, "escribir('guardarConceptosRazon', {") !== false);
+chequear('la principal muestra "el resto", de solo lectura', true,
+    strpos($jsPalq, "Principal: ' + esc(restoPrincipal(l))") !== false);
+chequear('sin el script 62 el selector se deshabilita y lo nombra', true,
+    strpos($jsPalq, "'Falta correr ' + datos.script_conceptos_razon") !== false);
+chequear('sin permiso, Permisos.soloLectura apaga la grilla de locales', true,
+    strpos($jsPalq, "Permisos.soloLectura(cuerpo);\n    }\n\n    /**\n     * El contrato del local") !== false);
+
+seccion('Parametros > Alquileres: la seccion Tipos de retencion');
+
+$tabPalq = file_get_contents($TABS . '/parametros_alquileres.php');
+$jsPalq = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros-Alquileres.js'));
+chequear('la seccion esta, con su grilla', [true, true],
+    [strpos($tabPalq, '<h5 class="mb-0">Tipos de retención</h5>') !== false, strpos($tabPalq, 'id="palqTiposBody"') !== false]);
+chequear('el alta solo se dibuja con permiso', true,
+    (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<div class="card-body border-bottom" id="palqTipoForm">/', $tabPalq));
+chequear('el JS da de alta, renombra y da de baja', [true, true, true], [
+    strpos($jsPalq, "escribir('altaTipoRetencion'") !== false,
+    strpos($jsPalq, "escribir('renombrarTipoRetencion'") !== false,
+    strpos($jsPalq, "escribir('bajaTipoRetencion'") !== false]);
+chequear('muestra quien hizo el ultimo cambio', true,
+    strpos($jsPalq, "Auditoria.linea('modif', t.usuario_modif, t.fecha_modif)") !== false);
+chequear('sin el script 60 se deshabilita nombrandolo', true,
+    strpos($jsPalq, "'Falta correr ' + datos.script_imputacion") !== false);
+
+seccion('Alquileres > Proyeccion: la grilla por razon social');
+
+$jsAlq = str_replace("\r\n", "\n", file_get_contents($JS . '/Alquileres.js'));
+chequear('dibuja razones sociales y, colgando, sus locales', [true, true], [
+    strpos($jsAlq, 'razones.map(function(x) { return filasRazon(x.r, x.locales, meses); })') !== false,
+    strpos($jsAlq, "locales.forEach(function(l) { h += filasLocal(l, meses, clave); });") !== false]);
+chequear('los hijos viajan con su razon social al ordenar', 4,
+    substr_count($jsAlq, 'data-orden-sigue data-ancestros='));
+chequear('un hijo se ve si todos sus ancestros estan abiertos', true,
+    strpos($jsAlq, "tr.getAttribute('data-ancestros').split(' ').every(function(k) { return !!abiertos[k]; })") !== false);
+chequear('el buscador mira razon social, codigo y local', [true, true], [
+    strpos($jsAlq, "String(r.cod || '').toLowerCase().indexOf(t) !== -1") !== false,
+    strpos($jsAlq, "String(l.nombre).toLowerCase().indexOf(t) !== -1") !== false]);
+chequear('exportar sigue abriendo todo, y despues vuelve a como estaba', true,
+    (bool) preg_match("/function exportar\(\) \{.*?abrirTodo\(true\);.*?exportarTabla\('tablaAlquileres'.*?abiertos = previo;/s", $jsAlq));
+
+seccion('Alquileres > Proyeccion: la linea "Facturas imputadas"');
+
+$jsAlq = str_replace("\r\n", "\n", file_get_contents($JS . '/Alquileres.js'));
+chequear('va al final de cada razon social, colgando de ella', true,
+    strpos($jsAlq, "h += '<tr class=\"alq-facturas\" data-orden-sigue data-ancestros=\"' + clave + '\">'") !== false);
+chequear('dice "Facturas imputadas"', true, strpos($jsAlq, 'Facturas imputadas</td>') !== false);
+chequear('el tooltip: facturas, retenciones por tipo, locales, quien y cuando, y si el mes queda fuera', [true, true, true, true], [
+    strpos($jsAlq, "' · se paga el '") !== false,
+    strpos($jsAlq, "i.retenciones.map(function(x) { return x.nombre + ' ' + importeTexto(x.importe); })") !== false,
+    strpos($jsAlq, "nLocales: ' + (i.todos ? 'todos (' : '')") !== false,
+    strpos($jsAlq, "(i.fuera_horizonte ? ', fuera del horizonte' : '')") !== false]);
+chequear('el pie suma tambien las facturas', true, strpos($jsAlq, 'var facturas = x.r.facturas ?') !== false);
+
+seccion('Alquileres > Proyeccion: el chip de origen y la leyenda');
+
+$jsAlq = str_replace("\r\n", "\n", file_get_contents($JS . '/Alquileres.js'));
+$tabAlq = file_get_contents($TABS . '/alquileres.php');
+$cssAlq = file_get_contents(__DIR__ . '/../Css/Alquileres.css');
+chequear('cada celda lleva su chip en data-etiqueta, que dibuja el CSS', [true, true], [
+    strpos($jsAlq, "'<span class=\"alq-chip alq-chip-' + o.clase + '\" data-etiqueta=\"' + esc(o.chip) + '\"></span></td>'") !== false,
+    strpos($cssAlq, 'content: attr(data-etiqueta);') !== false]);
+chequear('un subtotal con origenes mezclados dice mixto, con el desglose', true,
+    strpos($jsAlq, "return { clase: 'MIXTO', texto: 'Mixto', chip: 'mixto',") !== false);
+chequear('el tooltip suma la linea Origen', true, strpos($jsAlq, "Origen: ' + o.detalle") !== false);
+chequear('la leyenda arriba de la grilla', [true, true],
+    [strpos($tabAlq, 'id="alqLeyenda"') !== false, strpos($jsAlq, 'function pintarLeyenda()') !== false]);
+chequear('el Excel baja el origen en su columna, solo al exportar', [true, true, true], [
+    strpos($jsAlq, "nueva.setAttribute('data-exportar-solo', '');") !== false,
+    strpos($jsAlq, "'Origen ' + td.textContent") !== false,
+    strpos($cssAlq, '#tablaAlquileres .alq-solo-export { display: none; }') !== false]);
+chequear('la linea de facturas lleva el chip Factura', true,
+    strpos($jsAlq, "'<span class=\"alq-chip alq-chip-FACTURA\" data-etiqueta=\"factura\"></span></td>'") !== false);

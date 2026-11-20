@@ -7,9 +7,13 @@
  *
  * EL NAVEGADOR NO DECIDE NADA. Que reemplaza una imputacion, cuanto se paga y
  * cuando lo resuelve el servidor (Class/AlquileresImputacion.php). Aca se arma
- * el pedido, se suma para mostrar la diferencia mientras se carga -y bloquear
- * Guardar- y se pide la previsualizacion, que es la que vale: el servidor la
- * vuelve a correr al guardar contra los pendientes de ese momento.
+ * el pedido -facturas de UNA razon social, todos sus locales o uno, el mes y
+ * las retenciones por tipo-, se suman los totales en vivo para guiar y
+ * bloquear botones, y se pide la previsualizacion, que es la que vale: el
+ * servidor la vuelve a correr al guardar contra los pendientes de ese momento.
+ *
+ * UNA SOLA RAZON SOCIAL: al tildar la primera factura, las de las otras
+ * razones quedan deshabilitadas, con el porque en el tooltip.
  *
  * SIN PERMISO DE EDICION los controles de escritura no se dibujan (Permisos):
  * ni los tildes, ni el input de vencimiento, ni Imputar ni Deshacer.
@@ -22,7 +26,7 @@
     var datos = null;
     var hoy = null;
     var seleccion = {};
-    var renglones = [];
+    var retenciones = [];
     var previsto = null;
 
     var ESTADOS_PENDIENTES = ['SIN_IMPUTAR', 'IMPUTADA', 'PARCIAL', 'SUSPENDIDA'];
@@ -30,9 +34,26 @@
     /* Las que se pueden tildar e imputar: las pendientes y las ya pagadas del mes que nadie imputo. */
     var ESTADOS_IMPUTABLES = ESTADOS_PENDIENTES.concat(['PAGADA_SIN_IMPUTAR']);
 
+    /** Con permiso de edición: cambiar el vencimiento a considerar (script 53). */
     function puedeEditar() {
-        return Permisos.puedeEditar('alqFactBody') && datos && datos.tablas;
+        return Permisos.puedeEditar('alqFactBody') && !!datos;
     }
+
+    /**
+     * Imputar y deshacer piden además las tablas del script 60. Sin ellas la
+     * sub-pestaña carga, avisa en crítico nombrando el script y no deja imputar.
+     */
+    function puedeImputar() {
+        return puedeEditar() && !!datos.tablas;
+    }
+
+    /** Excluir y volver a incluir piden la tabla del script 61. */
+    function puedeExcluir() {
+        return puedeEditar() && !!datos.tabla_exclusion;
+    }
+
+    /** Las que se pueden excluir: las que no suman ni estan imputadas. */
+    var ESTADOS_EXCLUIBLES = ['SIN_IMPUTAR', 'PAGADA_SIN_IMPUTAR'];
 
     /* ================================================================
        PINTAR
@@ -42,6 +63,9 @@
         datos = d.facturas || { filas: [], imputaciones: [], kpis: {}, estados: {} };
         hoy = d.hoy;
         seleccion = {};
+        html('alqFactSinScript', datos.tablas ? '' : '<div class="alert alert-danger small py-2">'
+            + '<strong>No se puede imputar:</strong> falta correr ' + esc(datos.script) + ' contra la base central. '
+            + 'Las facturas se ven pero no suman, y la proyección no se reemplaza con nada.</div>');
         llenarFiltros();
         pintarKpis(d);
         dibujar();
@@ -79,18 +103,24 @@
         texto('alqFactKpiImp', importe(k.imputadas_a_pagar));
         texto('alqFactKpiImpPie', (k.imputadas_n || 0) + ' factura(s) · pendiente − retención');
         texto('alqFactKpiReemp', String(datos.reemplazados || 0));
+        texto('alqFactKpiExcl', importeTexto(k.excluidas_importe || 0));
+        texto('alqFactKpiExclPie', (k.excluidas_n || 0) + ' factura(s) que no se pagan por acá: no suman');
     }
 
     function visibles() {
         var r = document.getElementById('alqFactRazon').value;
         var e = document.getElementById('alqFactEstado').value;
         var pagadas = document.getElementById('alqFactVerPagadas').checked;
+        var excluidas = document.getElementById('alqFactVerExcluidas');
+        var verExcluidas = excluidas ? excluidas.checked : false;
 
         return datos.filas.filter(function(f) {
             if (r && f.cod_provee !== r) { return false; }
             if (e && f.estado !== e) { return false; }
             /* Las pagadas del mes se ven siempre; las anteriores, con "Ver pagadas". */
             if (!pagadas && !f.del_mes && ESTADOS_PAGADAS.indexOf(f.estado) !== -1) { return false; }
+            /* Las excluidas no suman en ningun lado: se ven con "Ver excluidas". */
+            if (!verExcluidas && f.estado === 'EXCLUIDA' && e !== 'EXCLUIDA') { return false; }
 
             return true;
         });
@@ -111,12 +141,19 @@
             return;
         }
 
+        var razon = razonTildada();
+
         html('alqFactBody', filas.map(function(f) {
-            var tildable = edita && ESTADOS_IMPUTABLES.indexOf(f.estado) !== -1;
+            var tildable = puedeImputar() && ESTADOS_IMPUTABLES.indexOf(f.estado) !== -1;
+            /* UNA SOLA RAZON SOCIAL POR IMPUTACION: con una tildada, las de
+               otra razón no se pueden tildar. El servidor lo vuelve a validar. */
+            var otra = tildable && razon !== null && f.cod_provee !== razon;
 
             return '<tr data-clave="' + esc(f.clave) + '">'
                 + '<td class="text-center" data-exportar-omitir>' + (tildable
-                    ? '<input type="checkbox" class="form-check-input alq-fact-sel"' + (seleccion[f.clave] ? ' checked' : '') + '>'
+                    ? '<input type="checkbox" class="form-check-input alq-fact-sel"' + (seleccion[f.clave] ? ' checked' : '')
+                        + (otra ? ' disabled title="Ya tildaste facturas de ' + esc(razon) + ': una imputación es de una '
+                            + 'sola razón social. Imputá esta aparte."' : '') + '>'
                     : '') + '</td>'
                 + '<td title="' + esc(f.cod_provee) + '">' + esc(f.razon || f.cod_provee) + '</td>'
                 + '<td title="' + esc(f.leyenda || '') + '">' + esc(f.t_comp + ' ' + f.n_comp) + '</td>'
@@ -125,10 +162,10 @@
                 + celdaVto(f, edita)
                 + '<td class="text-end" data-orden="' + (f.importe || 0) + '">' + importe(f.importe) + '</td>'
                 + '<td class="text-end" data-orden="' + f.pendiente + '">' + importe(f.pendiente) + '</td>'
-                + '<td class="text-end" data-orden="' + (f.retencion || 0) + '">'
+                + '<td class="text-end" data-orden="' + (f.retencion || 0) + '"' + tituloRetencion(f) + '>'
                 +   (f.retencion === null ? '<span class="text-muted">—</span>' : importe(f.retencion)) + '</td>'
                 + '<td class="text-end fw-semibold" data-orden="' + f.a_pagar + '">' + importe(f.a_pagar) + '</td>'
-                + '<td>' + chipEstado(f) + '</td>'
+                + '<td>' + chipEstado(f) + accionExclusion(f) + '</td>'
                 + '</tr>';
         }).join(''));
 
@@ -144,9 +181,27 @@
             cb.addEventListener('change', function() {
                 var clave = cb.closest('tr').getAttribute('data-clave');
 
+                var antes = razonTildada();
+
                 if (cb.checked) { seleccion[clave] = true; } else { delete seleccion[clave]; }
 
+                /* Cambia qué razón social está tildada: se redibuja para
+                   habilitar o deshabilitar las de las otras. */
+                if (antes !== razonTildada()) { dibujar(); }
+
                 actualizarBoton();
+            });
+        });
+
+        document.querySelectorAll('#alqFactBody .alq-fact-excluir').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                excluir([cuotaDeFila(btn)]);
+            });
+        });
+
+        document.querySelectorAll('#alqFactBody .alq-fact-incluir').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                incluir([cuotaDeFila(btn)]);
             });
         });
 
@@ -161,16 +216,100 @@
         actualizarBoton();
     }
 
+    /**
+     * La retención de una cuota imputada es SU PARTE del total de retenciones
+     * de la imputación (repartido por pendiente). El tooltip abre los tipos.
+     */
+    function tituloRetencion(f) {
+        var r = f.imputacion_resumen;
+
+        if (!r || f.retencion === null) { return ''; }
+
+        return ' title="' + esc('Su parte de las retenciones de la imputación #' + r.id + ', repartidas entre sus '
+            + 'facturas por el pendiente.\nRetenciones de la imputación: '
+            + (r.retenciones.length ? r.retenciones.map(function(x) { return x.nombre + ' ' + importeTexto(x.importe); }).join(', ')
+                : 'ninguna') + ' (total ' + importeTexto(r.total_retenciones) + ')') + '"';
+    }
+
+    /** Excluir (una sin imputar) o volver a incluir (una excluida), por fila */
+    function accionExclusion(f) {
+        if (!puedeExcluir()) { return ''; }
+
+        if (ESTADOS_EXCLUIBLES.indexOf(f.estado) !== -1) {
+            return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 alq-fact-excluir" data-exportar-omitir '
+                + 'title="No se paga por este circuito (por ejemplo, un pago de contrato): sale de todos los totales">'
+                + 'Excluir</button>';
+        }
+
+        if (f.estado === 'EXCLUIDA') {
+            return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 alq-fact-incluir" data-exportar-omitir '
+                + 'title="Vuelve a Sin imputar. La exclusión queda en el historial">Volver a incluir</button>';
+        }
+
+        return '';
+    }
+
+    function cuotaDeFila(el) {
+        var f = datos.filas.filter(function(x) { return x.clave === el.closest('tr').getAttribute('data-clave'); })[0];
+
+        return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango,
+                 a_imputar: f.a_imputar };
+    }
+
+    /**
+     * Excluir una o varias cuotas con UN motivo, obligatorio: una factura que
+     * sale del cashflow tiene que decir por qué. El servidor lo vuelve a validar.
+     */
+    function excluir(cuotas) {
+        var total = cuotas.reduce(function(a, c) { return a + (c.a_imputar || 0); }, 0);
+
+        Notificacion.pedirTexto({
+            titulo: 'Excluir factura(s) de alquiler',
+            mensaje: cuotas.length + ' factura(s) por ' + importeTexto(total) + ' dejan de sumar en Alquileres y en el '
+                + 'tablero, y no vuelven a Proveedores Locales.',
+            detalle: 'Es para las que no se pagan por este circuito (por ejemplo, un pago de contrato). Se puede volver '
+                + 'a incluir: queda en el historial.',
+            etiqueta: 'Motivo',
+            maxlargo: 300,
+            invalido: 'El motivo es obligatorio.',
+            confirmar: 'Excluir',
+            peligro: true
+        }).then(function(motivo) {
+            if (motivo === null) { return; }
+
+            seleccion = {};
+            guardar('excluirFacturas', { cuotas: cuotas, motivo: motivo });
+        });
+    }
+
+    function incluir(cuotas) {
+        Notificacion.confirmar({
+            titulo: 'Volver a incluir',
+            mensaje: '¿Vuelve a Sin imputar?',
+            detalle: 'Mientras no se impute no suma. La exclusión queda en el historial.',
+            confirmar: 'Volver a incluir'
+        }).then(function(si) {
+            if (si) { guardar('incluirFacturas', { cuotas: cuotas }); }
+        });
+    }
+
     function chipEstado(f) {
         var cls = { SIN_IMPUTAR: 'bg-danger', IMPUTADA: 'bg-success', PARCIAL: 'bg-warning text-dark',
                     PAGADA: 'bg-secondary', ANULADA: 'bg-warning text-dark', SIN_DATO: 'bg-warning text-dark',
-                    SUSPENDIDA: 'bg-warning text-dark', PAGADA_SIN_IMPUTAR: 'bg-danger' }[f.estado] || 'bg-light text-dark';
+                    SUSPENDIDA: 'bg-warning text-dark', PAGADA_SIN_IMPUTAR: 'bg-danger',
+                    EXCLUIDA: 'bg-dark' }[f.estado] || 'bg-light text-dark';
         var t = datos.estados[f.estado] || f.estado;
-        var tip = f.imputacion ? 'Imputación ' + f.imputacion + '\n'
+        var r = f.imputacion_resumen;
+        var tip = f.imputacion ? 'Imputación #' + f.imputacion
+            + (r ? ' · cubre ' + rotuloMes(r.mes) + ' · ' + textoLocales(r) : '') + '\n'
             + Auditoria.texto({ alta: { usuario: f.imputacion_usuario, fecha: f.imputacion_fecha } }) : '';
 
         if ((f.estado === 'PAGADA' || f.estado === 'PAGADA_SIN_IMPUTAR') && f.fecha_pagada) {
             tip += '\nPagada en Tango el ' + fecha(f.fecha_pagada);
+        }
+        if (f.estado === 'EXCLUIDA' && f.excluida) {
+            tip += 'No se paga por este circuito: no suma en ningún lado.\nMotivo: ' + f.excluida.motivo + '\n'
+                + Auditoria.texto({ alta: { usuario: f.excluida.usuario, fecha: f.excluida.fecha } });
         }
         if (f.estado === 'PAGADA_SIN_IMPUTAR') {
             tip += '\nNo se paga otra vez, pero la proyección de lo que cubre sigue en el flujo hasta que se impute '
@@ -270,11 +409,20 @@
 
     function actualizarBoton() {
         var b = document.getElementById('btnAlqImputar');
+        var x = document.getElementById('btnAlqExcluir');
 
-        if (!b) { return; }
+        if (b) {
+            b.style.display = puedeImputar() ? '' : 'none';
+            b.disabled = !Object.keys(seleccion).length;
+        }
 
-        b.style.display = puedeEditar() ? '' : 'none';
-        b.disabled = !Object.keys(seleccion).length;
+        /* EXCLUIR LAS TILDADAS: solo si todas son excluibles (sin imputar). */
+        if (x) {
+            var fs = tildadas();
+
+            x.style.display = puedeExcluir() ? '' : 'none';
+            x.disabled = !fs.length || fs.some(function(f) { return ESTADOS_EXCLUIBLES.indexOf(f.estado) === -1; });
+        }
     }
 
     /* ================================================================
@@ -290,21 +438,27 @@
             return;
         }
 
-        html('alqImputaciones', '<table class="table table-sm small mb-0"><thead><tr><th>#</th><th>Facturas</th>'
-            + '<th>Renglones</th><th>Cargó</th><th></th></tr></thead><tbody>'
+        html('alqImputaciones', '<table class="table table-sm small mb-0"><thead><tr><th>#</th><th>Razón social</th>'
+            + '<th>Cubre</th><th>Facturas</th><th>Retenciones</th><th class="text-end">A pagar</th><th>Cargó</th><th></th>'
+            + '</tr></thead><tbody>'
             + lista.map(function(imp) {
                 return '<tr' + (imp.suspendida ? ' class="table-warning"' : '') + '><td>' + imp.id + '</td>'
-                    + '<td>' + imp.facturas.map(function(f) {
-                        return esc(f.COD_PROVEE + ' ' + f.T_COMP + ' ' + f.N_COMP) + ' · ' + importe(f.PENDIENTE)
-                            + ' · ret. ' + importe(f.RETENCION) + (f.ESTADO === 'PAGADA' ? ' <span class="badge bg-secondary">pagada</span>' : '');
+                    + '<td>' + esc(imp.razon || imp.cod_provee) + ' <span class="text-muted">' + esc(imp.cod_provee) + '</span></td>'
+                    + '<td>' + esc(rotuloMes(imp.mes)) + (imp.fuera_horizonte ? ' <span class="text-muted">(fuera del horizonte)</span>' : '')
+                    + '<br><span class="text-muted">' + esc(textoLocales(imp)) + '</span></td>'
+                    + '<td>' + Object.keys(imp.facturas).map(function(k) {
+                        var f = imp.facturas[k];
+
+                        return esc(f.comprobante) + ' · ' + importe(f.pendiente)
+                            + (f.estado === 'PAGADA' ? ' <span class="badge bg-secondary">pagada</span>' : '');
                     }).join('<br>') + '</td>'
-                    + '<td>' + imp.renglones.map(function(r) {
-                        return r.orden + '. ' + esc(nombresConceptos(r.conceptos)) + ' · ' + esc(nombresLocales(r))
-                            + ' · cubre ' + esc(rotuloMes(r.mes)) + ' · ' + importe(r.importe);
-                    }).join('<br>') + '</td>'
+                    + '<td>' + (imp.retenciones.length ? imp.retenciones.map(function(r) {
+                        return esc(r.nombre) + ' ' + importe(r.importe);
+                    }).join('<br>') : '<span class="text-muted">sin retenciones</span>') + '</td>'
+                    + '<td class="text-end fw-semibold">' + importe(imp.total_a_pagar) + '</td>'
                     + '<td>' + esc(imp.usuario || '—') + '<br><span class="text-muted">' + esc(imp.fecha || '') + '</span>'
                     + (imp.observacion ? '<br><em>' + esc(imp.observacion) + '</em>' : '') + '</td>'
-                    + '<td class="text-end">' + (puedeEditar()
+                    + '<td class="text-end">' + (puedeImputar()
                         ? '<button class="btn btn-sm btn-outline-danger py-0 alq-imp-deshacer" data-id="' + imp.id + '">Deshacer</button>'
                         : '') + '</td></tr>';
             }).join('') + '</tbody></table>');
@@ -314,10 +468,10 @@
                 var id = b.getAttribute('data-id');
 
                 Notificacion.confirmar({
-                    titulo: 'Deshacer la imputación ' + id,
-                    mensaje: '¿Deshacer la imputación ' + id + '?',
+                    titulo: 'Deshacer la imputación #' + id,
+                    mensaje: '¿Deshacer la imputación #' + id + '?',
                     detalle: 'Sus facturas vuelven a Sin imputar —y dejan de sumar— y la proyección que '
-                        + 'reemplazaba vuelve. No se borra: queda en el historial.',
+                        + 'reemplazaba vuelve. No se borra: queda en el historial. Para corregirla, se arma de nuevo.',
                     confirmar: 'Deshacer',
                     peligro: true
                 }).then(function(ok) {
@@ -327,30 +481,37 @@
         });
     }
 
-    function nombresConceptos(lista) {
-        var nombres = {};
+    /** "Todos los locales de X (N)" o la lista de locales */
+    function textoLocales(imp) {
+        var nombres = imp.locales.map(function(l) { return l.nombre; }).join(', ');
 
-        (datos.conceptos || []).forEach(function(c) { nombres[c.id] = c.nombre; });
-
-        return lista.map(function(c) { return nombres[c] || c; }).join(', ');
-    }
-
-    function nombresLocales(r) {
-        if (r.todos_de) { return 'todos los de ' + r.todos_de; }
-
-        var nombres = {};
-
-        (datos.locales || []).forEach(function(l) { nombres[l.nro] = l.nombre; });
-
-        return r.locales.map(function(n) { return nombres[n] || n; }).join(', ');
+        return imp.todos ? 'todos los locales (' + nombres + ')' : nombres;
     }
 
     /* ================================================================
        EL ARMADO DE UNA IMPUTACION
+
+       Facturas de UNA razón social, todos sus locales o uno, un mes y las
+       retenciones por tipo. No se eligen conceptos: la imputación pisa todo
+       lo que esa razón social factura en esos locales ese mes.
        ================================================================ */
 
     function tildadas() {
         return datos.filas.filter(function(f) { return seleccion[f.clave]; });
+    }
+
+    /** La razón social de lo tildado: una sola. Null si no hay nada tildado. */
+    function razonTildada() {
+        var fs = tildadas();
+
+        return fs.length ? fs[0].cod_provee : null;
+    }
+
+    /** Los locales de una razón social: donde es principal o adicional */
+    function localesDe(cod) {
+        return (datos.locales || []).filter(function(l) {
+            return (l.razones || [l.cod_provee]).indexOf(cod) !== -1;
+        });
     }
 
     function abrirImputar() {
@@ -358,211 +519,130 @@
 
         if (!fs.length) { return; }
 
+        var cod = fs[0].cod_provee;
+        var locales = localesDe(cod);
+
         previsto = null;
-        renglones = [];
-        renglones = [nuevoRenglon(fs)];
-        html('alqImpFacturas', fs.map(function(f, i) {
-            return '<tr><td>' + esc(f.razon || f.cod_provee) + '</td><td>' + esc(f.t_comp + ' ' + f.n_comp) + '</td>'
-                + '<td>' + fecha(f.vto_considerar) + '</td><td class="text-end">' + importe(f.a_imputar)
-                + (f.estado === 'PAGADA_SIN_IMPUTAR' ? ' <span class="badge bg-secondary">pagada</span>' : '') + '</td>'
-                + '<td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end alq-imp-ret" '
-                + 'data-i="' + i + '" value="' + (f.retencion !== null ? f.retencion : '') + '" placeholder="sugerida al previsualizar"></td>'
-                + '<td class="text-end alq-imp-apagar" data-i="' + i + '">' + importe(f.a_imputar - (f.retencion || 0)) + '</td></tr>';
+        retenciones = [];
+
+        html('alqImpRazon', esc((fs[0].razon || cod) + ' (' + cod + ')'));
+        html('alqImpFacturas', fs.map(function(f) {
+            return '<tr><td>' + esc(f.t_comp + ' ' + f.n_comp) + '</td><td>' + fecha(f.vto_considerar) + '</td>'
+                + '<td class="text-end">' + importe(f.a_imputar)
+                + (f.estado === 'PAGADA_SIN_IMPUTAR' ? ' <span class="badge bg-secondary" title="Ya pagada en Tango: '
+                    + 'no se paga otra vez, pero reemplaza el mes">pagada</span>' : '') + '</td></tr>';
         }).join(''));
 
-        document.querySelectorAll('#alqImpFacturas .alq-imp-ret').forEach(function(inp) {
-            inp.addEventListener('input', cambio);
-        });
+        document.getElementById('alqImpLocal').innerHTML = '<option value="">Todos los locales de '
+            + esc(fs[0].razon || cod) + ' (' + locales.length + ')</option>'
+            + locales.map(function(l) { return '<option value="' + l.nro + '">' + esc(l.nombre) + '</option>'; }).join('');
+
+        document.getElementById('alqImpMes').innerHTML = (datos.meses || []).map(function(m) {
+            return '<option value="' + esc(m.clave) + '"' + (m.clave === datos.mes_actual ? ' selected' : '') + '>'
+                + esc(m.nombre) + (m.clave < datos.mes_actual ? ' (mes anterior: no pisa nada del horizonte)' : '')
+                + '</option>';
+        }).join('');
 
         document.getElementById('alqImpObs').value = '';
-        dibujarRenglones();
+        dibujarRetenciones();
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalAlqImputar')).show();
     }
 
-    /** Un renglon nuevo: el mes del vencimiento de la primera factura, el resto por cargar */
-    function nuevoRenglon(fs) {
-        var falta = totalFacturas(fs) - renglones.reduce(function(a, r) { return a + (Number(r.importe) || 0); }, 0);
-
-        return { conceptos: [], locales: [], todos_de: '', mes: (fs[0].vto_considerar || hoy).substring(0, 7),
-                 importe: falta > 0 ? Math.round(falta * 100) / 100 : '' };
+    function totalFacturas() {
+        return Math.round(tildadas().reduce(function(a, f) { return a + f.a_imputar; }, 0) * 100) / 100;
     }
 
-    function totalFacturas(fs) {
-        return (fs || tildadas()).reduce(function(a, f) { return a + f.a_imputar; }, 0);
-    }
+    /**
+     * Las retenciones, una línea por tipo. EL DESPLEGABLE NO OFRECE UN TIPO YA
+     * ELEGIDO EN OTRA LÍNEA: un tipo va una sola vez (el servidor lo vuelve a
+     * validar). Sin retenciones es válido.
+     */
+    function dibujarRetenciones() {
+        var tipos = datos.tipos_retencion || [];
 
-    function razonesTildadas() {
-        var r = {};
+        html('alqImpRetenciones', retenciones.length ? retenciones.map(function(r, i) {
+            var usados = retenciones.filter(function(x, j) { return j !== i && x.tipo; }).map(function(x) { return String(x.tipo); });
 
-        tildadas().forEach(function(f) { r[f.cod_provee] = f.razon || f.cod_provee; });
-
-        return r;
-    }
-
-    function dibujarRenglones() {
-        var razones = razonesTildadas();
-        /* Los locales de cualquiera de sus razones sociales: la principal o una
-           adicional (San Justo recibe facturas de SASANJ y de SAUCCS). */
-        var locales = (datos.locales || []).filter(function(l) {
-            return (l.razones || [l.cod_provee]).some(function(c) { return razones[c]; });
-        });
-        var nombresGrupo = datos.nombres_grupo || {};
-
-        html('alqImpRenglones', renglones.map(function(r, i) {
-            return '<div class="border rounded p-2 mb-2 alq-imp-renglon" data-i="' + i + '">'
-                + '<div class="d-flex justify-content-between align-items-center mb-1"><strong class="small">Renglón ' + (i + 1) + '</strong>'
-                + (renglones.length > 1 ? '<button type="button" class="btn btn-sm btn-link text-danger p-0 alq-imp-quitar">Quitar</button>' : '')
-                + '</div>'
-                + '<div class="small mb-1">Atajos: ' + Object.keys(datos.atajos || {}).map(function(g) {
-                    return '<button type="button" class="btn btn-sm btn-outline-secondary py-0 alq-imp-atajo" data-grupo="' + esc(g) + '">'
-                        + esc(nombresGrupo[g] || g) + '</button>';
-                }).join(' ') + '</div>'
-                + '<div class="d-flex flex-wrap gap-2 small mb-2">' + (datos.conceptos || []).map(function(c) {
-                    return '<label class="form-check-label"><input type="checkbox" class="form-check-input me-1 alq-imp-concepto" value="'
-                        + esc(c.id) + '"' + (r.conceptos.indexOf(c.id) !== -1 ? ' checked' : '') + '>' + esc(c.nombre) + '</label>';
-                }).join('') + '</div>'
-                + '<div class="row g-2">'
-                + '<div class="col-md-4"><label class="form-label small mb-0">Locales</label>'
-                +   '<select class="form-select form-select-sm alq-imp-todos"><option value="">Elegir locales…</option>'
-                +   Object.keys(razones).map(function(c) {
-                        return '<option value="' + esc(c) + '"' + (r.todos_de === c ? ' selected' : '') + '>Todos los de '
-                            + esc(razones[c]) + '</option>';
-                    }).join('') + '</select>'
-                +   '<select class="form-select form-select-sm mt-1 alq-imp-locales" multiple size="4"' + (r.todos_de ? ' disabled' : '') + '>'
-                +   locales.map(function(l) {
-                        return '<option value="' + l.nro + '"' + (r.locales.indexOf(l.nro) !== -1 ? ' selected' : '') + '>'
-                            + esc(l.nombre) + '</option>';
+            return '<div class="row g-2 mb-1 alq-imp-ret" data-i="' + i + '">'
+                + '<div class="col-md-6"><select class="form-select form-select-sm alq-imp-ret-tipo">'
+                +   '<option value="">Tipo de retención…</option>'
+                +   tipos.filter(function(t) { return usados.indexOf(String(t.id)) === -1; }).map(function(t) {
+                        return '<option value="' + t.id + '"' + (String(r.tipo) === String(t.id) ? ' selected' : '') + '>'
+                            + esc(t.nombre) + '</option>';
                     }).join('') + '</select></div>'
-                + '<div class="col-md-3"><label class="form-label small mb-0">Mes que cubre</label>'
-                +   '<input type="month" class="form-control form-control-sm alq-imp-mes" value="' + esc(r.mes) + '">'
-                +   '<div class="form-text">El mes de pago cuya proyección reemplaza.</div></div>'
-                + '<div class="col-md-3"><label class="form-label small mb-0">Importe (con IVA y percepciones)</label>'
-                +   '<input type="number" step="0.01" min="0" class="form-control form-control-sm text-end alq-imp-importe" value="'
-                +   esc(r.importe) + '"></div>'
-                + '</div></div>';
-        }).join(''));
+                + '<div class="col-md-4"><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end '
+                +   'alq-imp-ret-importe" value="' + esc(r.importe) + '" placeholder="Importe"></div>'
+                + '<div class="col-md-2"><button type="button" class="btn btn-sm btn-link text-danger alq-imp-ret-quitar">'
+                +   'Quitar</button></div></div>';
+        }).join('') : '<div class="small text-muted">Sin retenciones.</div>');
 
-        document.querySelectorAll('#alqImpRenglones .alq-imp-renglon').forEach(function(div) {
+        document.querySelectorAll('#alqImpRetenciones .alq-imp-ret').forEach(function(div) {
             var i = Number(div.getAttribute('data-i'));
-            var r = renglones[i];
 
-            div.querySelectorAll('.alq-imp-concepto').forEach(function(cb) {
-                cb.addEventListener('change', function() {
-                    r.conceptos = Array.prototype.map.call(div.querySelectorAll('.alq-imp-concepto:checked'),
-                        function(x) { return x.value; });
-                    cambio();
-                });
+            div.querySelector('.alq-imp-ret-tipo').addEventListener('change', function(ev) {
+                retenciones[i].tipo = ev.target.value;
+                dibujarRetenciones();
             });
-
-            div.querySelectorAll('.alq-imp-atajo').forEach(function(b) {
-                b.addEventListener('click', function() {
-                    var grupo = datos.atajos[b.getAttribute('data-grupo')] || [];
-                    var todos = grupo.every(function(c) { return r.conceptos.indexOf(c) !== -1; });
-
-                    r.conceptos = todos ? r.conceptos.filter(function(c) { return grupo.indexOf(c) === -1; })
-                        : r.conceptos.concat(grupo.filter(function(c) { return r.conceptos.indexOf(c) === -1; }));
-                    dibujarRenglones();
-                    cambio();
-                });
-            });
-
-            div.querySelector('.alq-imp-todos').addEventListener('change', function(ev) {
-                r.todos_de = ev.target.value;
-                dibujarRenglones();
+            div.querySelector('.alq-imp-ret-importe').addEventListener('input', function(ev) {
+                retenciones[i].importe = ev.target.value;
                 cambio();
             });
-
-            div.querySelector('.alq-imp-locales').addEventListener('change', function(ev) {
-                r.locales = Array.prototype.map.call(ev.target.selectedOptions, function(o) { return Number(o.value); });
-                cambio();
+            div.querySelector('.alq-imp-ret-quitar').addEventListener('click', function() {
+                retenciones.splice(i, 1);
+                dibujarRetenciones();
             });
-
-            div.querySelector('.alq-imp-mes').addEventListener('change', function(ev) { r.mes = ev.target.value; cambio(); });
-            div.querySelector('.alq-imp-importe').addEventListener('input', function(ev) { r.importe = ev.target.value; cambio(); });
-
-            var quitar = div.querySelector('.alq-imp-quitar');
-
-            if (quitar) {
-                quitar.addEventListener('click', function() {
-                    renglones.splice(i, 1);
-                    dibujarRenglones();
-                    cambio();
-                });
-            }
         });
+
+        var mas = document.getElementById('btnAlqImpRetencion');
+
+        if (mas) {
+            mas.disabled = retenciones.length >= tipos.length;
+            mas.title = mas.disabled ? 'Ya están todos los tipos de retención' : 'Agregar una retención';
+        }
 
         cambio();
     }
 
-    /** Cualquier cambio invalida la previsualizacion: Guardar se apaga hasta la proxima */
+    /**
+     * Los totales en vivo y lo que bloquea Guardar: facturas, retenciones y a
+     * pagar. Cualquier cambio invalida la previsualización.
+     */
     function cambio() {
         previsto = null;
         document.getElementById('btnAlqImpGuardar').disabled = true;
 
-        var fs = tildadas();
-        var tf = totalFacturas(fs);
-        var tr = renglones.reduce(function(a, r) { return a + (Number(r.importe) || 0); }, 0);
-        var dif = Math.round((tr - tf) * 100) / 100;
+        var tf = totalFacturas();
+        var tr = Math.round(retenciones.reduce(function(a, r) { return a + (Number(r.importe) || 0); }, 0) * 100) / 100;
+        var excede = tr > tf + 0.005;
 
-        document.querySelectorAll('#alqImpFacturas .alq-imp-ret').forEach(function(inp) {
-            var f = fs[Number(inp.getAttribute('data-i'))];
-            var celda = document.querySelector('#alqImpFacturas .alq-imp-apagar[data-i="' + inp.getAttribute('data-i') + '"]');
-
-            if (celda) { celda.textContent = importeTexto(f.a_imputar - (Number(inp.value) || 0)); }
-        });
-
-        html('alqImpTotales', '<span>Facturas: <strong>' + importe(tf) + '</strong></span>'
-            + '<span>Renglones: <strong>' + importe(tr) + '</strong></span>'
-            + '<span class="' + (Math.abs(dif) > (datos.tolerancia || 1) ? 'text-danger' : 'text-success') + '">Diferencia: <strong>'
-            + importe(dif) + '</strong></span>');
+        html('alqImpTotales', '<span>Total facturas: <strong>' + importe(tf) + '</strong></span>'
+            + '<span>Total retenciones: <strong>' + importe(tr) + '</strong></span>'
+            + '<span class="' + (excede ? 'text-danger' : '') + '">Total a pagar: <strong>' + importe(tf - tr) + '</strong>'
+            + (excede ? ' — las retenciones superan las facturas' : '') + '</span>');
         html('alqImpResultado', '');
+        document.getElementById('btnAlqImpPrevisualizar').disabled = excede;
     }
 
     function borrador() {
-        var fs = tildadas();
-        var rets = document.querySelectorAll('#alqImpFacturas .alq-imp-ret');
+        var local = document.getElementById('alqImpLocal').value;
 
         return {
-            facturas: fs.map(function(f, i) {
-                var v = rets[i] ? rets[i].value : '';
-
+            facturas: tildadas().map(function(f) {
                 return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango,
-                         pendiente: f.a_imputar, retencion: v === '' ? null : Number(v) };
+                         pendiente: f.a_imputar };
             }),
-            renglones: renglones.map(function(r) {
-                return { conceptos: r.conceptos, locales: r.todos_de ? [] : r.locales, todos_de: r.todos_de || null,
-                         mes: r.mes, importe: Number(r.importe) || 0 };
-            }),
+            todos: local === '',
+            local: local === '' ? null : Number(local),
+            mes: document.getElementById('alqImpMes').value,
+            retenciones: retenciones.map(function(r) { return { tipo: Number(r.tipo) || 0, importe: Number(r.importe) || 0 }; }),
             observacion: document.getElementById('alqImpObs').value
         };
     }
 
     function previsualizar() {
-        var b = borrador();
-
-        pedirJson(ENDPOINT + '?action=previsualizarImputacion', b)
+        pedirJson(ENDPOINT + '?action=previsualizarImputacion', borrador())
             .then(function(d) {
                 var v = d.data;
-                var rets = document.querySelectorAll('#alqImpFacturas .alq-imp-ret');
-
-                /* La retencion sugerida completa las que estan vacias: se puede corregir. */
-                (v.facturas || []).forEach(function(f, i) {
-                    if (rets[i] && rets[i].value === '' && f.retencion_sugerida !== null) {
-                        rets[i].value = f.retencion_sugerida;
-                        rets[i].title = 'Sugerida: alícuota de retención de los locales sobre el neto '
-                            + (f.neto_de === 'TANGO' ? 'gravado de Tango' : 'calculado con el IVA y la percepción de los locales')
-                            + ' (' + importeTexto(f.neto_usado) + ').';
-                    }
-                });
-
-                if (v.ok && b.facturas.some(function(f) { return f.retencion === null; })) {
-                    /* Se completaron sugeridas: hay que volver a previsualizar con ellas. */
-                    cambio();
-                    html('alqImpResultado', '<div class="alert alert-info small py-2">Se completó la retención sugerida. '
-                        + 'Revisala y volvé a previsualizar.</div>');
-
-                    return;
-                }
 
                 html('alqImpResultado', resultado(v));
                 previsto = v.ok ? JSON.stringify(borrador()) : null;
@@ -584,13 +664,13 @@
         });
 
         if (v.ok) {
-            h += '<div class="small"><strong>Qué reemplaza</strong>, por renglón y local (lo proyectado de esos conceptos en ese mes):'
-                + '<ul class="mb-0">' + v.renglones.map(function(r) {
-                    return '<li>Renglón ' + r.orden + ' · cubre ' + esc(rotuloMes(r.mes)) + ': '
-                        + Object.keys(r.pesos).map(function(nro) {
-                            return esc(nombresLocales({ locales: [Number(nro)] })) + ' ' + importe(r.proyectado[nro])
-                                + ' → ' + numero(r.pesos[nro] * 100, 1) + ' %';
-                        }).join(', ') + (r.iguales ? ' <em>(partes iguales)</em>' : '') + '</li>';
+            h += '<div class="small"><strong>Qué reemplaza:</strong> todo lo proyectado de ' + esc(v.cod_provee)
+                + ' en ' + v.locales.length + ' local(es) en ' + esc(rotuloMes(v.mes)) + ': ' + importe(v.proyectado)
+                + ' (' + v.pisa_n + ' pago(s)). Manda lo real: se paga ' + importe(v.total_a_pagar) + ', sin saldo.'
+                + '<ul class="mb-0 mt-1">' + v.facturas.map(function(f) {
+                    return '<li>' + esc(f.nombre) + ': ' + importe(f.pendiente) + ' − retenciones ' + importe(f.retencion)
+                        + ' = ' + importe(f.a_pagar) + (f.pagada ? ' <em>(ya pagada en Tango: no se paga otra vez)</em>' : '')
+                        + '</li>';
                 }).join('') + '</ul></div>';
         }
 
@@ -672,7 +752,7 @@
     }
 
     function iniciar() {
-        ['alqFactRazon', 'alqFactEstado', 'alqFactVerPagadas'].forEach(function(id) {
+        ['alqFactRazon', 'alqFactEstado', 'alqFactVerPagadas', 'alqFactVerExcluidas'].forEach(function(id) {
             var el = document.getElementById(id);
 
             if (el) { el.addEventListener('change', function() { if (datos) { dibujar(); } }); }
@@ -681,8 +761,23 @@
         var b = document.getElementById('btnAlqImputar');
         if (b) { b.addEventListener('click', abrirImputar); }
 
-        var r = document.getElementById('btnAlqImpRenglon');
-        if (r) { r.addEventListener('click', function() { renglones.push(nuevoRenglon(tildadas())); dibujarRenglones(); }); }
+        var x = document.getElementById('btnAlqExcluir');
+        if (x) {
+            x.addEventListener('click', function() {
+                excluir(tildadas().map(function(f) {
+                    return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango,
+                             a_imputar: f.a_imputar };
+                }));
+            });
+        }
+
+        var r = document.getElementById('btnAlqImpRetencion');
+        if (r) { r.addEventListener('click', function() { retenciones.push({ tipo: '', importe: '' }); dibujarRetenciones(); }); }
+
+        ['alqImpLocal', 'alqImpMes'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) { el.addEventListener('change', cambio); }
+        });
 
         var p = document.getElementById('btnAlqImpPrevisualizar');
         if (p) { p.addEventListener('click', previsualizar); }

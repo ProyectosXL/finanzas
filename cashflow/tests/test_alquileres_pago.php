@@ -241,3 +241,67 @@ chequear('sin dia de vencimiento en ningun lado', ['día de vencimiento (ni la r
     AlquileresPago::estadoLocal($completo, true, $razones, null, '2026-11')['faltan']);
 chequear('con dia propio de la razon no hace falta el general', 'PROYECTA',
     AlquileresPago::estadoLocal($completo, true, ['SAUNIC' => ['dia' => 5, 'diferimiento' => 0]], null, '2026-11')['estado']);
+
+seccion('Que factura cada razon social de un local (San Justo)');
+
+/* San Justo (80): SASANJ es la principal y SAUCCS la adicional. Por defecto
+   todo va a la principal; lo que se le marca a la adicional sale de ella. */
+$razonesSJ = ['SASANJ' => ['dia' => 10, 'diferimiento' => 1], 'SAUCCS' => ['dia' => 20, 'diferimiento' => 2]];
+$sanJusto = ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS'], 'conceptos_razon' => []];
+
+$def = AlquileresPago::conceptosPorRazon($sanJusto, $razonesSJ);
+chequear('por defecto todo es de la principal', ['SASANJ'], array_values(array_unique($def['por_concepto'])));
+chequear('y son los conceptos que se proyectan', AlquileresConceptos::proyectados(), array_keys($def['por_concepto']));
+chequear('una adicional sin conceptos queda para el aviso informativo', ['SAUCCS'], $def['sin_conceptos']);
+
+$sanJusto['conceptos_razon'] = ['SAUCCS' => [6, 7, 11, 16, 17]];
+$sj = AlquileresPago::conceptosPorRazon($sanJusto, $razonesSJ);
+chequear('lo marcado en la adicional sale de la principal',
+    [1 => 'SASANJ', 2 => 'SASANJ', 3 => 'SASANJ', 6 => 'SAUCCS', 7 => 'SAUCCS', 8 => 'SASANJ', 9 => 'SASANJ',
+     11 => 'SAUCCS', 14 => 'SASANJ', 16 => 'SAUCCS', 17 => 'SAUCCS'], $sj['por_concepto']);
+chequear('y ya no avisa que no factura nada', [], $sj['sin_conceptos']);
+
+$baja = AlquileresPago::conceptosPorRazon($sanJusto, ['SASANJ' => $razonesSJ['SASANJ']]);
+chequear('adicional dada de baja: sus conceptos vuelven a la principal', ['SASANJ'],
+    array_values(array_unique($baja['por_concepto'])));
+chequear('y quedan para el aviso de atencion', ['SAUCCS' => [6, 7, 11, 16, 17]], $baja['devueltos']);
+
+$dos = AlquileresPago::conceptosPorRazon(['cod_provee' => 'A', 'adicionales' => ['B', 'C'],
+    'conceptos_razon' => ['B' => [11], 'C' => [11, 6]]], ['A' => [], 'B' => [], 'C' => []]);
+chequear('si la tabla dijera un concepto en dos adicionales, gana la primera', ['B', 'C'], [$dos['por_concepto'][11], $dos['por_concepto'][6]]);
+chequear('un local sin fila no tiene a quien asignar', [], AlquileresPago::conceptosPorRazon(null, $razonesSJ)['por_concepto']);
+
+seccion('Cada concepto se paga con el dia y el diferimiento de su razon social');
+
+$sjBase = $base;
+$sjBase['local'] = ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS']] + $local;
+$sjBase['razon'] = $razonesSJ['SASANJ'];
+$sjBase['razones'] = $razonesSJ;
+$sjBase['concepto_razon'] = $sj['por_concepto'];
+$sjBase['extras'] = [['id' => 9, 'cod_provee' => 'SAUCCS', 'todos' => true, 'locales' => [], 'conceptos' => [8],
+                      'mes_base' => 12, 'pct' => 10.0, 'diferimiento' => 0]];
+$pj = porConcepto(AlquileresPago::pagosLocal($sjBase));
+
+chequear('el VMA (8) es de SASANJ y vence su dia (10)', ['SASANJ', '2026-11-10'],
+    [$pj[8]['2026-11']['cod_provee'], $pj[8]['2026-11']['fecha']]);
+chequear('las expensas (11) son de SAUCCS y vencen su dia (20)', ['SAUCCS', '2026-11-20'],
+    [$pj[11]['2026-11']['cod_provee'], $pj[11]['2026-11']['fecha']]);
+chequear('el 7 de SAUCCS se difiere 2 meses (el de septiembre se paga en noviembre)', [50.0, 'SAUCCS'],
+    [$pj[7]['2026-11']['neto'], $pj[7]['2026-11']['cod_provee']]);
+chequear('con el diferimiento de SASANJ (1) seria el de octubre: no', false, $pj[7]['2026-11']['mes_concepto'] === '2026-10');
+chequear('el extraordinario es de su razon social, con su dia', ['SAUCCS', '2026-12-21'],
+    [$pj['EXTRA:9']['2026-12']['cod_provee'], $pj['EXTRA:9']['2026-12']['fecha']]);
+
+$sinMapa = porConcepto(AlquileresPago::pagosLocal($base));
+chequear('sin el mapa, todo es de la principal (como antes)', 'SAUNIC', $sinMapa[7]['2026-11']['cod_provee']);
+
+seccion('Una adicional que factura sin dia de vencimiento deja el local incompleto');
+
+$completoSJ = ['cod_provee' => 'SASANJ', 'adicionales' => ['SAUCCS'], 'conceptos_razon' => ['SAUCCS' => [11]],
+               'frecuencia' => 1, 'mes_ajuste' => null, 'pct_iva' => 21.0, 'pct_percepcion' => 0.0, 'pct_retencion' => 0.0];
+$sinDia = ['SASANJ' => ['dia' => 10, 'diferimiento' => 1], 'SAUCCS' => ['dia' => null, 'diferimiento' => 1]];
+chequear('sin dia propio ni general: falta', ['día de vencimiento de SAUCCS (factura conceptos de este local; ni la razón social ni el general)'],
+    AlquileresPago::estadoLocal($completoSJ, true, $sinDia, null, '2026-11')['faltan']);
+chequear('con el general alcanza', 'PROYECTA', AlquileresPago::estadoLocal($completoSJ, true, $sinDia, 10, '2026-11')['estado']);
+chequear('si no factura nada no necesita dia', 'PROYECTA',
+    AlquileresPago::estadoLocal(['conceptos_razon' => []] + $completoSJ, true, $sinDia, null, '2026-11')['estado']);

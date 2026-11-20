@@ -102,8 +102,8 @@
 
     <!-- ============================================================
          1 — PROYECCIÓN
-         Un renglón por local con lo que se paga cada mes. Se abre en sus
-         grupos y cada grupo en sus conceptos. El mes es el MES DE PAGO: un
+         Un renglón por razón social con lo que se paga cada mes. Se abre en
+         sus locales, cada local en sus grupos y cada grupo en sus conceptos. El mes es el MES DE PAGO: un
          variable diferido aparece en el mes en que se paga.
          ============================================================ -->
     <div class="tab-pane fade show active" id="paneAlqProy" role="tabpanel">
@@ -111,33 +111,36 @@
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <div>
-                        <h5 class="mb-0">Proyección por local</h5>
+                        <h5 class="mb-0">Proyección por razón social</h5>
                         <small class="text-muted">
-                            El renglón del local es el <strong>a pagar</strong>; grupos y conceptos, el
-                            <strong>neto</strong>. Pasá el mouse por un importe para ver el desglose.
+                            Cada razón social se abre en sus locales, y cada local en lo que ella le
+                            factura. Razón social y local muestran el <strong>a pagar</strong>; grupos y
+                            conceptos, el <strong>neto</strong>. Pasá el mouse por un importe para ver el desglose.
                         </small>
                     </div>
                     <div class="search-box-container">
                         <div class="input-group input-group-sm">
                             <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
                             <input type="text" id="busquedaAlq" class="form-control border-start-0 ps-0"
-                                   placeholder="Buscar local o razón social…" style="min-width: 220px;">
+                                   placeholder="Buscar razón social, código o local…" style="min-width: 220px;">
                         </div>
                     </div>
                 </div>
                 <div class="d-flex gap-2">
                     <div id="colFijasAlq"></div>
-                    <button id="btnExpandirAlq" class="btn btn-sm btn-outline-secondary" title="Abrir o cerrar todos los locales">
+                    <button id="btnExpandirAlq" class="btn btn-sm btn-outline-secondary" title="Abrir o cerrar todas las razones sociales y sus locales">
                         <i class="fas fa-up-down me-1"></i> Abrir todo
                     </button>
                     <!-- No es data-exportar: antes de exportar abre todas las
                          filas, porque tabla-export.js baja sólo lo que se ve. -->
                     <button id="btnExportarAlq" class="btn btn-sm btn-success"
-                            title="Exportar a Excel con todos los locales, grupos y conceptos abiertos">
+                            title="Exportar a Excel con todas las razones sociales, locales, grupos y conceptos abiertos">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
                 </div>
             </div>
+            <!-- La leyenda de los chips de origen (Js/Alquileres.js, pintarLeyenda()). -->
+            <div class="card-body py-2 border-bottom small text-muted" id="alqLeyenda"></div>
             <div class="card-body p-0">
                 <div class="cargando-slot" id="alqSpinner" data-cargando="Proyectando los alquileres de los locales…"></div>
                 <div class="table-wrapper table-responsive tabla-temporal" id="alqWrapper" style="display: none;">
@@ -150,10 +153,12 @@
             </div>
             <div class="card-body py-2 border-top">
                 <small class="text-muted">
-                    <strong>De dónde sale cada importe</strong>, de mayor a menor prioridad: un mes
-                    <em>cerrado en la app</em> se toma tal cual; si no está cerrado pero ya tiene
-                    <em>venta real</em>, el cashflow calcula los conceptos con esa venta; si no, todo es
-                    <em>estimado</em>. Un período abierto en la app nunca se lee. Los pagos que ya
+                    <strong>De dónde sale cada importe</strong>, de mayor a menor prioridad: la
+                    <em>factura</em> imputada pisa todo lo de su razón social en sus locales ese mes; un
+                    mes <em>cerrado en la app</em> se toma tal cual; de un período <em>abierto</em> se
+                    toman sólo los fijos cargados (los variables se calculan, con el VMA de la app); si
+                    el mes ya tiene <em>venta real</em>, el cashflow calcula los variables con esa venta;
+                    si no, todo es <em>estimado</em>. Cada celda lo dice con su chip. Los pagos que ya
                     vencieron en el mes en curso y todavía no tienen factura van al siguiente día hábil
                     desde hoy.
                 </small>
@@ -225,13 +230,16 @@
          Las facturas pendientes de Tango de las razones sociales dadas de alta
          en Parámetros › Alquileres, una fila por vencimiento (cuota). SIN
          IMPUTAR NO SUMAN: contarían dos veces contra la proyección del local.
-         Imputar es repartirlas en renglones de conceptos × locales × mes que
-         cubre; cada renglón reemplaza esa proyección. La regla está en
+         Imputar es elegir facturas de una razón social, sus locales (todos o
+         uno), el mes y las retenciones por tipo: la imputación reemplaza todo lo
+         proyectado de esa razón social ahí ese mes. La regla está en
          Class/AlquileresImputacion.php; acá sólo se dibuja y se arma el pedido.
     -->
     <div class="tab-pane fade" id="paneAlqFact" role="tabpanel">
+        <!-- Sin el script 60: no se imputa, y se dice cuál falta. -->
+        <div id="alqFactSinScript"></div>
         <div data-kpis="kpisAlqFact" class="row g-3 mb-3" id="kpisAlqFact">
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Sin imputar</span>
@@ -241,7 +249,7 @@
                     <div class="kpi-card-footer"><span class="text-muted" id="alqFactKpiSinPie">No suman en ningún lado hasta que se imputen</span></div>
                 </div>
             </div>
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Imputadas, a pagar</span>
@@ -251,7 +259,7 @@
                     <div class="kpi-card-footer"><span class="text-muted" id="alqFactKpiImpPie">Pendiente − retención</span></div>
                 </div>
             </div>
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Proyección reemplazada</span>
@@ -259,6 +267,16 @@
                     </div>
                     <div class="kpi-card-value" id="alqFactKpiReemp">0</div>
                     <div class="kpi-card-footer"><span class="text-muted">Pagos proyectados que pisa una factura</span></div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <div class="kpi-card">
+                    <div class="kpi-card-header">
+                        <span class="kpi-card-title">Excluidas</span>
+                        <div class="kpi-card-icon orange"><i class="fas fa-ban"></i></div>
+                    </div>
+                    <div class="kpi-card-value" id="alqFactKpiExcl">$ 0,00</div>
+                    <div class="kpi-card-footer"><span class="text-muted" id="alqFactKpiExclPie">No se pagan por acá: no suman</span></div>
                 </div>
             </div>
         </div>
@@ -278,11 +296,21 @@
                         <option value="">Todos los estados</option>
                     </select>
                     <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="alqFactVerExcluidas">
+                        <label class="form-check-label small" for="alqFactVerExcluidas" title="Las que no se pagan por este circuito: no suman en ningún lado">Ver excluidas</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="alqFactVerPagadas">
                         <label class="form-check-label small" for="alqFactVerPagadas" title="Las pagadas de este mes se ven siempre">Ver pagadas de meses anteriores</label>
                     </div>
+                    <!-- Excluir las tildadas, con un motivo. El JS lo muestra sólo con
+                         permiso y con el script 61. -->
+                    <button id="btnAlqExcluir" class="btn btn-sm btn-outline-dark" disabled style="display: none;"
+                            title="Las tildadas no se pagan por este circuito (pagos de contrato): salen de todos los totales">
+                        <i class="fas fa-ban me-1"></i> Excluir
+                    </button>
                     <button id="btnAlqImputar" class="btn btn-sm btn-primary" disabled
-                            title="Tildá una o varias facturas, de una o varias razones sociales">
+                            title="Tildá una o varias facturas de una razón social">
                         <i class="fas fa-file-signature me-1"></i> Imputar
                     </button>
                     <button class="btn btn-sm btn-success" data-exportar="tablaAlqFact"
@@ -318,41 +346,56 @@
 
         <div class="card mb-4">
             <div class="card-header"><h6 class="mb-0">Imputaciones vigentes</h6>
-                <small class="text-muted">Cada renglón reemplaza la proyección de sus conceptos, en sus locales,
-                    del mes que cubre. Deshacer devuelve las facturas a Sin imputar y la proyección vuelve.</small>
+                <small class="text-muted">Cada una reemplaza todo lo proyectado de su razón social en sus locales
+                    en el mes que cubre, y manda lo real. Deshacer devuelve las facturas a Sin imputar y la
+                    proyección vuelve; para corregir una imputación, se deshace y se arma de nuevo.</small>
             </div>
             <div class="card-body p-0" id="alqImputaciones"></div>
         </div>
     </div>
 
-    <!-- EL ARMADO DE UNA IMPUTACIÓN. El navegador suma y muestra la diferencia
-         para guiar; lo que vale es la previsualización del servidor, que se
-         vuelve a correr al guardar contra los pendientes de ese momento. -->
+    <!-- EL ARMADO DE UNA IMPUTACIÓN: facturas de UNA razón social, todos sus
+         locales o uno, el mes de pago y las retenciones por tipo. No se eligen
+         conceptos: pisa todo lo que esa razón social factura ahí ese mes. El
+         navegador suma para guiar; lo que vale es la previsualización del
+         servidor, que se vuelve a correr al guardar con los pendientes de ese
+         momento. -->
     <div class="modal fade" id="modalAlqImputar" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Imputar facturas de alquiler</h5>
+                    <h5 class="modal-title">Imputar facturas de <span id="alqImpRazon"></span></h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
                     <h6>Facturas</h6>
                     <table id="tablaAlqImpFacturas" class="table table-sm small">
-                        <thead><tr><th>Razón social</th><th>Comprobante</th><th>Vence</th>
-                            <th class="text-end">Pendiente</th><th class="text-end" style="width: 170px;">Retención</th>
-                            <th class="text-end">A pagar</th></tr></thead>
+                        <thead><tr><th>Comprobante</th><th>Vence</th><th class="text-end">Pendiente</th></tr></thead>
                         <tbody id="alqImpFacturas"></tbody>
                     </table>
 
+                    <div class="row g-2">
+                        <div class="col-md-7">
+                            <label class="form-label small mb-0" for="alqImpLocal">Locales</label>
+                            <select class="form-select form-select-sm" id="alqImpLocal"></select>
+                            <div class="form-text">Donde la razón social es principal o adicional.</div>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small mb-0" for="alqImpMes">Mes</label>
+                            <select class="form-select form-select-sm" id="alqImpMes"></select>
+                            <div class="form-text">El mes de pago cuya proyección reemplaza.</div>
+                        </div>
+                    </div>
+
                     <div class="d-flex justify-content-between align-items-center mt-3">
-                        <h6 class="mb-0">Renglones</h6>
-                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnAlqImpRenglon">
-                            <i class="fas fa-plus me-1"></i> Agregar renglón
+                        <h6 class="mb-0">Retenciones</h6>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnAlqImpRetencion">
+                            <i class="fas fa-plus me-1"></i> Retención
                         </button>
                     </div>
-                    <div id="alqImpRenglones" class="mt-2"></div>
+                    <div id="alqImpRetenciones" class="mt-2"></div>
 
-                    <div class="d-flex justify-content-end gap-3 small mt-2" id="alqImpTotales"></div>
+                    <div class="d-flex justify-content-end gap-3 small mt-3" id="alqImpTotales"></div>
                     <div class="mt-2">
                         <input type="text" class="form-control form-control-sm" id="alqImpObs" maxlength="300"
                                placeholder="Observación (opcional)">

@@ -7,6 +7,9 @@ require_once __DIR__ . '/AlquileresCalculo.php';
 require_once __DIR__ . '/AlquileresVenta.php';
 require_once __DIR__ . '/AlquileresPago.php';
 require_once __DIR__ . '/AlquileresImputacion.php';
+require_once __DIR__ . '/AlquileresImputaciones.php';
+require_once __DIR__ . '/AlquileresFacturaExclusion.php';
+require_once __DIR__ . '/AlquileresTiposRetencion.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Inflacion.php';
 
@@ -124,7 +127,27 @@ class Alquileres {
 
         $avisos = array_merge($avisos, AlquileresFacturas::avisoRubroSinFila($sinFila));
 
+        /* UNA ADICIONAL QUE NO FACTURA NINGUN CONCEPTO sigue sirviendo para sus
+           extraordinarios y para imputarle facturas; se avisa por si falta
+           marcarle lo que factura. Solo con el script 62: sin el, ninguna
+           adicional puede facturar nada y el selector ya lo dice. */
+        $conConceptos = $base['tablas_ok'] && $this->tablaConceptosRazon($avisos);
+
+        if ($conConceptos) {
+            foreach ($base['locales'] as $l) {
+                foreach ($l['razones_sin_conceptos'] ?? [] as $cod) {
+                    $avisos[] = Aviso::nuevo(Aviso::INFO, ($vigentes[$cod]['razon'] ?? $cod) . ' es adicional de '
+                        . $l['nombre'] . ' pero no factura ningún concepto.', 'Locales');
+                }
+            }
+        }
+
+        $tipos = $this->tiposRetencion($avisos);
+
         return [
+            'tipos_retencion' => $tipos['todos'],
+            'tabla_tipos_retencion' => $tipos['tabla'],
+            'script_imputacion' => AlquileresTiposRetencion::SCRIPT,
             'rubro_sin_fila' => $sinFila,
             'tabla_creada' => $this->par->tablaCreada(),
             'script' => AlquileresParametros::SCRIPT,
@@ -133,6 +156,11 @@ class Alquileres {
             'columnas_vigencia' => $base['tablas_ok'] && $this->columnasVigencia($avisos),
             'script_vigencia' => AlquileresParametros::SCRIPT_VIGENCIA,
             'script_razones_local' => AlquileresParametros::SCRIPT_RAZONES_LOCAL,
+            'tabla_conceptos_razon' => $conConceptos,
+            'script_conceptos_razon' => AlquileresParametros::SCRIPT_CONCEPTOS_RAZON,
+            'conceptos_proyectados' => array_map(function ($id) {
+                return ['id' => $id, 'nombre' => AlquileresConceptos::NOMBRE[$id]];
+            }, AlquileresConceptos::proyectados()),
             'general' => $base['general'],
             'razones' => array_values($razonesAlta),
             'historial_razones' => $base['tablas_ok'] ? $this->par->razones(false) : [],
@@ -235,12 +263,15 @@ class Alquileres {
      */
     protected function insumosFacturas($h) {
         $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'dias' => [],
-                'pagadas_mes' => [], 'imputaciones' => [], 'en_tango' => [], 'avisos' => []];
+                'pagadas_mes' => [], 'imputaciones' => [], 'en_tango' => [], 'avisos' => [],
+                'tabla_imputacion' => false, 'tipos' => [], 'tipos_vigentes' => [], 'excluidas_factura' => [],
+                'tabla_exclusion' => false];
 
         try {
             require_once __DIR__ . '/AlquileresUniverso.php';
             require_once __DIR__ . '/Proveedores.php';
             require_once __DIR__ . '/AlquileresImputaciones.php';
+require_once __DIR__ . '/AlquileresFacturaExclusion.php';
             require_once __DIR__ . '/AlquileresFacturaVto.php';
 
             $ctx = AlquileresUniverso::delPedido();
@@ -269,6 +300,10 @@ class Alquileres {
 
             $out['pendientes'] = $partes[AlquileresFacturas::A_ALQUILERES];
             $out['excluidas'] = $partes[AlquileresFacturas::A_EXCLUIDA];
+            /* LAS EXCLUIDAS A MANO (no se pagan por aca): no suman, pero se ven
+               con "Ver excluidas", con su motivo, para poder volver a incluirlas. */
+            $out['excluidas_factura'] = $partes[AlquileresFacturas::A_EXCLUIDA_FACTURA];
+            $out['tabla_exclusion'] = (new AlquileresFacturaExclusion())->tablaCreada();
             $out['vtos'] = (new AlquileresFacturaVto())->vigentes();
             $out['dias'] = $this->diasDeVencimiento();
 
@@ -277,15 +312,34 @@ class Alquileres {
                imputar deja la proyeccion de su mes en el flujo. Si no se pueden
                leer, la grilla sigue con las pendientes y se avisa. */
             try {
-                $out['pagadas_mes'] = AlquileresFacturas::partir($prov->getCanceladasEmitidas(
+                $pm = AlquileresFacturas::partir($prov->getCanceladasEmitidas(
                     array_keys($ctx['razones']), substr($h->hoy(), 0, 8) . '01', date('Y-m-t', strtotime($h->hoy()))),
-                    $ctx)[AlquileresFacturas::A_ALQUILERES];
+                    $ctx);
+                $out['pagadas_mes'] = $pm[AlquileresFacturas::A_ALQUILERES];
+                $out['excluidas_factura'] = array_merge($out['excluidas_factura'], array_map(function ($p) {
+                    return ['IMPORTE_PENDIENTE' => 0.0, 'PAGADA_TANGO' => true] + $p;
+                }, $pm[AlquileresFacturas::A_EXCLUIDA_FACTURA]));
             } catch (Throwable $e) {
                 $out['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer de Tango las facturas de '
                     . 'alquiler ya pagadas este mes (' . $e->getMessage() . '): la grilla muestra sólo las pendientes.',
                     'Facturas');
             }
-            $out['imputaciones'] = (new AlquileresImputaciones())->vigentes();
+            /* SIN EL SCRIPT 60 no hay imputaciones que leer: la proyeccion no se
+               reemplaza con nada y las facturas no suman hasta que se imputen.
+               Se avisa en critico: hay plata real que no esta en el cuadro. */
+            $imps = new AlquileresImputaciones();
+            $out['tabla_imputacion'] = $imps->tablaCreada();
+
+            if (!$out['tabla_imputacion']) {
+                $out['avisos'][] = Aviso::nuevo(Aviso::DANGER, $imps->avisoSinTabla(), 'Facturas');
+            }
+
+            $out['imputaciones'] = $imps->vigentes();
+            /* Sin los tipos ya avisa lo de arriba: son del mismo script. */
+            $sinAviso = [];
+            $tipos = $this->tiposRetencion($sinAviso);
+            $out['tipos'] = $tipos['nombres'];
+            $out['tipos_vigentes'] = array_column($tipos['vigentes'], 'nombre', 'id');
 
             $pares = AlquileresImputacion::aConsultarEnTango($out['imputaciones'], $out['pendientes']);
             $out['en_tango'] = empty($pares) ? [] : $prov->estadoComprobantesEnTango($pares);
@@ -332,8 +386,9 @@ class Alquileres {
     public static function conFacturas($out, $ins, $h) {
         $out += ['facturas' => [], 'imputaciones' => [], 'reemplazados' => [], 'pagadas_nuevas' => [],
                  'facturas_kpis' => ['sin_imputar_n' => 0, 'sin_imputar_importe' => 0.0, 'imputadas_n' => 0,
-                                     'imputadas_a_pagar' => 0.0],
-                 'fuera_horizonte_facturas' => 0.0, 'condicion' => null];
+                                     'imputadas_a_pagar' => 0.0, 'reemplazado_a_pagar' => 0.0],
+                 'fuera_horizonte_facturas' => 0.0, 'condicion' => null, 'tipos_vigentes' => [],
+                 'tabla_imputacion' => false];
         $f = $ins['facturas'] ?? null;
 
         if ($f === null) {
@@ -347,6 +402,21 @@ class Alquileres {
             return $out;
         }
 
+        $out['tipos_vigentes'] = $f['tipos_vigentes'] ?? [];
+        $out['tabla_exclusion'] = $f['tabla_exclusion'] ?? false;
+        $out['tabla_imputacion'] = $f['tabla_imputacion'] ?? false;
+
+        /* El nombre de la razon social de cada imputacion, para la grilla y el tooltip. */
+        $nombres = [];
+
+        foreach ($out['razones'] ?? [] as $cod => $r) {
+            $nombres[Planilla::codigo($cod)] = $r['razon'] ?? $cod;
+        }
+
+        $imputaciones = array_map(function ($imp) use ($nombres) {
+            return $imp + ['razon' => $nombres[Planilla::codigo($imp['cod_provee'])] ?? $imp['cod_provee']];
+        }, $f['imputaciones']);
+
         $a = AlquileresImputacion::aplicar([
             'pagos' => $out['pagos'],
             'meses_pago' => $out['meses_pago'],
@@ -355,11 +425,15 @@ class Alquileres {
             'vtos' => $f['vtos'],
             'dias' => $f['dias'] ?? [],
             'pagadas_mes' => $f['pagadas_mes'] ?? [],
-            'imputaciones' => $f['imputaciones'],
+            'excluidas_factura' => $f['excluidas_factura'] ?? [],
+            'exclusiones' => $f['ctx']['facturas_excluidas'] ?? [],
+            'imputaciones' => $imputaciones,
             'en_tango' => $f['en_tango'],
             'ctx' => $f['ctx'],
             'habiles' => $ins['habiles'] ?? [],
-            'hoy' => $h->hoy()
+            'hoy' => $h->hoy(),
+            'tipos' => $f['tipos'] ?? [],
+            'nombres_locales' => array_map(function ($l) { return $l['nombre']; }, $out['locales'] ?? [])
         ]);
 
         $out['pagos'] = $a['pagos'];
@@ -377,9 +451,10 @@ class Alquileres {
     /**
      * Lo que necesita validar o guardar una imputacion, leido AHORA: las cuotas
      * pendientes de alquiler, las imputaciones vigentes, la proyeccion ORIGINAL
-     * (sin reemplazos: es con lo que se reparte por local) y los locales con sus
-     * alicuotas. Es lo que hace que guardar frene si una factura cambio entre
-     * que se armo y se guardo.
+     * (sin reemplazos: para decir cuanto pisa), los locales con sus razones
+     * sociales, los tipos de retencion vigentes y los meses que se pueden
+     * imputar. Es lo que hace que guardar frene si una factura cambio entre que
+     * se armo y se guardo.
      *
      * @param Horizonte $h
      * @return array El $e de AlquileresImputacion::validar(), + 'avisos'
@@ -417,15 +492,28 @@ class Alquileres {
         $locales = [];
 
         foreach ($proy['locales'] as $nro => $l) {
-            $locales[$nro] = ['cod_provee' => $l['params']['cod_provee'] ?? null, 'nombre' => $l['nombre'],
-                              'razones' => AlquileresPago::razonesDelLocal($l['params']),
-                              'pct_iva' => $l['params']['pct_iva'] ?? null,
-                              'pct_percepcion' => $l['params']['pct_percepcion'] ?? null,
-                              'pct_retencion' => $l['params']['pct_retencion'] ?? null];
+            $locales[$nro] = ['nombre' => $l['nombre'], 'razones' => AlquileresPago::razonesDelLocal($l['params'])];
         }
 
         return ['pendientes' => $pend, 'imputaciones' => $f['imputaciones'], 'pagos' => $proy['pagos'],
-                'locales' => $locales, 'dias' => $f['dias'] ?? [], 'avisos' => $f['avisos']];
+                'locales' => $locales, 'dias' => $f['dias'] ?? [], 'avisos' => $f['avisos'],
+                'tipos' => $f['tipos_vigentes'] ?? [], 'meses' => self::mesesImputables($h),
+                'excluidas' => $f['ctx']['facturas_excluidas'] ?? [],
+                'tabla_imputacion' => $f['tabla_imputacion'] ?? false];
+    }
+
+    /**
+     * Los meses que se pueden imputar: EL ANTERIOR (una factura de un mes que ya
+     * paso: se paga en su fecha y no pisa nada del horizonte) y los del
+     * horizonte. Por defecto, el mes en curso.
+     *
+     * @param Horizonte $h
+     * @return string[] 'Y-m'
+     */
+    public static function mesesImputables($h) {
+        $meses = array_column($h->meses(), 'clave');
+
+        return array_merge([Inflacion::mesMas(substr($h->hoy(), 0, 7), -1)], $meses);
     }
 
     /**
@@ -489,6 +577,49 @@ class Alquileres {
         }
     }
 
+    /**
+     * Los tipos de retencion (script 60): todos, con los dados de baja, para
+     * que Parametros muestre el historial y una imputacion vieja su nombre.
+     * Nunca lanza: sin el script, vacio y el aviso que lo nombra.
+     *
+     * @return array ['tabla' => bool, 'todos' => [...], 'vigentes' => [...], 'nombres' => [id => nombre]]
+     */
+    protected function tiposRetencion(&$avisos) {
+        $out = ['tabla' => false, 'todos' => [], 'vigentes' => [], 'nombres' => []];
+
+        try {
+            $t = new AlquileresTiposRetencion();
+            $out['tabla'] = $t->tablaCreada();
+
+            if (!$out['tabla']) {
+                $avisos[] = Aviso::nuevo(Aviso::DANGER, $t->avisoSinTabla(), 'Tipos de retención');
+
+                return $out;
+            }
+
+            $out['todos'] = $t->todos();
+            $out['vigentes'] = array_values(array_filter($out['todos'], function ($x) { return $x['vigente']; }));
+            $out['nombres'] = array_column($out['todos'], 'nombre', 'id');
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los tipos de retención ('
+                . $e->getMessage() . ').', 'Tipos de retención');
+        }
+
+        return $out;
+    }
+
+    /** Si se pueden marcar los conceptos de una razon social adicional (script 62). Nunca lanza. */
+    protected function tablaConceptosRazon(&$avisos) {
+        try {
+            return $this->par->tablaConceptosRazonCreada();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo verificar la tabla de conceptos por razón social ('
+                . $e->getMessage() . ').', 'Locales');
+
+            return false;
+        }
+    }
+
     /** Si se puede agregar mas de una razon social a un local (script 58). Nunca lanza. */
     protected function tablaRazonesLocal(&$avisos) {
         try {
@@ -531,7 +662,8 @@ class Alquileres {
         $hoy = $h->hoy();
         $mesesPago = array_column($h->meses(), 'clave');
 
-        $out = ['pagos' => [], 'locales' => $base['locales'], 'ventas' => null, 'meses_pago' => $mesesPago,
+        $out = ['pagos' => [], 'locales' => $base['locales'], 'razones' => $base['razones'], 'ventas' => null,
+                'meses_pago' => $mesesPago,
                 'meses_concepto' => $mesesPago, 'faltan_inflacion' => [], 'avisos' => []];
 
         foreach ($base['razones'] as $cod => $r) {
@@ -567,6 +699,10 @@ class Alquileres {
 
         try {
             $detalle = $this->app->detalleCerrados($base['cerrados'], $desde);
+            /* LOS FIJOS CARGADOS CON EL PERIODO ABIERTO, de los meses posteriores
+               al ultimo cerrado: los usa AlquileresCalculo::fijos(). */
+            $abiertos = $this->app->detalleAbiertos(array_values(array_filter($mesesConcepto,
+                function ($m) use ($ultimoGlobal) { return $m > $ultimoGlobal; })), $base['cerrados']);
             $pct = $this->app->porcentajes();
             $desdeVenta = min($base['ventana'][0] ?? $mesesConcepto[0], $mesesConcepto[0]);
             $netas = $this->app->ventasNetas($desdeVenta);
@@ -661,6 +797,8 @@ class Alquileres {
         /* Los pagos de cada local que proyecta. */
         $diaGeneral = ($base['general'] === null) ? null : $base['general']['dia'];
         $faltanInf = [];
+        $sinAjuste = [];
+        $ajusteFuera = [];
         $sinCerrado = [];
         $sinVenta = [];
         $sinPct = [];
@@ -683,10 +821,22 @@ class Alquileres {
                 'pct' => $pctLocal,
                 'inflacion' => $ins['inflacion'],
                 'tasa_expensas' => AlquileresCalculo::tasaDelLocal($propia, $general),
-                'ventas' => ($ventas === null) ? [] : ($ventas['ventas'][$nro] ?? [])
+                'ventas' => ($ventas === null) ? [] : ($ventas['ventas'][$nro] ?? []),
+                'abiertos' => $abiertos[$nro] ?? []
             ]);
 
             $faltanInf = array_merge($faltanInf, $proy['faltan_inflacion']);
+
+            foreach ($proy['avisos_app'] as $a) {
+                $texto = $l['nombre'] . ' (' . AlquileresConceptos::NOMBRE[$a['concepto']] . ', '
+                    . AlquileresImputacion::mesLargo($a['mes']) . ')';
+
+                if ($a['tipo'] === 'SIN_AJUSTE') {
+                    $sinAjuste[] = $texto;
+                } else {
+                    $ajusteFuera[] = $texto;
+                }
+            }
 
             if ($proy['ultimo_cerrado'] === null) {
                 $sinCerrado[] = $l['nombre'];
@@ -711,6 +861,8 @@ class Alquileres {
             foreach (AlquileresPago::pagosLocal([
                 'local' => $p,
                 'razon' => $razon,
+                'razones' => $base['razones'],
+                'concepto_razon' => $l['concepto_razon'],
                 'dia_general' => $diaGeneral,
                 'proyeccion' => $proy,
                 'extras' => $extras,
@@ -725,6 +877,24 @@ class Alquileres {
         $faltanInf = array_values(array_unique($faltanInf));
         sort($faltanInf);
         $out['faltan_inflacion'] = $faltanInf;
+
+        /* LOS FIJOS DEL PERIODO ABIERTO QUE NO SE USARON: en un mes en que el
+           local ajusta, la app tiene el valor de antes (copia el mes anterior
+           al abrir el periodo). Se sigue estimando con el ajuste. */
+        if (!empty($sinAjuste)) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'La app de alquileres todavía no aplicó el ajuste en '
+                . implode('; ', $sinAjuste) . ': tiene el mismo valor que el mes anterior, así que se sigue estimando '
+                . 'con el ajuste por inflación. Cuando la app lo cargue, se toma ese.', 'Locales');
+        }
+
+        /* Y LOS QUE SE USARON EN UN MES QUE NO ES DE AJUSTE: si el mes del
+           ultimo ajuste de Parametros esta mal, el proximo ajuste se suma dos veces. */
+        if (!empty($ajusteFuera)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'La app de alquileres cambió un fijo en un mes que, según '
+                . 'Parámetros › Alquileres, no es de ajuste: ' . implode('; ', $ajusteFuera) . '. Se usa el valor de '
+                . 'la app; revisá el mes del último ajuste del local en Parámetros, o el próximo ajuste se va a sumar '
+                . 'dos veces.', 'Locales');
+        }
 
         if (!empty($faltanInf)) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, Inflacion::avisoFaltan($faltanInf, $hoy)
@@ -781,8 +951,11 @@ class Alquileres {
        ==================================================================== */
 
     /**
-     * La grilla de Proyeccion (local -> grupos -> conceptos, por mes de pago),
-     * la de Ventas, las tarjetas y los avisos, a partir de calcular().
+     * La grilla de Proyeccion (razon social -> local -> grupos -> conceptos,
+     * por mes de pago: armarRazones()), la de Ventas, las tarjetas y los
+     * avisos, a partir de calcular(). 'locales' sigue viniendo plano, un
+     * renglon por local con todos sus pagos: es el que leen la sub-pestaña
+     * Ventas y Facturas.
      *
      * NO CALCULA NADA: agrupa la lista de pagos. Por eso lo que la pestaña dice
      * es lo mismo que dice el tablero, que suma la misma lista.
@@ -809,8 +982,16 @@ class Alquileres {
         }
 
         $porLocal = [];
+        $facturas = [];
 
         foreach ($c['pagos'] as $p) {
+            /* LAS FACTURAS IMPUTADAS SON DE LA RAZON SOCIAL, no de un local:
+               van a su linea "Facturas imputadas" (armarRazones()). */
+            if (($p['origen'] ?? null) === AlquileresCalculo::FACTURA) {
+                $facturas[self::razonDelPago($p)][] = $p;
+                continue;
+            }
+
             if ($totalConcepto[$p['nro'] . '|' . $p['concepto']] == 0 && $p['grupo'] !== AlquileresConceptos::VARIABLES) {
                 continue;
             }
@@ -822,68 +1003,19 @@ class Alquileres {
         $totalHorizonte = 0.0;
         $totalMesActual = 0.0;
 
-        foreach ($c['locales'] as $nro => $l) {
-            $fila = [
-                'nro' => $nro,
-                'nombre' => $l['nombre'],
-                'cod_provee' => $l['params']['cod_provee'] ?? null,
-                'razon' => $l['razon'],
-                'estado' => $l['estado'],
-                'faltan' => $l['faltan'],
-                'nuevo' => $l['nuevo'],
-                'meses' => [],
-                'total' => self::celdaVacia(),
-                'grupos' => []
-            ];
+        foreach ($c['pagos'] as $p) {
+            $totalHorizonte += $p['a_pagar'];
 
-            foreach ($porLocal[$nro] ?? [] as $p) {
-                $grupo = $p['grupo'];
-                $concepto = (string) $p['concepto'];
-                $mes = $p['mes_pago'];
-
-                if (!isset($fila['grupos'][$grupo])) {
-                    $fila['grupos'][$grupo] = ['grupo' => $grupo, 'nombre' => self::nombresGrupo()[$grupo],
-                                               'meses' => [], 'total' => self::celdaVacia(), 'conceptos' => []];
-                }
-
-                $g = &$fila['grupos'][$grupo];
-
-                if (!isset($g['conceptos'][$concepto])) {
-                    $g['conceptos'][$concepto] = ['id' => $concepto, 'nombre' => self::nombreConcepto($p),
-                                                  'meses' => [], 'total' => self::celdaVacia()];
-                }
-
-                $k = &$g['conceptos'][$concepto];
-                $k['meses'][$mes] = self::sumarCelda($k['meses'][$mes] ?? self::celdaVacia(), $p, true);
-                $k['total'] = self::sumarCelda($k['total'], $p, false);
-                $g['meses'][$mes] = self::sumarCelda($g['meses'][$mes] ?? self::celdaVacia(), $p, false);
-                $g['total'] = self::sumarCelda($g['total'], $p, false);
-                $fila['meses'][$mes] = self::sumarCelda($fila['meses'][$mes] ?? self::celdaVacia(), $p, false);
-                $fila['total'] = self::sumarCelda($fila['total'], $p, false);
-                unset($g, $k);
-
-                $totalHorizonte += $p['a_pagar'];
-
-                if ($mes === $mesActual) {
-                    $totalMesActual += $p['a_pagar'];
-                }
+            if ($p['mes_pago'] === $mesActual) {
+                $totalMesActual += $p['a_pagar'];
             }
-
-            /* Los grupos en su orden, y cada uno con sus conceptos en orden. */
-            $ordenados = [];
-
-            foreach (array_keys(self::nombresGrupo()) as $gr) {
-                if (isset($fila['grupos'][$gr])) {
-                    $g = $fila['grupos'][$gr];
-                    ksort($g['conceptos'], SORT_NATURAL);
-                    $g['conceptos'] = array_values($g['conceptos']);
-                    $ordenados[] = $g;
-                }
-            }
-
-            $fila['grupos'] = $ordenados;
-            $locales[] = $fila;
         }
+
+        foreach ($c['locales'] as $nro => $l) {
+            $locales[] = self::filaLocal($nro, $l, $porLocal[$nro] ?? []);
+        }
+
+        $razones = self::armarRazones($c, $porLocal, $facturas);
 
         $incompletos = count(array_filter($c['locales'], function ($l) {
             return $l['estado'] === AlquileresPago::INCOMPLETO || !empty($l['faltan']);
@@ -897,6 +1029,7 @@ class Alquileres {
             'meses' => $meses,
             'mes_actual' => $mesActual,
             'locales' => $locales,
+            'razones' => $razones,
             'ventas' => self::armarVentas($c),
             'kpis' => [
                 'total_horizonte' => round($totalHorizonte, 2),
@@ -905,42 +1038,234 @@ class Alquileres {
                 'locales_incompletos' => $incompletos
             ],
             'origenes' => AlquileresCalculo::NOMBRE_ORIGEN,
+            /* LA LEYENDA de los chips, en el orden de la jerarquia. */
+            'leyenda_origenes' => [
+                ['clave' => AlquileresCalculo::APP_CERRADA, 'texto' => 'Real (cerrado)',
+                 'ayuda' => 'El período está cerrado en la app de alquileres.'],
+                ['clave' => AlquileresCalculo::APP_ABIERTA, 'texto' => 'Cargado en app (abierto)',
+                 'ayuda' => 'El período está abierto y el fijo ya está cargado en la app.'],
+                ['clave' => AlquileresCalculo::VENTA_REAL, 'texto' => 'Venta real',
+                 'ayuda' => 'Variable calculado por el cashflow con la venta real del mes.'],
+                ['clave' => 'INFLACION', 'texto' => 'Estimado · inflación desde [mes]',
+                 'ayuda' => 'Un fijo proyectado por inflación desde el último valor tomado de la app.'],
+                ['clave' => AlquileresCalculo::ESTIMADO, 'texto' => 'Estimado', 'ayuda' => 'Todo estimado.'],
+                ['clave' => AlquileresCalculo::FACTURA, 'texto' => 'Factura', 'ayuda' => 'La factura imputada.'],
+                ['clave' => 'MIXTO', 'texto' => 'Mixto', 'ayuda' => 'Un subtotal con pagos de distinto origen: el desglose, en el tooltip.']
+            ],
             'estados' => AlquileresPago::NOMBRE_ESTADO,
-            'facturas' => self::armarFacturas($c),
+            'facturas' => self::armarFacturas($c, $h),
             'avisos' => $c['avisos']
         ];
     }
 
+    /** La clave del grupo de los locales sin razon social dada de alta */
+    const SIN_RAZON = 'SIN_RAZON';
+
     /**
-     * Los grupos de la grilla de Proyeccion, en orden: los de los conceptos y
-     * los dos de las facturas que no caen en uno solo.
+     * El renglon de un local con sus grupos y conceptos, a partir de SUS
+     * pagos (todos, o los de una razon social). No calcula: suma celdas.
+     */
+    private static function filaLocal($nro, $l, $pagos) {
+        $fila = [
+            'nro' => $nro,
+            'nombre' => $l['nombre'],
+            'cod_provee' => $l['params']['cod_provee'] ?? null,
+            'razon' => $l['razon'],
+            'estado' => $l['estado'],
+            'faltan' => $l['faltan'],
+            'nuevo' => $l['nuevo'],
+            'meses' => [],
+            'total' => self::celdaVacia(),
+            'grupos' => []
+        ];
+
+        foreach ($pagos as $p) {
+            $grupo = $p['grupo'];
+            $concepto = (string) $p['concepto'];
+            $mes = $p['mes_pago'];
+
+            if (!isset($fila['grupos'][$grupo])) {
+                $fila['grupos'][$grupo] = ['grupo' => $grupo, 'nombre' => self::nombresGrupo()[$grupo],
+                                           'meses' => [], 'total' => self::celdaVacia(), 'conceptos' => []];
+            }
+
+            $g = &$fila['grupos'][$grupo];
+
+            if (!isset($g['conceptos'][$concepto])) {
+                $g['conceptos'][$concepto] = ['id' => $concepto, 'nombre' => self::nombreConcepto($p),
+                                              'meses' => [], 'total' => self::celdaVacia()];
+            }
+
+            $k = &$g['conceptos'][$concepto];
+            $k['meses'][$mes] = self::sumarCelda($k['meses'][$mes] ?? self::celdaVacia(), $p, true);
+            $k['total'] = self::sumarCelda($k['total'], $p, false);
+            $g['meses'][$mes] = self::sumarCelda($g['meses'][$mes] ?? self::celdaVacia(), $p, false);
+            $g['total'] = self::sumarCelda($g['total'], $p, false);
+            $fila['meses'][$mes] = self::sumarCelda($fila['meses'][$mes] ?? self::celdaVacia(), $p, false);
+            $fila['total'] = self::sumarCelda($fila['total'], $p, false);
+            unset($g, $k);
+        }
+
+        /* Los grupos en su orden, y cada uno con sus conceptos en orden. */
+        $ordenados = [];
+
+        foreach (array_keys(self::nombresGrupo()) as $gr) {
+            if (isset($fila['grupos'][$gr])) {
+                $g = $fila['grupos'][$gr];
+                ksort($g['conceptos'], SORT_NATURAL);
+                $g['conceptos'] = array_values($g['conceptos']);
+                $ordenados[] = $g;
+            }
+        }
+
+        $fila['grupos'] = $ordenados;
+
+        return $fila;
+    }
+
+    /** La razon social que factura un pago: la suya, o la de la factura imputada */
+    private static function razonDelPago($p) {
+        $cod = $p['cod_provee'] ?? ($p['detalle']['cod_provee'] ?? null);
+
+        return ($cod === null) ? null : Planilla::codigo($cod);
+    }
+
+    /**
+     * La grilla de Proyeccion: RAZON SOCIAL -> local -> grupo -> concepto.
+     *
+     * POR QUE EL PRIMER NIVEL ES LA RAZON SOCIAL. Es lo que se paga: una
+     * factura es de una razon social, se imputa a sus locales y pisa lo que
+     * ella factura. Agrupar por local mezclaba en un renglon lo que pagan dos
+     * proveedores distintos (San Justo).
+     *
+     * UN LOCAL CON DOS RAZONES SOCIALES APARECE BAJO LAS DOS, cada una con sus
+     * conceptos (AlquileresPago::conceptosPorRazon()). Bajo la principal se ve
+     * siempre, aunque no proyecte -con su estado-; bajo una adicional, solo si
+     * ella le factura algo en el horizonte. Los locales sin razon social dada
+     * de alta van al final, en "Sin razon social", con su aviso de siempre.
+     *
+     * AL FINAL DE CADA RAZON SOCIAL, "FACTURAS IMPUTADAS": el total a pagar de
+     * sus facturas en cada mes de pago. Sin reparto entre locales: la factura
+     * es de la razon social, y en los locales que cubre ese mes queda sin
+     * proyeccion. 'imputaciones' trae lo que explica el tooltip.
+     *
+     * NO CALCULA: reparte la misma lista de pagos que suma el tablero, y la
+     * suma de las razones da el total de la pestaña al centavo.
+     *
+     * @param array $c Lo de calcular(), con 'razones' (cod => ['razon', ...]) e 'imputaciones'
+     * @param array $porLocal nro => pagos que se muestran (los conceptos en 0 todo el horizonte, fuera)
+     * @param array $facturas cod => pagos de origen FACTURA
+     * @return array Lista de ['cod', 'nombre', 'sin_razon', 'meses', 'total', 'locales' => [filaLocal()],
+     *               'facturas' => null | ['meses', 'total', 'imputaciones']]
+     */
+    private static function armarRazones($c, $porLocal, $facturas = []) {
+        $nombres = [];
+
+        foreach ($c['razones'] ?? [] as $cod => $r) {
+            $nombres[Planilla::codigo($cod)] = $r['razon'] ?? $cod;
+        }
+
+        $porRazon = [];
+
+        foreach ($c['locales'] as $nro => $l) {
+            $principal = Planilla::codigo($l['params']['cod_provee'] ?? '');
+            $deEl = isset($nombres[$principal]) ? $principal : self::SIN_RAZON;
+            $porRazon[$deEl][$nro] = $porRazon[$deEl][$nro] ?? [];
+
+            foreach ($porLocal[$nro] ?? [] as $p) {
+                $cod = self::razonDelPago($p);
+                $cod = ($cod !== null && isset($nombres[$cod])) ? $cod : $deEl;
+                $porRazon[$cod][$nro][] = $p;
+            }
+        }
+
+        foreach (array_keys($facturas) as $cod) {
+            $porRazon[isset($nombres[$cod]) ? $cod : self::SIN_RAZON] = $porRazon[isset($nombres[$cod]) ? $cod : self::SIN_RAZON] ?? [];
+        }
+
+        $out = [];
+
+        foreach ($porRazon as $cod => $locs) {
+            $r = ['cod' => ($cod === self::SIN_RAZON) ? null : $cod,
+                  'nombre' => ($cod === self::SIN_RAZON) ? 'Sin razón social' : $nombres[$cod],
+                  'sin_razon' => $cod === self::SIN_RAZON, 'meses' => [], 'total' => self::celdaVacia(),
+                  'locales' => [], 'facturas' => null];
+
+            /* LA LINEA DE FACTURAS IMPUTADAS de esta razon social. */
+            $suyas = [];
+
+            foreach ($facturas as $fc => $ps) {
+                if ($fc === $cod || ($cod === self::SIN_RAZON && !isset($nombres[$fc]))) {
+                    $suyas = array_merge($suyas, $ps);
+                }
+            }
+            $imps = array_values(array_filter($c['imputaciones'] ?? [], function ($i) use ($cod) {
+                return Planilla::codigo($i['cod_provee']) === $cod && !$i['suspendida'];
+            }));
+
+            if (!empty($suyas) || !empty($imps)) {
+                $linea = ['meses' => [], 'total' => self::celdaVacia(), 'imputaciones' => $imps];
+
+                foreach ($suyas as $p) {
+                    $linea['meses'][$p['mes_pago']] = self::sumarCelda($linea['meses'][$p['mes_pago']] ?? self::celdaVacia(), $p, true);
+                    $linea['total'] = self::sumarCelda($linea['total'], $p, false);
+                    $r['meses'][$p['mes_pago']] = self::sumarCelda($r['meses'][$p['mes_pago']] ?? self::celdaVacia(), $p, false);
+                    $r['total'] = self::sumarCelda($r['total'], $p, false);
+                }
+
+                $r['facturas'] = $linea;
+            }
+
+            /* En el orden de la app, no en el de la lista de pagos. */
+            foreach (array_keys($c['locales']) as $nro) {
+                if (!array_key_exists($nro, $locs)) {
+                    continue;
+                }
+
+                $r['locales'][] = self::filaLocal($nro, $c['locales'][$nro], $locs[$nro]);
+
+                foreach ($locs[$nro] as $p) {
+                    $r['meses'][$p['mes_pago']] = self::sumarCelda($r['meses'][$p['mes_pago']] ?? self::celdaVacia(), $p, false);
+                    $r['total'] = self::sumarCelda($r['total'], $p, false);
+                }
+            }
+
+            $out[] = $r;
+        }
+
+        usort($out, function ($a, $b) {
+            return ($a['sin_razon'] <=> $b['sin_razon']) ?: strcmp($a['nombre'], $b['nombre']);
+        });
+
+        return $out;
+    }
+
+    /**
+     * Los grupos de la grilla de Proyeccion, en orden. Las facturas imputadas no
+     * son un grupo de un local: van en su linea al final de la razon social.
      */
     public static function nombresGrupo() {
-        return AlquileresConceptos::NOMBRE_GRUPO + [
-            AlquileresImputacion::GRUPO_VARIOS => 'Facturas de varios grupos',
-            AlquileresImputacion::GRUPO_OTROS => 'Otros (no proyectados)'
-        ];
+        return AlquileresConceptos::NOMBRE_GRUPO;
     }
 
     /**
      * La sub-pestaña Facturas: la grilla por cuota, las imputaciones, las
-     * tarjetas y lo que el armado de una imputacion necesita (conceptos,
-     * atajos, locales con su razon social). No calcula nada.
+     * tarjetas y lo que el armado de una imputacion necesita (las razones
+     * sociales con sus locales, los tipos de retencion vigentes y los meses
+     * que se pueden imputar). No calcula nada.
      */
-    private static function armarFacturas($c) {
-        $conceptos = [];
-
-        foreach (AlquileresImputacion::CONCEPTOS as $id) {
-            $conceptos[] = ['id' => $id, 'nombre' => ($id === AlquileresImputacion::EXTRA) ? 'Extraordinario'
-                : (($id === AlquileresImputacion::OTROS) ? 'Otros (no proyectados)'
-                    : $id . ' · ' . (AlquileresConceptos::NOMBRE[(int) $id] ?? ''))];
-        }
-
+    private static function armarFacturas($c, $h) {
         $locales = [];
 
         foreach ($c['locales'] as $nro => $l) {
             $locales[] = ['nro' => $nro, 'nombre' => $l['nombre'], 'cod_provee' => $l['params']['cod_provee'] ?? null,
                           'razones' => AlquileresPago::razonesDelLocal($l['params']), 'razon' => $l['razon']];
+        }
+
+        $tipos = [];
+
+        foreach ($c['tipos_vigentes'] ?? [] as $id => $nombre) {
+            $tipos[] = ['id' => (int) $id, 'nombre' => $nombre];
         }
 
         return [
@@ -949,11 +1274,15 @@ class Alquileres {
             'imputaciones' => $c['imputaciones'],
             'kpis' => $c['facturas_kpis'],
             'estados' => AlquileresImputacion::NOMBRE_ESTADO,
-            'conceptos' => $conceptos,
-            'atajos' => AlquileresImputacion::atajos(),
-            'nombres_grupo' => AlquileresConceptos::NOMBRE_GRUPO,
             'locales' => $locales,
-            'tolerancia' => AlquileresImputacion::TOLERANCIA,
+            'tipos_retencion' => $tipos,
+            'meses' => array_map(function ($m) { return ['clave' => $m, 'nombre' => AlquileresImputacion::mesLargo($m)]; },
+                self::mesesImputables($h)),
+            'mes_actual' => substr($h->hoy(), 0, 7),
+            'tablas' => !empty($c['tabla_imputacion']),
+            'tabla_exclusion' => !empty($c['tabla_exclusion']),
+            'script_exclusion' => AlquileresFacturaExclusion::SCRIPT,
+            'script' => AlquileresImputaciones::SCRIPT,
             'reemplazados' => count($c['reemplazados'])
         ];
     }
@@ -1002,14 +1331,60 @@ class Alquileres {
     }
 
     private static function celdaVacia() {
-        return ['neto' => 0.0, 'iva' => 0.0, 'percepcion' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0];
+        return ['neto' => 0.0, 'iva' => 0.0, 'percepcion' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0,
+                'origenes' => []];
     }
 
-    /** Suma un pago a una celda; en la de concepto, ademas guarda el detalle. */
+    /**
+     * El origen de un pago, como lo dice el chip de su celda. Pura.
+     *
+     *   FACTURA       la factura imputada (la linea "Facturas imputadas")
+     *   APP_CERRADA   Real (cerrado): el periodo esta cerrado en la app
+     *   APP_ABIERTA   Cargado en app (abierto): un fijo cargado con el periodo
+     *                 abierto (y el 9 calculado con ese VMA)
+     *   VENTA_REAL    un variable calculado con la venta real del mes
+     *   INFLACION:Y-m Estimado · inflacion desde [mes]: un fijo (o el 9
+     *                 actualizado como fijo) proyectado por inflacion desde el
+     *                 ultimo valor tomado de la app
+     *   ESTIMADO      todo estimado
+     *
+     * La clave lleva el mes de la inflacion: dos fijos que ajustan desde meses
+     * distintos no tienen el mismo origen, y su subtotal dice "mixto".
+     *
+     * @param array $p Un pago de la lista
+     * @return array ['clave' => string, 'texto' => string]
+     */
+    public static function origenDelPago($p) {
+        $o = $p['origen'] ?? AlquileresCalculo::ESTIMADO;
+        $desde = $p['detalle']['inflacion_desde'] ?? null;
+
+        if ($o === AlquileresCalculo::ESTIMADO && $desde !== null) {
+            return ['clave' => 'INFLACION:' . $desde, 'texto' => 'Estimado · inflación desde ' . self::mesCorto($desde)];
+        }
+
+        return ['clave' => $o, 'texto' => AlquileresCalculo::NOMBRE_ORIGEN[$o] ?? $o];
+    }
+
+    /** '2026-10' -> 'oct-26' */
+    private static function mesCorto($mes) {
+        $n = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+        return $n[(int) substr($mes, 5, 2) - 1] . '-' . substr($mes, 2, 2);
+    }
+
+    /**
+     * Suma un pago a una celda; en la de concepto, ademas guarda el detalle.
+     * Toda celda lleva SUS ORIGENES (clave => texto y a pagar): con uno solo,
+     * la pestaña dibuja su chip; con varios, "mixto" y el desglose.
+     */
     private static function sumarCelda($celda, $p, $conDetalle) {
         foreach (['neto', 'iva', 'percepcion', 'retencion', 'a_pagar'] as $k) {
             $celda[$k] = round($celda[$k] + $p[$k], 2);
         }
+
+        $o = self::origenDelPago($p);
+        $celda['origenes'][$o['clave']] = ['texto' => $o['texto'],
+            'a_pagar' => round(($celda['origenes'][$o['clave']]['a_pagar'] ?? 0.0) + $p['a_pagar'], 2)];
 
         if ($conDetalle) {
             $celda['pagos'][] = array_intersect_key($p, array_flip([
@@ -1022,18 +1397,6 @@ class Alquileres {
     }
 
     private static function nombreConcepto($p) {
-        /* UNA LINEA POR RENGLON DE FACTURA, dentro del grupo de sus conceptos:
-           dice de que imputacion y renglon es y que conceptos cubre. */
-        if ($p['origen'] === AlquileresCalculo::FACTURA) {
-            $d = $p['detalle'];
-
-            return 'Factura · imputación ' . $d['imputacion'] . ', renglón ' . $d['renglon'] . ' ('
-                . implode(', ', array_map(function ($c) {
-                    return ($c === AlquileresImputacion::EXTRA) ? 'extraordinario'
-                        : (($c === AlquileresImputacion::OTROS) ? 'otros' : $c);
-                }, $d['conceptos'])) . ')';
-        }
-
         if ($p['grupo'] === AlquileresConceptos::EXTRA) {
             $d = $p['detalle'];
             return $d['pct'] . ' % s/ ' . implode(' + ', array_keys($d['base']));
@@ -1149,11 +1512,23 @@ class Alquileres {
                 $estado['faltan'][] = 'venta mensual estimada (local nuevo, sin 12 meses de venta)';
             }
 
+            /* DE QUE RAZON SOCIAL ES CADA CONCEPTO: con su dia y su
+               diferimiento se paga, y bajo ella se ve. */
+            $deQuien = AlquileresPago::conceptosPorRazon($p, $out['razones']);
+
+            foreach ($deQuien['devueltos'] as $cod => $ids) {
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, $l['nombre'] . ': ' . $cod . ' está dada de baja en Razones '
+                    . 'sociales y facturaba ' . implode(', ', $ids) . '. Esos conceptos se proyectan con la principal, '
+                    . 'con su día y su diferimiento, hasta que se la vuelva a dar de alta o se le quiten.', 'Locales');
+            }
+
             $out['locales'][$nro] = [
                 'nro' => $nro,
                 'nombre' => $l['nombre'],
                 'habilitado' => $l['habilitado'],
                 'params' => $p,
+                'concepto_razon' => $deQuien['por_concepto'],
+                'razones_sin_conceptos' => $deQuien['sin_conceptos'],
                 /* La principal y, despues, las adicionales dadas de alta: es lo
                    que muestra la columna Razon social de la pestaña. */
                 'razon' => (isset($p['cod_provee']) && isset($out['razones'][$p['cod_provee']]))

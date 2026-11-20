@@ -48,6 +48,8 @@ try {
     require_once __DIR__ . '/../Class/Alquileres.php';
     require_once __DIR__ . '/../Class/AlquileresImputaciones.php';
     require_once __DIR__ . '/../Class/AlquileresFacturaVto.php';
+    require_once __DIR__ . '/../Class/AlquileresTiposRetencion.php';
+    require_once __DIR__ . '/../Class/AlquileresFacturaExclusion.php';
     require_once __DIR__ . '/../Class/AlquileresUniverso.php';
     require_once __DIR__ . '/../Class/Proveedores.php';
 
@@ -90,9 +92,7 @@ try {
                 }
             }
 
-            $out = Alquileres::armarPestana($c, $h);
-            $out['facturas']['tablas'] = (new AlquileresImputaciones())->tablaCreada();
-            responder($out);
+            responder(Alquileres::armarPestana($c, $h));
             break;
 
         /* ================================================================
@@ -135,6 +135,9 @@ try {
                 . 'El cambio queda en el historial.' : 'Ya estaba con el vencimiento sin editar.');
             break;
 
+        /* LA PREVISUALIZACION Y EL GUARDADO SON LA MISMA VALIDACION
+           (AlquileresImputacion::validar()), con lo que hay en Tango ahora. Sin
+           el script 60 no se imputa: se dice cual falta. */
         case 'previsualizarImputacion':
             $h = horizonteAlq();
             $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
@@ -145,15 +148,21 @@ try {
             $data = bodyJson();
             $h = horizonteAlq();
             $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
-            $v = AlquileresImputacion::validar($data, $e, true);
+
+            if (empty($e['tabla_imputacion'])) {
+                throw new InvalidArgumentException((new AlquileresImputaciones())->avisoSinTabla());
+            }
+
+            $v = AlquileresImputacion::validar($data, $e);
 
             if (!$v['ok']) {
                 throw new InvalidArgumentException('No se guardó: ' . implode(' ', $v['errores']));
             }
 
             $r = (new AlquileresImputaciones())->guardar($v, $data['observacion'] ?? null, $usuario);
-            responder($r, 'Imputación ' . $r['id'] . ' guardada.' . (empty($r['reemplazadas']) ? ''
-                : ' Reemplaza a la ' . implode(', ', $r['reemplazadas']) . ', que queda en el historial.'));
+            responder($r, 'Imputación #' . $r['id'] . ' guardada: ' . $v['cod_provee'] . ', '
+                . AlquileresImputacion::mesLargo($v['mes']) . ', a pagar $ '
+                . number_format($v['total_a_pagar'], 2, ',', '.') . '.');
             break;
 
         case 'deshacerImputacion':
@@ -161,8 +170,41 @@ try {
             $habia = (new AlquileresImputaciones())->deshacer((int) ($data['id'] ?? 0), $usuario);
             responder(['habia' => $habia], $habia
                 ? 'Imputación deshecha: sus facturas vuelven a Sin imputar y la proyección que reemplazaba '
-                  . 'vuelve. Queda en el historial.'
+                  . 'vuelve. Queda en el historial; para corregirla, armala de nuevo.'
                 : 'Esa imputación ya no estaba vigente.');
+            break;
+
+        /* EXCLUIR LAS FACTURAS QUE NO SE PAGAN POR ACA (pagos de contrato), por
+           cuota o las tildadas, con motivo obligatorio; y volver a incluirlas.
+           Se valida contra lo de AHORA: una imputada no se excluye (primero se
+           deshace) y una excluida no se imputa. */
+        case 'excluirFacturas':
+        case 'incluirFacturas':
+            $data = bodyJson();
+            $h = horizonteAlq();
+            $e = (new Alquileres($h->hoy()))->contextoImputacion($h);
+            $imputadas = [];
+
+            foreach ($e['imputaciones'] as $imp) {
+                foreach ($imp['facturas'] as $fi) {
+                    $imputadas[AlquileresImputacion::claveCuota($fi)] = $imp['id'];
+                }
+            }
+
+            $excl = new AlquileresFacturaExclusion();
+            $accion = ($action === 'excluirFacturas') ? 'EXCLUIR' : 'INCLUIR';
+            $v = AlquileresFacturaExclusion::validar($accion, $data['cuotas'] ?? [], $data['motivo'] ?? null,
+                ['imputables' => $e['pendientes'], 'imputadas' => $imputadas, 'excluidas' => $e['excluidas']]);
+
+            if (!$v['ok']) {
+                throw new InvalidArgumentException(implode(' ', $v['errores']));
+            }
+
+            $n = ($accion === 'EXCLUIR') ? $excl->excluir($v, $usuario) : $excl->incluir($v, $usuario);
+            AlquileresUniverso::olvidar();
+            responder(['n' => $n], ($accion === 'EXCLUIR')
+                ? $n . ' factura(s) excluida(s): no suman en ningún lado. Se ven con «Ver excluidas».'
+                : $n . ' factura(s) incluida(s) de nuevo: vuelven a Sin imputar. La exclusión queda en el historial.');
             break;
 
         /* ================================================================
@@ -235,20 +277,55 @@ try {
             responder($r, 'Local ' . $universo[$r['nro']]['nombre'] . ' guardado.');
             break;
 
-        /* MAS DE UNA RAZON SOCIAL POR LOCAL: las adicionales. El dia y el
-           diferimiento siguen siendo los de la principal. */
+        /* MAS DE UNA RAZON SOCIAL POR LOCAL: las adicionales, y los conceptos
+           que factura cada una. Cada concepto se paga con el dia y el
+           diferimiento de la razon que lo factura. */
         case 'altaRazonLocal':
             $data = bodyJson();
             $universo = (new AlquileresApp())->locales();
             $r = $par->altaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $universo, $usuario);
             responder($r, $r['cod'] . ' agregada a ' . $universo[$r['nro']]['nombre'] . ': sus facturas se pueden '
-                . 'imputar a este local. El vencimiento y el diferimiento siguen siendo los de la razón principal.');
+                . 'imputar a este local. Todavía no factura ningún concepto: marcale los suyos para que salgan de la '
+                . 'principal.');
+            break;
+
+        case 'guardarConceptosRazon':
+            $data = bodyJson();
+            $universo = (new AlquileresApp())->locales();
+            $r = $par->guardarConceptosRazon($data['nro'] ?? 0, $data['cod_provee'] ?? '', $data['conceptos'] ?? [],
+                                             $universo, $usuario);
+            responder($r, empty($r['conceptos'])
+                ? $r['cod'] . ' ya no factura ningún concepto de ' . $universo[$r['nro']]['nombre'] . ': todos vuelven a la principal.'
+                : $r['cod'] . ' factura ' . implode(', ', $r['conceptos']) . ' en ' . $universo[$r['nro']]['nombre']
+                  . ': se pagan con su día de vencimiento y su diferimiento.');
             break;
 
         case 'bajaRazonLocal':
             $data = bodyJson();
             $r = $par->bajaRazonLocal($data['nro'] ?? 0, $data['cod_provee'] ?? '', $usuario);
             responder($r, $r['cod'] . ' ya no es razón social de ese local. No se borra: queda en el historial.');
+            break;
+
+        /* LOS TIPOS DE RETENCION de las imputaciones. Renombrar es baja y alta:
+           una imputacion vieja sigue mostrando el nombre con el que se cargo. */
+        case 'altaTipoRetencion':
+            $data = bodyJson();
+            $r = (new AlquileresTiposRetencion())->alta($data['nombre'] ?? '', $usuario);
+            responder($r, 'Tipo de retención «' . $r['nombre'] . '» dado de alta: ya se puede elegir al imputar.');
+            break;
+
+        case 'renombrarTipoRetencion':
+            $data = bodyJson();
+            $r = (new AlquileresTiposRetencion())->renombrar($data['id'] ?? 0, $data['nombre'] ?? '', $usuario);
+            responder($r, $r['igual'] ? 'El nombre no cambió.' : 'Tipo de retención renombrado a «' . $r['nombre']
+                . '». Las imputaciones que ya lo usan siguen mostrando el nombre anterior.');
+            break;
+
+        case 'bajaTipoRetencion':
+            $data = bodyJson();
+            $r = (new AlquileresTiposRetencion())->baja($data['id'] ?? 0, $usuario);
+            responder($r, 'Tipo de retención dado de baja: ya no se ofrece para imputar. Las imputaciones que lo '
+                . 'usan lo siguen mostrando, y queda en el historial.');
             break;
 
         case 'altaExtra':
