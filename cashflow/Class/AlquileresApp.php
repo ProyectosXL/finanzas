@@ -25,13 +25,21 @@
  * compara exacto, en PHP, despues de convertir. Ver "Pendientes conocidos" en
  * README-alquileres.md.
  *
- * UN PERIODO ABIERTO NUNCA SE LEE. Con el periodo abierto la base guarda los
- * conceptos 6 y 7 SIN restar el valor minimo (la resta la hace el JS de la app
- * al mostrar), asi que lo guardado no es lo que se ve. Cerrado es cuando el
- * periodo tiene fila en RO_T_DETALLE_ALQUILERES_ESTADO; la app lo reabre
- * borrando esa fila. detalleCerrados() solo devuelve meses cerrados, y como no
- * se guarda copia, un periodo que se reabre y se vuelve a cerrar se lee como
+ * UN PERIODO ABIERTO SE LEE SOLO PARA LOS FIJOS. Cerrado es cuando el periodo
+ * tiene fila en RO_T_DETALLE_ALQUILERES_ESTADO; la app lo reabre borrando esa
+ * fila. detalleCerrados() devuelve los meses cerrados tal cual, y como no se
+ * guarda copia, un periodo que se reabre y se vuelve a cerrar se lee como
  * quedo.
+ *
+ * De un periodo ABIERTO solo sirven los fijos (1, 2, 3 y 8): son importes que
+ * administracion carga de la factura o del contrato, y valen lo que se ve
+ * (detalleAbiertos()). LOS VARIABLES NO: con el periodo abierto la base guarda
+ * el 6 y el 7 SIN restar el VMA (y el 16 y el 17 sin restar el 9) -la resta la
+ * hace el JS de la app al mostrar, totalizar()-, asi que lo guardado no es lo
+ * que se ve. Tampoco el 9, que la app recalcula como VMA x %9: el cashflow lo
+ * calcula igual, con el VMA de la app. Las expensas (11) siguen con su tasa
+ * desde el ultimo cerrado. Que hacer con un fijo abierto lo decide
+ * AlquileresCalculo::fijos().
  *
  * LOS CRUCES SE HACEN EN PHP: cada metodo lee UNA tabla (o la vista de la app)
  * y devuelve mapas por local y mes. Quien combina es AlquileresCalculo, que es
@@ -254,6 +262,58 @@ class AlquileresApp {
         }
 
         return $detalle;
+    }
+
+    /** Los fijos que se leen de un periodo abierto: alquiler, complementario, baulera y VMA */
+    const FIJOS_ABIERTOS = [1, 2, 3, 8];
+
+    /**
+     * Los FIJOS cargados en los periodos ABIERTOS de unos meses: los que no
+     * estan cerrados, con importe mayor que 0 (un fijo sin fila o en 0 se sigue
+     * estimando). Ni variables, ni el 9, ni las expensas: ver el encabezado.
+     *
+     * El filtro por periodo va en SQL con la lista exacta, como
+     * detalleCerrados(); que el mes no este cerrado se mira en PHP.
+     *
+     * @param string[] $meses 'Y-m' los meses a mirar (los posteriores al ultimo cerrado)
+     * @param string[] $cerrados Los de mesesCerrados()
+     * @return array NRO_SUCURS => 'Y-m' => ID_CA => float
+     */
+    public function detalleAbiertos($meses, $cerrados) {
+        $cer = array_flip($cerrados);
+        $periodos = [];
+
+        foreach ($meses as $mes) {
+            if (!isset($cer[$mes])) {
+                $periodos[] = self::periodoDeMes($mes);
+            }
+        }
+
+        if (empty($periodos)) {
+            return [];
+        }
+
+        $marcas = implode(',', array_fill(0, count($periodos), '?'));
+        $ids = implode(',', self::FIJOS_ABIERTOS);
+        $sql = "SELECT NRO_SUCURS, PERIODO, ID_CA, CAST(IMPORTE AS FLOAT) AS IMPORTE
+                FROM dbo.RO_T_DETALLE_ALQUILERES
+                WHERE LTRIM(RTRIM(PERIODO)) IN ($marcas) AND ID_CA IN ($ids) AND IMPORTE > 0";
+
+        $out = [];
+
+        foreach ($this->filas($sql, $periodos, 'Error al leer los fijos de los periodos abiertos') as $r) {
+            $mes = self::mesDePeriodo($r['PERIODO']);
+
+            if ($mes === null || $r['NRO_SUCURS'] === null || isset($cer[$mes])) {
+                continue;
+            }
+
+            $nro = (int) $r['NRO_SUCURS'];
+            $id = (int) $r['ID_CA'];
+            $out[$nro][$mes][$id] = ($out[$nro][$mes][$id] ?? 0.0) + (float) $r['IMPORTE'];
+        }
+
+        return $out;
     }
 
     /**

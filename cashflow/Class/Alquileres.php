@@ -699,6 +699,10 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
 
         try {
             $detalle = $this->app->detalleCerrados($base['cerrados'], $desde);
+            /* LOS FIJOS CARGADOS CON EL PERIODO ABIERTO, de los meses posteriores
+               al ultimo cerrado: los usa AlquileresCalculo::fijos(). */
+            $abiertos = $this->app->detalleAbiertos(array_values(array_filter($mesesConcepto,
+                function ($m) use ($ultimoGlobal) { return $m > $ultimoGlobal; })), $base['cerrados']);
             $pct = $this->app->porcentajes();
             $desdeVenta = min($base['ventana'][0] ?? $mesesConcepto[0], $mesesConcepto[0]);
             $netas = $this->app->ventasNetas($desdeVenta);
@@ -793,6 +797,8 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
         /* Los pagos de cada local que proyecta. */
         $diaGeneral = ($base['general'] === null) ? null : $base['general']['dia'];
         $faltanInf = [];
+        $sinAjuste = [];
+        $ajusteFuera = [];
         $sinCerrado = [];
         $sinVenta = [];
         $sinPct = [];
@@ -815,10 +821,22 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
                 'pct' => $pctLocal,
                 'inflacion' => $ins['inflacion'],
                 'tasa_expensas' => AlquileresCalculo::tasaDelLocal($propia, $general),
-                'ventas' => ($ventas === null) ? [] : ($ventas['ventas'][$nro] ?? [])
+                'ventas' => ($ventas === null) ? [] : ($ventas['ventas'][$nro] ?? []),
+                'abiertos' => $abiertos[$nro] ?? []
             ]);
 
             $faltanInf = array_merge($faltanInf, $proy['faltan_inflacion']);
+
+            foreach ($proy['avisos_app'] as $a) {
+                $texto = $l['nombre'] . ' (' . AlquileresConceptos::NOMBRE[$a['concepto']] . ', '
+                    . AlquileresImputacion::mesLargo($a['mes']) . ')';
+
+                if ($a['tipo'] === 'SIN_AJUSTE') {
+                    $sinAjuste[] = $texto;
+                } else {
+                    $ajusteFuera[] = $texto;
+                }
+            }
 
             if ($proy['ultimo_cerrado'] === null) {
                 $sinCerrado[] = $l['nombre'];
@@ -859,6 +877,24 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
         $faltanInf = array_values(array_unique($faltanInf));
         sort($faltanInf);
         $out['faltan_inflacion'] = $faltanInf;
+
+        /* LOS FIJOS DEL PERIODO ABIERTO QUE NO SE USARON: en un mes en que el
+           local ajusta, la app tiene el valor de antes (copia el mes anterior
+           al abrir el periodo). Se sigue estimando con el ajuste. */
+        if (!empty($sinAjuste)) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'La app de alquileres todavía no aplicó el ajuste en '
+                . implode('; ', $sinAjuste) . ': tiene el mismo valor que el mes anterior, así que se sigue estimando '
+                . 'con el ajuste por inflación. Cuando la app lo cargue, se toma ese.', 'Locales');
+        }
+
+        /* Y LOS QUE SE USARON EN UN MES QUE NO ES DE AJUSTE: si el mes del
+           ultimo ajuste de Parametros esta mal, el proximo ajuste se suma dos veces. */
+        if (!empty($ajusteFuera)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'La app de alquileres cambió un fijo en un mes que, según '
+                . 'Parámetros › Alquileres, no es de ajuste: ' . implode('; ', $ajusteFuera) . '. Se usa el valor de '
+                . 'la app; revisá el mes del último ajuste del local en Parámetros, o el próximo ajuste se va a sumar '
+                . 'dos veces.', 'Locales');
+        }
 
         if (!empty($faltanInf)) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, Inflacion::avisoFaltan($faltanInf, $hoy)

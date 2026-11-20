@@ -62,6 +62,7 @@ class PestAppDoble extends AlquileresApp {
         return $d;
     }
     public function porcentajes() { return [3 => [6 => 7.0, 9 => 15.0], 2 => [7 => 8.0, 9 => 10.0]]; }
+    public function detalleAbiertos($meses, $cerrados) { return []; }
     public function ventasNetas($desde) {
         return [3 => ventana12(600), 2 => ventana12(300), 10 => ventana12(100), 40 => ventana12(1000)]
             + [];

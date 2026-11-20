@@ -79,6 +79,33 @@ if (!Pruebas::hayBase()) {
 
     chequear('detalleCerrados() no trae ningun mes abierto', 0, $abiertos);
 
+    /* DE UN PERIODO ABIERTO SOLO LOS FIJOS (1, 2, 3 y 8), mayores que 0, y
+       ningun mes cerrado. */
+    $siguientes = [Inflacion::mesMas(end($cerrados), 1), Inflacion::mesMas(end($cerrados), 2)];
+    $ab = $app->detalleAbiertos(array_merge([end($cerrados)], $siguientes), $cerrados);
+    $malos = [];
+
+    foreach ($ab as $nro => $meses) {
+        foreach ($meses as $m => $ids) {
+            foreach ($ids as $id => $v) {
+                if (in_array($m, $cerrados, true) || !in_array($id, AlquileresApp::FIJOS_ABIERTOS, true) || $v <= 0) {
+                    $malos[] = "$nro/$m/$id";
+                }
+            }
+        }
+    }
+
+    chequear('detalleAbiertos(): solo fijos > 0 de meses abiertos', [], $malos);
+
+    /* EL VMA DE NOVIEMBRE DE 2026 DE AVELLANEDA, cargado con el periodo
+       abierto: $ 10.209.263. Solo mientras noviembre siga abierto. */
+    if (in_array('2026-11', $cerrados, true)) {
+        Pruebas::saltear('noviembre de 2026 ya se cerró: el VMA de Avellaneda se lee como cerrado');
+    } else {
+        $nov = $app->detalleAbiertos(['2026-11'], $cerrados);
+        chequear('Avellaneda, noviembre abierto: el VMA es el de la app', 10209263.0, $nov[6]['2026-11'][8] ?? null);
+    }
+
     /* Con el mes cerrado, 6 = max(0, bruta x %6 - c8) y 7 = max(0, neta x %7
        - c8): la resta ya esta hecha. Se mide en todo local que tenga el
        porcentaje y la venta, con un peso de tolerancia porque la app trunca a
