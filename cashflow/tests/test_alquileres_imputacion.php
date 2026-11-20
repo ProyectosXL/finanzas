@@ -431,6 +431,15 @@ chequear('el modal: locales, mes, + Retencion y totales; sin renglones', [true, 
     strpos($tabA, 'alqImpRenglones') !== false]);
 chequear('una sola razon social: las de otra se deshabilitan con tooltip', true,
     strpos($jsF, "var otra = tildable && razon !== null && f.cod_provee !== razon;") !== false);
+chequear('tildar todas: la casilla va en el encabezado, sin bajar al Excel', true,
+    (bool) preg_match('/<th[^>]*data-exportar-omitir>\s*<input type="checkbox"[^>]*id="alqFactSelTodas"/s', $tabA));
+chequear('tildar todas toma solo las sin imputar que se ven (las imputadas el servidor las rechaza)', [true, true], [
+    strpos($jsF, "var ESTADOS_TILDAR_TODAS = ESTADOS_EXCLUIBLES;") !== false,
+    strpos($jsF, "return visibles().filter(function(f) { return ESTADOS_TILDAR_TODAS.indexOf(f.estado) !== -1; });") !== false]);
+chequear('tildar todas se habilita solo con una razon social, y la de lo ya tildado', true,
+    strpos($jsF, "chk.disabled = cods.length !== 1 || (tildada !== null && tildada !== cods[0]);") !== false);
+chequear('el encabezado sigue a cada cambio de tilde', true,
+    (bool) preg_match('/function actualizarBoton\(\) \{.*?pintarSelTodas\(\);/s', $jsF));
 chequear('un tipo ya elegido no se ofrece en otra linea', true,
     strpos($jsF, "tipos.filter(function(t) { return usados.indexOf(String(t.id)) === -1; })") !== false);
 chequear('sin el script 60, no se tilda ni se imputa, y se avisa nombrandolo', [true, true], [

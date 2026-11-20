@@ -17,6 +17,13 @@
  * data-orden-sigue, asi tabla-orden.js ordena por razon social sin separarlos,
  * y data-ancestros con las claves que tienen que estar abiertas para verse.
  *
+ * QUE IMPORTE MUESTRA CADA FILA. Razon social y local: el A PAGAR (neto + IVA
+ * + percepcion - retencion), lo que sale de caja. Grupos y conceptos: neto +
+ * IVA + percepcion ('bruto'), sin la retencion, que es una estimacion del
+ * local: asi se comparan con el total de una factura. Con el neto se veian
+ * sin impuestos y parecia que no tomaban los % de Parametros. El neto queda
+ * en el tooltip.
+ *
  * EXPORTAR ABRE TODO. tabla-export.js baja lo que se ve, y la planilla tiene
  * que tener todas las razones con sus locales, grupos y conceptos: se abren,
  * se exporta y se vuelve a como estaba.
@@ -235,13 +242,13 @@
 
             h += '<tr class="alq-grupo" data-orden-sigue data-ancestros="' + padre + ' ' + clave + '" data-clave="' + gClave + '">'
                 + '<td>' + toggle(gClave) + esc(g.nombre) + '</td><td></td>'
-                + celdas(g.meses, g.total, meses, 'neto', null)
+                + celdas(g.meses, g.total, meses, 'bruto', null)
                 + '</tr>';
 
             g.conceptos.forEach(function(k) {
                 h += '<tr class="alq-concepto" data-orden-sigue data-ancestros="' + padre + ' ' + clave + ' ' + gClave + '">'
                     + '<td>' + esc(k.nombre) + '</td><td></td>'
-                    + celdas(k.meses, k.total, meses, 'neto', g.grupo)
+                    + celdas(k.meses, k.total, meses, 'bruto', g.grupo)
                     + '</tr>';
             });
         });
@@ -255,7 +262,7 @@
 
             if (!c) { return '<td class="text-end text-muted">—</td>'; }
 
-            var o = origen(c);
+            var o = origen(c, campo);
 
             /* EL CHIP VA EN data-etiqueta Y LO DIBUJA EL CSS: el Excel se queda
                con el número limpio. El origen baja en su propia columna, que
@@ -264,7 +271,7 @@
                 + esc(tooltip(c, grupo) + '\nOrigen: ' + o.detalle) + '">' + importe(c[campo])
                 + '<span class="alq-chip alq-chip-' + o.clase + '" data-etiqueta="' + esc(o.chip) + '"></span></td>';
         }).join('')
-            + '<td class="text-end fw-bold" title="' + esc(tooltip(total, null) + '\nOrigen: ' + origen(total).detalle) + '">'
+            + '<td class="text-end fw-bold" title="' + esc(tooltip(total, null) + '\nOrigen: ' + origen(total, campo).detalle) + '">'
             + importe(total[campo]) + '</td>';
     }
 
@@ -274,10 +281,11 @@
 
     /**
      * El origen de una celda, con lo que trae del servidor ('origenes': clave
-     * => texto y a pagar). Uno solo: su chip. Varios: "mixto", con el
-     * desglose en el tooltip.
+     * => texto, bruto y a pagar). Uno solo: su chip. Varios: "mixto", con el
+     * desglose en el tooltip, en el mismo importe que muestra la fila
+     * ('campo': bruto o a_pagar) para que las partes sumen lo que se ve.
      */
-    function origen(c) {
+    function origen(c, campo) {
         var claves = Object.keys(c.origenes || {});
 
         if (claves.length === 1) {
@@ -290,13 +298,20 @@
 
         return { clase: 'MIXTO', texto: 'Mixto', chip: 'mixto',
                  detalle: 'mixto — ' + claves.map(function(k) {
-                     return c.origenes[k].texto + ' ' + importeTexto(c.origenes[k].a_pagar);
+                     return c.origenes[k].texto + ' ' + importeTexto(c.origenes[k][campo || 'a_pagar']);
                  }).join('; ') };
     }
 
-    /** La leyenda de los chips, arriba de la grilla. */
+    /**
+     * La leyenda de los chips, arriba de la grilla, y antes qué importe
+     * muestra cada nivel: no es el mismo, y sin decirlo un concepto no cierra
+     * contra el total de su local.
+     */
     function pintarLeyenda() {
-        html('alqLeyenda', (datos.leyenda_origenes || []).map(function(l) {
+        html('alqLeyenda', '<div class="mb-1"><strong>Razón social y local:</strong> a pagar (con IVA y percepción, '
+            + 'menos la retención estimada del local). <strong>Grupos y conceptos:</strong> con IVA y percepción, sin '
+            + 'restar la retención. El neto, en el detalle al pasar el mouse.</div>'
+            + (datos.leyenda_origenes || []).map(function(l) {
             var chip = l.clave === 'INFLACION' ? 'est. mes' : (l.clave === 'MIXTO' ? 'mixto' : (CHIP[l.clave] || l.clave));
 
             return '<span class="me-3 text-nowrap" title="' + esc(l.ayuda) + '"><span class="alq-chip alq-chip-'
@@ -307,7 +322,8 @@
     /** El desglose de una celda, con lo que explica cada pago. */
     function tooltip(c, grupo) {
         var t = 'Neto ' + importeTexto(c.neto) + '\nIVA ' + importeTexto(c.iva)
-            + '\nPercepción ' + importeTexto(c.percepcion) + '\nRetención ' + importeTexto(c.retencion)
+            + '\nPercepción ' + importeTexto(c.percepcion) + '\nCon IVA y percepción ' + importeTexto(c.bruto)
+            + '\nRetención ' + importeTexto(c.retencion)
             + '\nA pagar ' + importeTexto(c.a_pagar);
 
         (c.pagos || []).forEach(function(p) {

@@ -166,7 +166,14 @@ class AlquileresPago {
      *
      * @param float $neto
      * @param array $local ['pct_iva', 'pct_percepcion', 'pct_retencion'], en %
-     * @return array ['neto', 'iva', 'percepcion', 'retencion', 'a_pagar']
+     * 'bruto' es neto + IVA + percepcion, sin restar la retencion: lo que se
+     * compara con el total de una factura. Es lo que muestran los grupos y los
+     * conceptos de la Proyeccion; el local y la razon social muestran el a
+     * pagar, que es lo que sale de caja.
+     *
+     * @param float $neto
+     * @param array $local ['pct_iva', 'pct_percepcion', 'pct_retencion'], en %
+     * @return array ['neto', 'iva', 'percepcion', 'bruto', 'retencion', 'a_pagar']
      */
     public static function importes($neto, $local) {
         $n = round((float) $neto, 2);
@@ -178,6 +185,7 @@ class AlquileresPago {
             'neto' => $n,
             'iva' => $iva,
             'percepcion' => $perc,
+            'bruto' => round($n + $iva + $perc, 2),
             'retencion' => $ret,
             'a_pagar' => round($n + $iva + $perc - $ret, 2)
         ];

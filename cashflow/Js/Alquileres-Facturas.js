@@ -55,6 +55,13 @@
     /** Las que se pueden excluir: las que no suman ni estan imputadas. */
     var ESTADOS_EXCLUIBLES = ['SIN_IMPUTAR', 'PAGADA_SIN_IMPUTAR'];
 
+    /* LAS QUE TILDA "TILDAR TODAS": las sin imputar. Una imputada (o parcial,
+       o suspendida) se puede tildar a mano, pero el servidor la rechaza
+       ("deshacé primero la #N"): si el tilde masivo las sumara, toda
+       imputación armada con él fallaría. Son las mismas que se excluyen, asi
+       que "Excluir tildadas" tambien queda habilitado. */
+    var ESTADOS_TILDAR_TODAS = ESTADOS_EXCLUIBLES;
+
     /* ================================================================
        PINTAR
        ================================================================ */
@@ -407,9 +414,51 @@
         });
     }
 
+    /** Las filas que se ven y que "tildar todas" tildaría. */
+    function candidatasTodas() {
+        if (!puedeImputar()) { return []; }
+
+        return visibles().filter(function(f) { return ESTADOS_TILDAR_TODAS.indexOf(f.estado) !== -1; });
+    }
+
+    /**
+     * TILDAR TODAS, sobre lo que se ve con el filtro. UNA IMPUTACIÓN ES DE UNA
+     * SOLA RAZÓN SOCIAL: la casilla se habilita sólo si las que se ven son
+     * todas de la misma y, si ya hay algo tildado, de esa. Sin permiso de
+     * imputar no se ve, como los tildes de cada fila.
+     */
+    function pintarSelTodas() {
+        var chk = document.getElementById('alqFactSelTodas');
+
+        if (!chk) { return; }
+
+        chk.style.display = puedeImputar() ? '' : 'none';
+
+        var fs = candidatasTodas();
+        var razones = {};
+        var tildada = razonTildada();
+
+        fs.forEach(function(f) { razones[f.cod_provee] = f.razon || f.cod_provee; });
+
+        var cods = Object.keys(razones);
+        var elegidas = fs.filter(function(f) { return !!seleccion[f.clave]; }).length;
+
+        chk.disabled = cods.length !== 1 || (tildada !== null && tildada !== cods[0]);
+        chk.checked = !chk.disabled && elegidas === fs.length;
+        chk.indeterminate = !chk.disabled && elegidas > 0 && elegidas < fs.length;
+        chk.title = !fs.length ? 'No hay facturas sin imputar a la vista'
+            : cods.length > 1 ? 'Se ven facturas de más de una razón social: filtrá por una para tildar todas'
+            : chk.disabled ? 'Ya tildaste facturas de ' + tildada + ': una imputación es de una sola razón social'
+            : (chk.checked ? 'Destildar' : 'Tildar') + ' las ' + fs.length + ' factura(s) sin imputar de '
+                + razones[cods[0]] + ' que se ven';
+    }
+
     function actualizarBoton() {
         var b = document.getElementById('btnAlqImputar');
         var x = document.getElementById('btnAlqExcluir');
+
+        /* El encabezado sigue a lo tildado: cada cambio de tilde pasa por acá. */
+        pintarSelTodas();
 
         if (b) {
             b.style.display = puedeImputar() ? '' : 'none';
@@ -757,6 +806,20 @@
 
             if (el) { el.addEventListener('change', function() { if (datos) { dibujar(); } }); }
         });
+
+        var todas = document.getElementById('alqFactSelTodas');
+        if (todas) {
+            todas.addEventListener('change', function() {
+                if (!datos) { return; }
+
+                candidatasTodas().forEach(function(f) {
+                    if (todas.checked) { seleccion[f.clave] = true; } else { delete seleccion[f.clave]; }
+                });
+                /* Se redibuja: cambian los tildes de las filas y, con ellos, qué
+                   razones sociales quedan deshabilitadas. */
+                dibujar();
+            });
+        }
 
         var b = document.getElementById('btnAlqImputar');
         if (b) { b.addEventListener('click', abrirImputar); }
