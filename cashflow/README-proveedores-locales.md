@@ -42,11 +42,17 @@ Contra `central`, en cualquier momento:
 -- 6. sql/cashflow_prov_locales_opciones.sql          (las cinco listas de opciones)
 -- 7. sql/cashflow_prov_locales_fuente_fecha.sql      (de dónde salió cada fecha de pago)
 -- 8. sql/cashflow_prov_exclusion_modulo.sql          (excluir un proveedor entero del módulo)
--- 9. sql/cashflow_prov_locales_pago_medio.sql        (un comprobante pagado con dos medios)
+-- 9. sql/cashflow_prov_locales_pago_medio.sql        (un comprobante pagado con varios medios)
 -- 10. sql/cashflow_prov_locales_retenciones.sql      (las retenciones: impuestos y alícuotas)
 -- 11. sql/cashflow_prov_locales_excedente_parcial.sql (pago con excedente y pago parcial)
 -- 12. sql/cashflow_prov_locales_excedente_por_proveedor.sql (facturas compensadas en el total del proveedor)
+-- 13. sql/cashflow_prov_locales_pago_n_medios.sql   (N pagos por comprobante, también en cuotas)
+-- 14. sql/cashflow_prov_locales_pago_agrupado.sql   (un cheque para varias facturas)
 ```
+
+El decimocuarto agrega `GRUPO_PAGO` —el identificador del pago agrupado— a `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, con un índice filtrado. Va **después del decimotercero** —corta si el `CHECK` de `ORDEN` todavía es el de dos partes— y es reejecutable. **El día que se corre el tablero no se mueve**: la columna nace en `NULL` en todas las filas. **Sin él** no hay pago agrupado: cada fila de la planilla es su factura, vacío es el neto y 0 es error con un motivo que nombra el script, y la pestaña avisa. Ver *Un cheque para varias facturas*.
+
+El decimotercero cambia el `CHECK` de `ORDEN` de la tabla de medios de `ORDEN IN (1, 2)` a `ORDEN >= 1`, en una transacción: un comprobante se puede pagar en N filas, también si está en cuotas. Va **después del undécimo** —corta si no están sus columnas— y es reejecutable. **El día que se corre el tablero no se mueve**: no toca ninguna fila. **Sin él** la planilla funciona como antes —hasta dos medios, y uno solo en cuotas—, las filas de más quedan en error nombrando el script y la pestaña avisa. Ver *Un comprobante pagado con varios medios*.
 
 El duodécimo cambia el `CHECK` de `CLASIFICACION` de `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO` para que acepte `COMPENSADA`, en una transacción. Va **después del undécimo** —corta si no está la columna— y es reejecutable. **El día que se corre el tablero no se mueve**: no toca ninguna fila. **Sin él** el excedente se valida igual sobre el total del proveedor, pero un proveedor que paga una factura de más y otra de menos no se puede compensar: sus filas quedan en error con un motivo que nombra el script, y la pestaña avisa. Ver *El excedente se valida por proveedor*.
 
@@ -54,7 +60,7 @@ El undécimo le agrega a `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO` lo que hace fal
 
 El décimo crea las tres tablas de las retenciones —los impuestos, sus alícuotas generales y las de cada proveedor— y siembra **IIBB** y **GANANCIAS** "a todos" y **SUSS** "solo a los asignados", **sin alícuotas**: **el día que se corre el tablero no se mueve**. No depende de ningún otro. Es reejecutable: la semilla es un `MERGE` sobre el código que sólo inserta lo que falta, así que un impuesto renombrado, con otro alcance o dado de baja no se pisa ni se reactiva. **Sin él** las facturas se proyectan por el total, como antes, y la pestaña avisa qué script falta. Después de correrlo, **hasta que se carguen las alícuotas generales** en *Parámetros › Prov. Locales* tampoco se retiene nada, y la pestaña avisa cuántos comprobantes del cronograma están sin retención por eso. Ver *Las retenciones*.
 
-El noveno crea `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, vacía: **el día que se corre el tablero no se mueve**. Va después del primero —necesita la tabla de pagos y aborta si no está— y no depende de ningún otro. **Sin él** un comprobante no se puede pagar con dos medios: la importación rechaza esas filas nombrando el script, todo lo demás funciona igual, y la pestaña avisa. Ver *Un comprobante pagado con dos medios*.
+El noveno crea `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, vacía: **el día que se corre el tablero no se mueve**. Va después del primero —necesita la tabla de pagos y aborta si no está— y no depende de ningún otro. **Sin él** un comprobante no se puede pagar con varios medios: la importación rechaza esas filas nombrando el script, todo lo demás funciona igual, y la pestaña avisa. Ver *Un comprobante pagado con varios medios*.
 
 El octavo crea `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`, vacía: **el día que se corre el tablero no se mueve**. No depende de ningún otro. **Sin él** nadie está excluido —que es lo cierto—, la columna *PROV. LOCALES* del maestro se dibuja con un guion y la pestaña avisa qué script falta. Ver *Excluir un proveedor entero del módulo*.
 
@@ -226,7 +232,7 @@ Ahora `deletePago()` hace dos pasos en una transacción: pone `FECHA_PAGO` y `FU
 
 **Sin `sql/cashflow_prov_locales_forma_por_factura.sql`** `FECHA_PAGO` no admite `NULL` y se hace lo de antes, el `DELETE` directo. Sin ese script tampoco existen la forma por factura ni la exclusión, así que lo único que se pierde es lo que se perdía antes.
 
-**Un comprobante pagado con dos medios vuelve entero.** En la misma transacción, ↺ da de baja su apertura (`guardarApertura()` con `null`, sin borrar filas) y el comprobante vuelve a su vencimiento o al cronograma. La exclusión, el override de forma y la observación se conservan, igual que con una fecha sola: viven en la tabla de pagos, y este botón borra la fecha, no la fila.
+**Un comprobante pagado con varios medios vuelve entero, y un pago agrupado también.** En la misma transacción, ↺ da de baja su apertura (`guardarApertura()` con `null`, sin borrar filas) y el comprobante vuelve a su vencimiento o al cronograma; si es parte de un pago agrupado, lo mismo con todas sus facturas, y la pantalla lo pregunta antes. La exclusión, el override de forma y la observación se conservan, igual que con una fecha sola: viven en la tabla de pagos, y este botón borra la fecha, no la fila.
 
 ### El plazo del maestro no es un número
 
@@ -402,7 +408,7 @@ Verificado contra la base: una factura con `EXCLUIDA = 1`, su motivo y un `FORMA
 
 **Tampoco desconcilia nada.** Si alguna de las elegidas ya se pagó, Tango tiene la fecha real y eso no se toca: lo que cambia es la previsión, y con ella el desvío que después contesta *"¿le acertamos a la fecha?"*. El diálogo lo dice cuando hay alguna.
 
-**Y no toca los comprobantes pagados con dos medios.** Tienen dos fechas, y una para todas no dice a cuál reemplaza. El diálogo dice cuántos hay en la selección y que no se van a tocar, el resto se fecha como siempre, y el backend los vuelve a saltear (`Proveedores::sinAbiertos()`) porque el endpoint se alcanza sin pasar por la pantalla.
+**Y no toca los comprobantes con un pago importado** —en varios medios, con excedente o parcial, o de un pago agrupado—. Tienen su propia fecha o varias, y una para todas no dice a cuál reemplaza. El diálogo dice cuántos hay en la selección y que no se van a tocar, el resto se fecha como siempre, y el backend los vuelve a saltear (`Proveedores::sinAbiertos()`) porque el endpoint se alcanza sin pasar por la pantalla.
 
 ### No se filtra lo que "ya está así", al revés que al excluir
 
@@ -974,11 +980,11 @@ Si el archivo daría de baja **más de la mitad** del maestro, lo más probable 
 
 Campos: **cód. proveedor, número de factura, fecha de pago, forma de pago e importe**. Los tres primeros son obligatorios.
 
-**`IMPORTE` es el neto de retenciones**, que es lo que pone quien arma la planilla: lo que sale de la caja. **Es opcional con un medio** (sinónimos `MONTO`, `IMPORTE_PAGO`): vacío quiere decir *el neto a pagar*. Si viene **se clasifica** contra el neto a pagar del comprobante —con dos medios, la suma de los dos—: el neto con $1 de tolerancia, un **pago con excedente** hasta el % permitido, o un **pago parcial**. Ver *Un pago con excedente o parcial*. Un importe que no es un número, cero o negativo es un error: tomar el neto porque la celda decía *"mil pesos"* sería decidir por quien armó la planilla.
+**`IMPORTE` es el neto de retenciones**, que es lo que pone quien arma la planilla: lo que sale de la caja. **Es opcional con un medio** (sinónimos `MONTO`, `IMPORTE_PAGO`): vacío quiere decir *el neto a pagar*, salvo que la fila sea parte de un pago agrupado (ver *Un cheque para varias facturas*). Si viene **se clasifica** contra el neto a pagar del comprobante —con varios medios, la suma—: el neto con $1 de tolerancia, un **pago con excedente** hasta el % permitido, o un **pago parcial**. Ver *Un pago con excedente o parcial*. Un importe que no es un número o negativo es un error, y cero también, salvo dentro de un pago agrupado: tomar el neto porque la celda decía *"mil pesos"* sería decidir por quien armó la planilla.
 
 > **Sin `sql/cashflow_prov_locales_excedente_parcial.sql`** la regla es la de antes: el importe tiene que coincidir con el neto a pagar con $1 de tolerancia, y otro número deja la fila en error.
 
-El neto se calcula con la misma regla que la grilla (*El cálculo*, arriba), **a la `FECHA_PAGO` de la planilla** —la que va a quedar cargada— y, con dos medios, a la más tardía de las dos. Un comprobante **sin retención** —otra forma, nota de crédito, proveedor sin impuestos que le apliquen, o sin el script— tiene neto = total, y la regla es la de antes.
+El neto se calcula con la misma regla que la grilla (*El cálculo*, arriba), **a la `FECHA_PAGO` de la planilla** —la que va a quedar cargada— y, con varios medios, a la más tardía. Un comprobante **sin retención** —otra forma, nota de crédito, proveedor sin impuestos que le apliquen, o sin el script— tiene neto = total, y la regla es la de antes.
 
 **El motivo ayuda a corregir.** Un importe que **supera el máximo** dice cuánto supera el neto, en pesos y en %, y cuál es el máximo permitido. Si además **coincide con el total sin retenciones** (±$1) —el error del primer día— lo dice: *"El importe coincide con el total de la factura sin retenciones ($ X). El neto a pagar con retenciones es $ Y (IIBB $ a, Ganancias $ b). Si a este proveedor no se le retiene, cargale alícuota 0 en el Maestro"*. **Dentro del máximo, el total sin retenciones ya no es un error**: es un pago con excedente, y se acepta. **La previsualización** muestra, por fila, el total, las retenciones —con el desglose en el tooltip— y el neto contra el que se comparó.
 
@@ -1006,68 +1012,82 @@ El neto se calcula con la misma regla que la grilla (*El cálculo*, arriba), **a
 
 **Confirmar no le cree a lo que vuelve del navegador.** Cada fila de la previsualización viaja con lo que decía el archivo (`crudo`), y `aplicarImportacion()` vuelve a calcular el diff con eso contra los pendientes, los pagos, las aperturas, **las alícuotas y el % de excedente** de *ahora*. Si una sola línea da un estado distinto del que se previsualizó —se pagó una parte en Tango, alguien cargó otra fecha—, **el mismo estado con otro neto** —cambió una alícuota— **u otra clasificación**, o **si cambió el %**, **no se aplica nada** y el mensaje dice qué cambió. Antes se le creía al diff que se reenviaba; desde que hay una regla que depende de sumar importes contra el pendiente, eso no podía depender de la pantalla. Mismo criterio que el maestro y que Cob. Electrónicos.
 
-### Un comprobante pagado con dos medios
+### Un comprobante pagado con varios medios
 
-> Esto es **nuevo**, de `feature/cashflow-excel-medios-ux`. Antes la segunda fila de un comprobante quedaba en error pidiendo *"dejá una sola fila por comprobante"*.
+> Nació en `feature/cashflow-excel-medios-ux` con un tope de dos. Desde `feature/prov-locales-pago-agrupado` es **N**: antes la tercera fila de un comprobante dejaba todas en error, y un comprobante en cuotas sólo se podía cargar con un medio.
 
-Una factura se puede pagar parte con un echeq y parte con una transferencia, o con dos echeqs de fechas distintas. En la planilla son **dos filas del mismo comprobante**, cada una con su `FECHA_PAGO`, su `FORMA_PAGO` y su `IMPORTE`.
+Una factura se puede pagar en varias veces: tres echeqs en tres fechas, un echeq y dos transferencias, o el mismo medio repetido. En la planilla son **N filas del mismo comprobante**, cada una con su `FECHA_PAGO`, su `FORMA_PAGO` y su `IMPORTE`. El caso que lo pidió es Donna di Dio, que paga facturas grandes en varios echeqs.
 
-| | Un medio (una fila) | Dos medios (dos filas) |
+| | Un medio (una fila) | Varios medios (N filas) |
 | --- | --- | --- |
 | `FORMA_PAGO` | opcional, como siempre | **obligatoria**, `ECHEQ` o `TRANSFERENCIA`. Puede repetirse |
-| `IMPORTE` | opcional; si viene, se clasifica: neto, excedente o parcial | **obligatorio en las dos**, mayor a cero, neto |
-| La suma | — | se clasifica igual que el importe de un medio |
-| En cuotas | se carga | **error**: *"es un comprobante en cuotas: cargalo con un solo medio"* |
+| `IMPORTE` | opcional; si viene, se clasifica: neto, excedente o parcial | **obligatorio en todas**, mayor a cero, neto |
+| La suma | — | se clasifica igual que el importe de un medio, y entra al total del proveedor |
+| En cuotas | se carga | **se carga**: lo pagado cubre primero las cuotas más viejas (ver abajo) |
 
-- **Tres filas o más** dejan en error **todas**, nombrando las líneas. No hay tercer medio, y elegir cuáles dos valen sería decidir por quien armó la planilla.
-- **El error es del comprobante, no de una fila suelta.** Si una de las dos está mal, no se carga ninguna: media apertura dejaría el comprobante partido a medias. El motivo es uno solo, dice todo lo que está mal —la forma de qué línea, cuánto suman, cuál es el pendiente y la diferencia— y va en las dos filas. La previsualización las muestra juntas, con *1/2* y *2/2*.
-- **El orden lo da la fecha**: *1/2* es la parte que se paga primero. Con la misma fecha —dos echeqs del mismo día— desempata el orden de las filas en el archivo.
-- **El resumen cuenta comprobantes**, no filas: un comprobante en dos medios es *una* alta. Lo que no se carga sí se cuenta por fila, porque es lo que hay que ir a corregir. Hay un chip *En dos medios*.
+- **El tope es de 50 filas por comprobante** (`Proveedores::MAX_PARTES`). No es una regla de negocio: es una red contra un copiar y pegar de más. Con más, todas quedan en error nombrando las líneas; elegir cuáles valen sería decidir por quien armó la planilla. `ORDEN` es `TINYINT` en la base y el `CHECK` dice sólo `ORDEN >= 1`: el número vive en un solo lugar, el código.
+- **El error es del comprobante, no de una fila suelta.** Si una está mal, no se carga ninguna: media apertura dejaría el comprobante partido a medias. El motivo es uno solo, dice todo lo que está mal —la forma de qué línea, cuánto suman, cuál es el neto y la diferencia— y va en todas sus filas.
+- **El orden lo da la fecha**: *1/N* es la parte que se paga primero. Con la misma fecha —dos echeqs del mismo día— desempata el orden de las filas en el archivo. La previsualización y la grilla dicen *1/3*, *2/3*, *3/3*.
+- **El resumen cuenta comprobantes**, no filas: un comprobante en tres medios es *una* alta. Lo que no se carga sí se cuenta por fila, porque es lo que hay que ir a corregir. Hay un chip *En varios medios*.
+- **Una factura en varias filas no puede estar además en un pago agrupado**: queda en error con un motivo que lo dice. Ver *Un cheque para varias facturas*.
 
-**Qué decide qué no cambió.** Si el comprobante entra al cronograma lo sigue decidiendo la **forma vigente** —el override de la factura o, si no hay, el maestro—, nunca la de la planilla. Un comprobante con `CAJA` en el maestro abierto en echeq + transferencia **se acepta**, pero la previsualización lo marca: *"se sigue tratando como CAJA; para que entre al cronograma, cambiá su forma en la grilla o el maestro"*.
+**Qué decide qué no cambió.** Si el comprobante entra al cronograma lo sigue decidiendo la **forma vigente** —el override de la factura o, si no hay, el maestro—, nunca la de la planilla. Un comprobante con `CAJA` en el maestro abierto en echeqs y transferencias **se acepta**, pero la previsualización lo marca: *"se sigue tratando como CAJA; para que entre al cronograma, cambiá su forma en la grilla o el maestro"*.
 
-**Reimportar reemplaza la apertura entera.** Si el comprobante vuelve con una sola fila, deja de estar partido y vuelve a ser un comprobante con una fecha. Si vuelve igual —aunque las dos filas vengan en otro orden—, es `SIN_CAMBIOS`.
+**Reimportar reemplaza la apertura entera.** Si el comprobante vuelve con una sola fila, deja de estar partido y vuelve a ser un comprobante con una fecha. Si vuelve igual —aunque las filas vengan en otro orden—, es `SIN_CAMBIOS`.
+
+**Sin `sql/cashflow_prov_locales_pago_n_medios.sql`** todo funciona como antes del cambio: hasta dos filas por comprobante y uno en cuotas con un solo medio. Una tercera fila, o dos de un comprobante en cuotas, quedan en error con un motivo que nombra el script, y la pestaña avisa. `guardarApertura()` tampoco escribe más de dos partes sin él: el `CHECK` viejo las rechazaría a mitad de la transacción.
 
 #### Dónde vive: `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`
 
-Una fila por medio, con la clave del comprobante en `Latin1_General_BIN`, `ORDEN`, `FECHA_PAGO`, `FORMA_PAGO`, `FORMA_PAGO_ORIG`, `IMPORTE` y la auditoría del módulo. **Sin bajas físicas**: reemplazar o borrar una apertura pasa las partes vigentes a `VIGENTE = 0` con quién y cuándo, y un índice único filtrado impide dos partes vigentes con el mismo orden.
+Una fila por medio, con la clave del comprobante en `Latin1_General_BIN`, `ORDEN`, `FECHA_PAGO`, `FORMA_PAGO`, `FORMA_PAGO_ORIG`, `IMPORTE` y la auditoría del módulo. **Sin bajas físicas**: reemplazar o borrar una apertura pasa las partes vigentes a `VIGENTE = 0` con quién y cuándo, y un índice único filtrado impide dos partes vigentes con el mismo orden. Ese índice sirve igual para N partes: no cambió.
 
 - **El caso de un medio funciona exactamente como antes, sin migrar nada**: un comprobante sin filas en esta tabla es lo que era.
 - **La exclusión, el override de forma y la observación siguen en la tabla de pagos**: son del comprobante entero, no de una parte.
-- **La tabla de pagos lleva la fecha MÁS TARDÍA de las dos partes**, con `FUENTE_FECHA = ARCHIVO`, la forma en `NULL` y las observaciones de las dos filas juntas. No es una copia de más: es lo que hace que la conciliación mida el desvío contra la última parte, y que un pago parcial en Tango proyecte el saldo en esa fecha sin código nuevo (ver abajo). Lo decide `Proveedores::camposDeImportacion()`, que es pura.
+- **La tabla de pagos lleva la fecha MÁS TARDÍA de las partes**, con `FUENTE_FECHA = ARCHIVO`, la forma en `NULL` y las observaciones de todas las filas juntas. No es una copia de más: es lo que hace que la conciliación mida el desvío contra la última parte, y que un pago parcial en Tango proyecte el saldo en esa fecha sin código nuevo (ver abajo). Lo decide `Proveedores::camposDeImportacion()`, que es pura.
 - **`guardarPago()` sigue siendo el único que escribe la tabla de pagos, y `guardarApertura()` el único que escribe la de medios**, siempre dentro de la transacción de quien llama: `aplicarImportacion()` escribe las dos juntas.
 
-**Sin `sql/cashflow_prov_locales_pago_medio.sql`** las dos filas de un comprobante quedan en error con un motivo que nombra el script, y todo lo demás funciona como antes. La pestaña avisa que falta.
+**Sin `sql/cashflow_prov_locales_pago_medio.sql`** las filas de un comprobante en varios medios quedan en error con un motivo que nombra el script, y todo lo demás funciona como antes. La pestaña avisa que falta.
 
 #### En el eje y en el tablero
 
 `getPendientes()` **con el horizonte** devuelve **una fila por parte**, con `IMPORTE_A_PAGAR` = el importe de la parte y su fecha resuelta con la jerarquía de siempre, cada una por separado: una parte futura se respeta tal cual, y una que ya pasó, si la forma vigente es del cronograma, va al próximo día de pago. Lo hace `Proveedores::abrirEnMedios()`, pura.
 
-> **Lo que sigue es un comprobante en dos medios clasificado como neto**: las dos partes suman el neto con $1 de tolerancia. Con excedente o parcial —con uno o dos medios— cada parte proyecta su importe, la retención se reparte y hay un saldo; ver *Un pago con excedente o parcial*.
+> **Lo que sigue es un comprobante en varios medios clasificado como neto, sin cuotas**: las partes suman el neto con $1 de tolerancia. Con excedente o parcial —con uno o varios medios— cada parte proyecta su importe, la retención se reparte y hay un saldo; ver *Un pago con excedente o parcial*. En cuotas, ver más abajo.
 
-**Las partes son importes netos.** La planilla trae lo que sale por cada medio, que es después de retenciones, así que las dos partes suman **el neto a pagar** del comprobante. La retención se calcula **sobre el comprobante entero, una sola vez**, a la **fecha más tardía** de las dos partes —una orden de pago retiene sobre la factura, no sobre cada medio— y **va entera en la primera parte**: su pendiente es su neto más la retención, y el de la segunda, su neto. Sin alícuotas, el neto es el pendiente y todo funciona como antes.
+**Las partes son importes netos.** La planilla trae lo que sale por cada medio, que es después de retenciones, así que las partes suman **el neto a pagar** del comprobante. La retención se calcula **sobre el comprobante entero, una sola vez**, a la **fecha más tardía** de las partes —una orden de pago retiene sobre la factura, no sobre cada medio— y **va entera en la primera parte**: su pendiente es su neto más la retención, y el de las demás, su neto. Sin alícuotas, el neto es el pendiente y todo funciona como antes.
 
 - **Las series no ganan ni pierden un peso.** La última parte se lleva el resto —neto menos las anteriores—, así que la tolerancia de $1 no llega al cuadro. Los pendientes de las partes siguen sumando el pendiente del comprobante, `IMPORTE_VTO` e `IMPUTACIONES` se reparten en la misma proporción, y los pies de *Importe* y *Pendiente* tampoco se mueven. Las retenciones van en una sola parte, así que los totales por impuesto no se duplican. Las dos particiones de `PAGOS_TODO` siguen cerrando; lo único que cambia es en qué columna cae cada peso.
-- **Excluir el comprobante excluye las dos partes**, por factura o por proveedor: las dos filas llevan las mismas marcas.
+- **Excluir el comprobante excluye todas las partes**, por factura o por proveedor: las filas llevan las mismas marcas.
 - **Sin el horizonte no se parte.** Tarjetas Pagos Corporativos arma su clave de cuota con comprobante + vencimiento y dos filas con la misma clave le romperían el circuito; la previsualización necesita el pendiente del comprobante entero.
 
 **Medido contra la base real** (13/10/2026, 600 vencimientos), con una apertura simulada en memoria sobre un comprobante real de $117.921,30, 60/40, una parte vencida y otra futura: las 29 series dan idénticas en importe, los dos cortes cierran contra los $2.353.245.202,55 de `PAGOS_TODO`, el total de la grilla no se mueve y los indicadores siguen contando 600 vencimientos con 601 filas.
 
+#### En cuotas: lo pagado cubre primero las cuotas más viejas
+
+Un comprobante en cuotas pagado en varias filas usa la misma regla que un pago parcial con un medio —*"lo pagado cubre primero lo más viejo"*, que es como imputa Tango—, aplicada medio por medio, en el orden de la planilla. Lo hace `Proveedores::tramosEnCuotas()`, pura, desde `proyectarPagoImportado()`:
+
+- **Cada medio sigue donde quedó el anterior.** Con tres cuotas de $ 100.000 y tres pagos de $ 120.000, $ 90.000 y $ 90.000: el primero cubre la cuota 1 y $ 20.000 de la 2; el segundo, $ 80.000 de la 2 y $ 10.000 de la 3; el tercero, el resto de la 3. **Cada medio proyecta exactamente su importe en su fecha**, y una cuota puede quedar repartida entre dos medios: dos filas, la segunda con `PARTE_EXTRA`, así que los indicadores siguen contando tres vencimientos.
+- **Una cuota cubierta a medias se parte**; si es un parcial, lo que no se cubre queda como **saldo** de cada cuota, con la jerarquía de siempre.
+- **El excedente va en la última cuota cubierta**: es lo que el o los medios pagan después de cubrir el neto. Sin cuotas, el excedente con varios medios se sigue repartiendo entre ellos en proporción a su importe, como antes.
+- **Cada cuota lleva su retención**, repartida en proporción al neto de cada fila, impuesto por impuesto: la del comprobante se calcula una vez, a la fecha más tardía, como siempre.
+
+En la previsualización el comprobante se compara contra el **neto del comprobante entero** —todas sus cuotas—, como un medio.
+
 #### Un pago parcial en Tango
 
-Un pago parcial baja el pendiente, y **la retención se recalcula sobre el pendiente nuevo**. Si el neto que resulta deja de coincidir con la suma de la apertura —más de $1 de diferencia—, o el comprobante pasa a tener más de un vencimiento, **no se parte**: todo lo que queda pendiente se proyecta **en la fecha más tardía**, que es la que tiene la tabla de pagos, con la jerarquía de siempre y su neto. La pestaña avisa, en atención: *"N comprobante(s) abiertos en dos medios ya no coinciden con su neto a pagar: se proyecta el saldo en la fecha más tardía. Reimportá para corregirlo"*. En la grilla la marca dice *no coincide*, en naranja.
+Un pago parcial baja el pendiente, y **la retención se recalcula sobre el pendiente nuevo**. Si el neto que resulta —del comprobante entero, con todas sus cuotas— deja de coincidir con la suma de la apertura —más de $1 de diferencia—, **no se parte**: todo lo que queda pendiente se proyecta **en la fecha más tardía**, que es la que tiene la tabla de pagos, con la jerarquía de siempre y su neto. La pestaña avisa, en atención: *"N comprobante(s) abiertos en varios medios ya no coinciden con su neto a pagar: se proyecta el saldo en la fecha más tardía. Reimportá para corregirlo"*. En la grilla la marca dice *no coincide*, en naranja.
 
 Cuando el comprobante sale de pendientes, concilia como cualquier otro, y **el desvío en días se mide contra la fecha más tardía**.
 
 #### En la grilla de Cuentas a Pagar
 
-- Un comprobante abierto se ve en **dos filas**, una por parte, cada una con su importe en la columna de su fecha. La columna *Fecha de pago* lleva *1/2* o *2/2* —en `data-etiqueta`, así el Excel baja la fecha sola— y el tooltip dice los dos medios, sus fechas e importes, quién los cargó y cuándo.
-- **La fecha no se edita en la celda**: tiene dos, y una fecha tipeada no dice a cuál reemplaza. Se cambia reimportando, o con **↺, que borra la apertura entera** y deja la exclusión, el override de forma y la observación. El servidor rechaza `savePago` sobre un comprobante abierto.
+- Un comprobante abierto se ve en **una fila por parte**, cada una con su importe en la columna de su fecha. La columna *Fecha de pago* lleva *1/N* … *N/N* —en `data-etiqueta`, así el Excel baja la fecha sola— y el tooltip dice los medios, sus fechas e importes, quién los cargó y cuándo.
+- **La fecha no se edita en la celda**: tiene varias, y una fecha tipeada no dice a cuál reemplaza. Se cambia reimportando, o con **↺, que borra la apertura entera** y deja la exclusión, el override de forma y la observación. El servidor rechaza `savePago` sobre un comprobante abierto.
 - **La columna Forma sigue mostrando la que decide.** El medio de cada parte va en el tooltip de la fecha, no en el selector.
-- **Tildar una de las dos filas selecciona el comprobante**: la otra se tilda sola, y la barra cuenta comprobantes y suma el importe sin duplicar. Excluir manda el comprobante una vez.
+- **Tildar una de las filas selecciona el comprobante**: las otras se tildan solas, y la barra cuenta comprobantes y suma el importe sin duplicar. Excluir manda el comprobante una vez.
 - **Los indicadores cuentan el comprobante una vez** y suman su importe completo. La regla está escrita una vez, en `Proveedores::cuentaComoVencimiento()`, y la usan los indicadores, los avisos de la pestaña y del tablero, y el control de faltantes; la pantalla la repite en `esParteExtra()`.
 - **El fechado masivo no toca los comprobantes abiertos**: el diálogo dice cuántos son y que no se van a tocar, y el backend los vuelve a saltear (`sinAbiertos()`).
-- **Exportar a Excel** baja las dos filas, con su importe y su fecha.
+- **Exportar a Excel** baja todas las filas, con su importe y su fecha.
 
 ### Un pago con excedente o parcial
 
@@ -1086,7 +1106,7 @@ Una factura se puede pagar **en N veces**: cada planilla trae otro parcial contr
 
 #### La regla: `Proveedores::clasificarImporte()`
 
-Una sola regla, pura, que usan un medio, dos medios —sobre la **suma**— y la confirmación. Con `máximo = neto × (1 + %/100)`:
+Una sola regla, pura, que usan un medio, varios medios —sobre la **suma**—, el pago agrupado —sobre el cheque contra la suma de los netos— y la confirmación. Con `máximo = neto × (1 + %/100)`:
 
 | Importe | Clasificación | Qué pasa |
 | --- | --- | --- |
@@ -1100,7 +1120,7 @@ Una sola regla, pura, que usan un medio, dos medios —sobre la **suma**— y la
 - **El tope es sobre el neto a pagar** —lo que sale de la caja—, no sobre el total de la factura, y **sobre el comprobante entero**, también con cuotas. Con varias facturas del mismo proveedor en la planilla, el tope que decide es el de su **total**: ver abajo.
 - **El neto es el del pendiente de hoy.** Si Tango ya registró un parcial, el siguiente pago —otro parcial, el que cancela o uno con excedente— se mide contra lo que quedó.
 - **Si cae dentro del máximo se acepta, punto**, aunque coincida con el total de la factura sin retenciones.
-- **Dos medios**: cada fila tiene que ser mayor a cero, y la suma se clasifica. **Dos medios con cuotas sigue siendo error**, como antes. Un medio con cuotas sí puede ser excedente o parcial.
+- **Varios medios**: cada fila tiene que ser mayor a cero, y la suma se clasifica, también en cuotas (con el script de N medios). Ver *En cuotas: lo pagado cubre primero las cuotas más viejas*.
 - **La forma de pago sigue sin decidir el cronograma**: lo decide la forma vigente.
 
 #### El excedente se valida por proveedor: `Proveedores::clasificarProveedor()`
@@ -1109,7 +1129,7 @@ La orden de pago se arma **por proveedor**: el redondeo o el excedente se pone e
 
 Para cada proveedor, sobre **todas sus filas del archivo, aunque tengan fechas de pago distintas**:
 
-- **Total pagado** = la suma de los importes de sus filas (con dos medios, los dos). Una fila sin importe cuenta como su neto.
+- **Total pagado** = la suma de los importes de sus filas (con varios medios, todos; un pago agrupado, el cheque una vez). Una fila sin importe cuenta como su neto.
 - **Total neto** = la suma de los netos a pagar de **sus comprobantes que vienen en el archivo** —no de toda su deuda—, con la regla de retenciones de siempre.
 - **Máximo** = total neto × (1 + %). **Sin % cargado, el máximo es el total neto**: no se acepta excedente, pero sí compensar.
 
@@ -1117,7 +1137,7 @@ Para cada proveedor, sobre **todas sus filas del archivo, aunque tengan fechas d
 | --- | --- |
 | **mayor al máximo + $1** | **Error en todas las filas del proveedor; no se carga ninguna.** El motivo dice total pagado, total neto, la diferencia en $ y %, y el máximo |
 | **entre total neto − $1 y máximo + $1** | **Se acepta y ninguna factura queda con saldo**. Si alguna, sola, iría de menos o superaría su propio %, las que se apartan de su neto en más de $1 quedan **compensadas** (`COMPENSADA`); las que coinciden con su neto (±$1) quedan **neto**. Si ninguna necesita compensarse, cada una es lo de siempre —neto o con excedente— |
-| **menor al total neto − $1** | **Cada factura se evalúa sola, como antes**: la que va de menos es pago parcial con su saldo; la que va de más es excedente si está dentro de su propio %, y si no, error en esa factura (con dos medios, en sus dos filas) |
+| **menor al total neto − $1** | **Cada factura se evalúa sola, como antes**: la que va de menos es pago parcial con su saldo; la que va de más es excedente si está dentro de su propio %, y si no, error en esa factura (con varios medios, en todas sus filas) |
 
 Con 5%:
 
@@ -1130,7 +1150,7 @@ Con 5%:
 | 5 | 100.000 / 104.000 | 100.000 / 50.000 | 200.000 / 154.000 | Cada una sola: A con excedente $ 4.000, B parcial con $ 50.000 pendientes |
 
 - **Un proveedor con una sola factura** se comporta exactamente como antes, con el motivo de siempre.
-- **Lo que tiene un error propio queda fuera del total**, y el resto se evalúa sin eso. Un error propio es: no existe en Tango, no está en cuenta corriente, ya está pagado en Tango, más de dos filas, dos medios mal armados, o un importe cero, negativo o que no es un número. Superar el propio % **no** es un error propio: otra factura puede compensarlo. El subtotal dice *"N filas fuera del total"*.
+- **Lo que tiene un error propio queda fuera del total**, y el resto se evalúa sin eso. Un error propio es: no existe en Tango, no está en cuenta corriente, ya está pagado en Tango, más filas que el tope, varios medios mal armados, o un importe cero fuera de un pago agrupado, negativo o que no es un número. Superar el propio % **no** es un error propio: otra factura puede compensarlo. El subtotal dice *"N filas fuera del total"*.
 - **La confirmación vuelve a aplicar la misma regla.** Cada fila viaja con el resultado de su proveedor (`regla_proveedor`), y si cambió desde la previsualización —por ejemplo, una factura de otra línea pasó a estar pagada en Tango y el proveedor dejó de entrar por el total—, `diferenciasConLoVisto()` frena y no se aplica nada.
 - **Sin `sql/cashflow_prov_locales_excedente_por_proveedor.sql`** la regla corre igual, pero un proveedor que necesita compensar queda en error con un motivo que nombra el script: no hay dónde guardar `COMPENSADA`. Lo que no compensa se carga como siempre. Esos proveedores **no** se cuentan como que superan el máximo: tienen su propio chip, *Proveedores sin compensar*, y su propio aviso.
 
@@ -1150,15 +1170,15 @@ Vive en `RO_T_CASHFLOW_PARAMETROS` (`prov_locales_pct_excedente`) con **su propi
 
 #### Qué se guarda
 
-En la misma tabla de los dos medios, `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, **con una parte o con dos**. Lo que no es *neto* se guarda porque es lo que se va a proyectar; **un comprobante neto con un medio sigue sin filas ahí**, y funciona exactamente como antes. Cada parte lleva `CLASIFICACION`, el **pendiente y el neto del comprobante al importar** (`PENDIENTE_IMPORT`, `NETO_IMPORT`) —con eso se sabe después si Tango ya registró el pago— y la marca de Tango (`ESTADO_TANGO`, `FECHA_REAL`, `PENDIENTE_REAL`, `FECHA_REGISTRO`). Con un medio, la forma sigue en la tabla de pagos y en la de medios va en `NULL`.
+En la misma tabla de los medios, `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, **con una parte o con varias**. Lo que no es *neto* se guarda porque es lo que se va a proyectar; **un comprobante neto con un medio sigue sin filas ahí**, y funciona exactamente como antes. Cada parte lleva `CLASIFICACION`, el **pendiente y el neto del comprobante al importar** (`PENDIENTE_IMPORT`, `NETO_IMPORT`) —con eso se sabe después si Tango ya registró el pago— y la marca de Tango (`ESTADO_TANGO`, `FECHA_REAL`, `PENDIENTE_REAL`, `FECHA_REGISTRO`). Con un medio, la forma sigue en la tabla de pagos y en la de medios va en `NULL`.
 
 La tabla de pagos —la de los overrides— queda así:
 
 | | `FECHA_PAGO` | Por qué |
 | --- | --- | --- |
-| **Con excedente** | la de la planilla (la más tardía con dos medios) | La O/P cancela la factura y **concilia como cualquier otra**, con el desvío contra esa fecha |
+| **Con excedente** | la de la planilla (la más tardía con varios medios) | La O/P cancela la factura y **concilia como cualquier otra**, con el desvío contra esa fecha |
 | **Parcial** | **ninguna** | La factura sigue pendiente: el saldo —y después el pendiente que deje Tango— va por la jerarquía de siempre. Una fecha cargada a mano antes **se reemplaza**: reimportar reemplaza lo cargado |
-| **Compensada** | la de la planilla (la más tardía con dos medios) | Como un excedente: la O/P del proveedor cancela la factura, que **concilia como cualquier otra** contra esa fecha |
+| **Compensada** | la de la planilla (la más tardía con varios medios) | Como un excedente: la O/P del proveedor cancela la factura, que **concilia como cualquier otra** contra esa fecha |
 
 **Una compensada se guarda como un excedente**: una parte por medio, `CLASIFICACION = 'COMPENSADA'`, el `IMPORTE` de la planilla y el pendiente y el neto al importar. **El excedente del proveedor no se guarda aparte**: es la suma de las diferencias de sus compensadas —importe menos neto, con signo—, y así queda contado una sola vez, sin repartirlo a mano.
 
@@ -1168,12 +1188,12 @@ Reimportar el comprobante **reemplaza** lo cargado (baja lógica con historial, 
 
 La regla de cuánto se paga y cuándo, escrita una vez. La usan la grilla y el tablero —por `abrirEnMedios()`— y la previsualización, que con ella dice en qué fecha cae el saldo.
 
-- **Con excedente**: el importe pagado completo en la fecha de la planilla. Con dos medios **cada parte proyecta su importe**: ninguna se lleva el resto. El excedente se reparte entre las partes en proporción a su importe.
+- **Con excedente**: el importe pagado completo en la fecha de la planilla. Con varios medios **cada parte proyecta su importe**: ninguna se lleva el resto. Sin cuotas, el excedente se reparte entre las partes en proporción a su importe; en cuotas, va en la última cuota cubierta.
 - **Parcial**: lo pagado en la fecha de la planilla y el saldo **como si no tuviera fecha cargada**: vencimiento, emisión + plazo, y si es del cronograma el próximo día de pago; si ya venció, el próximo día de pago, o el primer día del eje si no es del cronograma.
 - **Cuotas**: lo pagado cubre las cuotas **en orden de vencimiento, la más vieja primero**, que es como imputa Tango. Las cubiertas van a la fecha de la planilla, la que queda a medias se parte, y las que no se tocan siguen con su fecha. **El excedente va en la última cuota cubierta.**
 - **La retención se calcula una vez**, sobre el comprobante entero, a la fecha más tardía de la planilla, y **se reparte en proporción al neto de cada fila**, impuesto por impuesto, con la última llevándose el resto: en cada fila **neto + retención = pendiente** y los pendientes suman el del comprobante al centavo. **El excedente no lleva retención**: no es factura. *Pendiente* e *Importe* de la grilla no se mueven.
-- **Compensada**: **exactamente el importe de la planilla** en su fecha, **sin saldo**. La diferencia con su neto va en `EXCEDENTE` **con signo** —negativa si se pagó de menos—, así que las de un proveedor suman su excedente, y el tablero suma lo mismo que la planilla. Con dos medios cada parte proyecta su importe; con cuotas, todas van a la fecha de la planilla y la diferencia se reparte en proporción a su neto, para que ninguna quede en negativo. La retención, como siempre.
-- **Un comprobante neto en dos medios no cambió**: sigue con la última parte llevándose el resto y la retención entera en la *1/2*. Hay una prueba que lo fija.
+- **Compensada**: **exactamente el importe de la planilla** en su fecha, **sin saldo**. La diferencia con su neto va en `EXCEDENTE` **con signo** —negativa si se pagó de menos—, así que las de un proveedor suman su excedente, y el tablero suma lo mismo que la planilla. Con varios medios cada parte proyecta su importe; con cuotas, todas van a la fecha de la planilla y la diferencia se reparte en proporción a su neto, para que ninguna quede en negativo. La retención, como siempre.
+- **Un comprobante neto en varios medios sin cuotas no cambió**: sigue con la última parte llevándose el resto y la retención entera en la *1/N*. Hay una prueba que lo fija.
 
 **El excedente es plata que sale y no está en el pendiente de Tango.** Suma en *Cuentas a Pagar Locales* con el rubro del proveedor —está en `IMPORTE_A_PAGAR`— y la auditoría del tablero lo cuenta aparte, en `excedente`. Ver *El tablero va en neto*.
 
@@ -1200,12 +1220,12 @@ La proyección compara el pendiente de hoy con el que tenía el comprobante al i
 #### En la grilla de Cuentas a Pagar
 
 - **Con excedente**: al lado del neto, la marca **"+ excedente"**; el tooltip dice neto, excedente, total pagado, % y quién lo importó y cuándo.
-- **Compensada**: la marca **"compensada"**, y en la fecha *compensada* (o *1/2 · compensada*). El tooltip dice lo pagado, el neto y la diferencia con signo, y que no queda saldo. La tarjeta del total suma el excedente con signo: con un filtro que deja sólo una compensada de menos, dice *"Incluye −$ X de facturas pagadas de menos, compensadas en el total de su proveedor"*.
-- **Parcial**: el comprobante en **dos filas**, lo que se paga en la fecha de la planilla —*pago parcial*, o *1/2 · parcial* y *2/2 · parcial* con dos medios— y el **saldo** en su fecha —*saldo*, atenuado: esa fecha no la decidió nadie—. El tooltip dice pagado, saldo, neto y de dónde sale la fecha del saldo. Uno que Tango ya registró dice *parcial en Tango*, con la fecha real.
+- **Compensada**: la marca **"compensada"**, y en la fecha *compensada* (o *1/3 · compensada*). El tooltip dice lo pagado, el neto y la diferencia con signo, y que no queda saldo. La tarjeta del total suma el excedente con signo: con un filtro que deja sólo una compensada de menos, dice *"Incluye −$ X de facturas pagadas de menos, compensadas en el total de su proveedor"*.
+- **Parcial**: el comprobante en **dos filas**, lo que se paga en la fecha de la planilla —*pago parcial*, o *1/3 · parcial*, *2/3 · parcial*… con varios medios— y el **saldo** en su fecha —*saldo*, atenuado: esa fecha no la decidió nadie—. El tooltip dice pagado, saldo, neto y de dónde sale la fecha del saldo. Uno que Tango ya registró dice *parcial en Tango*, con la fecha real.
 - **La fecha no se edita en la celda** ni con el fechado masivo: se cambia reimportando o con **↺**, que borra lo importado y deja la exclusión, el override de forma y la observación.
 - **Tildar una de las filas selecciona el comprobante**, y los indicadores lo cuentan una vez (`cuentaComoVencimiento()` / `esParteExtra()`, con `PARTE_EXTRA`).
 - **La tarjeta del total** suma lo que se proyecta, con los excedentes, y dice cuánto es excedente.
-- **Exportar** baja todas las filas con su importe y su fecha, y una columna **Pago importado** con la etiqueta —*pago parcial*, *saldo*, *+ excedente*, *1/2*—. Las marcas de la pantalla van en `data-etiqueta` y las dibuja el CSS, así que el Excel no las baja; por eso esa columna existe sólo para el Excel (`data-exportar-solo`).
+- **Exportar** baja todas las filas con su importe y su fecha, y una columna **Pago importado** con la etiqueta —*pago parcial*, *saldo*, *+ excedente*, *2/3*, *pago agrupado*—. Las marcas de la pantalla van en `data-etiqueta` y las dibuja el CSS, así que el Excel no las baja; por eso esa columna existe sólo para el Excel (`data-exportar-solo`).
 
 #### En la previsualización
 
@@ -1226,6 +1246,80 @@ Y el motivo de cada fila:
 - *"El proveedor paga $ X por facturas que suman un neto de $ Y: lo supera en $ Z (N%). El máximo permitido es $ M (5%). No se carga ninguna de sus filas."*, en todas sus filas.
 
 Un parcial **no cuenta como vencido resuelto**: el saldo sigue sin fecha.
+
+### Un cheque para varias facturas: el pago agrupado
+
+> Esto es **nuevo**, de `feature/prov-locales-pago-agrupado`. Antes el importe del cheque quedaba en la primera factura, con un sobrepago enorme, y las demás no se podían cargar: vacío era el neto y 0 era error.
+
+Un proveedor con muchas facturas chicas se paga con **un solo cheque**, o una sola transferencia. El caso que lo pidió es Embotelladora Blanco (`OGEMBO`): medido el 22/11/2026, en los últimos 90 días tuvo 45 facturas de entre $ 8.124 y $ 63.399, canceladas por **tres O/P mensuales** de alrededor de $ 500.000, unas 15 facturas por O/P. En la planilla del 06/11 una de sus filas traía $ 453.750 contra un neto de $ 7.555,32 y quedaba en error.
+
+#### Cuándo es un pago agrupado: `Proveedores::agruparPagos()`
+
+Las filas **del mismo proveedor, con la misma `FECHA_PAGO` y la misma `FORMA_PAGO`** —escrita, y `ECHEQ` o `TRANSFERENCIA`— forman un pago agrupado cuando **al menos una trae importe y al menos otra viene en 0 o vacía**:
+
+| La fila viene… | ¿Entra al grupo? | Por qué |
+| --- | --- | --- |
+| **en 0** | **Siempre** | Un 0 no puede ser el pago de su factura —fuera de un grupo es error—, así que la única lectura posible es *"esta factura va en el cheque de la otra fila"* |
+| **vacía** | **Sólo si el importe del grupo supera el máximo de su propia factura** (neto × (1 + %), con $1 de tolerancia) | Vacío quiere decir *el neto* desde siempre, y una planilla que paga una factura con excedente y otra por el neto el mismo día es un caso real: en la del 13/11/2026 hubo cuatro proveedores así. Leerlas como un cheque para las dos cambiaría en silencio lo que dicen. Un importe que no puede ser el de su factura, en cambio, sólo se explica como el cheque de todas |
+| **sin forma** | No | Vacío en la forma es *"la del maestro"*: agrupar por una forma que nadie escribió juntaría pagos que la planilla no juntó |
+
+- **La planilla no trae número de cheque ni de orden de pago** —medido el 22/11/2026: no hay ninguna planilla en el repo y `columnasImportacion()` no tiene esa columna—, así que **proveedor + fecha + forma** es lo único que dice *"esto salió junto"*. Es también el identificador del grupo: `OGEMBO|2026-12-05|ECHEQ`. Si algún día la planilla trae el número, es lo que pasa a agrupar.
+- **Una fila vacía sin otra del grupo con importe sigue valiendo el neto**, como siempre. **El 0 deja de ser error sólo dentro de un grupo**: fuera de uno sigue siéndolo.
+- **Si la fila que trae el importe tiene un error propio** —ya pagada en Tango, no existe— no se sabe su máximo, y **las vacías no entran**: es lo conservador. Con 0 se puede decir igual.
+- **Una factura en varias filas no entra en un grupo**: un pago agrupado cubre facturas enteras, y si además tiene otras filas no se sabe qué parte va en cada una. Queda en error con un motivo que lo dice, y el resto del grupo se evalúa sin ella.
+
+#### Cómo se valida y cómo se reparte: `Proveedores::unPagoAgrupado()`
+
+**El importe del pago** es la suma de los importes cargados del grupo (normalmente una sola fila) y se compara contra **la suma de los netos a pagar** de sus facturas, a la fecha del pago, con la regla de siempre (`clasificarImporte()`): neto (± $1), con excedente hasta el % o parcial. **Y entra al total del proveedor como un comprobante**: neto = la suma de los netos, pagado = el cheque. Sigue valiendo la validación por proveedor sobre todo el archivo.
+
+El reparto es **en orden de vencimiento, la más vieja primero**, como imputa Tango. **Ninguna factura queda con sobrepago**: cada una guarda **su parte**.
+
+| El cheque… | Qué pasa |
+| --- | --- |
+| **cubre los netos** (± $1) | Todas pagadas, cada una con su neto. La última lleva los centavos de diferencia, para que las partes sumen el cheque al centavo |
+| **con excedente** hasta el % | Todas pagadas, cada una con su neto; el excedente, en la última por vencimiento |
+| **supera el máximo** | Error en todas las facturas del grupo, con el motivo de siempre |
+| **es menor** (parcial) | Las que alcanza, pagadas; la que queda a medias, **parcial** con su saldo por la jerarquía de siempre; las que no se cubren, **no cubiertas** (`NO_CUBIERTA`) |
+| **compensado en el total del proveedor** | Todas pagadas. La diferencia va en la última si es de más, y repartida en proporción a su neto si es de menos, para que ninguna parte quede en cero |
+
+Con diez facturas de $ 10.000: **$ 100.000** las paga a todas; **$ 103.000** con 5 % deja $ 3.000 de excedente en la última; **$ 60.000** cubre las seis más viejas, ninguna a medias; **$ 65.000** deja la séptima a medias, con $ 5.000 de saldo.
+
+**Una factura no cubierta es una advertencia**, como una ya pagada en Tango: no se carga, no frena la confirmación, y sigue como si no estuviera en la planilla —si tenía una fecha cargada, la conserva—. Su motivo lo dice.
+
+**Una factura con un error propio queda fuera del grupo** —no existe, ya pagada en Tango, no está en cuenta corriente—: conserva su motivo, dice que queda fuera, y el resto se evalúa sin su neto. **El importe sigue siendo del grupo** aunque lo traiga la fila que quedó afuera: es lo que salió en el cheque.
+
+#### Qué se guarda
+
+Cada factura del grupo guarda **su parte** en `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO` —una fila, con su importe, su clasificación, el pendiente y el neto al importar, la forma del cheque— y la **marca del grupo** en `GRUPO_PAGO`, **también cuando es neto**: es lo que la grilla muestra, lo que deja deshacerlo entero y lo que hace que el eje sume el cheque al centavo. En la tabla de pagos, la fecha del cheque —ninguna si quedó parcial— y su forma, como un medio.
+
+**El total del cheque no se guarda**: es la suma de las partes vigentes con el mismo `GRUPO_PAGO`. Guardarlo aparte sería una segunda copia que se puede desincronizar.
+
+Así **la grilla, el tablero y la conciliación siguen trabajando por factura** sin código nuevo: cada una es un pago importado como cualquier otro.
+
+**Reimportar cualquiera de las facturas del grupo reemplaza el grupo entero.** Si una cambia, las otras ya no suman el cheque, y dejarlas con su parte vieja proyectaría un pago que ya no existe. Las del grupo viejo que no vuelven a cargarse en la planilla nueva **vuelven a su vencimiento o al cronograma** —baja lógica de su parte y de su fecha, en la misma transacción—, y la previsualización las lista en el motivo de la fila que lo reemplaza y en un aviso. Lo decide `deshaceGrupos()`, pura; la confirmación lo recalcula y, si cambió, no aplica nada. Reimportar el mismo pago es `SIN_CAMBIOS`.
+
+**↺ sobre una factura del grupo deshace el pago entero.** La pantalla lo pregunta antes, diciendo el cheque y cuántas facturas; el servidor lo hace igual, porque el endpoint se alcanza sin pasar por ella. La exclusión, la forma y la observación de cada una se conservan.
+
+**Sin `sql/cashflow_prov_locales_pago_agrupado.sql`** no hay pago agrupado: cada fila es su factura, vacío es el neto y 0 es error —con un motivo que nombra el script—, y la pestaña avisa. Necesita el de N medios, que necesita el del excedente.
+
+#### En el eje y en el tablero
+
+Cada factura proyecta **su parte** en la fecha del cheque, por `proyectarPagoImportado()` —la misma regla que un pago con excedente o parcial—, así que **el importe del cheque aparece una sola vez, en su fecha, y las partes suman exacto el cheque, al centavo**. Los centavos de diferencia con los netos van en `EXCEDENTE` con signo, para que la auditoría del tablero siga cerrando. `IMPORTE_PENDIENTE` no cambia: sigue siendo lo que dice Tango, y *Tarjetas Pagos Corporativos* y Alquileres no ven nada de esto —el reparto es sólo con el horizonte—.
+
+**La conciliación** mide cada factura contra la fecha del cheque, como cualquier otra: cada una tiene esa fecha en la tabla de pagos.
+
+#### En la previsualización
+
+- **Chip "Pago agrupado"**: cuántos pagos, cuántas facturas, el importe y **cuántas filas vacías entraron** como parte de uno, que es lo que hay que mirar. Hay otro chip para las **no cubiertas**.
+- **El motivo de cada fila**: *"Pago agrupado: echeq de $ 100.000,00 del 05/12/2026 por 10 facturas (netos $ 100.000,00). A esta factura le tocan $ 10.000,00."*, y si hay excedente o saldo, lo dice. Una vacía tomada dice *"Tomada como parte del pago agrupado de $ X porque ese importe supera el máximo de su propia factura"*.
+- **Las filas del mismo grupo van juntas**, con la misma marca —*pago agrupado L2*, la línea del cheque—, y la que quedó fuera o la vacía tomada lo dicen al lado.
+
+#### En la grilla de Cuentas a Pagar
+
+- Las facturas del grupo dicen **"pago agrupado"** en la columna *Fecha de pago* —en `data-etiqueta`, y en la columna *Pago importado* que baja al Excel—, con *· + excedente* o *· parcial* en la que corresponde.
+- **El tooltip** dice el cheque, su fecha y su forma, las facturas que cubre y cuánto le toca a cada una —la de esa fila marcada—, quién lo importó y cuándo.
+- **Tildar una factura del grupo no tilda las demás**: son facturas distintas, y excluir o fechar una no toca las otras. La barra de selección avisa cuando alguna es parte de un pago agrupado.
+- **Las tarjetas y el pie no duplican importes**: cada factura suma su parte, una vez.
 
 ### Los saldos a cuenta
 
@@ -1290,7 +1384,7 @@ Queda marcada `CONCILIADO` con la **fecha real al lado**, sin pisar la prevista.
 
 Por eso el aviso informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice. **Las canceladas con un saldo a cuenta no entran**: su fecha real es la de una O/P vieja. Ver *Una factura cancelada con un saldo a cuenta, en la conciliación*.
 
-**Un comprobante pagado con dos medios mide el desvío contra la fecha más tardía**: es la que guarda la tabla de pagos (ver *Un comprobante pagado con dos medios*), y es cuando termina de pagarse. **Uno con excedente**, contra la fecha de la planilla.
+**Un comprobante pagado con varios medios mide el desvío contra la fecha más tardía**: es la que guarda la tabla de pagos (ver *Un comprobante pagado con varios medios*), y es cuando termina de pagarse. **Uno con excedente**, contra la fecha de la planilla. **Cada factura de un pago agrupado**, contra la fecha del cheque.
 
 **Un pago parcial no concilia**: la factura sigue pendiente. Lo que se anota es que Tango lo registró —en la tabla de medios, con la fecha real— y el aviso va en esta misma sección. Ver *Cuando Tango registra el pago*.
 
@@ -1590,7 +1684,7 @@ Los tres filtros —el buscador y los dos interruptores— son del navegador, as
 - **El eje va en neto**: cada comprobante cae en su fecha por el neto (`EjeVista::armar(..., 'IMPORTE_A_PAGAR')`), así que los totales del eje coinciden con la fila del tablero.
 - **El pie y los indicadores** suman el neto; lo retenido va **aparte**, por impuesto: en el pie debajo del total de Retenciones, y en la tarjeta *Neto a pagar* en una línea propia. La barra de selección también suma el neto.
 - **El Excel baja una columna por impuesto.** Están en la tabla, escondidas en pantalla y marcadas `data-exportar-solo`, que `Js/tabla-export.js` respeta: exporta lo que se ve, salvo esa marca, porque un tooltip no se exporta.
-- **Dos medios**: cada parte muestra su neto; la retención va en la parte *1/2* y la *2/2* lo dice en vez de repetirla, así que los totales no la duplican.
+- **Varios medios**: cada parte muestra su neto; la retención va en la parte *1/N* y las demás lo dicen en vez de repetirla, así que los totales no la duplican.
 
 > Un número arriba de una tabla describe esa tabla.
 
@@ -1667,7 +1761,11 @@ php cashflow/tests/run.php proveedores
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
-`tests/test_prov_locales_medios.php` fija el comprobante pagado con dos medios, sin base: un medio sin importe toma el pendiente y con otro importe da error; dos medios que suman el pendiente (±$1) se cargan y los que no, quedan en error en las dos filas con la diferencia; tres filas, una forma que no es echeq ni transferencia, una fila mala de dos y un comprobante en cuotas dejan en error todo el comprobante; dos echeqs el mismo día desempatan por el orden del archivo; reimportar igual es `SIN_CAMBIOS` y con una fila deshace la apertura; lo que se escribe no toca `FORMA_PAGO_CRONOGRAMA` y lleva la fecha más tardía; cada parte entra al eje con su importe y su fecha por la jerarquía de siempre; un pendiente que ya no coincide va entero a la fecha más tardía con su aviso; las dos particiones de `PAGOS_TODO` cierran; excluir excluye las dos partes; el fechado masivo y la celda no tocan un abierto; ↺ da de baja la apertura en la misma transacción; confirmar frena si algo cambió desde la previsualización; sin el script, error que lo nombra; el `CHECK` del script es `FORMAS_CRONOGRAMA`; y el cableado de la grilla.
+`tests/test_prov_locales_medios.php` fija el comprobante pagado con dos medios, sin base y **sin decirle a la regla que el script de N medios está** —es el comportamiento de antes, que sigue valiendo sin él—: un medio sin importe toma el pendiente y con otro importe da error; dos medios que suman el pendiente (±$1) se cargan y los que no, quedan en error en las dos filas con la diferencia; tres filas, una forma que no es echeq ni transferencia, una fila mala de dos y un comprobante en cuotas dejan en error todo el comprobante; dos echeqs el mismo día desempatan por el orden del archivo; reimportar igual es `SIN_CAMBIOS` y con una fila deshace la apertura; lo que se escribe no toca `FORMA_PAGO_CRONOGRAMA` y lleva la fecha más tardía; cada parte entra al eje con su importe y su fecha por la jerarquía de siempre; un pendiente que ya no coincide va entero a la fecha más tardía con su aviso; las dos particiones de `PAGOS_TODO` cierran; excluir excluye las dos partes; el fechado masivo y la celda no tocan un abierto; ↺ da de baja la apertura en la misma transacción; confirmar frena si algo cambió desde la previsualización; sin el script, error que lo nombra; el `CHECK` del script es `FORMAS_CRONOGRAMA`; y el cableado de la grilla.
+
+`tests/test_prov_locales_n_medios.php` fija N pagos por comprobante, sin base: el script (el `CHECK` a `ORDEN >= 1` en una transacción, reejecutable, el tope en el código); tres echeqs en tres fechas con *1/3*, *2/3* y *3/3*; medios mezclados y repetidos el mismo día; la suma de N filas como neto, excedente, parcial o error, y la regla por proveedor con N filas; un comprobante en cuotas en tres filas con el script y en error sin él, nombrándolo; el tope de 50; reimportar igual; y en el eje: cada medio en su fecha con la retención entera en la *1/3*, la apertura descuadrada por un pago en Tango, las cuotas cubiertas de la más vieja a la más nueva con una cuota repartida entre dos medios, el parcial y el excedente en cuotas, y las particiones y la planilla vacía.
+
+`tests/test_prov_locales_pago_agrupado.php` fija el pago agrupado, sin base: el script; diez facturas de $ 10.000 con $ 100.000 y nueve vacías o en 0 —todas pagadas, ninguna con sobrepago—; $ 103.000 con el excedente en la última; $ 60.000 y $ 65.000; vacías con otra fecha, otra forma o sin forma que no se agrupan; un importe que cabe en su propia factura que no se lleva a las vacías (el caso del 13/11); el 0 fuera de un grupo; sin el script; una factura ya pagada en Tango fuera del grupo; la fila del cheque con un error propio; el grupo en el total del proveedor; una factura en varias filas; lo que se escribe; reimportar igual y reimportar una factura, que deshace el resto; confirmar que frena; el cheque una vez en el eje, al centavo; el parcial con su saldo; las particiones, la auditoría y la planilla vacía; y lo que toca la base.
 
 `tests/test_planilla.php` fija el mecanismo compartido de las tres importaciones: que `Planilla::numero()` y `Planilla::fecha()` entiendan lo que manda el navegador desde un Excel, que **el número de línea sea la fila del Excel** aunque haya filas vacías en el medio o arriba del encabezado, que un `;` adentro de una celda no parta la fila, y que **la plantilla y el parser salgan de la misma definición** en pagos, maestro y Cob. Electrónicos. La conversión de celdas del navegador —fechas desde el serial, fines de mes, importes sin exponente, ceros a la izquierda— la prueba `tests/js/planilla_excel.wsf` con cscript, y su cableado `test_tablas_controles.php`.
 
@@ -1717,7 +1815,7 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 - **Lo que se guarda**: fecha de la planilla en la tabla de pagos y la parte `COMPENSADA` con el importe de la planilla; que `guardarApertura()` no la escribe sin el script, que el chequeo del script sólo lee, y el `CHECK` del script.
 - **La proyección**: cada factura con el importe de la planilla, sin saldo, el tablero suma lo mismo que la planilla y la diferencia con signo suma el excedente del proveedor; la auditoría del tablero cierra; dos medios, cuotas sin ninguna en negativo, retenciones, y Tango que la registra o la cancela.
 
-*Suite completa: 9966 OK, 0 fallas (84 archivos), con la base.*
+*Suite completa: 11290 OK, 0 fallas (100 archivos), con la base, el 22/11/2026.*
 
 ---
 
@@ -1730,7 +1828,9 @@ sql/cashflow_prov_locales_maestro_manual.sql   ORIGEN: habilita la carga a mano
 sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factura
 sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
 sql/cashflow_prov_locales_opciones.sql         Las cinco listas de opciones + semilla
-sql/cashflow_prov_locales_pago_medio.sql       Un comprobante pagado con dos medios
+sql/cashflow_prov_locales_pago_medio.sql       Un comprobante pagado con varios medios (nacio con dos)
+sql/cashflow_prov_locales_pago_n_medios.sql     N pagos por comprobante: el CHECK de ORDEN
+sql/cashflow_prov_locales_pago_agrupado.sql     Un cheque para varias facturas: GRUPO_PAGO
 sql/cashflow_prov_locales_retenciones.sql      Las retenciones: impuestos, generales y por proveedor
 sql/cashflow_prov_locales_excedente_parcial.sql  Pago con excedente y pago parcial, y el % de excedente
 sql/cashflow_prov_locales_excedente_por_proveedor.sql  COMPENSADA: facturas compensadas en el total del proveedor
@@ -1755,7 +1855,7 @@ tests/test_proveedores.php
 
 Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_extra`) · `Class/CobElectronicos.php` (delega en `Planilla`, sin cambiar su contrato) · `Class/Menu.php` (la pestaña pasa a `DATOS`) · `Class/Parametros.php` (el módulo `PROV_LOCALES` y su sección) · `Tabs/parametros.php` (la sub-pestaña) · `Js/notificaciones.js` (`pedirFecha()`, el tercer diálogo sobre el mismo armazón) · `tests/test_providers.php` y `tests/test_menu.php` (los conteos).
 
-Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`. Del pago con excedente y el parcial: `tests/test_prov_locales_excedente_parcial.php`. Del excedente por proveedor: `tests/test_prov_locales_excedente_proveedor.php`.
+Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`. Del pago con excedente y el parcial: `tests/test_prov_locales_excedente_parcial.php`. Del excedente por proveedor: `tests/test_prov_locales_excedente_proveedor.php`. De N pagos: `tests/test_prov_locales_n_medios.php`. Del pago agrupado: `tests/test_prov_locales_pago_agrupado.php`.
 
 ---
 

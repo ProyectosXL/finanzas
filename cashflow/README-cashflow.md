@@ -396,6 +396,17 @@ El `IMPORTE` de la planilla de pagos ya no tiene que ser el neto a pagar: puede 
 
 Contra `central`, **después del 37** (`cashflow_prov_locales_pago_medio.sql`): le agrega columnas a su tabla y corta si no está. Necesita también `cashflow_prov_locales_forma_por_factura.sql`, que hace nullable la fecha de la tabla de pagos: sin él la pantalla se comporta como si el 49 no estuviera. **El día que se corre el tablero no se mueve un peso**: las dos aperturas que hay en producción quedan como `NETO` y se proyectan igual. Medido el 03/11/2026 con la planilla vacía: las series, sus ejes y la auditoría dan idénticas al centavo con el código de `develop` y con el de esta rama.
 
+### Proveedores Locales: N pagos por comprobante y un cheque para varias facturas (`feature/prov-locales-pago-agrupado`)
+
+La planilla de pagos acepta **N filas por comprobante** —tres echeqs en tres fechas, también si está en cuotas— y un **pago agrupado**: un cheque para varias facturas del mismo proveedor, repartido en orden de vencimiento. Ver *Un comprobante pagado con varios medios* y *Un cheque para varias facturas* en `README-proveedores-locales.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 64 | `sql/cashflow_prov_locales_pago_n_medios.sql` | Cambia el `CHECK` de `ORDEN` de `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO` a `ORDEN >= 1`, en una transacción. El tope (50 filas por comprobante) vive en el código | La planilla funciona como antes —hasta dos medios, y uno solo en cuotas— y la pestaña avisa con el nombre del script |
+| 65 | `sql/cashflow_prov_locales_pago_agrupado.sql` | Agrega `GRUPO_PAGO` a la tabla de medios, con un índice filtrado: la marca del pago agrupado | No hay pago agrupado: cada fila es su factura, vacío es el neto y 0 es error, y la pestaña avisa con el nombre del script |
+
+Contra `central`, **el 64 después del 49** (`cashflow_prov_locales_excedente_parcial.sql`) y **el 65 después del 64**: cada uno corta si falta el anterior. **El día que se corren el tablero no se mueve un peso**: ninguno toca filas. Medido el 22/11/2026 con la planilla vacía: las 35 series del proveedor dan idénticas al centavo antes y después del cambio, `PAGOS_TODO` en $ 1.173.819.101,80 y las dos particiones cierran.
+
 ### Alquileres: la proyección por local y Parámetros › Alquileres (`feature/alquileres-proyeccion`)
 
 Pestaña *RRHH y Operativos › Alquileres* —de `PENDIENTE` a `DATOS`— con la proyección por local desde la app de alquileres y la venta por local, y la sub-pestaña *Parámetros › Alquileres*. En esta rama no entraba al tablero; entra con la siguiente, abajo. Ver `README-alquileres.md`.
@@ -555,9 +566,13 @@ En este orden, contra `central`:
 -- 61. sql/cashflow_alquileres_excluir_factura.sql  (Alquileres: excluir facturas que no se pagan por aca)
 -- 62. sql/cashflow_alquileres_local_razon_conceptos.sql  (Alquileres: que conceptos factura cada razon social de un local)
 -- 63. sql/cashflow_ventas_mix_corte_finde.sql   (Ventas: el corte de fin de semana del mix de cobro; Fiserv desde el viernes)
+-- 64. sql/cashflow_prov_locales_pago_n_medios.sql  (Prov. Locales: N pagos por comprobante, tambien en cuotas)
+-- 65. sql/cashflow_prov_locales_pago_agrupado.sql  (Prov. Locales: un cheque para varias facturas)
 ```
 
 **El 63 va después del 35**, al que le agrega una columna. Corrido antes, lo dice y no hace nada.
+
+**El 64 va después del 49 y el 65 después del 64**: cada uno corta si falta el anterior. Ver *Proveedores Locales: N pagos por comprobante y un cheque para varias facturas*, más arriba.
 
 **El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento. **El 57, `sql/cashflow_calendario_permisos.sql`, también va contra `apps`**, antes de publicar el código de Calendario: le da la edición de Calendario a quien hoy edita Generales.
 
@@ -2224,7 +2239,9 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | --- | --- | --- |
 | | Falta la tabla de fechas de pago | danger |
 | | Falta `cashflow_prov_locales_fuente_fecha.sql` | warning |
-| | Falta `cashflow_prov_locales_pago_medio.sql`: no se puede pagar con dos medios | warning |
+| | Falta `cashflow_prov_locales_pago_medio.sql`: no se puede pagar con varios medios | warning |
+| | Falta `cashflow_prov_locales_pago_n_medios.sql`: hasta dos medios, y uno solo en cuotas | warning |
+| | Falta `cashflow_prov_locales_pago_agrupado.sql`: no se puede cargar un cheque para varias facturas | warning |
 | | Falta la tabla de exclusión | warning |
 | | Falta la tabla del maestro | danger |
 | | Maestro vacío | warning |
@@ -2238,7 +2255,7 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | Cronograma | No se pudo resolver el cronograma | danger |
 | | Vencidos del cronograma sin fecha de pago | warning |
 | | Vencidos fuera del cronograma sin fecha de pago | warning |
-| | Comprobantes en dos medios que ya no coinciden con su pendiente | warning |
+| | Comprobantes en varios medios que ya no coinciden con su pendiente | warning |
 | | Sin vencimiento ni plazo | warning |
 | | Proveedores con rubro excluido | info |
 | | Proveedores con deuda fuera del maestro | warning |
