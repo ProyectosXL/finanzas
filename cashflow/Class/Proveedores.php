@@ -121,11 +121,28 @@ class Proveedores {
     const SCRIPT_MEDIO = 'sql/cashflow_prov_locales_pago_medio.sql';
 
     /**
-     * A lo sumo dos medios por comprobante. Una tercera fila no es un tercer
-     * medio: casi siempre es un comprobante copiado de mas, y aceptarla
-     * obligaria a elegir cual de las tres sobra.
+     * CUANTAS FILAS PUEDE TENER UN COMPROBANTE EN LA PLANILLA: N, con un tope.
+     *
+     * Una factura se paga en N veces -tres echeqs en tres fechas, un echeq y
+     * dos transferencias- y cada vez es una fila. El tope no es de negocio: es
+     * una red contra un copiar y pegar de mas. Cincuenta filas de una misma
+     * factura no describen ningun pago real, y aceptarlas dejaria el
+     * comprobante partido en cincuenta columnas del eje sin que nadie lo haya
+     * querido. ORDEN es TINYINT en la base (255), asi que el tope fisico esta
+     * lejos; el que decide es este, y vive solo aca: el CHECK del script dice
+     * ORDEN >= 1 para no ser una segunda copia del numero.
      */
-    const MAX_MEDIOS = 2;
+    const MAX_PARTES = 50;
+
+    /**
+     * SIN sql/cashflow_prov_locales_pago_n_medios.sql el CHECK de ORDEN acepta
+     * 1 y 2: el tope es el de antes, dos medios, y un comprobante en cuotas se
+     * carga con uno solo. Ver capacidadImportacion().
+     */
+    const PARTES_SIN_SCRIPT = 2;
+
+    /** El script que deja pasar N partes por comprobante */
+    const SCRIPT_N_MEDIOS = 'sql/cashflow_prov_locales_pago_n_medios.sql';
 
     /**
      * Cuanto se tolera entre un IMPORTE de la planilla y el neto a pagar para
@@ -196,6 +213,9 @@ class Proveedores {
 
     /** @var bool|null Cache de si CLASIFICACION ya acepta COMPENSADA */
     private $conCompensada = null;
+
+    /** @var bool|null Cache de si ORDEN ya acepta N partes */
+    private $conNMedios = null;
 
     /** @var array|null Cache del % de excedente de este pedido. Ver getPorcExcedente() */
     private $porcExcedente = null;
@@ -386,6 +406,70 @@ class Proveedores {
         $this->conCompensada = ($row && intval($row['N']) > 0);
 
         return $this->conCompensada;
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_prov_locales_pago_n_medios.sql: el CHECK de
+     * ORDEN acepta mas de dos partes.
+     *
+     * SE MIRA EL CHECK Y NO UNA COLUMNA porque el script no agrega ninguna: lo
+     * unico que cambia es que la base deja de rechazar la tercera parte. Sin
+     * el, una tercera fila fallaria a mitad de la transaccion de la
+     * importacion; con este chequeo la planilla la rechaza antes, nombrando el
+     * script.
+     *
+     * Necesita el script del excedente (el undecimo): un comprobante en cuotas
+     * pagado en N veces se proyecta con proyectarPagoImportado(), que se apoya
+     * en el pendiente al importar.
+     *
+     * @return bool
+     */
+    public function tablaNMediosCreada() {
+        if ($this->conNMedios !== null) {
+            return $this->conNMedios;
+        }
+
+        if (!$this->tablaExcedenteCreada()) {
+            $this->conNMedios = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COUNT(*) AS N FROM sys.check_constraints
+             WHERE name = 'CK_RO_T_CF_PLMED_ORDEN' AND definition LIKE '%>=%'");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar cuántas partes acepta un pago importado'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->conNMedios = ($row && intval($row['N']) > 0);
+
+        return $this->conNMedios;
+    }
+
+    /**
+     * QUE PUEDE GUARDAR LA IMPORTACION DE PAGOS CON LOS SCRIPTS QUE HAY CORRIDOS,
+     * para compararImportacion(). La regla pura no mira la base: lo recibe.
+     *
+     *   partes    cuantas filas puede tener un comprobante: MAX_PARTES con el
+     *             script de N medios, PARTES_SIN_SCRIPT sin el
+     *   cuotas    si un comprobante en cuotas se puede pagar en varias filas
+     *   n_medios  si el script esta corrido, para nombrarlo cuando falta
+     *
+     * @return array ['partes' => int, 'cuotas' => bool, 'n_medios' => bool]
+     */
+    public function capacidadImportacion() {
+        $n = $this->tablaNMediosCreada();
+
+        return [
+            'partes' => $n ? self::MAX_PARTES : self::PARTES_SIN_SCRIPT,
+            'cuotas' => $n,
+            'n_medios' => $n
+        ];
     }
 
     /* ====================================================================
@@ -658,6 +742,16 @@ class Proveedores {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_COMPENSADA . '. Mientras '
                 . 'tanto, un proveedor que paga una factura de más y otra de menos no se puede compensar '
                 . 'en su total: la planilla deja sus filas en error, nombrando el script, y todo lo demás '
+                . 'funciona igual.');
+        }
+
+        /* Sin N medios tampoco cambia ningun numero de hoy: la planilla acepta
+           hasta dos filas por comprobante, y una sola si esta en cuotas, como
+           antes. Atencion. */
+        if ($this->tablaExcedenteCreada() && !$this->tablaNMediosCreada()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_N_MEDIOS . '. Mientras '
+                . 'tanto un comprobante se puede pagar con dos medios como máximo, y uno en cuotas con '
+                . 'uno solo: la planilla rechaza las filas de más nombrando el script, y todo lo demás '
                 . 'funciona igual.');
         }
 
@@ -2865,7 +2959,7 @@ class Proveedores {
                     $resumen['vencidos_resueltos']++;
                 }
 
-                if ($fila['partes'] === self::MAX_MEDIOS) {
+                if ($fila['partes'] === self::PARTES_SIN_SCRIPT) {
                     $resumen['dos_medios']++;
 
                     if ($fila['aviso'] !== null) {
@@ -2946,7 +3040,7 @@ class Proveedores {
             return [self::unMedio($grupo[0], $pagos, $aperturas, $retCfg, $excedente, $hoy, $forzada)];
         }
 
-        if (count($grupo) === self::MAX_MEDIOS) {
+        if (count($grupo) === self::PARTES_SIN_SCRIPT) {
             return self::dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg, $excedente, $hoy, $forzada);
         }
 
@@ -3715,7 +3809,7 @@ class Proveedores {
 
         foreach ($grupo as $i => $f) {
             $grupo[$i]['grupo'] = $grupo[0]['linea'];
-            $grupo[$i]['partes'] = self::MAX_MEDIOS;
+            $grupo[$i]['partes'] = self::PARTES_SIN_SCRIPT;
             $grupo[$i]['parte'] = $i + 1;
         }
 

@@ -566,8 +566,8 @@ $sql = file_get_contents(__DIR__ . '/../sql/cashflow_prov_locales_pago_medio.sql
 chequear('el CHECK de la forma es FORMAS_CRONOGRAMA', true,
     preg_match("/CHECK \(FORMA_PAGO IN \('ECHEQ', 'TRANSFERENCIA'\)\)/", $sql) === 1
     && ProveedoresCategorias::FORMAS_CRONOGRAMA === ['ECHEQ', 'TRANSFERENCIA']);
-chequear('el ORDEN va de 1 a MAX_MEDIOS', true,
-    strpos($sql, 'CHECK (ORDEN IN (1, 2))') !== false && Proveedores::MAX_MEDIOS === 2);
+chequear('el ORDEN nace de 1 a 2: el tope sin el script de N medios', true,
+    strpos($sql, 'CHECK (ORDEN IN (1, 2))') !== false && Proveedores::PARTES_SIN_SCRIPT === 2);
 chequear('la clave con la collation de Tango', 3,
     preg_match_all('/(COD_PROVEE|T_COMP|N_COMP)\s+VARCHAR\(\d+\)\s+COLLATE Latin1_General_BIN NOT NULL/', $sql));
 chequear('una parte vigente por orden, con un indice filtrado', true,
