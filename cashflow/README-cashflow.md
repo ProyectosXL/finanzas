@@ -479,6 +479,16 @@ Los tres contra `central`, reejecutables: el 60 después del 53, el 61 después 
 - **Las imputaciones viejas dejan de leerse con el código** (y el 60 las borra): hasta que se reimputen las dos vigentes —SACORR A0000200000467 y SAARCO A0001300017366, ya pagadas—, noviembre sube **$ 42.294.950,15** (Gurruchaga y Distrito Arcos).
 - **Los fijos cargados en el período abierto** (noviembre) suben el horizonte **$ 12.866.764,43**.
 
+### Ventas: el corte de fin de semana (`feature/ventas-corte-fin-de-semana`)
+
+Con Fiserv a 1 día, la cobranza de las ventas de viernes a domingo se proyectaba el lunes y Fiserv la acredita el martes (test 86). Cada nodo del mix de cobro tiene ahora un **corte de fin de semana** —*No aplica*, *Desde el viernes*, *Desde el sábado*—, heredado como los días: dentro del corte, los días se cuentan desde el primer hábil después del domingo. Ver *El corte de fin de semana* en `README-ventas.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 63 | `sql/cashflow_ventas_mix_corte_finde.sql` | Agrega `CORTE_FINDE` (con `CHECK`, nullable, sin default) a `RO_T_CASHFLOW_VENTAS_MIX_NODO` y deja Fiserv (Procesadora) en *Desde el viernes* donde no tenga un corte cargado, con `USUARIO_MODIF` = el nombre del script. No borra nada | Sin corte: la cobranza de siempre. En Parámetros la columna *Corte finde* se ve deshabilitada y nombra el script |
+
+Contra `central`, reejecutable, **después del 35** y al publicar el código. **Mueve la cobranza de Fiserv de fecha, no de total**: medido el 22/11/2026, $ 169.981.675,18 cambian de día dentro del horizonte y el total baja $ 7.646.142,79, lo que cruza el borde del eje. Todo lo demás da igual al último bit, y sin el script el código da lo mismo que `develop` (486 celdas).
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -544,7 +554,10 @@ En este orden, contra `central`:
 -- 60. sql/cashflow_alquileres_imputacion_razon.sql  (Alquileres: tipos de retencion e imputacion por razon social; BORRA las imputaciones viejas)
 -- 61. sql/cashflow_alquileres_excluir_factura.sql  (Alquileres: excluir facturas que no se pagan por aca)
 -- 62. sql/cashflow_alquileres_local_razon_conceptos.sql  (Alquileres: que conceptos factura cada razon social de un local)
+-- 63. sql/cashflow_ventas_mix_corte_finde.sql   (Ventas: el corte de fin de semana del mix de cobro; Fiserv desde el viernes)
 ```
+
+**El 63 va después del 35**, al que le agrega una columna. Corrido antes, lo dice y no hace nada.
 
 **El 52, `sql/cashflow_alquileres_permisos.sql`, va contra `apps`** como el de permisos de edición, en cualquier momento. **El 57, `sql/cashflow_calendario_permisos.sql`, también va contra `apps`**, antes de publicar el código de Calendario: le da la edición de Calendario a quien hoy edita Generales.
 

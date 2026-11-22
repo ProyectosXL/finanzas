@@ -164,6 +164,13 @@ class MixCobroGuardadoPrueba extends MixCobro {
         return $this->nodos;
     }
 
+    /** Si se corrio el script del corte de fin de semana */
+    public $columna = true;
+
+    public function columnaCorte() {
+        return $this->columna;
+    }
+
     protected function conexionEscritura() {
         $this->conexiones++;
 
@@ -252,3 +259,40 @@ foreach (['getMixCobro', 'saveMixCobro', 'addMixCobro'] as $accion) {
     chequear("$accion: retirada del controller", 0, substr_count($ctrlMG, "case '" . $accion . "':"));
     chequear("$accion: y del mapa", 0, substr_count($authMG, "'" . $accion . "'"));
 }
+
+seccion('el corte de fin de semana: se guarda con su auditoria, y sin el script no');
+
+$pruebaCorte = new MixCobroGuardadoPrueba();
+$pruebaCorte->nodos = arbolMG();
+
+$sinColumna = new MixCobroGuardadoPrueba();
+$sinColumna->nodos = arbolMG();
+$sinColumna->columna = false;
+
+chequearLanza('sin el script, un corte nuevo se rechaza nombrando el script', function () use ($sinColumna) {
+    $sinColumna->guardarCanal('LOCALES', [['id' => 2, 'corte' => 'VIERNES']], 'prueba');
+}, 'Falta correr sql/cashflow_ventas_mix_corte_finde.sql: hasta entonces el corte de fin de semana no se puede guardar.');
+chequear('antes de abrir la conexion de escritura', [0, []], [$sinColumna->conexiones, $sinColumna->escritos]);
+
+if (!Pruebas::hayBase()) {
+    Pruebas::saltear('sin conexion a la base no hay transaccion que abrir');
+} else {
+    // La transaccion se abre y se confirma sin escribir nada: escribirNodo()
+    // es el de la subclase, que solo anota.
+    $conexionCorte = new Conexion;
+    $pruebaCorte->cid = $conexionCorte->conectar('central');
+    $sinColumna->cid = $pruebaCorte->cid;
+
+    chequear('cambiar el corte de Tarjeta escribe solo esa columna', 1,
+        $pruebaCorte->guardarCanal('LOCALES', [['id' => 2, 'corte' => 'VIERNES']], 'prueba'));
+    chequear('con el usuario de la auditoria', [['id' => 2, 'campos' => ['CORTE_FINDE' => 'VIERNES'], 'usuario' => 'prueba']],
+        $pruebaCorte->escritos);
+    chequear('sin el script el resto se guarda igual (el corte vacio no es un cambio)', 1,
+        $sinColumna->guardarCanal('LOCALES', [['id' => 1, 'dias' => '2', 'corte' => '']], 'prueba'));
+}
+chequear('el UPDATE admite la columna del corte', true,
+    strpos($fuenteMix, "\$columnas = ['NOMBRE', 'NIVEL', 'PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION', 'CORTE_FINDE'];") !== false);
+chequear('la lectura pide la columna solo si existe', true,
+    strpos($fuenteMix, "\$corte = \$this->columnaCorte() ? ', CORTE_FINDE' : '';") !== false);
+chequear('el corte se guarda con saveMixArbol, la misma accion y el mismo permiso que el resto del mix', 1,
+    substr_count($authMG, "'saveMixArbol' => [['parametros', 'VENTAS']],"));

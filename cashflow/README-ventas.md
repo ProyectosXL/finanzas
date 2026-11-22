@@ -137,6 +137,23 @@ Es el mismo SP que corre el job, reejecutable: borra y repone mes por mes, en un
 | La tabla | El SP la saltea y carga la venta igual: no hay dónde ver qué quedó fuera |
 | Los SP | El histórico sigue con el ecommerce inflado y sin XL Lomas |
 
+### 8. El corte de fin de semana
+
+**Este script NO se corrió todavía.** Se corre **en el mismo momento de publicar** el código de `feature/ventas-corte-fin-de-semana`, contra `central`, **después** de `sql/cashflow_ventas_mix_nodo.sql` (le agrega una columna a su tabla; si la tabla no está, lo dice y no hace nada):
+
+```sql
+-- sql/cashflow_ventas_mix_corte_finde.sql
+```
+
+Agrega `CORTE_FINDE` al árbol del mix, con su `CHECK`, y deja **Fiserv en *Desde el viernes*** en todo nodo de nivel Procesadora que se llame Fiserv, **sólo donde no tenga un corte cargado**. Cada nodo tocado queda con `USUARIO_MODIF` = el nombre del script y la fecha en que corre, y el script los imprime con su camino. Es reejecutable: no borra nada ni pisa un corte ya cargado. Hoy toca un solo nodo: `Locales › Tarjeta › Crédito › Fiserv`.
+
+| Si no se corre | |
+| --- | --- |
+| Ventas y el tablero | Sin corte: la cobranza de siempre, al último bit |
+| Parámetros | La columna *Corte finde* se ve deshabilitada, nombrando el script, y la tarjeta avisa qué correr |
+
+**A diferencia de los pasos 5 y 6, esto SÍ mueve la proyección**, pero sólo de fecha: la cobranza de Fiserv de las ventas de viernes a domingo pasa del lunes al martes. El total del horizonte no cambia, salvo lo que cruza el borde del eje. Medido: ver *El corte de fin de semana*.
+
 ---
 
 ## Modelo de cálculo
@@ -149,11 +166,14 @@ VentaDiaria(c, d)      = VentaCanal(c, M(d)) / (días_del_mes − feriados_comer
 Bruto(c, h, d)         = VentaDiaria(c, d) × %efectivo(h)
 Costo(c, h, d)         = Bruto(c, h, d) × (costo + tasa acumulados de h)
 Neto(c, h, d)          = Bruto(c, h, d) − Costo(c, h, d)
-FechaAcreditación      = d + Días(h)
+Base(d, h)             = d
+                         o, si d entra en el corte de fin de semana de h,
+                         el primer día bancario hábil después del domingo de esa semana
+FechaAcreditación      = Base(d, h) + Días(h)
                          → corrida al PRÓXIMO día bancario hábil si cae en no hábil
 ```
 
-`h` es una **hoja** del árbol del mix de cobro del canal: su % efectivo es el producto de los porcentajes de su rama, su costo y su tasa se suman a lo largo de la rama y sus días son los del nivel más cercano que los tenga. Ver *Mix de cobro: el árbol*. El costo cae en la **misma fecha** que el bruto del que sale.
+`h` es una **hoja** del árbol del mix de cobro del canal: su % efectivo es el producto de los porcentajes de su rama, su costo y su tasa se suman a lo largo de la rama, y sus días y su corte de fin de semana son los del nivel más cercano que los tenga. Ver *Mix de cobro: el árbol*. La fecha la calcula **una sola función**, `MixCobro::fechaAcreditacion()`: ver *El corte de fin de semana*. El costo cae en la **misma fecha** que el bruto del que sale.
 
 **El árbol es el del MES DE LA VENTA `M(d)`**: el constante, o el del mes si el canal está en mix variable y ese mes tiene mix propio. Una venta del 30/11 que se acredita en diciembre se cobra con el mix de noviembre. Ver *Mix de cobro por mes*.
 
@@ -169,6 +189,8 @@ No se mezclan nunca:
 | **Bancario** | Acreditación de cobranza | `RO_T_CALENDARIO.DIA_LABORAL = 1`, en la conexión `power`. Excluye sábados, domingos y feriados nacionales. |
 
 Como el divisor de la venta diaria descuenta los feriados de comercio, el total mensual se conserva. Como los sábados y domingos de cobranza se corren al lunes, la cobranza se concentra los lunes: es un **efecto del corrimiento**, no una regla aparte.
+
+El **corte de fin de semana** sí es una regla aparte, y es de quien acredita: Fiserv presenta junto el lote del fin de semana y cuenta el plazo desde el primer hábil siguiente. Mueve la base desde la que se cuentan los días, no el calendario: la base y la acreditación se corren con el mismo calendario bancario. Para decidir si una venta entra en el corte cuenta **el día de la semana de la venta**, no el calendario: un viernes feriado sigue siendo viernes.
 
 ### Pestaña Análisis de Ventas
 
@@ -283,7 +305,7 @@ La grilla de cobranza de la sub-pestaña Proyección es un **árbol que se abre 
 
 | Columna | Qué es |
 | --- | --- |
-| Concepto | El nombre del nodo con la sangría de su nivel. El tooltip dice el nivel, el camino completo y, en una hoja que hereda los días, de quién |
+| Concepto | El nombre del nodo con la sangría de su nivel. El tooltip dice el nivel, el camino completo y, en una hoja que hereda los días, de quién. Si el nodo tiene corte de fin de semana, también: *"Corte de fin de semana: desde el viernes (hereda de Fiserv)"* |
 | % efectivo | Qué parte de la venta del canal cobra esa rama: el producto de los porcentajes de su cadena |
 | Costo + tasa | En una hoja, el acumulado de su rama. En un nodo con ramas debajo —y en la fila del canal—, el **promedio de sus hojas ponderado por % efectivo**: lo que cuesta cobrar la rama entera |
 | Días | Los de la hoja. En los subtotales va vacía: cada hoja tiene los suyos |
@@ -297,7 +319,8 @@ La grilla de cobranza de la sub-pestaña Proyección es un **árbol que se abre 
 - **El pie muestra siempre tres filas**, sea cual sea el selector: *Cobranza bruta*, *Costos de cobro* (negativo) y *Cobranza neta*. Los tres importes vienen del servidor —el neto se calcula como bruto − costo celda por celda—, así que bruta − costos = neta en cada columna, sin que la pantalla reste nada.
 - **Los KPIs** de cobranza del tramo y del horizonte muestran la neta al lado de la bruta.
 - **Las hojas al 0%** se muestran igual, en cero. Los nodos inhabilitados —y todo lo que cuelga de ellos— no aparecen.
-- **La pantalla no resuelve nada**: el % efectivo, la carga, los días y los importes de cada nodo vienen de `Ventas::cobranzaPorHojas()`, que usa la regla de `MixCobro::resolver()`.
+- **La pantalla no resuelve nada**: el % efectivo, la carga, los días y los importes de cada nodo vienen de `Ventas::cobranzaPorHojas()`, que usa la regla de `MixCobro::resolver()` y la fecha de `MixCobro::fechaAcreditacion()`.
+- **Las ventas de fin de semana, en el tooltip de la celda.** En una hoja con corte, cada celda **diaria** que recibe ventas corridas por el corte lo dice: *"Venta de fin de semana (corte desde el viernes): ventas del vie 20/11 al dom 22/11, base lunes 23/11, + 1 día"*. Es lo que explica por qué la plata del viernes aparece el martes. El texto lo arma el servidor (`Ventas::textoCorte()`, en `cobranza.corte_tooltip`). Las columnas mensuales no llevan: juntarían decenas de fines de semana. Nada más cambia en la grilla.
 - **El mix de cada mes.** Si algún canal tiene mix propio en algún mes de la ventana, arriba del árbol aparece **"Mix de las ventas de: [mes ▾]"**, que arranca en el mes en curso. Al elegir un mes, las columnas *% efectivo*, *Costo + tasa* y *Días* pasan a las de ese mes, **sin recargar**: el servidor ya manda lo resuelto para cada nodo en cada mes de venta (`cobranza.por_mes`). El canal que usó su mix propio en ese mes lleva la etiqueta *mix propio*, y un nodo que ese mes no está en juego se ve atenuado, con un guion. **Los importes no cambian con el selector**: cada columna de fecha ya trae cada venta cobrada con el mix de su mes, y el tooltip lo aclara —en la columna de diciembre hay ventas de noviembre—. Con todo en constante no hay `por_mes` y el selector no aparece. Las filas del árbol son los nodos en juego en *algún* mes: un nodo que sólo se usa en diciembre es una fila más.
 - **Exportar** baja lo que se ve: las ramas cerradas no van, y los importes son los de la medida elegida. La tabla no se ordena por columna: es un árbol, y ordenar separaría cada nodo de su rama.
 
@@ -458,9 +481,9 @@ LOCALES
    └─ Crédito                       80%
       ├─ Payway                     10%   costo 4,90%           1 día
       ├─ Mercado Pago               10%   (sin costo)          18 días
-      ├─ Fiserv                     60%   costo 4,90%           7 días
-      │  ├─ 3 cuotas                30%            tasa 0,90%   1 día
-      │  └─ Resto                   70%                      (hereda 7)
+      ├─ Fiserv                     60%   costo 4,90%           7 días   corte desde el viernes
+      │  ├─ 3 cuotas                30%            tasa 0,90%   1 día    (hereda el corte)
+      │  └─ Resto                   70%                      (hereda 7)  (hereda el corte)
       └─ Promo Bancarias            20%   costo 4,90%          15 días
 ECOMMERCE
 ├─ Vtex                             70%
@@ -495,7 +518,7 @@ ECOMMERCE
 - En **Ecommerce** todo cuelga de un marketplace: su primer nivel sólo admite `MARKETPLACE`. En **los demás canales** el primer nivel es `MEDIO_PAGO`, y `MARKETPLACE` no existe.
 - **Franquicias y Mayoristas** usan el mismo árbol y hoy tienen un solo nivel. El modelo no les impide crecer, y el editor les permite cargar costo y tasa igual que a los demás.
 - El nombre es **único entre hermanos**, sin distinguir mayúsculas ni acentos —como la collation de la columna—. El mismo nombre en otra rama sí vale: "Mercado Pago" como medio de pago de Mercado Libre y como procesadora de Crédito son nodos distintos.
-- Porcentaje, costo y tasa entre 0% y 100%; días enteros y no negativos.
+- Porcentaje, costo y tasa entre 0% y 100%; días enteros y no negativos; el corte de fin de semana, uno de *No aplica*, *Desde el viernes* o *Desde el sábado*, o vacío. La lista es `MixCobro::CORTES` y la misma del `CHECK` de la columna: cambian juntas.
 
 **La regla** (`MixCobro::resolver()`, la **única** implementación: la usan el motor, la pestaña Ventas, Parámetros y el tablero):
 
@@ -504,7 +527,8 @@ ECOMMERCE
 | **Activo y hoja** | Un nodo inactivo saca de juego **todo su subárbol**. Una hoja es un nodo en juego sin hijos en juego: inhabilitar "3 cuotas" y "Resto" convierte a Fiserv en hoja sin borrar nada, y entonces Fiserv necesita días |
 | **% efectivo** | El producto de los porcentajes de la cadena: Tarjeta 90% × Crédito 80% × Fiserv 60% × 3 cuotas 30% = 12,96% de la venta del canal |
 | **Costo y tasa** | **Se suman** a lo largo de la rama, con null como cero. Cada nivel carga sólo lo suyo y la hoja paga todo: Fiserv 4,90% + "3 cuotas" 0,90% = 5,80%. Los porcentajes **ya incluyen IVA e impuestos**. La comisión del marketplace es costo de cobro y entra en la misma fila del tablero |
-| **Días** | **Gana el nivel más cercano** que los tenga; no se suman, porque el plazo lo pone quien acredita. Se cuentan desde el día de venta y se corren al próximo hábil bancario, como siempre |
+| **Días** | **Gana el nivel más cercano** que los tenga; no se suman, porque el plazo lo pone quien acredita. Se cuentan desde el día de venta —o desde la base, si la venta entra en el corte de fin de semana— y se corren al próximo hábil bancario |
+| **Corte de fin de semana** | **Se hereda como los días**: gana el nivel más cercano que lo tenga, y si nadie lo tiene es *No aplica*. Se carga en Fiserv y lo heredan sus cuotas. *No aplica* cargado en un nodo corta la herencia: esa cuota se acredita como siempre aunque su procesadora tenga corte. **Es un dato fijo del nodo**: no se abre por mes. Ver *El corte de fin de semana* |
 | **Cuotas** | Una venta en cuotas se acredita **entera** a los días de su hoja. No se reparte por mes |
 
 Y lo que exige para que la venta del canal llegue entera a la caja:
@@ -514,11 +538,11 @@ Y lo que exige para que la venta del canal llegue entera a la caja:
 - El costo + tasa acumulado de una hoja es menor a 100%.
 - El canal tiene al menos una hoja: sin ninguna, su venta desaparecería del cashflow.
 
-**Vacío no es lo mismo en todos los campos, y es a propósito.** Un dato que falta es null y avisa —la regla del módulo—, **con una excepción explícita: el costo y la tasa vacíos valen cero y no avisan**, porque es una decisión de negocio que muchos nodos no tengan costo. Los días vacíos son "los define un nivel de arriba", y 0 días es "se acredita el mismo día".
+**Vacío no es lo mismo en todos los campos, y es a propósito.** Un dato que falta es null y avisa —la regla del módulo—, **con una excepción explícita: el costo y la tasa vacíos valen cero y no avisan**, porque es una decisión de negocio que muchos nodos no tengan costo. Los días vacíos son "los define un nivel de arriba", y 0 días es "se acredita el mismo día". El corte de fin de semana vacío es lo mismo que los días vacíos —"lo define un nivel de arriba"—, y si nadie arriba lo tiene **no es un dato que falta**: es que no hay corte, y no avisa. *No aplica* es un "no" cargado.
 
 ### Mix de cobro: el editor de Parámetros
 
-Se administra desde **Parámetros → Ventas → Mix de Cobro y Plazos**, un bloque por canal con columnas Nombre, Nivel, %, Costo %, Tasa %, Días, Activo y Última edición.
+Se administra desde **Parámetros → Ventas → Mix de Cobro y Plazos**, un bloque por canal con columnas Nombre, Nivel, %, Costo %, Tasa %, Días, Corte finde, Activo y Última edición.
 
 - **El tipo de nivel, en color** (ver la tabla de tipos en *Mix de cobro: el árbol*).
   - Cada nodo tiene una barra del color de su tipo, después de la sangría y pegada al nombre.
@@ -527,17 +551,18 @@ Se administra desde **Parámetros → Ventas → Mix de Cobro y Plazos**, un blo
   - Un nodo fuera de juego conserva el color de su tipo, atenuado, y lo mismo el desplegable de un nodo con hijos. La fila de cada canal no es un nivel y va sin color.
   - El desplegable de nivel del formulario de alta también toma el color del tipo elegido.
   - Exportar no cambia: los colores no bajan al Excel.
-- **Lo heredado, a la vista.** Al lado de cada campo, en gris, lo que resuelve la regla para ese nodo: el costo + tasa de su rama ("rama: 5,80% (costo 4,90% + tasa 0,90%)") y de quién hereda los días ("hereda 7 de Fiserv"). Es lo que hace entendible la herencia.
+- **Lo heredado, a la vista.** Al lado de cada campo, en gris, lo que resuelve la regla para ese nodo: el costo + tasa de su rama ("rama: 5,80% (costo 4,90% + tasa 0,90%)"), de quién hereda los días ("hereda 7 de Fiserv") y de quién hereda el corte ("hereda Desde el viernes de Fiserv"). Es lo que hace entendible la herencia.
+- **El corte de fin de semana** es un selector —vacío, *No aplica*, *Desde el viernes*, *Desde el sábado*— al lado de *Días*. El encabezado de la columna lo explica: *"Las ventas desde ese día hasta el domingo se toman como del primer hábil siguiente y desde ahí se cuentan los días"*. Entra en la previsualización y en el guardado del canal como cualquier otro campo, con su auditoría (*Última edición*), y el servidor rechaza un valor fuera de la lista. **En un mes se ve como texto**, con *(del constante)*: no cambia por mes, y el servidor rechaza uno distinto en un mes. **Sin `sql/cashflow_ventas_mix_corte_finde.sql`** el selector se ve deshabilitado nombrando el script, la tarjeta avisa, y el guardado lo rechaza si igual llega uno.
 - **El 100% de cada grupo.** El nodo padre —o el canal, para el primer nivel— muestra la Σ de sus hijos activos, en rojo si no da 100%. Con algún error, el canal lo lista arriba de sus nodos y **Guardar** queda bloqueado diciendo por qué.
 - **La pantalla no tiene la regla.** Lo heredado, las sumas y si se puede guardar salen del servidor: del payload inicial y, mientras se edita, de `previsualizarMixArbol`, que resuelve el canal **como quedaría** con la misma función que el motor. Se consulta al **cambiar de campo**, no en cada tecla; mientras se tipea o se espera la respuesta, Guardar queda bloqueado.
 - **Agregar**, en el encabezado de cada canal (primer nivel) y en cada nodo (hijo): nombre, nivel —sólo los que admite ese lugar—, costo, tasa y días. **No pide porcentaje: lo nuevo entra inhabilitado y en 0%**, así no rompe el 100% de su grupo. Para usarlo hay que encenderlo y reacomodar sus hermanos.
 - **Inhabilitar** es el switch de *Activo*: no se borra nada. Inhabilitar un nodo con ramas debajo pide confirmación y dice cuántas hojas saca de la proyección.
 - **Renombrar** se permite, respetando el único entre hermanos. **Cambiar el nivel de un nodo con hijos no**: si quedó mal, se inhabilita y se crea otro. Un nodo tampoco se mueve de rama.
 - **Guardar** es por canal. Manda el árbol del canal y el servidor escribe **sólo los nodos que cambiaron**, en una transacción, después de volver a validar el canal entero como quedaría: un árbol inválido corta antes de abrir la transacción. Otro canal roto —por una edición directa en la base— no impide guardar este.
-- **Exportar** baja el mix **guardado** de cada canal, con el camino completo de cada nodo, y en los canales con mix variable una fila por nodo **y por cada uno de los doce meses**, diciendo si el mes tiene mix propio o usa el constante. Sale de una tabla escondida que arma el JS (`#tablaMixExport`), no de lo que se está editando.
+- **Exportar** baja el mix **guardado** de cada canal, con el camino completo de cada nodo y su corte de fin de semana, y en los canales con mix variable una fila por nodo **y por cada uno de los doce meses**, diciendo si el mes tiene mix propio o usa el constante. Sale de una tabla escondida que arma el JS (`#tablaMixExport`), no de lo que se está editando.
 - **Sin permiso de edición** (`['parametros', 'VENTAS']`), el árbol se ve sin ningún control. **Sin el script**, también, y la tarjeta dice qué correr.
 
-Las acciones son `previsualizarMixArbol`, `saveMixArbol` y `addMixNodo`, y las del mix por mes, `saveMixModo`, `copiarMixMes` y `quitarMixMes`, todas con `['parametros', 'VENTAS']`. Las del mix plano —`getMixCobro`, `saveMixCobro`, `addMixCobro`— se retiraron, junto con su editor.
+Las acciones son `previsualizarMixArbol`, `saveMixArbol` —que guarda también el corte— y `addMixNodo` —un nodo nuevo entra sin corte: hereda—, y las del mix por mes, `saveMixModo`, `copiarMixMes` y `quitarMixMes`, todas con `['parametros', 'VENTAS']`. Las del mix plano —`getMixCobro`, `saveMixCobro`, `addMixCobro`— se retiraron, junto con su editor.
 
 ### Mix de cobro por mes
 
@@ -553,6 +578,7 @@ Cada canal elige:
 | | |
 | --- | --- |
 | **Mismo árbol, otros valores** | Padre, nivel, nombre y orden son los del constante y se editan sólo ahí. Un mes guarda valores, no nodos: si guardara su propio árbol, renombrar "Crédito" dejaría doce "Crédito" viejos dando vueltas |
+| **El corte de fin de semana no es un valor del mes** | Es de la presentación del lote de quien acredita, no de la estacionalidad: no está en `CAMPOS_MES` ni en las tablas del mes. Un canal en mix variable toma el corte del árbol en todos los meses |
 | **Activo varía por mes** | Apagar "Go Cuotas" sólo en febrero es un caso de negocio. Por eso inhabilitar un nodo en el constante **no** lo apaga solo en los meses: el editor lo ofrece (ver abajo) |
 | **Mes del año, no mes puntual** | El mix de diciembre vale para todos los diciembres del horizonte |
 | **Un mes sin mix propio usa el constante** | Cargar un mes es opcional |
@@ -592,6 +618,60 @@ Cada canal elige:
 - `tests/test_ventas_mix_mes_sql.php` lee el script: reejecutable, con auditoría, sin `DROP` ni escrituras.
 
 El editor se probó además en un navegador sin cabeza, con el JS real y un payload armado por `MixCobro::datosEditor()`: los pasos del checklist, con permiso y sin permiso.
+
+### El corte de fin de semana
+
+> **Nuevo** en `feature/ventas-corte-fin-de-semana`. Origen: test Nº 86 del checklist (17/11/2026).
+
+Antes la acreditación era `día de venta + días`, corrida al próximo hábil. Con Fiserv a 1 día, las ventas de viernes, sábado y domingo se proyectaban el **lunes**, pero Fiserv las acredita el **martes**: presenta junto el lote del fin de semana y cuenta el plazo desde el primer hábil siguiente.
+
+**La regla** (`MixCobro::fechaAcreditacion($fechaVenta, $dias, $corte, $habiles)`, la única: la usa `Ventas::cobranzaPorHojas()`, de donde salen la pestaña y el tablero):
+
+| Corte de la hoja | Ventas que entran | Acreditación |
+| --- | --- | --- |
+| *No aplica* (o nadie lo tiene) | ninguna | `venta + días`, corrida al próximo hábil: la cuenta de siempre |
+| *Desde el viernes* | viernes, sábado y domingo | `base + días`, corrida, con **base = el primer hábil bancario después del domingo** de esa semana |
+| *Desde el sábado* | sábado y domingo | igual; el viernes, como siempre |
+
+Con Fiserv a 1 día y *Desde el viernes*:
+
+| Venta | Sin corte | Con corte |
+| --- | --- | --- |
+| Jueves | viernes | viernes (no entra en el corte) |
+| Viernes, sábado o domingo | lunes | **martes** (base lunes + 1) |
+| Viernes a domingo, con el lunes feriado | martes | **miércoles** (base martes + 1) |
+| Viernes a domingo, con 0 días | lunes | lunes (base lunes + 0) |
+| Viernes, con *Desde el sábado* | lunes | lunes (no entra en el corte) |
+
+- **Cuenta el día de la semana de la venta**: un viernes feriado sigue siendo viernes para el corte. El calendario bancario es el de siempre (`RO_T_CALENDARIO` con los ajustes de *Parámetros › Calendario*), para la base y para la acreditación.
+- **Sólo mueve fechas.** Cada venta se acredita entera, como siempre, otro día. El total no cambia salvo lo que, al correrse, cruza el borde del eje: eso se descarta como cualquier acreditación fuera del horizonte.
+- **Sin corte, al último bit.** La función hace exactamente la cuenta de antes —la misma fecha teórica y el mismo corrimiento—, así que todo nodo en *No aplica* da la cobranza de siempre. `tests/test_mix_cobro.php` lo compara contra la cuenta vieja en 600 combinaciones de día, plazo y corte (vacío y No aplica).
+- **El calendario alcanza.** El motor pide el calendario hasta el fin del eje + lo más lejos que puede caer una venta antes del corrimiento (`Ventas::alcanceAcreditacion()`: el plazo más largo de las hojas en juego, más `MixCobro::MARGEN_CORTE` = 3 días si alguna tiene corte, porque el viernes se cuenta desde el lunes) + 30 días de holgura para el corrimiento.
+- **Lo vendido antes de hoy no se proyecta, con o sin corte.** El motor proyecta la venta desde hoy. Un efecto que se ve los lunes: la cobranza del martes que viene de las ventas de Fiserv del fin de semana pasado **no aparece**, igual que antes no aparecía la del lunes. Es el mismo criterio de siempre: esa venta ya se hizo, y su cobranza no es de la proyección.
+- **El aviso de calendario no cambia**: la base se corre con el mismo `proximoHabil()` del motor, que avisa si a `RO_T_CALENDARIO` le falta un mes.
+
+**Medido contra la base el 22/11/2026**, sólo con lecturas —el `.env` local apunta a producción, así que no se escribió nada, ni siquiera una `#temporal`—. Tres corridas de `Ventas::proyectarCobranzas()`, una detrás de la otra, con el eje del 22/11/2026 al 31/10/2027:
+
+| Corrida | Código | Corte | Resultado contra A |
+| --- | --- | --- | --- |
+| A | `develop` | — | (la referencia). Bruto: tramo $ 1.490.492.501,86, horizonte $ 40.805.151.144,58; costo del horizonte $ 946.907.382,52 |
+| B | esta rama | sin la columna: como queda al publicar sin el script | **idénticas** las 486 celdas, los nodos y los avisos |
+| C | esta rama | Fiserv en *Desde el viernes*, inyectado en memoria como lo deja el script | cambian **sólo** Fiserv, sus dos cuotas y sus ancestros (Tarjeta, Crédito). Franquicias, Mayoristas, Ecommerce y las demás hojas de Locales, idénticos al último bit. Los mismos avisos |
+
+En C, en Locales (bruto):
+
+- **Se mueve de fecha** $ 169.981.675,18; el horizonte baja **$ 7.646.142,79**, que es lo que cruza el borde del eje (la venta de Fiserv *Otras* del viernes 22/10/2027, que pasaba al viernes 29/10 y ahora al lunes 01/11). El costo del horizonte baja $ 374.661,00, el costo de esa misma plata.
+- **Por mes** (C − A): tramo de noviembre −$ 32.520.900,70 y de diciembre +$ 23.729.636,46; mes de diciembre +$ 8.791.264,24; después, lo que cambia de mes por los fines de semana que caen en el cambio de mes (mayo −$ 18.301.495,09 / junio +$ 23.236.754,58, y montos menores en el resto), y octubre-27 −$ 7.646.142,79 (el borde).
+- **Fiserv › 3 (1 día)**: se mueven $ 137.835.478,98 y no cruza nada el borde. En el tramo, por ejemplo: el lunes 30/11 pasa de $ 26.608.009,66 a $ 0 y el martes 01/12 de $ 8.869.336,55 a $ 35.477.346,22. Con el lunes 23/11 feriado, la venta del domingo 22 pasa del martes 24 al **miércoles 25**. Con el martes 08/12 feriado, las del fin de semana del 04/12 caen el miércoles 09.
+- **Fiserv › Otras (7 días), aparte para validarlo con Tesorería**: se mueven $ 51.785.610,97 de fecha y $ 7.646.142,79 cruzan el borde. La venta del **viernes** pasa del viernes siguiente al **lunes subsiguiente** (3 días más tarde); la del sábado y el domingo no cambian (ya caían ese lunes). En el tramo: los viernes 04/12, 11/12 y 18/12 quedan en $ 0 y su plata pasa a los lunes 07/12, 14/12 y 21/12 (este último ya en la columna de diciembre). Si Tesorería dice que el plan de 7 días no se presenta así, se carga *No aplica* en *Otras* desde Parámetros, sin tocar código.
+
+**Las pruebas:**
+- `tests/test_mix_cobro.php`: la regla con Fiserv a 1 día (viernes, sábado y domingo → martes; jueves → viernes; lunes feriado → miércoles; 0 días → lunes; viernes feriado), *Desde el sábado*, *No aplica* y vacío contra la cuenta vieja, la herencia (las cuotas heredan; una cuota con *No aplica* propio no), la validación en el servidor y el guardado.
+- `tests/test_mix_cobro_mes.php`: el mix por mes no toca el corte y rechaza uno distinto en un mes.
+- `tests/test_mix_cobro_guardado.php`: el corte se guarda con su auditoría, y sin el script se rechaza nombrándolo.
+- `tests/test_ventas_cobranza.php`: `cobranzaPorHojas()` con el corte (el total por canal no cambia dentro del horizonte; lo de afuera de Fiserv, idéntico al último bit; el lunes feriado), el calendario que alcanza para la última acreditación con corte, y el tooltip.
+- `tests/test_ventas_mix_corte_sql.php`: el script es reejecutable, no pisa un corte cargado, sella la auditoría y su `CHECK` es `MixCobro::CORTES`.
+- `tests/test_tablas_controles.php`: la columna nueva en el editor y su guardado.
 
 ### El invariante de la migración
 
@@ -779,11 +859,13 @@ sql/RO_V_DOLAR_OFICIAL_BCRA.sql         Vista del T/C de cierre por mes
 sql/cashflow_ventas_mix_nodo.sql        El árbol del mix de cobro y la migración del plano
 sql/cashflow_estructura_costos_cobro.sql  La fila "Costos de cobro" del tablero
 sql/cashflow_ventas_mix_mes.sql         El mix de cobro por mes: modo por canal, meses y valores
+sql/cashflow_ventas_mix_corte_finde.sql El corte de fin de semana en el árbol del mix (y Fiserv desde el viernes)
 sql/cashflow_ventas_excluidas.sql       Lo que queda fuera de la venta, para conciliar contra el libro IVA
 sql/RO_SP_CASHFLOW_VENTAS_HIST_DIA.sql  Stored procedure del histórico diario (tendencias)
 tests/test_ventas_hist_sql.php          Los dos SP calculan igual y la parte E es el complemento de los canales
+tests/test_ventas_mix_corte_sql.php     El script del corte: reejecutable y sin pisar lo cargado
 cashflow/Class/Ventas.php               Motor de proyección
-cashflow/Class/MixCobro.php             El árbol del mix: la regla, el editor y su escritura
+cashflow/Class/MixCobro.php             El árbol del mix: la regla, la fecha de acreditación, el editor y su escritura
 cashflow/Class/Cotizacion.php           Tipo de cambio — punto de acceso del cashflow
 cashflow/Class/Parametros.php           Parámetros (y la lectura del mix plano, como respaldo)
 cashflow/Controller/VentasController.php

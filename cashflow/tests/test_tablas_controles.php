@@ -1128,7 +1128,7 @@ chequear('la tabla del arbol, que no se ordena, y Exportar baja la de todos los 
     substr_count($paramTab, 'data-exportar="tablaMixExport"'),
     substr_count($paramTab, '<tbody id="mixBody">')
 ]);
-chequear('las ocho columnas, en orden', ['Nombre', 'Nivel', '%', 'Costo %', 'Tasa %', 'Días', 'Activo', 'Última edición'],
+chequear('las nueve columnas, en orden: Corte finde al lado de Dias', ['Nombre', 'Nivel', '%', 'Costo %', 'Tasa %', 'Días', 'Corte finde', 'Activo', 'Última edición'],
     (function ($html) {
         $ini = strpos($html, '<table id="tablaMix"');
         $thead = substr($html, $ini, strpos($html, '</thead>', $ini) - $ini);
@@ -1178,6 +1178,37 @@ chequear('inhabilitar un nodo con hijos pide confirmacion', true,
     strpos($paramJs, 'confirmarInhabilitar(el, canal).then(function(ok) {') !== false);
 chequear('sin permiso o sin el script, no se dibujan controles', true,
     strpos($paramJs, "return !!datosMix().editable && Permisos.puedeEditar('mixBody');") !== false);
+
+seccion('Parametros: el corte de fin de semana en el editor y en el guardado');
+
+chequear('la fila del nodo dibuja la celda del corte despues de los dias', 1,
+    substr_count($paramJs, "html += celdaCorteMix(n, editable, enMes);"));
+chequear('con permiso y la columna, un selector que es campo del editor', true,
+    strpos($paramJs, "'<td><select class=\"form-select form-select-sm mixa-campo\" data-campo=\"corte\" '") !== false);
+chequear('las opciones salen del servidor (MixCobro::cortesLista()), con la vacia primero', true,
+    strpos($paramJs, '(mix.cortes || []).map(function(c) {') !== false
+        && strpos($paramJs, "'<option value=\"\"' + (valor === '' ? ' selected' : '') + '></option>'") !== false);
+chequear('sin el script, deshabilitado y nombrando el script; sin data-campo, asi no viaja', true,
+    preg_match('/if \(editable && !enMes && !mix\.corte\) \{\s+return \'<td><select class="form-select form-select-sm" disabled \' \+\s+\'title="Falta correr \' \+ escapar\(mix\.script_corte\)/', $paramJs) === 1);
+chequear('sin permiso o en un mes, texto: sin controles', true,
+    strpos($paramJs, 'if (!editable || enMes) {') !== false);
+chequear('lo heredado en gris: hereda <corte> de <nodo>', true,
+    strpos($paramJs, "? 'hereda ' + rotuloCorte(r.corte) + ' de ' + r.corte_de.nombre") !== false);
+chequear('viaja en la previsualizacion y en el guardado, con el resto de los campos', 1,
+    substr_count($paramJs, "corte: leer('corte')"));
+chequear('Exportar lo baja, el del constante', true,
+    strpos($paramJs, '<th>Días</th><th>Corte finde</th><th>Activo</th>') !== false);
+chequear('el texto de ayuda en el encabezado de la columna', true,
+    strpos($paramTab, 'title="Las ventas desde ese día hasta el domingo se toman como del primer hábil siguiente y desde ahí se cuentan los días.') !== false);
+chequear('las filas de ancho completo cubren la columna nueva', [0, 3, 1],
+    [substr_count($paramJs, 'colspan="8"'), substr_count($paramJs, 'colspan="9"'), substr_count($paramJs, '<td colspan="7" class="text-end">')]);
+
+$mixPhp = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/MixCobro.php'));
+chequear('el servidor lee el campo corte del guardado y lo valida', 1,
+    substr_count($mixPhp, "\$nuevo['CORTE_FINDE'] = self::validarCorte(\$f['corte'], \$quien);"));
+chequear('y Parametros le pasa al editor si existe la columna', true,
+    strpos(str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Parametros.php')),
+        "MixCobro::datosEditor(\$arbol['nodos'], \$arbol['origen'], \$arbol['config'],\n                        \$arbol['corte']);") !== false);
 
 // ============================================================================
 // LAS TRES IMPORTACIONES LEEN EXCEL, Y CON UN SOLO LECTOR

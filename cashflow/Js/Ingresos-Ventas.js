@@ -1674,8 +1674,14 @@
                         (fuera ? '' : porcentajeOVacio(d.hoja ? d.carga : d.carga_ponderada)) + '</td>';
                 html += '<td class="text-center text-muted">' + (!fuera && d.hoja && d.dias !== null ? d.dias : '') + '</td>';
 
+                // Las celdas DIARIAS de una hoja con ventas de fin de semana
+                // corridas por el corte dicen cuáles son, desde qué base y a
+                // cuántos días. El texto lo arma el servidor.
+                var tipsCorte = n.hoja ? ((cob.corte_tooltip || {})[n.clave] || {}) : {};
+
                 cols.forEach(function(col) {
-                    html += celdaImporte(conSigno(medidaCobranza, valorEn(grilla, n.clave, col)), col);
+                    html += celdaImporte(conSigno(medidaCobranza, valorEn(grilla, n.clave, col)), col,
+                        col.rama === 'dias' ? tipsCorte[col.clave] : '');
                 });
 
                 html += '</tr>';
@@ -1742,8 +1748,10 @@
     }
 
     /**
-     * El tooltip del concepto: el nivel del nodo y de dónde salen sus días.
-     * Es lo que hace legible la herencia sin abrir Parámetros.
+     * El tooltip del concepto: el nivel del nodo, de dónde salen sus días y,
+     * si tiene, su corte de fin de semana y de quién lo hereda. Es lo que
+     * hace legible la herencia sin abrir Parámetros. El rótulo del corte
+     * viene armado del servidor (corte_rotulo): la pantalla no tiene la lista.
      */
     function tituloNodo(n) {
         var t = n.rotulo + ' · ' + titulo(n.canal) + ' › ' +
@@ -1751,6 +1759,11 @@
 
         if (n.hoja && n.dias_de && n.dias_de.clave !== n.clave) {
             t += '\nDías: hereda ' + n.dias + ' de ' + n.dias_de.nombre;
+        }
+
+        if (n.corte && n.corte !== 'NO_APLICA' && n.corte_rotulo) {
+            t += '\nCorte de fin de semana: ' + n.corte_rotulo.charAt(0).toLowerCase() + n.corte_rotulo.slice(1) +
+                 (n.corte_de && n.corte_de.clave !== n.clave ? ' (hereda de ' + n.corte_de.nombre + ')' : '');
         }
 
         return t;
@@ -1827,14 +1840,15 @@
      * Cero queda vacía, como en el resto de la pestaña. col.noHabil es la
      * clase del día no hábil, o vacío.
      */
-    function celdaImporte(valor, col) {
+    function celdaImporte(valor, col, tip) {
         var noHabil = (col && col.noHabil) ? ' ' + col.noHabil : '';
 
         if (!valor) {
             return '<td class="currency' + noHabil + '"></td>';
         }
 
-        return '<td class="currency ' + (valor < 0 ? 'cell-negativo' : 'cell-with-value') + noHabil + '">' +
+        return '<td class="currency ' + (valor < 0 ? 'cell-negativo' : 'cell-with-value') + noHabil + '"' +
+               (tip ? ' title="' + escapar(tip) + '"' : '') + '>' +
                formatCurrency(valor) + '</td>';
     }
 

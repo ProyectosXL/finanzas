@@ -539,3 +539,28 @@ chequear('el payload trae resuelto solo lo cargado: diciembre de Locales', ['LOC
     array_map('array_keys', $edMM['vistas_mes']));
 chequear('con sus valores: Credito 90% x 60%', 0.54,
     round($edMM['vistas_mes']['LOCALES'][12]['nodos']['N4']['porcentaje_efectivo'], 6));
+
+seccion('el mix por mes no toca el corte de fin de semana');
+
+$arbolCorteMM = array_map(function ($n) {
+    return $n['ID'] === 4 ? array_merge($n, ['CORTE_FINDE' => 'VIERNES']) : $n;
+}, arbolMM());
+
+chequear('el corte no es un campo del mes', false, in_array('CORTE_FINDE', MixCobro::CAMPOS_MES, true));
+chequear('diciembre, con mix propio, toma el corte del constante', ['VIERNES', 20],
+    [MixCobro::resolver($arbolCorteMM, 12, configMM())['nodos']['N4']['corte'],
+     MixCobro::resolver($arbolCorteMM, 12, configMM())['nodos']['N4']['dias']]);
+chequear('y un mes sin mix propio, tambien', 'VIERNES',
+    MixCobro::resolver($arbolCorteMM, 11, configMM())['nodos']['N4']['corte']);
+chequear('resolverPorMes(): el mismo corte en todos los meses', ['VIERNES', 'VIERNES'],
+    array_map(function ($a) { return $a['nodos']['N4']['corte']; },
+        array_values(MixCobro::resolverPorMes($arbolCorteMM, configMM(), [11, 12]))));
+chequear('los valores del mes no lo traen', false,
+    array_key_exists('CORTE_FINDE', MixCobro::valoresDelMes($arbolCorteMM, configMM(), 'LOCALES', 12)[4]));
+chequear('guardar un mes con el mismo corte del constante: se ignora', true,
+    is_array(MixCobro::resolverCambiosMes($arbolCorteMM, configMM(), 'LOCALES', 12,
+        [['id' => 4, 'corte' => 'VIERNES', 'dias' => '21']])));
+chequearLanza('un corte distinto en un mes: rechazado, diciendo que va en el constante', function () use ($arbolCorteMM) {
+    MixCobro::resolverCambiosMes($arbolCorteMM, configMM(), 'LOCALES', 12, [['id' => 4, 'corte' => 'SABADO']]);
+}, 'En Diciembre se cargan los valores de cada nodo: el corte de fin de semana de "Crédito" se cambia en el '
+    . 'mix constante, y vale para todos los meses.');

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/DiasHabiles.php';
 
 /**
  * MixCobro
@@ -34,6 +35,13 @@ require_once __DIR__ . '/Auditoria.php';
  *   Dias            GANA EL NIVEL MAS CERCANO que los tenga. No se suman: el
  *                   plazo lo pone quien acredita, y "3 cuotas" a 1 dia debajo de
  *                   un Fiserv a 7 dias se acredita a 1 dia, no a 8.
+ *   Corte finde     SE HEREDA COMO LOS DIAS: gana el nivel mas cercano que lo
+ *                   tenga, y si nadie lo tiene es NO_APLICA. Lo pone quien
+ *                   acredita -Fiserv presenta junto el lote del fin de semana-
+ *                   y lo heredan sus cuotas. NO_APLICA cargado es un "no"
+ *                   explicito: corta la herencia. Es un dato FIJO del nodo, no
+ *                   se abre por mes (no esta en CAMPOS_MES). Como cambia la
+ *                   fecha lo dice fechaAcreditacion().
  *
  * Y lo que la regla exige para que la venta del canal llegue entera a la caja:
  * los hermanos en juego de cada grupo suman 100%, toda hoja tiene dias en algun
@@ -108,6 +116,33 @@ class MixCobro {
      * nombre, orden- es del constante y no varia por mes.
      */
     const CAMPOS_MES = ['PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION', 'ACTIVO'];
+
+    /* ---- El corte de fin de semana (sql/cashflow_ventas_mix_corte_finde.sql) */
+
+    /**
+     * Los valores del corte de fin de semana de un nodo. NULL, en la columna,
+     * es "lo define un nivel de arriba"; si nadie lo tiene, NO_APLICA.
+     * LA LISTA Y EL CHECK CK_RO_T_CASHFLOW_VENTAS_MIX_NODO_CORTE CAMBIAN JUNTAS.
+     */
+    const CORTES = [
+        'NO_APLICA' => 'No aplica',
+        'VIERNES' => 'Desde el viernes',
+        'SABADO' => 'Desde el sábado'
+    ];
+
+    /** El corte de un nodo sin corte en toda su rama */
+    const SIN_CORTE = 'NO_APLICA';
+
+    /** El script que agrega la columna: la pantalla lo nombra si falta */
+    const SCRIPT_CORTE = 'sql/cashflow_ventas_mix_corte_finde.sql';
+
+    /**
+     * Cuantos dias corridos puede sumar el corte ANTES del corrimiento: una
+     * venta del viernes se cuenta desde el lunes, tres dias despues. Lo que
+     * sume un lunes feriado es corrimiento, como cualquier otro. El motor lo
+     * suma al tramo de calendario que pide (Ventas::alcanceAcreditacion()).
+     */
+    const MARGEN_CORTE = 3;
 
     const NOMBRES_MES = [1 => 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
                          'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -184,6 +219,9 @@ class MixCobro {
                     && $f['DIAS_ACREDITACION'] !== '')
                 ? intval($f['DIAS_ACREDITACION']) : null,
             'ACTIVO' => intval($f['ACTIVO']) === 1 ? 1 : 0,
+            // Sin la columna (falta el script) no viene: null, que con nadie
+            // arriba es NO_APLICA, y la cobranza es la de siempre.
+            'CORTE_FINDE' => self::corteONull(isset($f['CORTE_FINDE']) ? $f['CORTE_FINDE'] : null),
             'ORDEN' => isset($f['ORDEN']) ? intval($f['ORDEN']) : 0,
             'USUARIO_MODIF' => isset($f['USUARIO_MODIF']) ? $f['USUARIO_MODIF'] : null,
             'FECHA_MODIF' => isset($f['FECHA_MODIF']) ? $f['FECHA_MODIF'] : null
@@ -192,6 +230,37 @@ class MixCobro {
 
     private static function numeroONull($v) {
         return ($v === null || $v === '') ? null : floatval($v);
+    }
+
+    /**
+     * El corte como se guarda: en mayusculas y sin espacios, o null si esta
+     * vacio. NO lo valida: un valor que no esta en CORTES -solo por una
+     * edicion directa en la base, porque el CHECK lo impide- se conserva para
+     * que validarEstructura() lo diga, en vez de convertirse callado en otro.
+     */
+    private static function corteONull($v) {
+        $s = strtoupper(trim((string) $v));
+
+        return $s === '' ? null : $s;
+    }
+
+    /** "Desde el viernes", o el codigo si no esta en la lista */
+    public static function rotuloCorte($corte) {
+        return isset(self::CORTES[$corte]) ? self::CORTES[$corte] : (string) $corte;
+    }
+
+    /**
+     * Los cortes como viajan a la pantalla: [['codigo', 'rotulo']], en el
+     * orden de CORTES. Asi el selector de Parametros no los escribe a mano.
+     */
+    public static function cortesLista() {
+        $v = [];
+
+        foreach (self::CORTES as $codigo => $rotulo) {
+            $v[] = ['codigo' => $codigo, 'rotulo' => $rotulo];
+        }
+
+        return $v;
     }
 
     /** Posicion de un nivel en la jerarquia, o null si no es un nivel */
@@ -407,6 +476,11 @@ class MixCobro {
         if ($n['DIAS_ACREDITACION'] !== null && $n['DIAS_ACREDITACION'] < 0) {
             $err('Los días de acreditación de ' . $quien . ' no pueden ser negativos.');
         }
+
+        if (isset($n['CORTE_FINDE']) && $n['CORTE_FINDE'] !== null && !isset(self::CORTES[$n['CORTE_FINDE']])) {
+            $err('El corte de fin de semana de ' . $quien . ' es "' . $n['CORTE_FINDE'] . '", que no es '
+                . 'ninguno de los que existen: ' . implode(', ', array_values(self::CORTES)) . '.');
+        }
     }
 
     /** Si subiendo desde el nodo se vuelve a el */
@@ -455,6 +529,10 @@ class MixCobro {
      *                        carga. null si la rama no tiene hojas con %.
      *   dias, dias_de        los del nivel mas cercano que los tenga, y la clave
      *                        y el nombre de ese nivel; null si ninguno
+     *   corte, corte_de      el corte de fin de semana del nivel mas cercano que
+     *                        lo tenga, y de quien sale. Con nadie, NO_APLICA y
+     *                        corte_de null: no es un dato que falta, es que no
+     *                        hay corte. corte_propio, el cargado en el nodo
      *   hijos                claves de los hijos, en orden
      *
      * Por canal: sus hojas, sus grupos de hermanos y sus errores. Los errores
@@ -593,6 +671,7 @@ class MixCobro {
             $c = ['hojas' => [], 'grupos' => [], 'errores' => [], 'valido' => true];
             $ctx = ['canal' => $canal, 'camino' => [], 'en_juego' => true, 'porc' => 1.0,
                     'costo' => 0.0, 'tasa' => 0.0, 'dias' => null, 'dias_de' => null,
+                    'corte' => self::SIN_CORTE, 'corte_de' => null,
                     'clave_padre' => null, 'nombre_padre' => self::nombreCanal($canal)];
 
             self::bajar($canal, null, $ctx, $hijosDe, $r['nodos'], $c);
@@ -673,6 +752,13 @@ class MixCobro {
             $dias = $h['DIAS_ACREDITACION'] !== null ? $h['DIAS_ACREDITACION'] : $ctx['dias'];
             $diasDe = $h['DIAS_ACREDITACION'] !== null
                 ? ['clave' => $h['clave'], 'nombre' => $h['NOMBRE']] : $ctx['dias_de'];
+            // El corte, con la misma regla que los dias: el mas cercano gana.
+            // NO_APLICA cargado tambien gana: es lo que permite que una cuota
+            // no tenga el corte de su procesadora.
+            $cortePropio = isset($h['CORTE_FINDE']) ? $h['CORTE_FINDE'] : null;
+            $corte = $cortePropio !== null ? $cortePropio : $ctx['corte'];
+            $corteDe = $cortePropio !== null
+                ? ['clave' => $h['clave'], 'nombre' => $h['NOMBRE']] : $ctx['corte_de'];
 
             $nodo = [
                 'clave' => $h['clave'], 'id' => $h['ID'], 'canal' => $canal,
@@ -687,6 +773,7 @@ class MixCobro {
                 'costo' => $ctx['costo'] + ($h['COSTO'] === null ? 0 : $h['COSTO']),
                 'tasa' => $ctx['tasa'] + ($h['TASA'] === null ? 0 : $h['TASA']),
                 'dias' => $dias, 'dias_de' => $diasDe,
+                'corte_propio' => $cortePropio, 'corte' => $corte, 'corte_de' => $corteDe,
                 'hijos' => [], 'orden' => $h['ORDEN'],
                 'usuario_modif' => $h['USUARIO_MODIF'], 'fecha_modif' => $h['FECHA_MODIF']
             ];
@@ -701,6 +788,7 @@ class MixCobro {
                 'canal' => $canal, 'camino' => $camino, 'en_juego' => $enJuego,
                 'porc' => $nodo['porcentaje_efectivo'], 'costo' => $nodo['costo'],
                 'tasa' => $nodo['tasa'], 'dias' => $dias, 'dias_de' => $diasDe,
+                'corte' => $corte, 'corte_de' => $corteDe,
                 'clave_padre' => $h['clave'], 'nombre_padre' => $h['NOMBRE']
             ], $hijosDe, $salida, $c);
 
@@ -765,6 +853,93 @@ class MixCobro {
     /** 0.1296 -> "12,96%" */
     public static function porcentajeTexto($fraccion) {
         return number_format($fraccion * 100, 2, ',', '.') . '%';
+    }
+
+    /* ====================================================================
+       LA FECHA DE ACREDITACION
+       ==================================================================== */
+
+    /**
+     * Cuando se acredita una venta de una hoja. Pura: el calendario entra.
+     *
+     * ES LA UNICA REGLA DE LA FECHA. La usa Ventas::cobranzaPorHojas(), que es
+     * de donde salen la pestana Ventas y la serie del tablero: si cada uno
+     * hiciera su cuenta, la pantalla diria martes y el tablero lunes.
+     *
+     *   Sin corte, o la venta fuera del corte (lunes a jueves; o el viernes
+     *   con SABADO):
+     *       acreditacion = venta + dias, corrida al proximo habil bancario.
+     *   Venta dentro del corte (viernes, sabado o domingo con VIERNES; sabado
+     *   o domingo con SABADO):
+     *       base         = el primer habil bancario despues del domingo de
+     *                      esa semana (el lunes, o el martes si el lunes es
+     *                      feriado)
+     *       acreditacion = base + dias, corrida al proximo habil.
+     *
+     * POR QUE: Fiserv presenta junto el lote del fin de semana y el plazo
+     * corre desde el primer habil siguiente. Con 1 dia, lo vendido de viernes
+     * a domingo se acredita el martes, no el lunes; con 0 dias, el lunes.
+     *
+     * LO QUE CUENTA ES EL DIA DE LA SEMANA DE LA VENTA, no el calendario
+     * bancario: un viernes feriado sigue siendo viernes para el corte. Y el
+     * calendario bancario es el de siempre -RO_T_CALENDARIO con sus ajustes-:
+     * no hay uno propio del corte.
+     *
+     * Sin corte la cuenta es EXACTAMENTE la de antes -la misma fecha teorica
+     * y el mismo corrimiento-, que es lo que hace que los nodos en No aplica
+     * den la misma cobranza al ultimo bit.
+     *
+     * @param string $fechaVenta 'Y-m-d'
+     * @param int $dias Los dias de la hoja (resolver()), >= 0
+     * @param string|null $corte El corte de la hoja: un codigo de CORTES;
+     *                    null es NO_APLICA
+     * @param array|callable $habiles El mapa 'Y-m-d' => bool del calendario
+     *                    bancario, o la funcion que corre una fecha al
+     *                    proximo habil. El motor pasa la suya (proximoHabil(),
+     *                    que ademas avisa si al calendario le falta un mes);
+     *                    con el mapa se corre con DiasHabiles::siguiente(),
+     *                    la misma mecanica.
+     * @return array ['fecha' => 'Y-m-d' habil, 'en_corte' => bool,
+     *               'base' => 'Y-m-d' habil desde el que se contaron los
+     *               dias, o null si la venta no entro en el corte]
+     */
+    public static function fechaAcreditacion($fechaVenta, $dias, $corte, $habiles) {
+        $correr = is_array($habiles)
+            ? function ($fecha) use ($habiles) { return DiasHabiles::siguiente($fecha, $habiles)['fecha']; }
+            : $habiles;
+
+        if (!self::ventaEnCorte($fechaVenta, $corte)) {
+            $teorica = date('Y-m-d', strtotime($fechaVenta . ' +' . $dias . ' days'));
+
+            return ['fecha' => call_user_func($correr, $teorica), 'en_corte' => false, 'base' => null];
+        }
+
+        // El lunes que sigue al domingo de esa semana (N: 5 viernes ... 7
+        // domingo), y de ahi al primer habil.
+        $lunes = date('Y-m-d', strtotime($fechaVenta . ' +' . (8 - intval(date('N', strtotime($fechaVenta)))) . ' days'));
+        $base = call_user_func($correr, $lunes);
+        $teorica = date('Y-m-d', strtotime($base . ' +' . $dias . ' days'));
+
+        return ['fecha' => call_user_func($correr, $teorica), 'en_corte' => true, 'base' => $base];
+    }
+
+    /**
+     * Si una venta de ese dia entra en el corte. Pura. Desde el viernes: de
+     * viernes a domingo; desde el sabado: sabado y domingo. NO_APLICA, null o
+     * cualquier otro valor: no.
+     */
+    public static function ventaEnCorte($fechaVenta, $corte) {
+        $dia = intval(date('N', strtotime($fechaVenta)));
+
+        if ($corte === 'VIERNES') {
+            return $dia >= 5;
+        }
+
+        if ($corte === 'SABADO') {
+            return $dia >= 6;
+        }
+
+        return false;
     }
 
     /* ====================================================================
@@ -1033,6 +1208,15 @@ class MixCobro {
                     . $quien . ' se cambia en el mix constante, y vale para todos los meses.');
             }
 
+            // El corte no se abre por mes: es de la presentacion del lote de
+            // quien acredita, no de la estacionalidad. Si llega el mismo del
+            // constante se ignora; uno distinto se rechaza diciendo donde va.
+            if (array_key_exists('corte', $f)
+                    && self::validarCorte($f['corte'], $quien) !== (isset($nodo['CORTE_FINDE']) ? $nodo['CORTE_FINDE'] : null)) {
+                throw new Exception('En ' . $nombreMes . ' se cargan los valores de cada nodo: el corte de fin de '
+                    . 'semana de ' . $quien . ' se cambia en el mix constante, y vale para todos los meses.');
+            }
+
             $v = $nuevos[$id];
 
             if (array_key_exists('porcentaje', $f)) {
@@ -1279,12 +1463,13 @@ class MixCobro {
      *     inhabilita y se crea otro.
      *   - Un nodo de otro canal: el guardado es de un canal por vez.
      *
-     * Un campo ausente no se toca; costo, tasa y dias vacios son null.
+     * Un campo ausente no se toca; costo, tasa, dias y corte vacios son null.
      *
      * @param array $actuales Nodos normalizados de TODOS los canales
      * @param string $canal Canal que se guarda
      * @param array $filas [['id', 'nombre'?, 'nivel'?, 'porcentaje'?, 'costo'?,
-     *                     'tasa'?, 'dias'?, 'activo'?], ...] porcentajes en fraccion
+     *                     'tasa'?, 'dias'?, 'activo'?, 'corte'?], ...] porcentajes
+     *                     en fraccion; corte, un codigo de CORTES o vacio
      * @return array ['cambios' => [['id', 'campos' => [COLUMNA => valor]]],
      *               'simulado' => nodos normalizados como quedarian]
      */
@@ -1359,9 +1544,13 @@ class MixCobro {
                 $nuevo['ACTIVO'] = !empty($f['activo']) ? 1 : 0;
             }
 
+            if (array_key_exists('corte', $f)) {
+                $nuevo['CORTE_FINDE'] = self::validarCorte($f['corte'], $quien);
+            }
+
             $campos = [];
 
-            foreach (['NOMBRE', 'NIVEL', 'ACTIVO', 'DIAS_ACREDITACION'] as $col) {
+            foreach (['NOMBRE', 'NIVEL', 'ACTIVO', 'DIAS_ACREDITACION', 'CORTE_FINDE'] as $col) {
                 if ($nuevo[$col] !== $antes[$col]) {
                     $campos[$col] = $nuevo[$col];
                 }
@@ -1454,6 +1643,26 @@ class MixCobro {
     }
 
     /**
+     * El corte de fin de semana: vacio es null (lo define un nivel de arriba);
+     * si no, uno de CORTES. La validacion que manda es esta: el selector de
+     * la pantalla solo ofrece los de la lista, pero el servidor no le cree.
+     */
+    public static function validarCorte($v, $quien) {
+        $s = self::corteONull($v);
+
+        if ($s === null) {
+            return null;
+        }
+
+        if (!isset(self::CORTES[$s])) {
+            throw new Exception('El corte de fin de semana de ' . $quien . ' tiene que ser '
+                . implode(', ', array_values(self::CORTES)) . ' o vacío, no "' . trim((string) $v) . '".');
+        }
+
+        return $s;
+    }
+
+    /**
      * Un nodo nuevo, validado y como quedaria. Pura.
      *
      * ENTRA INHABILITADO Y EN 0%, como entraba un medio de pago en el mix
@@ -1523,6 +1732,9 @@ class MixCobro {
     /** @var bool|null Cache del sondeo de las tablas del mix por mes */
     private $tablasMes = null;
 
+    /** @var bool|null Cache del sondeo de la columna del corte de fin de semana */
+    private $corte = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -1573,8 +1785,12 @@ class MixCobro {
      * @return array
      */
     public function getNodos() {
+        // Sin sql/cashflow_ventas_mix_corte_finde.sql la columna no existe: no
+        // se pide, y normalizar() deja el corte en null -nadie tiene corte-,
+        // que es exactamente la cobranza de antes.
+        $corte = $this->columnaCorte() ? ', CORTE_FINDE' : '';
         $sql = "SELECT ID, CANAL, ID_PADRE, NIVEL, NOMBRE, PORCENTAJE, COSTO, TASA,
-                       DIAS_ACREDITACION, ACTIVO, ORDEN, USUARIO_MODIF, FECHA_MODIF
+                       DIAS_ACREDITACION, ACTIVO, ORDEN, USUARIO_MODIF, FECHA_MODIF" . $corte . "
                 FROM " . self::TABLA . "
                 ORDER BY CANAL, ORDEN, ID";
 
@@ -1599,6 +1815,38 @@ class MixCobro {
     }
 
     /**
+     * Si ya se corrio sql/cashflow_ventas_mix_corte_finde.sql: la columna
+     * CORTE_FINDE del arbol.
+     *
+     * Sin ella nada se cae: la cobranza se calcula sin corte, como antes, y
+     * Parametros muestra la columna "Corte finde" deshabilitada nombrando el
+     * script. Sin la tabla del arbol tampoco hay columna.
+     *
+     * @return bool
+     */
+    public function columnaCorte() {
+        if ($this->corte !== null) {
+            return $this->corte;
+        }
+
+        if (!$this->tablaCreada()) {
+            return $this->corte = false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COL_LENGTH('dbo." . self::TABLA . "', 'CORTE_FINDE') AS C");
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al verificar la columna del corte de fin de semana'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return $this->corte = ($row && $row['C'] !== null);
+    }
+
+    /**
      * El mix vigente, de donde sea que salga.
      *
      * CON LA TABLA NUEVA, el mix plano DEJA DE LEERSE, aunque la tabla este
@@ -1609,17 +1857,22 @@ class MixCobro {
      * 'config' es el mix por mes (getConfig()). Con el mix plano, todo
      * constante: un mes no tiene nodos sobre los que cargar valores.
      *
-     * @return array ['origen' => 'NODO'|'PLANO', 'nodos' => [...], 'config' => [...]]
+     * 'corte' dice si existe la columna del corte de fin de semana: sin ella
+     * nadie tiene corte y Parametros muestra el campo deshabilitado.
+     *
+     * @return array ['origen' => 'NODO'|'PLANO', 'nodos' => [...], 'config' => [...],
+     *               'corte' => bool]
      */
     public function getArbol() {
         if ($this->tablaCreada()) {
-            return ['origen' => 'NODO', 'nodos' => $this->getNodos(), 'config' => $this->getConfig()];
+            return ['origen' => 'NODO', 'nodos' => $this->getNodos(), 'config' => $this->getConfig(),
+                    'corte' => $this->columnaCorte()];
         }
 
         $parametros = new Parametros();
 
         return ['origen' => 'PLANO', 'nodos' => self::desdeMixPlano($parametros->getMixCobro()),
-                'config' => self::configVacia()];
+                'config' => self::configVacia(), 'corte' => false];
     }
 
     /**
@@ -1720,12 +1973,18 @@ class MixCobro {
      * pantalla no pide nada para mostrar los valores; lo heredado y las
      * sumas los pide a previsualizarMixArbol con ese mes, como al editar.
      *
+     * EL CORTE DE FIN DE SEMANA SE EDITA SOLO CON SU COLUMNA. Sin
+     * sql/cashflow_ventas_mix_corte_finde.sql, 'corte' es false y la pantalla
+     * dibuja el selector deshabilitado nombrando el script ('script_corte'):
+     * se ve que el campo existe y por que no se puede usar todavia.
+     *
      * @param array $nodos Nodos normalizados
      * @param string $origen 'NODO' | 'PLANO'
      * @param array|null $config La de getConfig(); null es todo constante
+     * @param bool $corte Si existe la columna del corte (getArbol()['corte'])
      * @return array
      */
-    public static function datosEditor($nodos, $origen, $config = null) {
+    public static function datosEditor($nodos, $origen, $config = null, $corte = false) {
         $config = $config === null ? self::configVacia() : $config;
         $resuelto = self::resolver($nodos);
         $conHijos = [];
@@ -1775,7 +2034,10 @@ class MixCobro {
             'modos' => $config['modos'],
             'nombres_mes' => array_values(self::NOMBRES_MES),
             'meses' => self::mesesEditor($nodos, $config),
-            'vistas_mes' => self::vistasMes($nodos, $config)
+            'vistas_mes' => self::vistasMes($nodos, $config),
+            'corte' => $origen === 'NODO' && $corte,
+            'cortes' => self::cortesLista(),
+            'script_corte' => self::SCRIPT_CORTE
         ];
     }
 
@@ -2006,6 +2268,16 @@ class MixCobro {
 
         if (count($cambios) === 0) {
             return 0;
+        }
+
+        // Sin la columna no hay donde guardar un corte. La pantalla no deja
+        // tocarlo, pero el servidor no le cree: se corta antes de escribir
+        // nada, nombrando el script, en vez de reventar en el UPDATE.
+        foreach ($cambios as $c) {
+            if (array_key_exists('CORTE_FINDE', $c['campos']) && !$this->columnaCorte()) {
+                throw new Exception('Falta correr ' . self::SCRIPT_CORTE . ': hasta entonces el corte de fin '
+                    . 'de semana no se puede guardar.');
+            }
         }
 
         if ($inhabilitarEnMeses && $this->tablasMesCreadas()) {
@@ -2420,7 +2692,7 @@ class MixCobro {
      * @param string $usuario
      */
     protected function escribirNodo($cid, $id, $campos, $usuario) {
-        $columnas = ['NOMBRE', 'NIVEL', 'PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION'];
+        $columnas = ['NOMBRE', 'NIVEL', 'PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION', 'CORTE_FINDE'];
         $sets = [];
         $params = [];
 
