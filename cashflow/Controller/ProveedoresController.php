@@ -466,7 +466,8 @@ try {
             $comp = Proveedores::compararImportacion(
                 $parse['filas'], $pendientes, $prov->getPagos(), $h->hoy(),
                 $prov->getAperturas(), $prov->tablaMedioCreada(), $prov->retenciones()->config(),
-                $enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido());
+                $enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido(),
+                $prov->capacidadImportacion());
 
             $comp['separador'] = $parse['separador'];
 

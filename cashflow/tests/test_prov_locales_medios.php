@@ -63,7 +63,7 @@ chequear('se carga', 'ALTA', $c['filas'][0]['estado']);
 chequear('con todo lo pendiente', 200000.0, $c['filas'][0]['importe_pendiente']);
 chequear('sin apertura: es un comprobante con una fecha', null,
     Proveedores::camposDeImportacion($c['filas'])['medios']);
-chequear('y el resumen no cuenta dos medios', 0, $c['resumen']['dos_medios']);
+chequear('y el resumen no cuenta varios medios', 0, $c['resumen']['varios_medios']);
 
 seccion('un medio con importe: tiene que ser el pendiente, con un peso de tolerancia');
 
@@ -97,10 +97,10 @@ $c = $comparar($dos);
 chequear('las dos filas se cargan', ['ALTA', 'ALTA'], array_column($c['filas'], 'estado'));
 chequear('a 80 centavos del pendiente, dentro de la tolerancia', 0, $c['resumen']['errores']);
 chequear('el resumen cuenta UN comprobante, no dos filas', 1, $c['resumen']['altas']);
-chequear('y lo cuenta como abierto en dos medios', 1, $c['resumen']['dos_medios']);
+chequear('y lo cuenta como abierto en varios medios', 1, $c['resumen']['varios_medios']);
 chequear('lo que se reubica es el pendiente, una vez', 200000.0, $c['resumen']['importe_con_fecha']);
 chequear('el aviso dice cuantos quedan en dos medios', true,
-    strpos(implode(' ', $c['avisos']), '1 comprobante(s) quedan pagados con dos medios') !== false);
+    strpos(implode(' ', $c['avisos']), '1 comprobante(s) quedan pagados con varios medios') !== false);
 
 // 1/2 es la parte que se paga primero, aunque en el archivo venga segunda.
 $porLinea = [];
@@ -149,7 +149,7 @@ chequear('y es el mismo en las dos: el error es del comprobante', $c['filas'][0]
     $c['filas'][1]['motivo']);
 chequear('se cuentan las dos filas como error', 2, $c['resumen']['errores']);
 
-seccion('tres filas del mismo comprobante: error en todas');
+seccion('sin el script de N medios: tres filas del mismo comprobante son error en todas');
 
 $c = $comparar([
     $fila(2, 'MTDODI', 'A0000500001731', '20/10/2026', 'ECHEQ', '100000'),
@@ -203,7 +203,7 @@ chequear('y la buena dice por que tampoco se carga', true,
 chequear('no queda nada para escribir', 0,
     $c['resumen']['altas'] + $c['resumen']['cambios']);
 
-seccion('un comprobante en cuotas no se parte en dos medios');
+seccion('sin el script de N medios: un comprobante en cuotas no se parte');
 
 $c = $comparar([
     $fila(2, 'OGRSA', 'A0010000247110', '20/10/2026', 'ECHEQ', '2000'),
@@ -244,7 +244,7 @@ chequear('con el aviso de que se sigue tratando como CAJA',
     'Se sigue tratando como CAJA; para que entre al cronograma, cambiá su forma en la grilla o el '
         . 'maestro.', $c['filas'][0]['aviso']);
 chequear('en las dos partes', $c['filas'][0]['aviso'], $c['filas'][1]['aviso']);
-chequear('y el resumen lo cuenta', 1, $c['resumen']['dos_medios_fuera_cronograma']);
+chequear('y el resumen lo cuenta', 1, $c['resumen']['varios_medios_fuera_cronograma']);
 
 $c = $comparar($dos);
 
@@ -272,7 +272,7 @@ $c = $comparar([$fila(2, 'MTDODI', 'A0000500001731', '27/10/2026', 'TRANSFERENCI
 
 chequear('con una fila deja de estar partido: es un cambio', 'CAMBIO', $c['filas'][0]['estado']);
 chequear('aunque la fecha sea la de una de las partes', true,
-    strpos($c['filas'][0]['motivo'], 'Deja de estar pagado con dos medios') !== false);
+    strpos($c['filas'][0]['motivo'], 'Deja de estar pagado con varios medios') !== false);
 chequear('y lo que se escribe no tiene apertura: se da de baja', null,
     Proveedores::camposDeImportacion($c['filas'])['medios']);
 
@@ -375,18 +375,21 @@ $avisos = Aviso::textos(Proveedores::avisosPendientesConNivel($parcial));
 
 // Desde las retenciones la apertura se compara contra el NETO a pagar: sin
 // alicuotas el neto es el pendiente, y el caso es el mismo.
-chequear('la pestaña avisa, con el texto pedido', true, in_array('1 comprobante(s) abiertos en dos '
+chequear('la pestaña avisa, con el texto pedido', true, in_array('1 comprobante(s) abiertos en varios '
     . 'medios ya no coinciden con su neto a pagar: se proyecta el saldo en la fecha más tardía. '
     . 'Reimportá para corregirlo.', $avisos, true));
 chequear('con nivel atencion', 'warning',
     Proveedores::avisosPendientesConNivel($parcial)[0]['nivel']);
 
-// Si en Tango pasa a tener dos vencimientos, tampoco se parte.
+/* Si en Tango pasa a tener dos vencimientos y el neto sigue coincidiendo,
+   se parte por cuota: cada medio cubre de la mas vieja a la mas nueva. Ver
+   test_prov_locales_n_medios.php. */
 $enCuotas = Proveedores::abrirEnMedios([$item(['IMPORTE_PENDIENTE' => 100000.0]),
     $item(['IMPORTE_PENDIENTE' => 100000.0, 'FECHA_VTO' => '2026-11-01'])], $apertura, $hoy, $crono);
 
-chequear('con dos vencimientos tampoco se parte', [2, true, true], [count($enCuotas),
-    !empty($enCuotas[0]['APERTURA_DESCUADRADA']), !empty($enCuotas[1]['APERTURA_DESCUADRADA'])]);
+chequear('con dos vencimientos que coinciden se parte por cuota, sin descuadre', [3, false, 200000.0],
+    [count($enCuotas), !empty($enCuotas[0]['APERTURA_DESCUADRADA']),
+     round(array_sum(array_column($enCuotas, 'IMPORTE_PENDIENTE')), 2)]);
 
 seccion('las dos particiones de PAGOS_TODO cierran con comprobantes abiertos');
 

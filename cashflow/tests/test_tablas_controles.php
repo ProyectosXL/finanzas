@@ -1947,7 +1947,9 @@ chequear('el subtotal dice neto, pagado, diferencia, máximo y las filas fuera d
     && strpos($jsProv, "partes.push('Máximo ' + plata(p.maximo)") !== false
     && strpos($jsProv, "' fuera del total</span>'") !== false);
 chequear('el controller clasifica con el % y el cronograma de ahora', true,
-    strpos($ctrlProv, '$enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido());') !== false);
+    strpos($ctrlProv, '$enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido(),') !== false);
+chequear('y con lo que se puede guardar con los scripts corridos (N medios)', true,
+    strpos($ctrlProv, '$prov->capacidadImportacion());') !== false);
 
 seccion('Cuentas a Pagar: las marcas del pago con excedente y del pago parcial');
 
