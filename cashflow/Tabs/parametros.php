@@ -102,6 +102,9 @@
                         su % entre sus hermanos, su costo, su tasa y sus días. Los hermanos
                         <strong>activos</strong> suman 100%; el costo y la tasa se suman a lo largo
                         de la rama, y los días los pone el nivel más cercano que los tenga.
+                        El <strong>corte de fin de semana</strong> se hereda igual: las ventas desde
+                        ese día hasta el domingo se toman como del primer hábil siguiente y desde
+                        ahí se cuentan los días.
                     </small>
                 </div>
                 <div class="d-flex gap-2 flex-shrink-0">
@@ -146,6 +149,11 @@
                                 <th class="text-center" style="width: 120px;">Tasa %</th>
                                 <th class="text-center" style="width: 170px;"
                                     title="Vacío: los define un nivel de arriba. En gris, de dónde los hereda">Días</th>
+                                <!-- El corte de fin de semana: se hereda como los días, y no
+                                     cambia por mes. Sin sql/cashflow_ventas_mix_corte_finde.sql
+                                     el selector se dibuja deshabilitado, nombrando el script. -->
+                                <th class="text-center" style="width: 170px;"
+                                    title="Las ventas desde ese día hasta el domingo se toman como del primer hábil siguiente y desde ahí se cuentan los días. Vacío: lo define un nivel de arriba. En gris, de dónde lo hereda">Corte finde</th>
                                 <th class="text-center" style="width: 80px;">Activo</th>
                                 <th style="width: 200px;">Última edición</th>
                             </tr>

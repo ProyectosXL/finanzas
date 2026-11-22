@@ -132,9 +132,9 @@
        MIX DE COBRO: EL EDITOR DEL ÁRBOL
 
        Un bloque por canal, con sus nodos en el orden del árbol. Cada nodo
-       carga lo suyo —%, costo, tasa, días— y al lado, en gris, lo que la
-       regla resuelve para él: el costo + tasa acumulado de su rama y de
-       quién hereda los días.
+       carga lo suyo —%, costo, tasa, días, corte de fin de semana— y al
+       lado, en gris, lo que la regla resuelve para él: el costo + tasa
+       acumulado de su rama y de quién hereda los días y el corte.
 
        ESTA PANTALLA NO TIENE LA REGLA. Lo que muestra en gris, las sumas de
        cada grupo de hermanos y si se puede guardar salen del servidor:
@@ -322,7 +322,7 @@
         html += filaCanalMix(canal, editable);
         html += filaMesesMix(canal, editable);
         html += '<tr class="mixa-errores" data-errores="' + canal + '" data-bloque="' + canal + '" ' +
-                    'style="display: none;"><td colspan="8"></td></tr>';
+                    'style="display: none;"><td colspan="9"></td></tr>';
 
         nodosDeCanal(canal, desdeConstante).forEach(function(n) {
             html += filaNodoMix(n.crudo, n.resuelto, editable, enMes);
@@ -422,7 +422,7 @@
                    '<td colspan="2"><strong>' + titulo(canal) + '</strong> ' +
                        '<span class="mixa-suma" data-suma="' + canal + '"></span>' +
                        controlModoMix(canal, editable) + '</td>' +
-                   '<td colspan="6" class="text-end">' +
+                   '<td colspan="7" class="text-end">' +
                        '<small class="text-muted me-2" data-estado="' + canal + '"></small>' + acciones +
                    '</td>' +
                '</tr>';
@@ -524,7 +524,7 @@
                     : '');
         }
 
-        return '<tr class="mixa-meses" data-bloque="' + canal + '"><td colspan="8">' +
+        return '<tr class="mixa-meses" data-bloque="' + canal + '"><td colspan="9">' +
                    '<div class="d-flex flex-wrap align-items-center gap-2">' +
                        '<div class="btn-group btn-group-sm flex-wrap mixa-meses-botones" role="group" ' +
                            'aria-label="Mes del mix de ' + titulo(canal) + '">' + botones + '</div>' +
@@ -617,6 +617,7 @@
         html += celdaNumeroMix('dias', n.DIAS_ACREDITACION === null ? '' : String(n.DIAS_ACREDITACION),
                                'días', editable, '1',
                                '<div class="mixa-hereda" data-hint-dias="' + n.clave + '"></div>');
+        html += celdaCorteMix(n, editable, enMes);
 
         // ---- Activo ---------------------------------------------------
         var activo = parseInt(n.ACTIVO, 10) === 1;
@@ -653,6 +654,53 @@
                        '<span class="input-group-text">' + unidad + '</span>' +
                    '</div>' + debajo +
                '</td>';
+    }
+
+    /**
+     * El corte de fin de semana de un nodo, con lo heredado debajo en gris
+     * (lo pinta pintarVistaMix(), como los días).
+     *
+     *   - Con permiso y la columna: un selector (vacío, No aplica, Desde el
+     *     viernes, Desde el sábado). Vacío es "lo define un nivel de arriba".
+     *   - Con permiso y SIN la columna: el selector deshabilitado, nombrando
+     *     el script que falta. Se ve que el campo existe y por qué no se usa.
+     *   - En un mes: texto. El corte no cambia por mes —es de la presentación
+     *     del lote, no de la estacionalidad— y se carga en el constante; el
+     *     servidor rechaza uno distinto en un mes.
+     *   - Sin permiso: texto, sin controles.
+     */
+    function celdaCorteMix(n, editable, enMes) {
+        var mix = datosMix();
+        var valor = n.CORTE_FINDE || '';
+        var hint = '<div class="mixa-hereda" data-hint-corte="' + n.clave + '"></div>';
+
+        if (editable && !enMes && !mix.corte) {
+            return '<td><select class="form-select form-select-sm" disabled ' +
+                       'title="Falta correr ' + escapar(mix.script_corte) + ': hasta entonces no hay corte de fin de semana">' +
+                       '<option value=""></option></select>' + hint + '</td>';
+        }
+
+        if (!editable || enMes) {
+            return '<td class="text-end"' +
+                       (enMes ? ' title="El corte no cambia por mes: se carga en el mix constante"' : '') + '>' +
+                       (valor ? escapar(rotuloCorte(valor)) : '<span class="text-muted">—</span>') +
+                       (enMes && valor ? ' <small class="text-muted">(del constante)</small>' : '') + hint + '</td>';
+        }
+
+        return '<td><select class="form-select form-select-sm mixa-campo" data-campo="corte" ' +
+                   'title="Vacío: lo define un nivel de arriba">' +
+                   '<option value=""' + (valor === '' ? ' selected' : '') + '></option>' +
+                   (mix.cortes || []).map(function(c) {
+                       return '<option value="' + c.codigo + '"' + (c.codigo === valor ? ' selected' : '') + '>' +
+                              escapar(c.rotulo) + '</option>';
+                   }).join('') +
+               '</select>' + hint + '</td>';
+    }
+
+    function rotuloCorte(codigo) {
+        var c = (datosMix().cortes || []).filter(function(x) { return x.codigo === codigo; })[0];
+
+        return c ? c.rotulo : codigo;
     }
 
     function rotuloNivel(codigo) {
@@ -701,6 +749,16 @@
                     dias.textContent = r.hoja ? 'sin días en toda la rama' : '';
                     dias.classList.toggle('mixa-falta', r.hoja);
                 }
+            }
+
+            // El corte, como los días: de quién lo hereda. Sin nadie que lo
+            // tenga es No aplica, y no se dice nada: no es un dato que falte.
+            var corte = cuerpo.querySelector('[data-hint-corte="' + clave + '"]');
+
+            if (corte) {
+                corte.textContent = (r.corte_propio === null && r.corte_de)
+                    ? 'hereda ' + rotuloCorte(r.corte) + ' de ' + r.corte_de.nombre
+                    : '';
             }
         });
 
@@ -785,7 +843,11 @@
                 costo: fraccion(leer('costo')),
                 tasa: fraccion(leer('tasa')),
                 dias: leer('dias'),
-                activo: leer('activo')
+                activo: leer('activo'),
+                // Solo si hay selector: en un mes, sin permiso o sin el script
+                // no se dibuja, y undefined no viaja. El servidor no le cree
+                // igual: valida la lista y rechaza un corte distinto en un mes.
+                corte: leer('corte')
             });
         });
 
@@ -1010,7 +1072,7 @@
         tr.className = 'mixa-alta';
         tr.dataset.canal = canal;
         tr.innerHTML =
-            '<td colspan="8">' +
+            '<td colspan="9">' +
                 '<div class="mixa-alta-titulo">Agregar ' +
                     (padre ? 'debajo de <strong>' + escapar(padre.NOMBRE) + '</strong>'
                            : 'al primer nivel de <strong>' + titulo(canal) + '</strong>') + '</div>' +
@@ -1293,10 +1355,12 @@
                    escapar(rotuloNivel(r.nivel)) + '</td><td>' + pct(v.PORCENTAJE) + '</td><td>' +
                    pct(v.COSTO) + '</td><td>' + pct(v.TASA) + '</td><td>' +
                    (v.DIAS_ACREDITACION === null || v.DIAS_ACREDITACION === undefined ? '' : v.DIAS_ACREDITACION) +
+                   // El corte es del nodo, no del mes: siempre el del constante
+                   '</td><td>' + (crudos[clave].CORTE_FINDE ? escapar(rotuloCorte(crudos[clave].CORTE_FINDE)) : '') +
                    '</td><td>' + (parseInt(v.ACTIVO, 10) === 1 ? 'Sí' : 'No') + '</td></tr>';
         };
         var html = '<thead><tr><th>Canal</th><th>Mix</th><th>Origen</th><th>Camino</th><th>Nivel</th>' +
-                   '<th>%</th><th>Costo %</th><th>Tasa %</th><th>Días</th><th>Activo</th></tr></thead><tbody>';
+                   '<th>%</th><th>Costo %</th><th>Tasa %</th><th>Días</th><th>Corte finde</th><th>Activo</th></tr></thead><tbody>';
 
         mix.canales.forEach(function(canal) {
             var claves = Object.keys(porClave).filter(function(k) { return porClave[k].canal === canal; });
