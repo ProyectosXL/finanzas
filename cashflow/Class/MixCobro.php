@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/DiasHabiles.php';
 
 /**
  * MixCobro
@@ -134,6 +135,14 @@ class MixCobro {
 
     /** El script que agrega la columna: la pantalla lo nombra si falta */
     const SCRIPT_CORTE = 'sql/cashflow_ventas_mix_corte_finde.sql';
+
+    /**
+     * Cuantos dias corridos puede sumar el corte ANTES del corrimiento: una
+     * venta del viernes se cuenta desde el lunes, tres dias despues. Lo que
+     * sume un lunes feriado es corrimiento, como cualquier otro. El motor lo
+     * suma al tramo de calendario que pide (Ventas::alcanceAcreditacion()).
+     */
+    const MARGEN_CORTE = 3;
 
     const NOMBRES_MES = [1 => 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
                          'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -844,6 +853,93 @@ class MixCobro {
     /** 0.1296 -> "12,96%" */
     public static function porcentajeTexto($fraccion) {
         return number_format($fraccion * 100, 2, ',', '.') . '%';
+    }
+
+    /* ====================================================================
+       LA FECHA DE ACREDITACION
+       ==================================================================== */
+
+    /**
+     * Cuando se acredita una venta de una hoja. Pura: el calendario entra.
+     *
+     * ES LA UNICA REGLA DE LA FECHA. La usa Ventas::cobranzaPorHojas(), que es
+     * de donde salen la pestana Ventas y la serie del tablero: si cada uno
+     * hiciera su cuenta, la pantalla diria martes y el tablero lunes.
+     *
+     *   Sin corte, o la venta fuera del corte (lunes a jueves; o el viernes
+     *   con SABADO):
+     *       acreditacion = venta + dias, corrida al proximo habil bancario.
+     *   Venta dentro del corte (viernes, sabado o domingo con VIERNES; sabado
+     *   o domingo con SABADO):
+     *       base         = el primer habil bancario despues del domingo de
+     *                      esa semana (el lunes, o el martes si el lunes es
+     *                      feriado)
+     *       acreditacion = base + dias, corrida al proximo habil.
+     *
+     * POR QUE: Fiserv presenta junto el lote del fin de semana y el plazo
+     * corre desde el primer habil siguiente. Con 1 dia, lo vendido de viernes
+     * a domingo se acredita el martes, no el lunes; con 0 dias, el lunes.
+     *
+     * LO QUE CUENTA ES EL DIA DE LA SEMANA DE LA VENTA, no el calendario
+     * bancario: un viernes feriado sigue siendo viernes para el corte. Y el
+     * calendario bancario es el de siempre -RO_T_CALENDARIO con sus ajustes-:
+     * no hay uno propio del corte.
+     *
+     * Sin corte la cuenta es EXACTAMENTE la de antes -la misma fecha teorica
+     * y el mismo corrimiento-, que es lo que hace que los nodos en No aplica
+     * den la misma cobranza al ultimo bit.
+     *
+     * @param string $fechaVenta 'Y-m-d'
+     * @param int $dias Los dias de la hoja (resolver()), >= 0
+     * @param string|null $corte El corte de la hoja: un codigo de CORTES;
+     *                    null es NO_APLICA
+     * @param array|callable $habiles El mapa 'Y-m-d' => bool del calendario
+     *                    bancario, o la funcion que corre una fecha al
+     *                    proximo habil. El motor pasa la suya (proximoHabil(),
+     *                    que ademas avisa si al calendario le falta un mes);
+     *                    con el mapa se corre con DiasHabiles::siguiente(),
+     *                    la misma mecanica.
+     * @return array ['fecha' => 'Y-m-d' habil, 'en_corte' => bool,
+     *               'base' => 'Y-m-d' habil desde el que se contaron los
+     *               dias, o null si la venta no entro en el corte]
+     */
+    public static function fechaAcreditacion($fechaVenta, $dias, $corte, $habiles) {
+        $correr = is_array($habiles)
+            ? function ($fecha) use ($habiles) { return DiasHabiles::siguiente($fecha, $habiles)['fecha']; }
+            : $habiles;
+
+        if (!self::ventaEnCorte($fechaVenta, $corte)) {
+            $teorica = date('Y-m-d', strtotime($fechaVenta . ' +' . $dias . ' days'));
+
+            return ['fecha' => call_user_func($correr, $teorica), 'en_corte' => false, 'base' => null];
+        }
+
+        // El lunes que sigue al domingo de esa semana (N: 5 viernes ... 7
+        // domingo), y de ahi al primer habil.
+        $lunes = date('Y-m-d', strtotime($fechaVenta . ' +' . (8 - intval(date('N', strtotime($fechaVenta)))) . ' days'));
+        $base = call_user_func($correr, $lunes);
+        $teorica = date('Y-m-d', strtotime($base . ' +' . $dias . ' days'));
+
+        return ['fecha' => call_user_func($correr, $teorica), 'en_corte' => true, 'base' => $base];
+    }
+
+    /**
+     * Si una venta de ese dia entra en el corte. Pura. Desde el viernes: de
+     * viernes a domingo; desde el sabado: sabado y domingo. NO_APLICA, null o
+     * cualquier otro valor: no.
+     */
+    public static function ventaEnCorte($fechaVenta, $corte) {
+        $dia = intval(date('N', strtotime($fechaVenta)));
+
+        if ($corte === 'VIERNES') {
+            return $dia >= 5;
+        }
+
+        if ($corte === 'SABADO') {
+            return $dia >= 6;
+        }
+
+        return false;
     }
 
     /* ====================================================================

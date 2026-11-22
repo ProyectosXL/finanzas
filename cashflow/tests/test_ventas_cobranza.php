@@ -399,3 +399,104 @@ chequear('con la carga de sus hojas ponderada por % efectivo', round($cargaLoc, 
 chequear('Franquicias sin costo: cero, no null', 0.0, $c['resumen_canal']['FRANQUICIAS']['carga_ponderada']);
 chequear('un canal sin hojas: sin carga, null', null,
     cobranzaVC(arbolVC([14 => ['ACTIVO' => 0]]))['resumen_canal']['MAYORISTAS']['carga_ponderada']);
+
+// ============================================================================
+// EL CORTE DE FIN DE SEMANA EN LA COBRANZA
+// ============================================================================
+
+seccion('el corte de fin de semana: Fiserv desde el viernes, con el lunes 12/10 feriado');
+
+$cCorte = cobranzaVC(arbolVC([7 => ['CORTE_FINDE' => 'VIERNES']]));
+
+// 3 cuotas (1 dia) hereda el corte de Fiserv. Viernes 09, sabado 10 y
+// domingo 11: el primer habil despues del domingo es el martes 13 (el 12 es
+// feriado), y a 1 dia, el miercoles 14. La del lunes 12 no entra en el corte:
+// 13. La del martes 13: 14.
+chequear('3 cuotas: el martes 13 solo recibe la venta del lunes feriado', 1000 * 0.1296,
+    $cCorte['dias']['N8']['2026-10-13']);
+chequear('y el miercoles 14, la del viernes, el sabado, el domingo y el martes', 4 * 1000 * 0.1296,
+    $cCorte['dias']['N8']['2026-10-14']);
+chequear('sin el corte, las cuatro del fin de semana largo caian el martes', 4 * 1000 * 0.1296,
+    $c['dias']['N8']['2026-10-13']);
+chequear('el costo sigue a su bruto, al miercoles', 4 * 1000 * 0.1296 * 0.058,
+    $cCorte['costo']['dias']['N8']['2026-10-14']);
+chequear('Resto (7 dias) tambien lo hereda: la del viernes 09 ya no cae el viernes 16, se cuenta desde el martes 13',
+    [1000 * 0.3024, 0.0], [$c['dias']['N9']['2026-10-16'], (float) $cCorte['dias']['N9']['2026-10-16']]);
+
+/** La cobranza total de un canal en el eje: dias + meses */
+function totalCanalVC($cob, $canal) {
+    return array_sum($cob['subtotal_dias'][$canal]) + array_sum($cob['subtotal_meses'][$canal]);
+}
+
+chequear('Locales: el total del horizonte no cambia, solo las fechas', round(totalCanalVC($c, 'LOCALES'), 6),
+    round(totalCanalVC($cCorte, 'LOCALES'), 6));
+chequear('tampoco el de Fiserv ni el de sus cuotas', [
+        round(array_sum($c['dias']['N7']) + array_sum($c['meses']['N7']), 6),
+        round(array_sum($c['dias']['N9']) + array_sum($c['meses']['N9']), 6)],
+    [round(array_sum($cCorte['dias']['N7']) + array_sum($cCorte['meses']['N7']), 6),
+     round(array_sum($cCorte['dias']['N9']) + array_sum($cCorte['meses']['N9']), 6)]);
+chequear('ni el costo de Locales', round(array_sum($c['costo']['subtotal_dias']['LOCALES'])
+        + array_sum($c['costo']['subtotal_meses']['LOCALES']), 6),
+    round(array_sum($cCorte['costo']['subtotal_dias']['LOCALES'])
+        + array_sum($cCorte['costo']['subtotal_meses']['LOCALES']), 6));
+
+$igualesVC = true;
+
+foreach (['dias', 'meses'] as $rama) {
+    foreach ($c[$rama] as $clave => $cols) {
+        if (!in_array($clave, ['N2', 'N4', 'N7', 'N8', 'N9'], true)) {
+            $igualesVC = $igualesVC && $cols === $cCorte[$rama][$clave]
+                && $c['costo'][$rama][$clave] === $cCorte['costo'][$rama][$clave];
+        }
+    }
+}
+
+chequear('todo lo que no esta debajo de Fiserv, identico al ultimo bit (===)', true, $igualesVC);
+chequear('los otros canales, identicos al ultimo bit', [true, true, true], array_map(function ($canal) use ($c, $cCorte) {
+    return $c['subtotal_dias'][$canal] === $cCorte['subtotal_dias'][$canal]
+        && $c['subtotal_meses'][$canal] === $cCorte['subtotal_meses'][$canal];
+}, ['FRANQUICIAS', 'MAYORISTAS', 'ECOMMERCE']));
+
+seccion('el corte de fin de semana: No aplica y vacio dan la cobranza de siempre');
+
+$cNoAplica = cobranzaVC(arbolVC([7 => ['CORTE_FINDE' => 'NO_APLICA']]));
+
+chequear('No aplica en Fiserv: la grilla entera identica al ultimo bit', true,
+    [$c['dias'], $c['meses'], $c['costo'], $c['neto'], $c['total_horizonte']]
+    === [$cNoAplica['dias'], $cNoAplica['meses'], $cNoAplica['costo'], $cNoAplica['neto'], $cNoAplica['total_horizonte']]);
+chequear('una cuota con No aplica propio vuelve a la fecha de siempre, aunque Fiserv tenga corte', true,
+    cobranzaVC(arbolVC([7 => ['CORTE_FINDE' => 'VIERNES'], 8 => ['CORTE_FINDE' => 'NO_APLICA']]))['dias']['N8']
+    === $c['dias']['N8']);
+
+seccion('el corte de fin de semana: el calendario alcanza para la ultima acreditacion');
+
+// Locales cobra todo por Fiserv, a 7 dias y desde el viernes, y es el plazo
+// mas largo: alcanceAcreditacion() tiene que sumarle el margen del corte.
+$soloFiserv = MixCobro::resolver(MixCobro::normalizar([
+    nodoVC(1, 'LOCALES', null, 'MEDIO_PAGO', 'Fiserv', 1.0, null, null, 7) + ['CORTE_FINDE' => 'VIERNES'],
+    nodoVC(12, 'FRANQUICIAS', null, 'MEDIO_PAGO', 'Echeq', 1.0, null, null, 3),
+    nodoVC(14, 'MAYORISTAS', null, 'MEDIO_PAGO', 'Echeq', 1.0, null, null, 3),
+    nodoVC(20, 'ECOMMERCE', null, 'MARKETPLACE', 'Vtex', 1.0, null, null, 3)
+]));
+$alcance = Ventas::alcanceAcreditacion([$soloFiserv]);
+
+chequear('el alcance es el plazo mas largo mas el margen del corte', 7 + MixCobro::MARGEN_CORTE, $alcance);
+chequear('sin corte, el plazo mas largo, como antes', 60, Ventas::alcanceAcreditacion([MixCobro::resolver(arbolVC())]));
+chequear('con un corte en una hoja que no es la mas lejana, igual suma el margen', 63,
+    Ventas::alcanceAcreditacion([MixCobro::resolver(arbolVC([7 => ['CORTE_FINDE' => 'SABADO']]))]));
+
+// La ventana termina un viernes: la venta de ese dia es la que mas lejos cae.
+$finVentana = '2026-10-30';
+$peor = '';
+
+foreach (['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'] as $venta) {
+    $r = MixCobro::fechaAcreditacion($venta, 7, 'VIERNES', function ($f) { return $f; });
+    $peor = max($peor, $r['fecha']);
+}
+
+$limite = date('Y-m-d', strtotime($finVentana . ' +' . $alcance . ' days'));
+$sinMargen = date('Y-m-d', strtotime($finVentana . ' +7 days'));
+
+chequear('la fecha teorica mas lejana (antes del corrimiento) entra en el calendario pedido', true, $peor <= $limite);
+chequear('y sin el margen del corte no entraria', true, $peor > $sinMargen);
+chequear('el corrimiento lo cubre la holgura de siempre', 30, Ventas::HOLGURA_CORRIMIENTO);

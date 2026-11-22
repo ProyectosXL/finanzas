@@ -28,14 +28,18 @@ require_once __DIR__ . '/MixCobro.php';
  *   Bruto(c, h, d)         = VentaDiaria(c, d) * %efectivo(h)
  *   Costo(c, h, d)         = Bruto(c, h, d) * (costo + tasa acumulados de h)
  *   Neto(c, h, d)          = Bruto - Costo
- *   FechaAcreditacion      = d + Dias(h), corrida al proximo dia bancario
- *                            habil si cae en no habil
+ *   FechaAcreditacion      = Base(d, h) + Dias(h), corrida al proximo dia
+ *                            bancario habil si cae en no habil
+ *   Base(d, h)             = d, salvo que d entre en el corte de fin de
+ *                            semana de h: entonces, el primer habil despues
+ *                            del domingo de esa semana
  *
  * h es una HOJA del arbol del mix de cobro del canal (Medio de pago > Tipo de
  * tarjeta > Procesadora > Cuotas, y en Ecommerce un Marketplace arriba de
  * todo). Su % efectivo es el producto de los porcentajes de su rama, su costo
- * y su tasa se suman a lo largo de la rama y sus dias son los del nivel mas
- * cercano que los tenga. La regla vive en MixCobro::resolver().
+ * y su tasa se suman a lo largo de la rama, y sus dias y su corte de fin de
+ * semana son los del nivel mas cercano que los tenga. La regla vive en
+ * MixCobro::resolver(), y la fecha en MixCobro::fechaAcreditacion().
  *
  * LA COBRANZA SIGUE SIENDO BRUTA. El costo de cobro (comisiones y tasas) es
  * una fila propia del tablero, en negativo -serie VENTAS.COSTO_COBRO-, con el
@@ -54,7 +58,9 @@ require_once __DIR__ . '/MixCobro.php';
  * Como el divisor de la venta diaria descuenta los feriados de comercio, el
  * total mensual se conserva. Como los sabados y domingos de cobranza se corren
  * al lunes, la cobranza se concentra los lunes: es un efecto del corrimiento,
- * no una regla aparte.
+ * no una regla aparte. El corte de fin de semana SI es una regla aparte, de
+ * quien acredita (Fiserv presenta junto el lote del fin de semana): mueve la
+ * base desde la que se cuentan los dias, y usa el mismo calendario bancario.
  *
  * RELACION CON LAS COBRANZAS REALES
  * ---------------------------------
@@ -85,6 +91,13 @@ class Ventas {
 
     /** Avisos no fatales acumulados durante el calculo (se devuelven en el JSON) */
     private $warnings = [];
+
+    /**
+     * Dias de calendario bancario que se piden de mas, despues de la ultima
+     * fecha teorica posible, para el corrimiento a habil: un fin de semana
+     * largo, un lunes feriado despues de un corte.
+     */
+    const HOLGURA_CORRIMIENTO = 30;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
@@ -1300,21 +1313,14 @@ class Ventas {
             $this->warnUnaVez($a);
         }
 
-        $maxDias = 0;
-
-        foreach ($arboles ?: [$arbol] as $a) {
-            foreach ($a['nodos'] as $n) {
-                if ($n['hoja'] && $n['dias'] !== null && $n['dias'] > $maxDias) {
-                    $maxDias = $n['dias'];
-                }
-            }
-        }
-
-        // Se pide el calendario con margen: el plazo maximo de las hojas en
-        // juego mas holgura para el corrimiento a habil (fines de semana
-        // largos).
+        // Se pide el calendario con margen: lo mas lejos que una venta del
+        // ultimo dia de la ventana puede caer antes del corrimiento -el plazo
+        // maximo de las hojas en juego, mas el margen del corte de fin de
+        // semana si alguna lo tiene- y holgura para el corrimiento a habil
+        // (fines de semana largos). Lo vendido ANTES de hoy no entra: el
+        // motor proyecta venta desde hoy, con o sin corte.
         $calFin = (new DateTime($ventanaFin))
-            ->modify('+' . ($maxDias + 30) . ' days')
+            ->modify('+' . (self::alcanceAcreditacion($arboles ?: [$arbol]) + self::HOLGURA_CORRIMIENTO) . ' days')
             ->format('Y-m-d');
 
         $habiles = $this->getDiasHabiles($hoy->format('Y-m-d'), $calFin);
@@ -1612,7 +1618,15 @@ class Ventas {
      *   Bruto(hoja, d) = VentaDiaria(canal, d) * %efectivo(hoja)
      *   Costo(hoja, d) = Bruto(hoja, d) * (costo + tasa acumulados de la hoja)
      *   Neto(hoja, d)  = Bruto - Costo
-     *   Acreditacion   = d + dias(hoja), corrida al proximo habil bancario
+     *   Acreditacion   = MixCobro::fechaAcreditacion(d, dias(hoja), corte(hoja)):
+     *                    d + dias corrida al proximo habil bancario, o -si d
+     *                    entra en el corte de fin de semana de la hoja- el
+     *                    primer habil despues del domingo + dias, corrida
+     *
+     * EL CORTE SOLO MUEVE FECHAS: cada venta se acredita entera, como siempre,
+     * en otro dia. El total por canal no cambia salvo lo que, al correrse,
+     * cruza el borde del eje y se descarta como cualquier acreditacion fuera
+     * del horizonte.
      *
      * EL COSTO CAE EN LA MISMA FECHA QUE SU BRUTO: es lo que la procesadora
      * se queda de esa acreditacion, no un pago aparte con su propio
@@ -1642,8 +1656,9 @@ class Ventas {
      * descarta, como siempre.
      *
      * Es estatica y pura: el calendario entra como $corrimiento, la funcion
-     * que corre una fecha teorica al proximo habil. El motor le pasa
-     * proximoHabil().
+     * que corre una fecha teorica al proximo habil, y se la pasa tal cual a
+     * MixCobro::fechaAcreditacion(). El motor le pasa proximoHabil(), que es
+     * el que avisa si al calendario le falta un mes.
      *
      * EL MIX POR MES. Con $arbolesPorMes, cada dia de venta se reparte con el
      * arbol del MES DE LA VENTA, no el de la acreditacion: una venta del 30/11
@@ -1710,9 +1725,18 @@ class Ventas {
         $bruto = self::grillaCobranzaVacia($claves, $dias, $mesesClaves);
         $costo = self::grillaCobranzaVacia($claves, $dias, $mesesClaves);
 
-        // Cache de corrimiento a habil: muchas fechas de venta distintas caen en
-        // la misma fecha de acreditacion teorica.
+        // Dos caches: la del corrimiento a habil -muchas ventas caen en la
+        // misma fecha teorica, y el corte pide ademas la de la base- y la de la
+        // fecha de acreditacion de cada venta con cada plazo y cada corte.
         $cacheHabil = [];
+        $correr = function ($fecha) use (&$cacheHabil, $corrimiento) {
+            if (!isset($cacheHabil[$fecha])) {
+                $cacheHabil[$fecha] = call_user_func($corrimiento, $fecha);
+            }
+
+            return $cacheHabil[$fecha];
+        };
+        $cacheAcred = [];
 
         foreach ($ventaDiaria as $fecha => $porCanal) {
             // El mix del MES DE LA VENTA
@@ -1731,13 +1755,14 @@ class Ventas {
                         continue;
                     }
 
-                    $teorica = date('Y-m-d', strtotime($fecha . ' +' . $h['dias'] . ' days'));
+                    // LA FECHA SALE DE LA UNICA REGLA: MixCobro::fechaAcreditacion()
+                    $k = $fecha . '|' . $h['dias'] . '|' . $h['corte'];
 
-                    if (!isset($cacheHabil[$teorica])) {
-                        $cacheHabil[$teorica] = call_user_func($corrimiento, $teorica);
+                    if (!isset($cacheAcred[$k])) {
+                        $cacheAcred[$k] = MixCobro::fechaAcreditacion($fecha, $h['dias'], $h['corte'], $correr);
                     }
 
-                    $acred = $cacheHabil[$teorica];
+                    $acred = $cacheAcred[$k]['fecha'];
 
                     if (isset($diasSet[$acred])) {
                         $rama = 'dias';
@@ -1797,9 +1822,39 @@ class Ventas {
     }
 
     /**
+     * Cuantos dias corridos, como mucho, hay entre una venta y su fecha
+     * teorica de acreditacion ANTES del corrimiento a habil. Pura.
+     *
+     * Es el plazo maximo de las hojas en juego de todos los arboles (el de
+     * cada mes de venta), mas MixCobro::MARGEN_CORTE si alguna de esas hojas
+     * tiene corte de fin de semana: una venta del viernes se cuenta desde el
+     * lunes. Sin corte, el de siempre. Lo que corra el corrimiento -un lunes
+     * feriado, un fin de semana largo- lo cubre HOLGURA_CORRIMIENTO.
+     *
+     * @param array $arboles Resultados de MixCobro::resolver()
+     * @return int
+     */
+    public static function alcanceAcreditacion($arboles) {
+        $maxDias = 0;
+        $hayCorte = false;
+
+        foreach ($arboles as $a) {
+            foreach ($a['nodos'] as $n) {
+                if ($n['hoja'] && $n['en_juego'] && $n['dias'] !== null) {
+                    $maxDias = max($maxDias, $n['dias']);
+                    $hayCorte = $hayCorte || (isset($n['corte']) && $n['corte'] !== MixCobro::SIN_CORTE);
+                }
+            }
+        }
+
+        return $maxDias + ($hayCorte ? MixCobro::MARGEN_CORTE : 0);
+    }
+
+    /**
      * Las hojas que se proyectan de un arbol, por canal: en juego y con dias.
      * Una hoja sin dias no se proyecta (avisosDelMix() dice cuanto queda
-     * afuera).
+     * afuera). Cada una lleva su corte de fin de semana, ya heredado; un
+     * arbol sin la columna -o el mix plano- da NO_APLICA en todas.
      */
     private static function hojasProyectables($arbol) {
         $hojas = [];
@@ -1811,6 +1866,7 @@ class Ventas {
                     'porcentaje' => $n['porcentaje_efectivo'],
                     'carga' => $n['carga'],
                     'dias' => $n['dias'],
+                    'corte' => isset($n['corte']) ? $n['corte'] : MixCobro::SIN_CORTE,
                     'suma_a' => array_column($n['camino'], 'clave')
                 ];
             }

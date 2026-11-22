@@ -499,3 +499,97 @@ chequear('el editor la recibe, con la columna y el script', [MixCobro::cortesLis
 chequear('sin la columna, el editor lo sabe', false, MixCobro::datosEditor(arbolMC(), 'NODO')['corte']);
 chequear('con el mix plano tampoco: no hay arbol donde cargarlo', false,
     MixCobro::datosEditor(arbolMC(), 'PLANO', null, true)['corte']);
+
+// ============================================================================
+// LA FECHA DE ACREDITACION: MixCobro::fechaAcreditacion()
+// ============================================================================
+
+/* Calendario de lunes a viernes, de noviembre a enero, con dos feriados
+   bancarios: el lunes 30/11 y el viernes 04/12. La semana del 16/11 es
+   normal: viernes 20, sabado 21, domingo 22, lunes 23, martes 24. */
+$habilesFA = [];
+$cursorFA = new DateTime('2026-11-01');
+
+while ($cursorFA->format('Y-m-d') <= '2027-01-31') {
+    $habilesFA[$cursorFA->format('Y-m-d')] = intval($cursorFA->format('N')) <= 5;
+    $cursorFA->modify('+1 day');
+}
+
+$habilesFA['2026-11-30'] = false;
+$habilesFA['2026-12-04'] = false;
+
+/** La fecha con el calendario de prueba */
+function fechaFA($venta, $dias, $corte) {
+    global $habilesFA;
+
+    return MixCobro::fechaAcreditacion($venta, $dias, $corte, $habilesFA)['fecha'];
+}
+
+seccion('fecha de acreditacion: Fiserv a 1 dia, desde el viernes');
+
+chequear('viernes, sabado y domingo -> martes', ['2026-11-24', '2026-11-24', '2026-11-24'],
+    [fechaFA('2026-11-20', 1, 'VIERNES'), fechaFA('2026-11-21', 1, 'VIERNES'), fechaFA('2026-11-22', 1, 'VIERNES')]);
+chequear('desde la base: el lunes', ['2026-11-23', true],
+    [MixCobro::fechaAcreditacion('2026-11-21', 1, 'VIERNES', $habilesFA)['base'],
+     MixCobro::fechaAcreditacion('2026-11-21', 1, 'VIERNES', $habilesFA)['en_corte']]);
+chequear('el jueves -> viernes: no cambia', ['2026-11-20', false, null],
+    array_values(MixCobro::fechaAcreditacion('2026-11-19', 1, 'VIERNES', $habilesFA)));
+chequear('el lunes y el martes, tampoco', ['2026-11-24', '2026-11-25'],
+    [fechaFA('2026-11-23', 1, 'VIERNES'), fechaFA('2026-11-24', 1, 'VIERNES')]);
+chequear('con el lunes feriado -> base martes -> miercoles', ['2026-12-02', '2026-12-02', '2026-12-02', '2026-12-01'],
+    [fechaFA('2026-11-27', 1, 'VIERNES'), fechaFA('2026-11-28', 1, 'VIERNES'), fechaFA('2026-11-29', 1, 'VIERNES'),
+     MixCobro::fechaAcreditacion('2026-11-29', 1, 'VIERNES', $habilesFA)['base']]);
+chequear('con 0 dias -> el lunes', ['2026-11-23', '2026-11-23', '2026-11-23'],
+    [fechaFA('2026-11-20', 0, 'VIERNES'), fechaFA('2026-11-21', 0, 'VIERNES'), fechaFA('2026-11-22', 0, 'VIERNES')]);
+chequear('con 7 dias, el viernes se cuenta desde el lunes (+7: el lunes siguiente, o el martes si es feriado)', ['2026-11-23', '2026-12-01'],
+    [fechaFA('2026-11-13', 7, 'VIERNES'), fechaFA('2026-11-20', 7, 'VIERNES')]);
+chequear('un viernes feriado sigue siendo viernes para el corte', ['2026-12-08', true],
+    [fechaFA('2026-12-04', 1, 'VIERNES'), MixCobro::ventaEnCorte('2026-12-04', 'VIERNES')]);
+chequear('el mismo viernes feriado sin corte: sabado, corrido al lunes', '2026-12-07', fechaFA('2026-12-04', 1, null));
+
+seccion('fecha de acreditacion: desde el sabado');
+
+chequear('el viernes, como hoy: sabado corrido al lunes', ['2026-11-23', false],
+    [fechaFA('2026-11-20', 1, 'SABADO'), MixCobro::fechaAcreditacion('2026-11-20', 1, 'SABADO', $habilesFA)['en_corte']]);
+chequear('sabado y domingo -> martes', ['2026-11-24', '2026-11-24'],
+    [fechaFA('2026-11-21', 1, 'SABADO'), fechaFA('2026-11-22', 1, 'SABADO')]);
+
+seccion('fecha de acreditacion: sin corte, al ultimo bit como antes');
+
+// La cuenta de antes: venta + dias, corrida con DiasHabiles::siguiente().
+$distintos = 0;
+$probados = 0;
+$cursorFA = new DateTime('2026-11-01');
+
+while ($cursorFA->format('Y-m-d') <= '2026-12-20') {
+    $venta = $cursorFA->format('Y-m-d');
+
+    foreach ([0, 1, 2, 7, 18, 25] as $d) {
+        $antes = DiasHabiles::siguiente(date('Y-m-d', strtotime($venta . ' +' . $d . ' days')), $habilesFA)['fecha'];
+
+        foreach ([null, 'NO_APLICA'] as $corte) {
+            $r = MixCobro::fechaAcreditacion($venta, $d, $corte, $habilesFA);
+            $distintos += ($r['fecha'] !== $antes || $r['en_corte'] || $r['base'] !== null) ? 1 : 0;
+            $probados++;
+        }
+    }
+
+    $cursorFA->modify('+1 day');
+}
+
+chequear('No aplica y vacio: la fecha de antes en ' . $probados . ' combinaciones de dia y plazo', 0, $distintos);
+chequear('un valor desconocido no corta: tampoco entra en el corte', false, MixCobro::ventaEnCorte('2026-11-21', 'DOMINGO'));
+
+seccion('fecha de acreditacion: el calendario entra como mapa o como funcion');
+
+$llamadasFA = [];
+$correrFA = function ($fecha) use ($habilesFA, &$llamadasFA) {
+    $llamadasFA[] = $fecha;
+
+    return DiasHabiles::siguiente($fecha, $habilesFA)['fecha'];
+};
+
+chequear('la funcion de corrimiento da lo mismo que el mapa', fechaFA('2026-11-28', 1, 'VIERNES'),
+    MixCobro::fechaAcreditacion('2026-11-28', 1, 'VIERNES', $correrFA)['fecha']);
+chequear('y se le pide la base y la fecha teorica: el motor avisa por ahi si falta un mes',
+    ['2026-11-30', '2026-12-02'], $llamadasFA);
