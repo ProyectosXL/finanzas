@@ -497,7 +497,11 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => $r['altas'] . ' comprobante(s) con fecha nueva y ' . $r['cambios']
-                    . ' modificado(s).',
+                    . ' modificado(s).'
+                    . (!empty($r['deshechas'])
+                        ? ' ' . $r['deshechas'] . ' factura(s) de pagos agrupados anteriores vuelven a su '
+                            . 'vencimiento o al cronograma.'
+                        : ''),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

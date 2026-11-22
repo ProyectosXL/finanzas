@@ -404,6 +404,14 @@
     color: #97a1ae;
 }
 
+/* Una factura de un pago agrupado parcial que el cheque no cubre: no es un
+   error, sigue como si no estuviera en la planilla. Se atenúa como lo que no
+   cambia. */
+.tab-proveedores_locales .prov-pre-no_cubierta {
+    color: #97a1ae;
+    background-color: #f8f9fa;
+}
+
 .tab-proveedores_locales .prov-preview-tabla code {
     font-size: 0.76rem;
     color: #43536b;

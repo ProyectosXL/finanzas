@@ -1220,6 +1220,19 @@
         var p = f.PAGO_IMPORTADO;
 
         if (!p) { return ''; }
+
+        /* UNA FACTURA DE UN PAGO AGRUPADO lo dice primero: "pago agrupado",
+           y al lado si es la que lleva el excedente o la que quedó a medias.
+           Va en data-etiqueta y en la columna que baja al Excel. */
+        if (f.PAGO_AGRUPADO && p.estado !== 'REGISTRADO' && p.estado !== 'DESCUADRADO') {
+            if (p.tipo === 'SALDO') { return 'saldo'; }
+            if (p.clasificacion === 'PARCIAL') { return 'pago agrupado · parcial'; }
+            if (p.clasificacion === 'COMPENSADA') { return 'pago agrupado · compensada'; }
+            if (p.clasificacion === 'EXCEDENTE' && Number(f.EXCEDENTE) > 0) { return 'pago agrupado · + excedente'; }
+
+            return 'pago agrupado';
+        }
+
         if (p.estado === 'REGISTRADO') {
             return p.clasificacion === 'COMPENSADA' ? 'registrada en Tango' : 'parcial en Tango';
         }
@@ -1252,6 +1265,12 @@
     function textoImportado(f) {
         var p = f.PAGO_IMPORTADO;
         var lineas = [];
+
+        /* EL PAGO AGRUPADO: el cheque, su fecha y su forma, las facturas que
+           cubre y cuánto le toca a cada una. Después, lo de esta factura. */
+        if (f.PAGO_AGRUPADO) {
+            lineas.push(textoAgrupado(f.PAGO_AGRUPADO, f));
+        }
         var nombre = { PARCIAL: 'parcial', COMPENSADA: 'compensado en el total del proveedor' }[p.clasificacion]
             || 'con excedente';
 
@@ -1265,6 +1284,9 @@
                 + ' de ' + plata(p.pagado) + ' sobre un pendiente de ' + plata(p.pendiente_import)
                 + ', pero en Tango el pendiente subió a ' + plata(p.pendiente) + ': se proyecta el '
                 + 'pendiente de Tango. Reimportá para corregirlo.');
+        } else if (p.clasificacion === 'NETO' && f.PAGO_AGRUPADO) {
+            lineas.push('A esta factura le tocan ' + plata(p.pagado) + ': su neto a pagar'
+                + (Number(f.EXCEDENTE) ? ', más los centavos que redondean el cheque' : '') + '.');
         } else if (p.clasificacion === 'NETO') {
             lineas.push('Pagado con ' + p.medios.length + ' medios, por el neto a pagar ('
                 + plata(p.neto) + '). Es un comprobante en cuotas: cada medio cubre las cuotas de la más '
@@ -1294,6 +1316,28 @@
 
         lineas.push('La fecha se cambia reimportando la planilla de pagos, o con ↺.');
         lineas.push(Auditoria.texto({ usuario: p.usuario, fecha: p.fecha_modif }));
+
+        return lineas.join('\n');
+    }
+
+    /**
+     * "Pago agrupado: ECHEQ de $ 100.000,00 del 05/12/2026 por 10 facturas",
+     * con una línea por factura y lo que le toca. La de esta fila va marcada.
+     */
+    function textoAgrupado(g, f) {
+        var lineas = ['Pago agrupado: ' + g.forma + ' de ' + plata(g.importe) + ' del ' + fechaCorta(g.fecha)
+            + ' por ' + g.facturas.length + ' factura(s). Cada una guarda su parte; el cheque va una vez, en su '
+            + 'fecha.'];
+
+        g.facturas.forEach(function(x) {
+            var esta = f && x.t_comp === f.T_COMP && x.n_comp === f.N_COMP;
+
+            lineas.push((esta ? '▸ ' : '   ') + x.t_comp + ' ' + x.n_comp + ': ' + plata(x.importe)
+                + ({ EXCEDENTE: ' (con el excedente)', PARCIAL: ' (parcial)', COMPENSADA: ' (compensada)' }[x.clasificacion]
+                    || ''));
+        });
+
+        lineas.push('Volver al vencimiento (↺) deshace el pago agrupado entero.');
 
         return lineas.join('\n');
     }
@@ -1392,7 +1436,8 @@
                 + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
                 + ' data-tcomp="' + escapar(f.T_COMP) + '"'
                 + ' data-ncomp="' + escapar(f.N_COMP) + '"'
-                + ' title="' + escapar((f.PAGO_IMPORTADO ? 'Borrar el pago importado' : 'Borrar los medios')
+                + ' title="' + escapar((f.PAGO_AGRUPADO ? 'Deshacer el pago agrupado entero (pregunta antes)'
+                    : (f.PAGO_IMPORTADO ? 'Borrar el pago importado' : 'Borrar los medios'))
                     + ': el comprobante vuelve a su vencimiento o al cronograma, por el neto a pagar. '
                     + 'La exclusión, la forma y la observación de esta factura, si tiene, se conservan.') + '">'
                 + '<i class="fas fa-rotate-left"></i></button>';
@@ -1794,8 +1839,15 @@
             return;
         }
 
+        /* UNA FACTURA DE UN PAGO AGRUPADO SE TILDA SOLA: son facturas distintas
+           y excluir o fechar una no toca las otras. Pero se avisa, porque el
+           cheque las cubre juntas. */
+        var agrupadas = sel.filter(function(f) { return !!f.PAGO_AGRUPADO; }).length;
+
         texto('selResumenProv', sel.length + ' factura(s) seleccionada(s) · ' + plata(total)
-            + (yaExcluidas ? ' · ' + yaExcluidas + ' ya excluida(s)' : ''));
+            + (yaExcluidas ? ' · ' + yaExcluidas + ' ya excluida(s)' : '')
+            + (agrupadas ? ' · ' + agrupadas + ' parte de un pago agrupado: lo que hagas con '
+                + (agrupadas === 1 ? 'ella' : 'ellas') + ' no toca las otras facturas del pago' : ''));
 
         /* Cada botón se apaga cuando no tiene nada que hacer: "Excluir" con
            todo ya excluido, o "Volver a incluir" sin ninguna excluida. Un botón
@@ -2120,11 +2172,39 @@
                 var src = btn.hasAttribute('data-cod') ? btn
                     : grupo.querySelector('.prov-input-fecha');
 
-                pedirPago('deletePago', {
+                var cuerpo = {
                     cod_provee: src.getAttribute('data-cod'),
                     t_comp: src.getAttribute('data-tcomp'),
                     n_comp: src.getAttribute('data-ncomp')
-                });
+                };
+                var fila = ((datos && datos.filas) || []).filter(function(x) {
+                    return x.COD_PROVEE === cuerpo.cod_provee && x.T_COMP === cuerpo.t_comp
+                        && x.N_COMP === cuerpo.n_comp;
+                })[0];
+
+                /* UNA FACTURA DE UN PAGO AGRUPADO: ↺ deshace el pago entero —si
+                   no, las otras quedarían con partes que ya no suman el cheque—,
+                   y eso se pregunta antes. El servidor lo hace igual. */
+                if (fila && fila.PAGO_AGRUPADO) {
+                    var g = fila.PAGO_AGRUPADO;
+
+                    Notificacion.confirmar({
+                        titulo: 'Deshacer el pago agrupado',
+                        mensaje: '¿Deshacer el pago agrupado entero?',
+                        detalle: 'Esta factura es parte de un ' + g.forma + ' de ' + plata(g.importe) + ' del '
+                            + fechaCorta(g.fecha) + ' por ' + g.facturas.length + ' factura(s). Volver al '
+                            + 'vencimiento deshace el pago entero: las ' + g.facturas.length + ' facturas vuelven a '
+                            + 'su vencimiento o al cronograma. La exclusión, la forma y la observación de cada una '
+                            + 'se conservan.',
+                        confirmar: 'Deshacer el pago agrupado'
+                    }).then(function(ok) {
+                        if (ok) { pedirPago('deletePago', cuerpo); }
+                    });
+
+                    return;
+                }
+
+                pedirPago('deletePago', cuerpo);
             });
         });
 
@@ -2265,6 +2345,12 @@
                 'Proveedores dentro del máximo que pagan una factura de más y otra de menos: para '
                 + 'compensarlas falta correr sql/cashflow_prov_locales_excedente_por_proveedor.sql. '
                 + 'Mientras tanto sus filas no se cargan.', true],
+               /* UN CHEQUE PARA VARIAS FACTURAS: cuántos pagos, cuántas facturas
+                  y el importe. Lo dibuja chipAgrupado(), con las vacías tomadas. */
+               ['pagos_agrupados', 'Pago agrupado', 'primary', 'importe_agrupado', null],
+               ['no_cubiertas', 'No cubiertas', 'warning text-dark', null,
+                'Facturas de un pago agrupado parcial que el cheque no alcanza a cubrir: siguen como si no '
+                + 'estuvieran en la planilla.', true],
                ['pagos_parciales', 'Pago parcial', 'primary', 'importe_parcial',
                 'Comprobantes que se pagan con menos que su neto a pagar. El importe es lo que se paga; '
                 + 'el saldo sigue con su vencimiento o el próximo día de pago.'],
@@ -2311,6 +2397,11 @@
             // alguno: en cero no dicen nada.
             if ((c[3] || c[5]) && !r[c[0]]) { return; }
 
+            if (c[0] === 'pagos_agrupados') {
+                html += chipAgrupado(r);
+                return;
+            }
+
             html += '<span class="badge bg-' + c[2] + ' prov-chip-' + c[0] + '"'
                 + (c[4] ? ' title="' + escapar(c[4]) + '"' : '') + '>' + c[1] + ': ' + (r[c[0]] || 0)
                 + (c[3] ? ' · ' + plata(r[c[3]] || 0) : '') + '</span>';
@@ -2350,6 +2441,22 @@
         if (!frenado) {
             conectar('btnConfirmarProv', confirmarImportacion);
         }
+    }
+
+    /**
+     * El chip del pago agrupado: "Pago agrupado: 2 · 15 facturas · $ X", y
+     * cuántas filas vacías entraron como parte de uno, que es lo que hay que
+     * mirar: una vacía quiere decir "el neto" desde siempre, y acá se tomó
+     * como parte de un cheque porque su importe no podía ser el de su factura.
+     */
+    function chipAgrupado(r) {
+        return '<span class="badge bg-primary prov-chip-pagos_agrupados" title="'
+            + escapar('Un cheque o una transferencia para varias facturas del mismo proveedor, repartido en '
+                + 'orden de vencimiento: cada factura guarda su parte y ninguna queda con sobrepago.'
+                + (r.vacias_agrupadas ? ' Las filas vacías que entraron así lo dicen en su motivo.' : ''))
+            + '">Pago agrupado: ' + r.pagos_agrupados + ' · ' + r.facturas_agrupadas + ' facturas · '
+            + plata(r.importe_agrupado || 0)
+            + (r.vacias_agrupadas ? ' · ' + r.vacias_agrupadas + ' vacía(s) tomada(s)' : '') + '</span>';
     }
 
     /**
@@ -2402,7 +2509,7 @@
         // ordena la línea, como siempre.
         // Las ya pagadas en Tango van después de los errores: son advertencias,
         // no frenan nada, pero conviene leerlas antes que lo que sí se carga.
-        var orden = { ERROR: 0, YA_PAGADA: 1, CAMBIO: 2, ALTA: 3, SIN_CAMBIOS: 4 };
+        var orden = { ERROR: 0, YA_PAGADA: 1, NO_CUBIERTA: 1, CAMBIO: 2, ALTA: 3, SIN_CAMBIOS: 4 };
 
         /* EN PAGOS, LAS FILAS DE UN PROVEEDOR VAN JUNTAS, con su subtotal
            arriba: el excedente se valida sobre su total. Los proveedores se
@@ -2424,11 +2531,29 @@
             });
         }
 
+        /* LAS FACTURAS DE UN PAGO AGRUPADO VAN JUNTAS, dentro de su proveedor,
+           en la posición de la más urgente: tienen estados distintos —una
+           puede quedar fuera, otra no cubierta— pero son un solo cheque. */
+        var claveGrupo = function(f) { return f.pago_agrupado ? 'G|' + f.pago_agrupado.id : ''; };
+        var rangoG = {};
+
+        filas.forEach(function(f) {
+            var g = claveGrupo(f);
+
+            if (g) { rangoG[g] = Math.min(rangoG[g] === undefined ? 9 : rangoG[g], orden[f.estado]); }
+        });
+
+        var rangoFila = function(f) { var g = claveGrupo(f); return g ? rangoG[g] : orden[f.estado]; };
+
         filas = filas.slice().sort(function(a, b) {
             var ka = claveProv(a);
             var kb = claveProv(b);
+            var ga = claveGrupo(a);
+            var gb = claveGrupo(b);
 
             return (porProv ? (rango[ka] - rango[kb]) || (ka < kb ? -1 : (ka > kb ? 1 : 0)) : 0)
+                || (rangoFila(a) - rangoFila(b))
+                || (ga < gb ? -1 : (ga > gb ? 1 : 0))
                 || (orden[a.estado] - orden[b.estado])
                 || ((a.grupo || a.linea) - (b.grupo || b.linea))
                 || ((a.parte || 0) - (b.parte || 0))
@@ -2476,6 +2601,22 @@
             if (que === 'Pagos' && f.estado !== 'ERROR' && (f.parte || 1) <= 1 && marcas[f.clasificacion]) {
                 detalle = '<span class="badge bg-primary me-1 prov-preview-clasif">'
                     + marcas[f.clasificacion] + '</span>' + detalle;
+            }
+
+            /* UN PAGO AGRUPADO: la misma marca en todas sus facturas —con la
+               línea del cheque como identificador— y, en la del cheque o la
+               que quedó fuera, lo que le pasó. */
+            if (que === 'Pagos' && f.pago_agrupado) {
+                var pa = f.pago_agrupado;
+
+                detalle = '<span class="badge bg-info text-dark me-1 prov-preview-agrupado" title="'
+                    + escapar('Pago agrupado ' + pa.etiqueta + ': ' + pa.forma + ' de ' + plata(pa.importe)
+                        + ' del ' + fechaCorta(pa.fecha) + '.')
+                    + '">pago agrupado ' + escapar(pa.etiqueta) + '</span>'
+                    + (pa.fuera ? '<span class="badge bg-light text-dark border me-1">fuera del pago</span>' : '')
+                    + (pa.tomada_vacia && !pa.fuera
+                        ? '<span class="badge bg-warning text-dark me-1">vacía tomada</span>' : '')
+                    + detalle;
             }
 
             /* LO QUE NO ENTRÓ EN EL TOTAL DE SU PROVEEDOR se dice: tiene un
@@ -2647,7 +2788,8 @@
 
     function colorEstado(e) {
         return { ALTA: 'success', CAMBIO: 'warning', SIN_CAMBIOS: 'secondary',
-                 YA_PAGADA: 'warning text-dark', ERROR: 'danger' }[e] || 'secondary';
+                 YA_PAGADA: 'warning text-dark', NO_CUBIERTA: 'light text-dark border',
+                 ERROR: 'danger' }[e] || 'secondary';
     }
 
     /**
@@ -2655,7 +2797,7 @@
      * leer junto a los errores, y tiene que decir qué pasó sin buscar el código.
      */
     function rotuloEstado(e) {
-        return { YA_PAGADA: 'Ya pagada en Tango' }[e] || e;
+        return { YA_PAGADA: 'Ya pagada en Tango', NO_CUBIERTA: 'No cubierta' }[e] || e;
     }
 
     function confirmarImportacion() {
