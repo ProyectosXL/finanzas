@@ -500,3 +500,44 @@ $sinMargen = date('Y-m-d', strtotime($finVentana . ' +7 days'));
 chequear('la fecha teorica mas lejana (antes del corrimiento) entra en el calendario pedido', true, $peor <= $limite);
 chequear('y sin el margen del corte no entraria', true, $peor > $sinMargen);
 chequear('el corrimiento lo cubre la holgura de siempre', 30, Ventas::HOLGURA_CORRIMIENTO);
+
+seccion('el corte de fin de semana: el tooltip de la celda, armado en el servidor');
+
+chequear('el texto: ventas, base y plazo',
+    'Venta de fin de semana (corte desde el viernes): ventas del vie 20/11 al dom 22/11, base lunes 23/11, + 1 día',
+    Ventas::textoCorte('VIERNES', ['2026-11-20', '2026-11-21', '2026-11-22'], '2026-11-23', 1));
+chequear('una sola venta, desde el sabado, base martes y en plural',
+    'Venta de fin de semana (corte desde el sábado): venta del dom 22/11, base martes 24/11, + 7 días',
+    Ventas::textoCorte('SABADO', ['2026-11-22'], '2026-11-24', 7));
+chequear('con 0 dias', 'Venta de fin de semana (corte desde el viernes): ventas del vie 20/11 al dom 22/11, base lunes 23/11, + 0 días',
+    Ventas::textoCorte('VIERNES', ['2026-11-20', '2026-11-21', '2026-11-22'], '2026-11-23', 0));
+
+chequear('solo las celdas diarias de las hojas con ventas corridas por el corte: 3 cuotas el miercoles 14',
+    ['N8' => ['2026-10-14']], array_map('array_keys', $cCorte['corte_tooltip']));
+chequear('con el lunes feriado, la base es el martes',
+    'Venta de fin de semana (corte desde el viernes): ventas del vie 09/10 al dom 11/10, base martes 13/10, + 1 día',
+    $cCorte['corte_tooltip']['N8']['2026-10-14']);
+chequear('sin corte no hay tooltip', [[], []], [$c['corte_tooltip'], $cNoAplica['corte_tooltip']]);
+chequear('las columnas mensuales no llevan: Resto cae en el mes y no tiene', false,
+    isset($cCorte['corte_tooltip']['N9']));
+
+seccion('el corte de fin de semana: el tooltip del concepto');
+
+$filaN8 = array_values(array_filter($cCorte['arbol'], function ($f) { return $f['clave'] === 'N8'; }))[0];
+$filaN7 = array_values(array_filter($cCorte['arbol'], function ($f) { return $f['clave'] === 'N7'; }))[0];
+
+chequear('cada fila del arbol trae su corte, con el rotulo armado y de quien sale',
+    ['VIERNES', 'Desde el viernes', 'Fiserv', 'N7'],
+    [$filaN8['corte'], $filaN8['corte_rotulo'], $filaN8['corte_de']['nombre'], $filaN7['corte_de']['clave']]);
+chequear('sin corte, No aplica y sin origen', ['NO_APLICA', null],
+    [$c['arbol'][0]['corte'], $c['arbol'][0]['corte_de']]);
+
+$jsVC = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Js/Ingresos-Ventas.js'));
+
+chequear('la pantalla agrega la linea del corte al tooltip del concepto', true,
+    strpos($jsVC, "t += '\\nCorte de fin de semana: ' + n.corte_rotulo.charAt(0).toLowerCase() + n.corte_rotulo.slice(1) +") !== false
+    && strpos($jsVC, "' (hereda de ' + n.corte_de.nombre + ')'") !== false);
+chequear('y pone el texto del servidor en las celdas diarias de las hojas', true,
+    strpos($jsVC, "var tipsCorte = n.hoja ? ((cob.corte_tooltip || {})[n.clave] || {}) : {};") !== false
+    && strpos($jsVC, "col.rama === 'dias' ? tipsCorte[col.clave] : ''") !== false
+    && strpos($jsVC, "(tip ? ' title=\"' + escapar(tip) + '\"' : '')") !== false);

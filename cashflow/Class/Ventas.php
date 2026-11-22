@@ -1681,7 +1681,10 @@ class Ventas {
      * @param array|null $arbolesPorMes [mes 1..12 => resolver()]; null o un mes
      *                   ausente usan $arbol
      * @return array Grilla bruta + ['costo' => grilla, 'neto' => grilla,
-     *               'arbol' => [...], 'filas' => [hojas], 'por_mes' => [...]?]
+     *               'arbol' => [...], 'filas' => [hojas], 'por_mes' => [...]?,
+     *               'corte_tooltip' => [clave de hoja => ['Y-m-d' => texto]]:
+     *               las celdas DIARIAS con ventas de fin de semana corridas
+     *               por el corte (textoCorte())]
      */
     public static function cobranzaPorHojas($ventaDiaria, $arbol, $dias, $meses, $diasSet, $corrimiento,
                                             $arbolesPorMes = null) {
@@ -1738,6 +1741,11 @@ class Ventas {
         };
         $cacheAcred = [];
 
+        // Por hoja y por dia del tramo: las ventas que cayeron ahi por el corte
+        // de fin de semana, agrupadas por base, plazo y corte. Es de donde sale
+        // el tooltip de la celda (corte_tooltip).
+        $corteDias = [];
+
         foreach ($ventaDiaria as $fecha => $porCanal) {
             // El mix del MES DE LA VENTA
             $mesVenta = intval(substr($fecha, 5, 2));
@@ -1777,6 +1785,10 @@ class Ventas {
 
                     self::sumarCobranza($bruto, $rama, $col, $canal, $h['suma_a'], $monto);
                     self::sumarCobranza($costo, $rama, $col, $canal, $h['suma_a'], $monto * $h['carga']);
+
+                    if ($rama === 'dias' && $cacheAcred[$k]['en_corte']) {
+                        $corteDias[$h['clave']][$col][$cacheAcred[$k]['base'] . '|' . $h['dias'] . '|' . $h['corte']][] = $fecha;
+                    }
                 }
             }
         }
@@ -1806,12 +1818,32 @@ class Ventas {
             ];
         }
 
+        // El tooltip de las celdas diarias de las hojas con corte, armado aca:
+        // la pantalla no sabe la regla, y sin esto un martes con la plata del
+        // viernes no se explica. Las columnas mensuales no llevan: juntarian
+        // decenas de fines de semana.
+        $corteTooltip = [];
+
+        foreach ($corteDias as $clave => $porDia) {
+            foreach ($porDia as $dia => $grupos) {
+                $textos = [];
+
+                foreach ($grupos as $g => $ventas) {
+                    list($base, $plazo, $corte) = explode('|', $g);
+                    $textos[] = self::textoCorte($corte, $ventas, $base, intval($plazo));
+                }
+
+                $corteTooltip[$clave][$dia] = implode("\n", $textos);
+            }
+        }
+
         $salida = array_merge($bruto, [
             'arbol' => $filasArbol,
             'filas' => $hojas,
             'resumen_canal' => $resumen,
             'costo' => $costo,
-            'neto' => self::restarGrilla($bruto, $costo)
+            'neto' => self::restarGrilla($bruto, $costo),
+            'corte_tooltip' => $corteTooltip
         ]);
 
         if (count($otros)) {
@@ -1819,6 +1851,42 @@ class Ventas {
         }
 
         return $salida;
+    }
+
+    /**
+     * El texto del tooltip de una celda diaria con ventas de fin de semana.
+     * Pura.
+     *
+     *   "Venta de fin de semana (corte desde el viernes): ventas del vie 20/11
+     *    al dom 22/11, base lunes 23/11, + 1 día"
+     *
+     * Dice que ventas son, desde que habil se contaron los dias y cuantos:
+     * lo que hace falta para entender por que la plata del viernes aparece
+     * el martes. Si la ventana arranca en medio del fin de semana, o hay un
+     * feriado de comercio sin venta, es una sola: "venta del dom 22/11".
+     *
+     * @param string $corte Codigo de MixCobro::CORTES
+     * @param array $ventas Fechas de venta 'Y-m-d', en orden
+     * @param string $base 'Y-m-d'
+     * @param int $dias
+     * @return string
+     */
+    public static function textoCorte($corte, $ventas, $base, $dias) {
+        $corto = ['', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
+        $largo = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+        $dia = function ($f, $nombres) {
+            return $nombres[intval(date('N', strtotime($f)))] . ' ' . date('d/m', strtotime($f));
+        };
+        $primera = reset($ventas);
+        $ultima = end($ventas);
+        $rotulo = MixCobro::rotuloCorte($corte);
+
+        return 'Venta de fin de semana (corte ' . mb_strtolower(mb_substr($rotulo, 0, 1, 'UTF-8'), 'UTF-8')
+            . mb_substr($rotulo, 1, null, 'UTF-8') . '): '
+            . ($primera === $ultima
+                ? 'venta del ' . $dia($primera, $corto)
+                : 'ventas del ' . $dia($primera, $corto) . ' al ' . $dia($ultima, $corto))
+            . ', base ' . $dia($base, $largo) . ', + ' . $dias . ($dias === 1 ? ' día' : ' días');
     }
 
     /**
@@ -1972,7 +2040,13 @@ class Ventas {
             'carga' => $n['carga'],
             'carga_ponderada' => $n['carga_ponderada'],
             'dias' => $n['dias'],
-            'dias_de' => $n['dias_de']
+            'dias_de' => $n['dias_de'],
+            // El corte de fin de semana, para el tooltip del Concepto ("Corte
+            // de fin de semana: desde el viernes (hereda de Fiserv)"). El
+            // rotulo va armado: la pantalla no tiene la lista de cortes.
+            'corte' => isset($n['corte']) ? $n['corte'] : MixCobro::SIN_CORTE,
+            'corte_rotulo' => MixCobro::rotuloCorte(isset($n['corte']) ? $n['corte'] : MixCobro::SIN_CORTE),
+            'corte_de' => isset($n['corte_de']) ? $n['corte_de'] : null
         ];
     }
 
