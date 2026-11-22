@@ -399,3 +399,103 @@ chequear('nivelesLista() es NIVELES, en su orden y con sus rotulos',
     array_map(function ($n) { return [$n['codigo'], $n['rotulo']]; }, MixCobro::nivelesLista()));
 chequear('y es la que recibe el editor de Parametros', MixCobro::nivelesLista(),
     MixCobro::datosEditor(arbolMC(), 'NODO')['niveles']);
+
+// ============================================================================
+// EL CORTE DE FIN DE SEMANA: se hereda como los dias
+// ============================================================================
+
+seccion('corte de fin de semana: se hereda como los dias');
+
+$sinCorte = MixCobro::resolver(arbolMC());
+
+chequear('sin ningun corte cargado, todos los nodos en No aplica y sin origen', [['NO_APLICA'], [null]],
+    [array_values(array_unique(array_column($sinCorte['nodos'], 'corte'))),
+     array_values(array_unique(array_map(function ($n) { return $n['corte_de']; }, $sinCorte['nodos']), SORT_REGULAR))]);
+
+$conCorte = MixCobro::resolver(arbolMC([7 => ['CORTE_FINDE' => 'VIERNES']]));
+
+chequear('Fiserv con corte propio', ['VIERNES', 'VIERNES', 'Fiserv'],
+    [$conCorte['nodos']['N7']['corte_propio'], $conCorte['nodos']['N7']['corte'],
+     $conCorte['nodos']['N7']['corte_de']['nombre']]);
+chequear('sus cuotas sin corte lo heredan de Fiserv', [['VIERNES', 'Fiserv', null], ['VIERNES', 'Fiserv', null]],
+    [[$conCorte['nodos']['N8']['corte'], $conCorte['nodos']['N8']['corte_de']['nombre'], $conCorte['nodos']['N8']['corte_propio']],
+     [$conCorte['nodos']['N9']['corte'], $conCorte['nodos']['N9']['corte_de']['nombre'], $conCorte['nodos']['N9']['corte_propio']]]);
+chequear('los hermanos de Fiserv no: el corte baja, no se contagia', ['NO_APLICA', 'NO_APLICA', null],
+    [$conCorte['nodos']['N5']['corte'], $conCorte['nodos']['N10']['corte'], $conCorte['nodos']['N5']['corte_de']]);
+chequear('ni sube: Credito sigue sin corte', 'NO_APLICA', $conCorte['nodos']['N4']['corte']);
+
+$cuotaPropia = MixCobro::resolver(arbolMC([7 => ['CORTE_FINDE' => 'VIERNES'], 8 => ['CORTE_FINDE' => 'NO_APLICA']]));
+
+chequear('una cuota con No aplica propio no lo hereda: corta la herencia', ['NO_APLICA', '3 cuotas'],
+    [$cuotaPropia['nodos']['N8']['corte'], $cuotaPropia['nodos']['N8']['corte_de']['nombre']]);
+chequear('y su hermana sigue heredando', 'VIERNES', $cuotaPropia['nodos']['N9']['corte']);
+
+$masCerca = MixCobro::resolver(arbolMC([4 => ['CORTE_FINDE' => 'VIERNES'], 7 => ['CORTE_FINDE' => 'SABADO']]));
+
+chequear('gana el nivel mas cercano: Credito desde el viernes, Fiserv desde el sabado', ['SABADO', 'Fiserv', 'VIERNES'],
+    [$masCerca['nodos']['N8']['corte'], $masCerca['nodos']['N8']['corte_de']['nombre'], $masCerca['nodos']['N6']['corte']]);
+chequear('el corte no cambia la validez del arbol ni sus errores', [true, []],
+    [$conCorte['valido'], $conCorte['errores']]);
+chequear('ni el % efectivo ni los dias de nadie', [array_column($sinCorte['nodos'], 'porcentaje_efectivo'),
+    array_column($sinCorte['nodos'], 'dias')],
+    [array_column($conCorte['nodos'], 'porcentaje_efectivo'), array_column($conCorte['nodos'], 'dias')]);
+
+seccion('corte de fin de semana: lo que llega de la base');
+
+chequear('la columna se normaliza a mayusculas y vacio es null', ['VIERNES', null, null],
+    [arbolMC([7 => ['CORTE_FINDE' => ' viernes ']])[6]['CORTE_FINDE'],
+     arbolMC([7 => ['CORTE_FINDE' => '']])[6]['CORTE_FINDE'],
+     arbolMC()[6]['CORTE_FINDE']]);
+chequear('sin la columna (falta el script) es null: nadie tiene corte', null,
+    MixCobro::normalizar([nodoMC(1, 'LOCALES', null, 'MEDIO_PAGO', 'Efectivo', 1.0, null, null, 1)])[0]['CORTE_FINDE']);
+
+$corteRaro = estructuraMC(arbolMC([7 => ['CORTE_FINDE' => 'DOMINGO']]));
+
+chequear('un valor que no existe se conserva y la estructura lo dice', true,
+    count($corteRaro) === 1 && strpos($corteRaro[0], 'corte de fin de semana de "Fiserv"') !== false);
+
+seccion('corte de fin de semana: validacion en el servidor');
+
+chequear('los tres valores y vacio', ['NO_APLICA', 'VIERNES', 'SABADO', null, null],
+    [MixCobro::validarCorte('NO_APLICA', 'x'), MixCobro::validarCorte('viernes', 'x'),
+     MixCobro::validarCorte('SABADO', 'x'), MixCobro::validarCorte('', 'x'), MixCobro::validarCorte(null, 'x')]);
+chequearLanza('un valor fuera de la lista: rechazado, diciendo cuales valen', function () {
+    MixCobro::validarCorte('DOMINGO', '"Fiserv"');
+}, 'El corte de fin de semana de "Fiserv" tiene que ser No aplica, Desde el viernes, Desde el sábado o vacío, no "DOMINGO".');
+chequearLanza('y en el guardado del canal', function () {
+    MixCobro::resolverCambios(arbolMC(), 'LOCALES', [['id' => 7, 'corte' => 'LUNES']]);
+});
+$pvCorte = MixCobro::previsualizar(arbolMC(), 'LOCALES', [['id' => 7, 'corte' => 'LUNES']]);
+chequear('previsualizar lo devuelve como error, no como excepcion', [false, 1],
+    [$pvCorte['valido'], count($pvCorte['errores'])]);
+
+seccion('corte de fin de semana: el guardado escribe solo si cambia');
+
+$rcCorte = MixCobro::resolverCambios(arbolMC(), 'LOCALES', [['id' => 7, 'corte' => 'VIERNES'],
+                                                           ['id' => 8, 'corte' => '']]);
+
+chequear('Fiserv cambia; "3 cuotas" vacio sigue vacio y no se escribe',
+    [['id' => 7, 'campos' => ['CORTE_FINDE' => 'VIERNES']]], $rcCorte['cambios']);
+chequear('volver a vacio es un cambio: null es heredar', [['id' => 7, 'campos' => ['CORTE_FINDE' => null]]],
+    MixCobro::resolverCambios(arbolMC([7 => ['CORTE_FINDE' => 'VIERNES']]), 'LOCALES',
+        [['id' => 7, 'corte' => '']])['cambios']);
+chequear('sin el campo, no se toca', [],
+    MixCobro::resolverCambios(arbolMC([7 => ['CORTE_FINDE' => 'VIERNES']]), 'LOCALES',
+        [['id' => 7, 'dias' => '7']])['cambios']);
+chequear('la previsualizacion ya hereda el corte nuevo', 'VIERNES',
+    MixCobro::previsualizar(arbolMC(), 'LOCALES', [['id' => 7, 'corte' => 'VIERNES']])['nodos']['N9']['corte']);
+chequear('un nodo nuevo entra sin corte (hereda): el alta no lo escribe', false,
+    array_key_exists('CORTE_FINDE', MixCobro::nodoNuevo(arbolMC(), ['canal' => 'LOCALES', 'id_padre' => 7,
+        'nombre' => '6 cuotas', 'nivel' => 'CUOTAS'])));
+
+seccion('corte de fin de semana: la lista viaja a la pantalla');
+
+chequear('cortesLista() es CORTES, en su orden', array_keys(MixCobro::CORTES),
+    array_column(MixCobro::cortesLista(), 'codigo'));
+chequear('con sus rotulos', 'Desde el viernes', MixCobro::rotuloCorte('VIERNES'));
+$edCorte = MixCobro::datosEditor(arbolMC(), 'NODO', null, true);
+chequear('el editor la recibe, con la columna y el script', [MixCobro::cortesLista(), true, MixCobro::SCRIPT_CORTE],
+    [$edCorte['cortes'], $edCorte['corte'], $edCorte['script_corte']]);
+chequear('sin la columna, el editor lo sabe', false, MixCobro::datosEditor(arbolMC(), 'NODO')['corte']);
+chequear('con el mix plano tampoco: no hay arbol donde cargarlo', false,
+    MixCobro::datosEditor(arbolMC(), 'PLANO', null, true)['corte']);

@@ -403,7 +403,16 @@ class Parametros {
                     // MixCobro: la pantalla recibe la regla ya aplicada.
                     $mixCobro = new MixCobro();
                     $arbol = $mixCobro->getArbol();
-                    $modulo['mix'] = MixCobro::datosEditor($arbol['nodos'], $arbol['origen'], $arbol['config']);
+                    $modulo['mix'] = MixCobro::datosEditor($arbol['nodos'], $arbol['origen'], $arbol['config'],
+                        $arbol['corte']);
+
+                    // Sin la columna del corte, la cobranza va sin corte y la
+                    // columna "Corte finde" se ve deshabilitada: se dice por que.
+                    if ($arbol['origen'] === 'NODO' && !$arbol['corte']) {
+                        $modulo['avisos'][] = 'Todavía no se puede cargar el corte de fin de semana: corré '
+                            . MixCobro::SCRIPT_CORTE . ' contra la base central. Mientras tanto la '
+                            . 'cobranza se proyecta sin corte, como hasta ahora.';
+                    }
 
                     if ($arbol['origen'] === 'PLANO') {
                         $modulo['avisos'][] = 'El mix de cobro todavía sale del mix plano y se '
