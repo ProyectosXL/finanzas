@@ -480,17 +480,22 @@ chequear('y savePago rechaza un comprobante abierto antes de escribir', true,
 
 seccion('volver al vencimiento borra la apertura y deja lo demas');
 
+/* deletePago() da de baja la apertura y le pide a borrarFechaEnTransaccion()
+   -el mismo camino que usa la importacion cuando deshace un pago agrupado-
+   que saque la fecha y borre la fila si quedo vacia. */
 $del = $cuerpoDe('deletePago');
+$borra = $cuerpoDe('borrarFechaEnTransaccion');
 
 chequear('da de baja la apertura entera', true,
-    strpos($del, '$this->guardarApertura($cid, $clave[0], $clave[1], $clave[2], null, $usuario);') !== false);
+    strpos($del, '$this->guardarApertura($cid, $c[0], $c[1], $c[2], null, $usuario);') !== false);
 chequear('dentro de la misma transaccion que la fecha', true,
     strpos($del, 'sqlsrv_begin_transaction') < strpos($del, '$this->guardarApertura(')
-    && strpos($del, '$this->guardarApertura(') < strpos($del, 'SET FECHA_PAGO = NULL'));
+    && strpos($del, '$this->guardarApertura(') < strpos($del, '$this->borrarFechaEnTransaccion(')
+    && strpos($del, '$this->borrarFechaEnTransaccion(') < strpos($del, 'sqlsrv_commit'));
 chequear('la tabla de pagos sigue tocando solo la fecha y su fuente', 1,
-    preg_match_all('/SET FECHA_PAGO = NULL"\s*\. \(in_array\(\'FUENTE_FECHA\'/', $del));
+    preg_match_all('/SET FECHA_PAGO = NULL"\s*\. \(in_array\(\'FUENTE_FECHA\'/', $borra));
 chequear('y borra la fila solo si quedo vacia: la exclusion, el override y la observacion quedan',
-    true, strpos($del, 'self::condicionFilaVacia($opcionales)') !== false);
+    true, strpos($borra, 'self::condicionFilaVacia($opcionales)') !== false);
 
 $apert = $cuerpoDe('guardarApertura');
 

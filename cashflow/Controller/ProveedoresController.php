@@ -426,12 +426,19 @@ try {
             $habia = $prov->deletePago($data['cod_provee'], $data['t_comp'], $data['n_comp'],
                 $usuario);
 
+            /* UN PAGO AGRUPADO SE DESHACE ENTERO, y el mensaje dice cuantas
+               facturas volvieron. Ver Proveedores::deletePago(). */
+            $deshechas = $prov->facturasDeshechas();
+
             echo json_encode([
                 'success' => true,
-                'message' => $habia
-                    ? 'La fecha vuelve a ser la de vencimiento.'
-                    : 'Ese comprobante no tenía fecha cargada.',
-                'data' => ['habia' => $habia]
+                'message' => ($deshechas > 1)
+                    ? 'Se deshizo el pago agrupado: ' . $deshechas . ' facturas vuelven a su vencimiento o al '
+                        . 'cronograma.'
+                    : ($habia
+                        ? 'La fecha vuelve a ser la de vencimiento.'
+                        : 'Ese comprobante no tenía fecha cargada.'),
+                'data' => ['habia' => $habia, 'deshechas' => $deshechas]
             ], JSON_UNESCAPED_UNICODE);
             break;
 
