@@ -109,6 +109,25 @@ class MixCobro {
      */
     const CAMPOS_MES = ['PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION', 'ACTIVO'];
 
+    /* ---- El corte de fin de semana (sql/cashflow_ventas_mix_corte_finde.sql) */
+
+    /**
+     * Los valores del corte de fin de semana de un nodo. NULL, en la columna,
+     * es "lo define un nivel de arriba"; si nadie lo tiene, NO_APLICA.
+     * LA LISTA Y EL CHECK CK_RO_T_CASHFLOW_VENTAS_MIX_NODO_CORTE CAMBIAN JUNTAS.
+     */
+    const CORTES = [
+        'NO_APLICA' => 'No aplica',
+        'VIERNES' => 'Desde el viernes',
+        'SABADO' => 'Desde el sábado'
+    ];
+
+    /** El corte de un nodo sin corte en toda su rama */
+    const SIN_CORTE = 'NO_APLICA';
+
+    /** El script que agrega la columna: la pantalla lo nombra si falta */
+    const SCRIPT_CORTE = 'sql/cashflow_ventas_mix_corte_finde.sql';
+
     const NOMBRES_MES = [1 => 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
                          'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
