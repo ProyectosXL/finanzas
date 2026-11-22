@@ -835,13 +835,13 @@
 
         if (!r) { return '<td></td>'; }
 
-        /* En un comprobante NETO en dos medios la retención va entera en la
-           parte 1/2: la 2/2 lo dice y no la repite, para que los totales no la
-           dupliquen. Con excedente o parcial cada fila trae su parte de la
+        /* En un comprobante NETO en varios medios la retención va entera en la
+           parte 1/N: las demás lo dicen y no la repiten, para que los totales no
+           la dupliquen. Con excedente o parcial cada fila trae su parte de la
            retención, y se muestra como cualquier otra. */
         if (f.APERTURA && Number(f.APERTURA.parte) > 1) {
             return '<td class="text-center text-muted small" title="La retención de este '
-                + 'comprobante va en su parte 1/2: se calcula sobre la factura entera.">—</td>';
+                + 'comprobante va en su parte 1/' + f.APERTURA.de + ': se calcula sobre la factura entera.">—</td>';
         }
 
         if (!r.aplica) {
@@ -1154,7 +1154,7 @@
     var cuotasPorComp = null;
 
     /* SE CUENTAN VENCIMIENTOS DISTINTOS, no filas: un comprobante pagado con
-       dos medios son dos filas del MISMO vencimiento, y contar filas le pondría
+       varios medios son varias filas del MISMO vencimiento, y contar filas le pondría
        "2 vtos." a una factura de una sola cuota. */
     function cuotasDe(f) {
         if (cuotasPorComp === null) {
@@ -1207,7 +1207,7 @@
 
     /**
      * La etiqueta de un pago importado, para la columna Fecha de pago y la que
-     * sólo baja al Excel: "pago parcial", "saldo", "1/2 · parcial", "1/2",
+     * sólo baja al Excel: "pago parcial", "saldo", "1/3 · parcial", "2/3",
      * "+ excedente". Vacía si la fila no tiene pago importado.
      */
     function etiquetaImportado(f) {
@@ -1227,6 +1227,12 @@
         if (p.tipo === 'SALDO') { return 'saldo'; }
 
         var dos = Number(p.de) > 1 ? p.parte + '/' + p.de : '';
+
+        /* UN NETO EN VARIOS MEDIOS CONTRA UN COMPROBANTE EN CUOTAS: cada fila
+           es la parte de un medio, como cualquier otra apertura. */
+        if (p.clasificacion === 'NETO') {
+            return dos || 'pago importado';
+        }
 
         if (p.clasificacion === 'PARCIAL') {
             return dos ? dos + ' · parcial' : 'pago parcial';
@@ -1259,6 +1265,10 @@
                 + ' de ' + plata(p.pagado) + ' sobre un pendiente de ' + plata(p.pendiente_import)
                 + ', pero en Tango el pendiente subió a ' + plata(p.pendiente) + ': se proyecta el '
                 + 'pendiente de Tango. Reimportá para corregirlo.');
+        } else if (p.clasificacion === 'NETO') {
+            lineas.push('Pagado con ' + p.medios.length + ' medios, por el neto a pagar ('
+                + plata(p.neto) + '). Es un comprobante en cuotas: cada medio cubre las cuotas de la más '
+                + 'vieja a la más nueva, así que una cuota puede quedar repartida entre dos medios.');
         } else if (p.clasificacion === 'EXCEDENTE') {
             lineas.push('Pago con excedente: se paga ' + plata(p.pagado) + ' — neto ' + plata(p.neto)
                 + ' + excedente ' + plata(p.excedente)
@@ -1327,12 +1337,12 @@
     }
 
     /**
-     * La celda de un comprobante pagado con DOS MEDIOS. NO SE EDITA: tiene dos
-     * fechas, y una fecha tipeada no dice a cuál reemplaza. Se cambia
+     * La celda de un comprobante pagado con VARIOS MEDIOS. NO SE EDITA: tiene
+     * varias fechas, y una fecha tipeada no dice a cuál reemplaza. Se cambia
      * reimportando la planilla, o con ↺, que borra la apertura entera y deja
      * la exclusión, el override de forma y la observación como estaban.
      *
-     * "1/2" y "2/2" van en data-etiqueta y los dibuja el CSS, igual que "vto."
+     * "1/N" … "N/N" van en data-etiqueta y los dibuja el CSS, igual que "vto."
      * o "crono": el export a Excel se queda con la fecha sola.
      *
      * Si la apertura ya no coincide con el neto a pagar —un pago parcial en
@@ -1353,11 +1363,11 @@
         }
 
         var titulo = f.PAGO_IMPORTADO ? textoImportado(f) : (f.APERTURA
-                ? 'Pagado con dos medios. Esta fila es la parte ' + etiqueta + ' y su importe va '
+                ? 'Pagado con varios medios. Esta fila es la parte ' + etiqueta + ' y su importe va '
                   + 'en la columna de su fecha'
                   + (f.PAGO_CRONO ? ' (la fecha ya pasó: va al próximo día de pago del cronograma)'
                                   : '') + '.'
-                : 'Estaba pagado con dos medios, pero el neto a pagar ('
+                : 'Estaba pagado con varios medios, pero el neto a pagar ('
                   + plata(abierta.neto !== undefined ? abierta.neto : abierta.pendiente)
                   + (abierta.neto !== undefined && abierta.neto !== abierta.pendiente
                       ? ', sobre un pendiente de ' + plata(abierta.pendiente) : '')
@@ -1382,7 +1392,7 @@
                 + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
                 + ' data-tcomp="' + escapar(f.T_COMP) + '"'
                 + ' data-ncomp="' + escapar(f.N_COMP) + '"'
-                + ' title="' + escapar((f.PAGO_IMPORTADO ? 'Borrar el pago importado' : 'Borrar los dos medios')
+                + ' title="' + escapar((f.PAGO_IMPORTADO ? 'Borrar el pago importado' : 'Borrar los medios')
                     + ': el comprobante vuelve a su vencimiento o al cronograma, por el neto a pagar. '
                     + 'La exclusión, la forma y la observación de esta factura, si tiene, se conservan.') + '">'
                 + '<i class="fas fa-rotate-left"></i></button>';
@@ -1835,7 +1845,7 @@
                     delete seleccion[k];
                 }
 
-                /* La otra parte de un pago con dos medios tiene la misma clave:
+                /* Las otras partes de un pago con varios medios tienen la misma clave:
                    su check sigue al que se tocó. */
                 document.querySelectorAll('#bodyProv .prov-sel').forEach(function(otro) {
                     if (otro !== chk && otro.getAttribute('data-clave') === k) {
@@ -1862,7 +1872,7 @@
 
         // Lo que ya está como se lo quiere dejar no se vuelve a escribir: sería
         // una versión idéntica en la tabla y un número inflado en el mensaje.
-        // Un comprobante con dos medios es UNA factura: se manda una vez.
+        // Un comprobante con varios medios es UNA factura: se manda una vez.
         var aplicar = unaPorComprobante(filas).filter(function(f) {
             return !!f.EXCLUIDA_MANUAL !== excluir;
         });
@@ -2232,14 +2242,14 @@
         var r = d.resumen;
 
         /* En pagos, altas, cambios y sin cambios son COMPROBANTES —uno pagado
-           con dos medios es uno, aunque sean dos filas— y lo que no se carga
+           con varios medios es uno, aunque sean varias filas— y lo que no se carga
            son FILAS, que es lo que hay que ir a corregir en la planilla. */
         /* "Con excedente" y "Pago parcial" cuentan comprobantes y dicen un
            importe al lado: el excedente que queda a cuenta, y lo que se paga.
            Ver Proveedores::clasificarImporte(). */
         var chips = que === 'Pagos'
             ? [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
-               ['sin_cambios', 'Sin cambios', 'secondary'], ['dos_medios', 'En dos medios', 'info'],
+               ['sin_cambios', 'Sin cambios', 'secondary'], ['varios_medios', 'En varios medios', 'info'],
                /* EL EXCEDENTE SE VALIDA POR PROVEEDOR: los chips cuentan
                   proveedores, no facturas. Ver Proveedores::clasificarProveedor(). */
                ['proveedores_con_excedente', 'Proveedores con excedente', 'primary', 'importe_excedente',
@@ -2448,11 +2458,11 @@
 
             var detalle = escapar(f.motivo || '');
 
-            /* UN COMPROBANTE EN DOS MEDIOS: cada fila dice qué parte es, con
-               su forma, su importe y su fecha. El motivo es del comprobante y
-               va igual en las dos. */
-            if (que === 'Pagos' && f.partes === 2 && f.parte > 0 && f.estado !== 'ERROR') {
-                clave += ' · ' + f.parte + '/2';
+            /* UN COMPROBANTE EN VARIOS MEDIOS: cada fila dice qué parte es —1/N
+               … N/N—, con su forma, su importe y su fecha. El motivo es del
+               comprobante y va igual en todas. */
+            if (que === 'Pagos' && f.partes > 1 && f.parte > 0 && f.estado !== 'ERROR') {
+                clave += ' · ' + f.parte + '/' + f.partes;
                 detalle = '<strong>' + escapar(f.forma_pago + ' ' + plata(f.importe) + ' el '
                     + fechaCorta(f.fecha_pago)) + '</strong> — ' + detalle;
             }
@@ -2570,7 +2580,7 @@
 
     /**
      * Total, retenciones y neto de la fila de la planilla. Vacías si la fila
-     * no llegó a cruzar contra un comprobante. Con dos medios, el total y las
+     * no llegó a cruzar contra un comprobante. Con varios medios, el total y las
      * retenciones son del comprobante y van en la primera parte; el neto es
      * el del comprobante, contra el que se compara la SUMA de las dos.
      */
@@ -2579,7 +2589,7 @@
             return '<td></td><td></td><td></td>';
         }
 
-        var segunda = (f.partes === 2 && f.parte === 2);
+        var segunda = (f.partes > 1 && f.parte > 1);
         var desglose = Object.keys(f.retenciones || {}).map(function(k) {
             var r = f.retenciones[k];
 

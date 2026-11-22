@@ -1874,7 +1874,7 @@ chequear('el tooltip dice alicuota y de donde sale', true,
     && strpos($jsProv, "NO_RETIENE: 'no se retiene'") !== false);
 /* Sólo en NETO: con excedente o parcial cada fila trae su parte, y una cuota
    partida (PARTE_EXTRA) también la muestra. */
-chequear('en dos medios NETO la retencion va en la parte 1/2', true,
+chequear('en varios medios NETO la retencion va en la parte 1/N', true,
     strpos($jsProv, "if (f.APERTURA && Number(f.APERTURA.parte) > 1) {\n            return '<td class=\"text-center text-muted small\" title=\"La retención de este '") !== false);
 chequear('el pie suma el neto y, aparte, lo retenido por impuesto', true,
     strpos($jsProv, 'total += aPagar(f);') !== false
@@ -1962,7 +1962,12 @@ chequear('el neto lleva "+ excedente" en data-etiqueta, no como texto de la celd
 chequear('una compensada lleva "compensada" en data-etiqueta, y su etiqueta de fecha', [true, true], [
     strpos($jsProv, '<span class="prov-marca-excedente" data-etiqueta="compensada"></span>') !== false,
     strpos($jsProv, "return (dos ? dos + ' · ' : '') + 'compensada';") !== false]);
-chequear('las etiquetas de la fecha: pago parcial, saldo, 1/2 · parcial', [true, true, true], [
+chequear('las etiquetas 1/N … N/N: la parte y cuántas son, en la grilla y en la previsualización', [true, true, true, true], [
+    strpos($jsProv, "return f.APERTURA.parte + '/' + f.APERTURA.de;") !== false,
+    strpos($jsProv, "var dos = Number(p.de) > 1 ? p.parte + '/' + p.de : '';") !== false,
+    strpos($jsProv, "clave += ' · ' + f.parte + '/' + f.partes;") !== false,
+    strpos($jsProv, "'/2'") === false]);
+chequear('las etiquetas de la fecha: pago parcial, saldo, 1/N · parcial', [true, true, true], [
     strpos($jsProv, "'pago parcial'") !== false,
     strpos($jsProv, "return 'saldo';") !== false,
     strpos($jsProv, "dos + ' · parcial'") !== false]);

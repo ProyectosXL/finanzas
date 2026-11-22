@@ -343,7 +343,7 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                     Neto a pagar
                                 </th>
                                 <!-- EL PAGO IMPORTADO: "pago parcial", "saldo",
-                                     "1/2 · parcial", "+ excedente"… En pantalla
+                                     "1/3 · parcial", "+ excedente"… En pantalla
                                      lo dicen la etiqueta de la fecha y la marca
                                      del neto, que dibuja el CSS y el Excel no
                                      baja; por eso esta columna existe sólo para

@@ -597,7 +597,7 @@ chequear('la celda de un comprobante abierto existe', true, $celdaAbierta !== ''
 chequear('y no tiene campo de fecha: no se edita', false, strpos($celdaAbierta, '<input') !== false);
 /* La etiqueta la arma etiquetaImportado(), que es la misma para la celda y
    para la columna que sólo baja al Excel. */
-chequear('lleva 1/2 y 2/2 como etiqueta, fuera del texto que se exporta', true,
+chequear('lleva 1/N … N/N como etiqueta, fuera del texto que se exporta', true,
     strpos($celdaAbierta, 'var etiqueta = etiquetaImportado(f);') !== false
     && strpos($cuerpoJs('etiquetaImportado'), "return f.APERTURA.parte + '/' + f.APERTURA.de;") !== false
     && strpos($celdaAbierta, 'data-etiqueta="') !== false);
@@ -626,8 +626,8 @@ chequear('excluir manda cada comprobante una vez', true,
 chequear('el fechado masivo saca los abiertos y dice cuantos son', true,
     strpos($cuerpoJs('fecharSeleccion'), 'var sel = todas.filter(function(f) { return !esAbierto(f); });') !== false
     && strpos($cuerpoJs('fecharSeleccion'), 'no se van a tocar') !== false);
-chequear('la previsualizacion muestra los comprobantes en dos medios', true,
-    strpos($js, "['dos_medios', 'En dos medios', 'info']") !== false);
+chequear('la previsualizacion muestra los comprobantes en varios medios', true,
+    strpos($js, "['varios_medios', 'En varios medios', 'info']") !== false);
 chequear('con las dos partes juntas', true,
     strpos($cuerpoJs('tablaPreview'), '((a.grupo || a.linea) - (b.grupo || b.linea))') !== false);
 chequear('y el aviso de la forma vigente', true, strpos($cuerpoJs('tablaPreview'), 'if (f.aviso) {') !== false);
