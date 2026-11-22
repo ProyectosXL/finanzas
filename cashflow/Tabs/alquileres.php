@@ -324,7 +324,12 @@
                     <table id="tablaAlqFact" class="table table-hover table-sm mb-0">
                         <thead>
                             <tr>
-                                <th class="text-center" style="width: 32px;" data-exportar-omitir></th>
+                                <!-- Tildar todas las que se ven (Js/Alquileres-Facturas.js, pintarSelTodas()):
+                                     sólo se habilita si son todas de una razón social. -->
+                                <th class="text-center" style="width: 32px;" data-orden="no" data-exportar-omitir>
+                                    <input type="checkbox" class="form-check-input" id="alqFactSelTodas" disabled
+                                           title="Filtrá por una razón social para tildar todas sus facturas">
+                                </th>
                                 <th>Razón social</th>
                                 <th>Comprobante</th>
                                 <th>Emisión</th>

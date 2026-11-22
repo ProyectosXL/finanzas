@@ -177,6 +177,14 @@ chequear('la celda de un concepto trae el detalle del pago', true,
     isset($fijos['conceptos'][0]['meses']['2026-11']['pagos'][0]['fecha']));
 chequear('el renglon del local muestra el a pagar, el grupo el neto', true,
     $unicenter['meses']['2026-11']['a_pagar'] > $fijos['meses']['2026-11']['neto']);
+$celdaVMA = $fijos['conceptos'][0]['meses']['2026-11'];
+chequear('grupos y conceptos traen el bruto: neto + IVA + percepcion, sin restar la retencion', [true, true],
+    [abs($celdaVMA['bruto'] - ($celdaVMA['neto'] + $celdaVMA['iva'] + $celdaVMA['percepcion'])) < 0.005,
+     abs($celdaVMA['bruto'] - ($celdaVMA['a_pagar'] + $celdaVMA['retencion'])) < 0.005]);
+chequear('el bruto del local es la suma del de sus grupos', $unicenter['total']['bruto'],
+    round(array_sum(array_map(function ($g) { return $g['total']['bruto']; }, $unicenter['grupos'])), 2));
+chequear('el origen de una celda trae tambien el bruto, para el desglose de "mixto"', true,
+    isset(array_values($celdaVMA['origenes'])[0]['bruto']));
 
 seccion('Alquileres: la grilla por razon social');
 

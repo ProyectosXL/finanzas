@@ -737,6 +737,7 @@ class AlquileresImputacion {
                     'neto' => $total,
                     'iva' => 0.0,
                     'percepcion' => 0.0,
+                    'bruto' => $total,
                     'retencion' => $ret,
                     'a_pagar' => round($total - $ret, 2),
                     'detalle' => [

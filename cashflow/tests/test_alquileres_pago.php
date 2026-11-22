@@ -42,8 +42,11 @@ $local = ['pct_iva' => 21.0, 'pct_percepcion' => 3.0, 'pct_retencion' => 2.0, 'f
 seccion('Cuanto: neto, IVA, percepcion y retencion');
 
 chequear('a pagar = neto + IVA + percepcion - retencion, retencion sobre el neto',
-    ['neto' => 1000.0, 'iva' => 210.0, 'percepcion' => 30.0, 'retencion' => 20.0, 'a_pagar' => 1220.0],
+    ['neto' => 1000.0, 'iva' => 210.0, 'percepcion' => 30.0, 'bruto' => 1240.0, 'retencion' => 20.0, 'a_pagar' => 1220.0],
     AlquileresPago::importes(1000.0, $local));
+chequear('bruto = neto + IVA + percepcion, sin restar la retencion (lo que muestran grupos y conceptos)',
+    [1240.0, 1220.0 + 20.0], [AlquileresPago::importes(1000.0, $local)['bruto'],
+                              AlquileresPago::importes(1000.0, $local)['a_pagar'] + AlquileresPago::importes(1000.0, $local)['retencion']]);
 chequear('con un IVA de 23 % (otros cargos)', 1250.0,
     AlquileresPago::importes(1000.0, ['pct_iva' => 23.0, 'pct_percepcion' => 3.0, 'pct_retencion' => 1.0])['a_pagar']);
 chequear('con un IVA de 19 %', 1190.0,

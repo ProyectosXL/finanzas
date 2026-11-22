@@ -1331,7 +1331,7 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
     }
 
     private static function celdaVacia() {
-        return ['neto' => 0.0, 'iva' => 0.0, 'percepcion' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0,
+        return ['neto' => 0.0, 'iva' => 0.0, 'percepcion' => 0.0, 'bruto' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0,
                 'origenes' => []];
     }
 
@@ -1374,22 +1374,26 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
 
     /**
      * Suma un pago a una celda; en la de concepto, ademas guarda el detalle.
-     * Toda celda lleva SUS ORIGENES (clave => texto y a pagar): con uno solo,
-     * la pestaña dibuja su chip; con varios, "mixto" y el desglose.
+     * Toda celda lleva SUS ORIGENES (clave => texto, bruto y a pagar): con uno
+     * solo, la pestaña dibuja su chip; con varios, "mixto" y el desglose, con
+     * el mismo importe que muestra la fila (bruto en grupos y conceptos, a
+     * pagar en local y razon social).
      */
     private static function sumarCelda($celda, $p, $conDetalle) {
-        foreach (['neto', 'iva', 'percepcion', 'retencion', 'a_pagar'] as $k) {
+        foreach (['neto', 'iva', 'percepcion', 'bruto', 'retencion', 'a_pagar'] as $k) {
             $celda[$k] = round($celda[$k] + $p[$k], 2);
         }
 
         $o = self::origenDelPago($p);
+        $antes = $celda['origenes'][$o['clave']] ?? ['bruto' => 0.0, 'a_pagar' => 0.0];
         $celda['origenes'][$o['clave']] = ['texto' => $o['texto'],
-            'a_pagar' => round(($celda['origenes'][$o['clave']]['a_pagar'] ?? 0.0) + $p['a_pagar'], 2)];
+            'bruto' => round($antes['bruto'] + $p['bruto'], 2),
+            'a_pagar' => round($antes['a_pagar'] + $p['a_pagar'], 2)];
 
         if ($conDetalle) {
             $celda['pagos'][] = array_intersect_key($p, array_flip([
                 'fecha', 'vencimiento', 'corrida', 'vencido', 'nota_dia', 'origen', 'mes_concepto',
-                'neto', 'iva', 'percepcion', 'retencion', 'a_pagar', 'detalle'
+                'neto', 'iva', 'percepcion', 'bruto', 'retencion', 'a_pagar', 'detalle'
             ]));
         }
 

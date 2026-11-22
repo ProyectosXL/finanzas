@@ -2095,6 +2095,10 @@ chequear('un subtotal con origenes mezclados dice mixto, con el desglose', true,
 chequear('el tooltip suma la linea Origen', true, strpos($jsAlq, "Origen: ' + o.detalle") !== false);
 chequear('la leyenda arriba de la grilla', [true, true],
     [strpos($tabAlq, 'id="alqLeyenda"') !== false, strpos($jsAlq, 'function pintarLeyenda()') !== false]);
+chequear('razon social y local muestran el a pagar; grupos y conceptos, con IVA y percepcion', [2, 2], [
+    substr_count($jsAlq, "meses, 'a_pagar', null)"), substr_count($jsAlq, "meses, 'bruto', ")]);
+chequear('la leyenda dice que importe muestra cada nivel', true,
+    strpos($jsAlq, '<strong>Grupos y conceptos:</strong> con IVA y percepción') !== false);
 chequear('el Excel baja el origen en su columna, solo al exportar', [true, true, true], [
     strpos($jsAlq, "nueva.setAttribute('data-exportar-solo', '');") !== false,
     strpos($jsAlq, "'Origen ' + td.textContent") !== false,
