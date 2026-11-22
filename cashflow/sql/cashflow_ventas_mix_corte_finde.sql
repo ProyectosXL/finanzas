@@ -159,17 +159,23 @@ BEGIN
             FROM Camino
             WHERE ID_PADRE IS NULL;
 
-            DECLARE @Id INT = (SELECT MIN(ID) FROM @Lineas);
+            -- PRINT no admite subconsultas (Msg 1046, y el lote entero no
+            -- compila): todo lo que se imprime pasa antes por una variable.
+            DECLARE @Id INT;
             DECLARE @Linea NVARCHAR(400);
+            DECLARE @Cantidad INT;
+
+            SELECT @Id = MIN(ID) FROM @Lineas;
 
             WHILE @Id IS NOT NULL
             BEGIN
                 SELECT @Linea = TEXTO FROM @Lineas WHERE ID = @Id;
                 PRINT @Linea;
-                SET @Id = (SELECT MIN(ID) FROM @Lineas WHERE ID > @Id);
+                SELECT @Id = MIN(ID) FROM @Lineas WHERE ID > @Id;
             END
 
-            PRINT CAST((SELECT COUNT(*) FROM @Tocados) AS VARCHAR(10))
+            SELECT @Cantidad = COUNT(*) FROM @Tocados;
+            PRINT CAST(@Cantidad AS VARCHAR(10))
                 + '' nodo(s) Fiserv quedaron en "Desde el viernes". Sus cuotas lo heredan.'';
         END';
 END

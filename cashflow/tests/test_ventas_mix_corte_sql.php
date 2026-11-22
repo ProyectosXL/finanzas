@@ -65,3 +65,7 @@ chequear('dice que nodos toco', true, strpos($update, 'OUTPUT INSERTED.ID INTO @
     && strpos($codigoCorte, 'PRINT @Linea;') !== false);
 chequear('el nombre del script es el que nombra la pantalla', 'sql/cashflow_ventas_mix_corte_finde.sql',
     MixCobro::SCRIPT_CORTE);
+chequear('ningun PRINT lleva una subconsulta: SQL Server no lo admite (Msg 1046) y el lote entero no compila', 0,
+    preg_match_all('/PRINT[^;]*\(\s*SELECT/i', $codigoCorte));
+chequear('ni una asignacion con subconsulta entre parentesis: van como SELECT @var = ...', 0,
+    preg_match_all('/(DECLARE|SET)\s+@\w+[^;]*=\s*\(\s*SELECT/i', $codigoCorte));
