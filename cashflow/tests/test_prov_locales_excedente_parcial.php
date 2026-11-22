@@ -304,7 +304,7 @@ chequear('las dos se cargan, con excedente de $20.000',
     [['ALTA', 'EXCEDENTE', 20000.0], ['ALTA', 'EXCEDENTE', 20000.0]],
     array_map(function ($f) { return [$f['estado'], $f['clasificacion'], $f['excedente']]; }, $c['filas']));
 chequear('el resumen cuenta un comprobante en dos medios y con excedente', [1, 1],
-    [$c['resumen']['dos_medios'], $c['resumen']['con_excedente']]);
+    [$c['resumen']['varios_medios'], $c['resumen']['con_excedente']]);
 
 $c = $comparar([$fila(2, 'PROVA', 'A0001', '20/10/2026', 'ECHEQ', '300000'),
                 $fila(3, 'PROVA', 'A0001', '27/10/2026', 'TRANSFERENCIA', '200000')], $con5);

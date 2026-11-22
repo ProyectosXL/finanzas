@@ -12,8 +12,9 @@
    dice con dos filas del mismo comprobante, cada una con su FECHA_PAGO, su
    FORMA_PAGO y su IMPORTE. Cada parte entra al eje con su importe y su fecha.
 
-   Esta tabla guarda esa APERTURA: una fila por medio, a lo sumo dos vigentes
-   por comprobante.
+   Esta tabla guarda esa APERTURA: una fila por medio. Este script la crea con
+   a lo sumo dos vigentes por comprobante; sql/cashflow_prov_locales_pago_n_medios.sql
+   le saca ese tope (N pagos por comprobante, tambien en cuotas).
 
    ----------------------------------------------------------------------------
    POR QUE UNA TABLA PROPIA Y NO DOS COLUMNAS MAS EN LA DE PAGOS

@@ -1874,7 +1874,7 @@ chequear('el tooltip dice alicuota y de donde sale', true,
     && strpos($jsProv, "NO_RETIENE: 'no se retiene'") !== false);
 /* Sólo en NETO: con excedente o parcial cada fila trae su parte, y una cuota
    partida (PARTE_EXTRA) también la muestra. */
-chequear('en dos medios NETO la retencion va en la parte 1/2', true,
+chequear('en varios medios NETO la retencion va en la parte 1/N', true,
     strpos($jsProv, "if (f.APERTURA && Number(f.APERTURA.parte) > 1) {\n            return '<td class=\"text-center text-muted small\" title=\"La retención de este '") !== false);
 chequear('el pie suma el neto y, aparte, lo retenido por impuesto', true,
     strpos($jsProv, 'total += aPagar(f);') !== false
@@ -1906,9 +1906,9 @@ seccion('Importar: el estado "Ya pagada en Tango" en la previsualizacion');
 
 $jsProv = str_replace("\r\n", "\n", file_get_contents($JS . '/Proveedores-Proveedores_locales.js'));
 chequear('el estado se nombra "Ya pagada en Tango"', true,
-    strpos($jsProv, "return { YA_PAGADA: 'Ya pagada en Tango' }[e] || e;") !== false);
+    strpos($jsProv, "return { YA_PAGADA: 'Ya pagada en Tango', NO_CUBIERTA: 'No cubierta' }[e] || e;") !== false);
 chequear('con color de advertencia, no de error', true,
-    strpos($jsProv, "YA_PAGADA: 'warning text-dark', ERROR: 'danger'") !== false);
+    strpos($jsProv, "YA_PAGADA: 'warning text-dark', NO_CUBIERTA: 'light text-dark border',\n                 ERROR: 'danger'") !== false);
 chequear('y su propio indicador en el resumen', true,
     strpos($jsProv, "['ya_pagadas', 'Ya pagadas en Tango', 'warning text-dark']") !== false);
 chequear('la previsualizacion muestra total, retenciones y neto por fila', true,
@@ -1947,7 +1947,9 @@ chequear('el subtotal dice neto, pagado, diferencia, máximo y las filas fuera d
     && strpos($jsProv, "partes.push('Máximo ' + plata(p.maximo)") !== false
     && strpos($jsProv, "' fuera del total</span>'") !== false);
 chequear('el controller clasifica con el % y el cronograma de ahora', true,
-    strpos($ctrlProv, '$enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido());') !== false);
+    strpos($ctrlProv, '$enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido(),') !== false);
+chequear('y con lo que se puede guardar con los scripts corridos (N medios)', true,
+    strpos($ctrlProv, '$prov->capacidadImportacion());') !== false);
 
 seccion('Cuentas a Pagar: las marcas del pago con excedente y del pago parcial');
 
@@ -1960,7 +1962,36 @@ chequear('el neto lleva "+ excedente" en data-etiqueta, no como texto de la celd
 chequear('una compensada lleva "compensada" en data-etiqueta, y su etiqueta de fecha', [true, true], [
     strpos($jsProv, '<span class="prov-marca-excedente" data-etiqueta="compensada"></span>') !== false,
     strpos($jsProv, "return (dos ? dos + ' · ' : '') + 'compensada';") !== false]);
-chequear('las etiquetas de la fecha: pago parcial, saldo, 1/2 · parcial', [true, true, true], [
+chequear('las etiquetas 1/N … N/N: la parte y cuántas son, en la grilla y en la previsualización', [true, true, true, true], [
+    strpos($jsProv, "return f.APERTURA.parte + '/' + f.APERTURA.de;") !== false,
+    strpos($jsProv, "var dos = Number(p.de) > 1 ? p.parte + '/' + p.de : '';") !== false,
+    strpos($jsProv, "clave += ' · ' + f.parte + '/' + f.partes;") !== false,
+    strpos($jsProv, "'/2'") === false]);
+seccion('Proveedores Locales: el pago agrupado en la previsualización y en Cuentas a Pagar');
+
+chequear('el chip "Pago agrupado" con pagos, facturas, importe y vacías tomadas', [true, true, true], [
+    strpos($jsProv, "['pagos_agrupados', 'Pago agrupado', 'primary', 'importe_agrupado', null]") !== false,
+    strpos($jsProv, "'\">Pago agrupado: ' + r.pagos_agrupados + ' · ' + r.facturas_agrupadas + ' facturas · '") !== false,
+    strpos($jsProv, "r.vacias_agrupadas + ' vacía(s) tomada(s)'") !== false]);
+chequear('las facturas del mismo pago van juntas y con la misma marca', [true, true], [
+    strpos($jsProv, "var claveGrupo = function(f) { return f.pago_agrupado ? 'G|' + f.pago_agrupado.id : ''; };") !== false,
+    strpos($jsProv, "'\">pago agrupado ' + escapar(pa.etiqueta) + '</span>'") !== false]);
+chequear('NO_CUBIERTA es una advertencia con su rótulo', [true, true], [
+    strpos($jsProv, "NO_CUBIERTA: 'No cubierta'") !== false,
+    strpos($cssProv, '.prov-pre-no_cubierta') !== false]);
+chequear('la grilla marca "pago agrupado" en data-etiqueta, que baja al Excel en su columna', [true, true], [
+    strpos($jsProv, "return 'pago agrupado';") !== false,
+    strpos($jsProv, "'<td class=\"prov-solo-export\" data-exportar-solo>' + escapar(etiquetaImportado(f)) + '</td>'") !== false]);
+chequear('el tooltip dice el cheque, las facturas y cuánto le toca a cada una', true,
+    strpos($jsProv, 'lineas.push(textoAgrupado(f.PAGO_AGRUPADO, f));') !== false);
+chequear('↺ pregunta si se deshace el pago agrupado entero', true,
+    strpos($jsProv, "mensaje: '¿Deshacer el pago agrupado entero?'") !== false);
+chequear('tildar una no tilda las otras, pero la barra avisa', true,
+    strpos($jsProv, "' parte de un pago agrupado: lo que hagas con '") !== false);
+chequear('el mensaje de ↺ dice cuántas facturas volvieron', true,
+    strpos($ctrlProv, '$deshechas = $prov->facturasDeshechas();') !== false);
+
+chequear('las etiquetas de la fecha: pago parcial, saldo, 1/N · parcial', [true, true, true], [
     strpos($jsProv, "'pago parcial'") !== false,
     strpos($jsProv, "return 'saldo';") !== false,
     strpos($jsProv, "dos + ' · parcial'") !== false]);

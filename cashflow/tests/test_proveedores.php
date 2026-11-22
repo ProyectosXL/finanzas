@@ -2566,11 +2566,14 @@ chequear('pero si por lo que esta desde el primer script', true,
     strpos($sinScripts, 'OBSERVACION IS NULL') !== false);
 
 $cuerpo = $cuerpoDe('deletePago');
+// Los dos pasos viven en borrarFechaEnTransaccion(), que tambien usa la importacion.
+$borraFecha = $cuerpoDe('borrarFechaEnTransaccion');
 
 chequear('primero pone la fecha en NULL', true,
-    strpos($cuerpo, 'SET FECHA_PAGO = NULL') !== false);
+    strpos($borraFecha, 'SET FECHA_PAGO = NULL') !== false
+    && strpos($cuerpo, '$this->borrarFechaEnTransaccion(') !== false);
 chequear('y borra solo si la fila quedo vacia', true,
-    strpos($cuerpo, 'self::condicionFilaVacia($opcionales)') !== false);
+    strpos($borraFecha, 'self::condicionFilaVacia($opcionales)') !== false);
 chequear('en una transaccion', true, strpos($cuerpo, 'sqlsrv_begin_transaction') !== false);
 
 seccion('la columna muestra la fecha que usa el eje');

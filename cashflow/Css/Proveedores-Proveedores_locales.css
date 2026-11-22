@@ -315,7 +315,7 @@
 }
 
 /* PAGADO CON DOS MEDIOS: la fecha es de la planilla —una decisión—, así que
-   se ve firme como ella, con "1/2" o "2/2" al lado. No hay input: la fecha de
+   se ve firme como ella, con "1/N" … "N/N" al lado. No hay input: la fecha de
    una parte se cambia reimportando. Cuando la apertura ya no coincide con el
    pendiente, la marca va en naranja: es la misma señal de "algo para mirar"
    que la forma con typo. */
@@ -402,6 +402,14 @@
 
 .tab-proveedores_locales .prov-pre-sin_cambios {
     color: #97a1ae;
+}
+
+/* Una factura de un pago agrupado parcial que el cheque no cubre: no es un
+   error, sigue como si no estuviera en la planilla. Se atenúa como lo que no
+   cambia. */
+.tab-proveedores_locales .prov-pre-no_cubierta {
+    color: #97a1ae;
+    background-color: #f8f9fa;
 }
 
 .tab-proveedores_locales .prov-preview-tabla code {

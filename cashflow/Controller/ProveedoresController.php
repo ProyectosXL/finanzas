@@ -426,12 +426,19 @@ try {
             $habia = $prov->deletePago($data['cod_provee'], $data['t_comp'], $data['n_comp'],
                 $usuario);
 
+            /* UN PAGO AGRUPADO SE DESHACE ENTERO, y el mensaje dice cuantas
+               facturas volvieron. Ver Proveedores::deletePago(). */
+            $deshechas = $prov->facturasDeshechas();
+
             echo json_encode([
                 'success' => true,
-                'message' => $habia
-                    ? 'La fecha vuelve a ser la de vencimiento.'
-                    : 'Ese comprobante no tenía fecha cargada.',
-                'data' => ['habia' => $habia]
+                'message' => ($deshechas > 1)
+                    ? 'Se deshizo el pago agrupado: ' . $deshechas . ' facturas vuelven a su vencimiento o al '
+                        . 'cronograma.'
+                    : ($habia
+                        ? 'La fecha vuelve a ser la de vencimiento.'
+                        : 'Ese comprobante no tenía fecha cargada.'),
+                'data' => ['habia' => $habia, 'deshechas' => $deshechas]
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -466,7 +473,8 @@ try {
             $comp = Proveedores::compararImportacion(
                 $parse['filas'], $pendientes, $prov->getPagos(), $h->hoy(),
                 $prov->getAperturas(), $prov->tablaMedioCreada(), $prov->retenciones()->config(),
-                $enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido());
+                $enTango, $prov->opcionesExcedente($h), AlquileresUniverso::delPedido(),
+                $prov->capacidadImportacion());
 
             $comp['separador'] = $parse['separador'];
 
@@ -489,7 +497,11 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => $r['altas'] . ' comprobante(s) con fecha nueva y ' . $r['cambios']
-                    . ' modificado(s).',
+                    . ' modificado(s).'
+                    . (!empty($r['deshechas'])
+                        ? ' ' . $r['deshechas'] . ' factura(s) de pagos agrupados anteriores vuelven a su '
+                            . 'vencimiento o al cronograma.'
+                        : ''),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

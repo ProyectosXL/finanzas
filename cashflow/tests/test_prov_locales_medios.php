@@ -63,7 +63,7 @@ chequear('se carga', 'ALTA', $c['filas'][0]['estado']);
 chequear('con todo lo pendiente', 200000.0, $c['filas'][0]['importe_pendiente']);
 chequear('sin apertura: es un comprobante con una fecha', null,
     Proveedores::camposDeImportacion($c['filas'])['medios']);
-chequear('y el resumen no cuenta dos medios', 0, $c['resumen']['dos_medios']);
+chequear('y el resumen no cuenta varios medios', 0, $c['resumen']['varios_medios']);
 
 seccion('un medio con importe: tiene que ser el pendiente, con un peso de tolerancia');
 
@@ -97,10 +97,10 @@ $c = $comparar($dos);
 chequear('las dos filas se cargan', ['ALTA', 'ALTA'], array_column($c['filas'], 'estado'));
 chequear('a 80 centavos del pendiente, dentro de la tolerancia', 0, $c['resumen']['errores']);
 chequear('el resumen cuenta UN comprobante, no dos filas', 1, $c['resumen']['altas']);
-chequear('y lo cuenta como abierto en dos medios', 1, $c['resumen']['dos_medios']);
+chequear('y lo cuenta como abierto en varios medios', 1, $c['resumen']['varios_medios']);
 chequear('lo que se reubica es el pendiente, una vez', 200000.0, $c['resumen']['importe_con_fecha']);
 chequear('el aviso dice cuantos quedan en dos medios', true,
-    strpos(implode(' ', $c['avisos']), '1 comprobante(s) quedan pagados con dos medios') !== false);
+    strpos(implode(' ', $c['avisos']), '1 comprobante(s) quedan pagados con varios medios') !== false);
 
 // 1/2 es la parte que se paga primero, aunque en el archivo venga segunda.
 $porLinea = [];
@@ -149,7 +149,7 @@ chequear('y es el mismo en las dos: el error es del comprobante', $c['filas'][0]
     $c['filas'][1]['motivo']);
 chequear('se cuentan las dos filas como error', 2, $c['resumen']['errores']);
 
-seccion('tres filas del mismo comprobante: error en todas');
+seccion('sin el script de N medios: tres filas del mismo comprobante son error en todas');
 
 $c = $comparar([
     $fila(2, 'MTDODI', 'A0000500001731', '20/10/2026', 'ECHEQ', '100000'),
@@ -203,7 +203,7 @@ chequear('y la buena dice por que tampoco se carga', true,
 chequear('no queda nada para escribir', 0,
     $c['resumen']['altas'] + $c['resumen']['cambios']);
 
-seccion('un comprobante en cuotas no se parte en dos medios');
+seccion('sin el script de N medios: un comprobante en cuotas no se parte');
 
 $c = $comparar([
     $fila(2, 'OGRSA', 'A0010000247110', '20/10/2026', 'ECHEQ', '2000'),
@@ -244,7 +244,7 @@ chequear('con el aviso de que se sigue tratando como CAJA',
     'Se sigue tratando como CAJA; para que entre al cronograma, cambiá su forma en la grilla o el '
         . 'maestro.', $c['filas'][0]['aviso']);
 chequear('en las dos partes', $c['filas'][0]['aviso'], $c['filas'][1]['aviso']);
-chequear('y el resumen lo cuenta', 1, $c['resumen']['dos_medios_fuera_cronograma']);
+chequear('y el resumen lo cuenta', 1, $c['resumen']['varios_medios_fuera_cronograma']);
 
 $c = $comparar($dos);
 
@@ -272,7 +272,7 @@ $c = $comparar([$fila(2, 'MTDODI', 'A0000500001731', '27/10/2026', 'TRANSFERENCI
 
 chequear('con una fila deja de estar partido: es un cambio', 'CAMBIO', $c['filas'][0]['estado']);
 chequear('aunque la fecha sea la de una de las partes', true,
-    strpos($c['filas'][0]['motivo'], 'Deja de estar pagado con dos medios') !== false);
+    strpos($c['filas'][0]['motivo'], 'Deja de estar pagado con varios medios') !== false);
 chequear('y lo que se escribe no tiene apertura: se da de baja', null,
     Proveedores::camposDeImportacion($c['filas'])['medios']);
 
@@ -375,18 +375,21 @@ $avisos = Aviso::textos(Proveedores::avisosPendientesConNivel($parcial));
 
 // Desde las retenciones la apertura se compara contra el NETO a pagar: sin
 // alicuotas el neto es el pendiente, y el caso es el mismo.
-chequear('la pestaña avisa, con el texto pedido', true, in_array('1 comprobante(s) abiertos en dos '
+chequear('la pestaña avisa, con el texto pedido', true, in_array('1 comprobante(s) abiertos en varios '
     . 'medios ya no coinciden con su neto a pagar: se proyecta el saldo en la fecha más tardía. '
     . 'Reimportá para corregirlo.', $avisos, true));
 chequear('con nivel atencion', 'warning',
     Proveedores::avisosPendientesConNivel($parcial)[0]['nivel']);
 
-// Si en Tango pasa a tener dos vencimientos, tampoco se parte.
+/* Si en Tango pasa a tener dos vencimientos y el neto sigue coincidiendo,
+   se parte por cuota: cada medio cubre de la mas vieja a la mas nueva. Ver
+   test_prov_locales_n_medios.php. */
 $enCuotas = Proveedores::abrirEnMedios([$item(['IMPORTE_PENDIENTE' => 100000.0]),
     $item(['IMPORTE_PENDIENTE' => 100000.0, 'FECHA_VTO' => '2026-11-01'])], $apertura, $hoy, $crono);
 
-chequear('con dos vencimientos tampoco se parte', [2, true, true], [count($enCuotas),
-    !empty($enCuotas[0]['APERTURA_DESCUADRADA']), !empty($enCuotas[1]['APERTURA_DESCUADRADA'])]);
+chequear('con dos vencimientos que coinciden se parte por cuota, sin descuadre', [3, false, 200000.0],
+    [count($enCuotas), !empty($enCuotas[0]['APERTURA_DESCUADRADA']),
+     round(array_sum(array_column($enCuotas, 'IMPORTE_PENDIENTE')), 2)]);
 
 seccion('las dos particiones de PAGOS_TODO cierran con comprobantes abiertos');
 
@@ -477,17 +480,22 @@ chequear('y savePago rechaza un comprobante abierto antes de escribir', true,
 
 seccion('volver al vencimiento borra la apertura y deja lo demas');
 
+/* deletePago() da de baja la apertura y le pide a borrarFechaEnTransaccion()
+   -el mismo camino que usa la importacion cuando deshace un pago agrupado-
+   que saque la fecha y borre la fila si quedo vacia. */
 $del = $cuerpoDe('deletePago');
+$borra = $cuerpoDe('borrarFechaEnTransaccion');
 
 chequear('da de baja la apertura entera', true,
-    strpos($del, '$this->guardarApertura($cid, $clave[0], $clave[1], $clave[2], null, $usuario);') !== false);
+    strpos($del, '$this->guardarApertura($cid, $c[0], $c[1], $c[2], null, $usuario);') !== false);
 chequear('dentro de la misma transaccion que la fecha', true,
     strpos($del, 'sqlsrv_begin_transaction') < strpos($del, '$this->guardarApertura(')
-    && strpos($del, '$this->guardarApertura(') < strpos($del, 'SET FECHA_PAGO = NULL'));
+    && strpos($del, '$this->guardarApertura(') < strpos($del, '$this->borrarFechaEnTransaccion(')
+    && strpos($del, '$this->borrarFechaEnTransaccion(') < strpos($del, 'sqlsrv_commit'));
 chequear('la tabla de pagos sigue tocando solo la fecha y su fuente', 1,
-    preg_match_all('/SET FECHA_PAGO = NULL"\s*\. \(in_array\(\'FUENTE_FECHA\'/', $del));
+    preg_match_all('/SET FECHA_PAGO = NULL"\s*\. \(in_array\(\'FUENTE_FECHA\'/', $borra));
 chequear('y borra la fila solo si quedo vacia: la exclusion, el override y la observacion quedan',
-    true, strpos($del, 'self::condicionFilaVacia($opcionales)') !== false);
+    true, strpos($borra, 'self::condicionFilaVacia($opcionales)') !== false);
 
 $apert = $cuerpoDe('guardarApertura');
 
@@ -566,8 +574,8 @@ $sql = file_get_contents(__DIR__ . '/../sql/cashflow_prov_locales_pago_medio.sql
 chequear('el CHECK de la forma es FORMAS_CRONOGRAMA', true,
     preg_match("/CHECK \(FORMA_PAGO IN \('ECHEQ', 'TRANSFERENCIA'\)\)/", $sql) === 1
     && ProveedoresCategorias::FORMAS_CRONOGRAMA === ['ECHEQ', 'TRANSFERENCIA']);
-chequear('el ORDEN va de 1 a MAX_MEDIOS', true,
-    strpos($sql, 'CHECK (ORDEN IN (1, 2))') !== false && Proveedores::MAX_MEDIOS === 2);
+chequear('el ORDEN nace de 1 a 2: el tope sin el script de N medios', true,
+    strpos($sql, 'CHECK (ORDEN IN (1, 2))') !== false && Proveedores::PARTES_SIN_SCRIPT === 2);
 chequear('la clave con la collation de Tango', 3,
     preg_match_all('/(COD_PROVEE|T_COMP|N_COMP)\s+VARCHAR\(\d+\)\s+COLLATE Latin1_General_BIN NOT NULL/', $sql));
 chequear('una parte vigente por orden, con un indice filtrado', true,
@@ -594,7 +602,7 @@ chequear('la celda de un comprobante abierto existe', true, $celdaAbierta !== ''
 chequear('y no tiene campo de fecha: no se edita', false, strpos($celdaAbierta, '<input') !== false);
 /* La etiqueta la arma etiquetaImportado(), que es la misma para la celda y
    para la columna que sólo baja al Excel. */
-chequear('lleva 1/2 y 2/2 como etiqueta, fuera del texto que se exporta', true,
+chequear('lleva 1/N … N/N como etiqueta, fuera del texto que se exporta', true,
     strpos($celdaAbierta, 'var etiqueta = etiquetaImportado(f);') !== false
     && strpos($cuerpoJs('etiquetaImportado'), "return f.APERTURA.parte + '/' + f.APERTURA.de;") !== false
     && strpos($celdaAbierta, 'data-etiqueta="') !== false);
@@ -623,8 +631,8 @@ chequear('excluir manda cada comprobante una vez', true,
 chequear('el fechado masivo saca los abiertos y dice cuantos son', true,
     strpos($cuerpoJs('fecharSeleccion'), 'var sel = todas.filter(function(f) { return !esAbierto(f); });') !== false
     && strpos($cuerpoJs('fecharSeleccion'), 'no se van a tocar') !== false);
-chequear('la previsualizacion muestra los comprobantes en dos medios', true,
-    strpos($js, "['dos_medios', 'En dos medios', 'info']") !== false);
+chequear('la previsualizacion muestra los comprobantes en varios medios', true,
+    strpos($js, "['varios_medios', 'En varios medios', 'info']") !== false);
 chequear('con las dos partes juntas', true,
     strpos($cuerpoJs('tablaPreview'), '((a.grupo || a.linea) - (b.grupo || b.linea))') !== false);
 chequear('y el aviso de la forma vigente', true, strpos($cuerpoJs('tablaPreview'), 'if (f.aviso) {') !== false);
