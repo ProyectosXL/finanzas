@@ -519,7 +519,7 @@ Pestaña *RRHH y Operativos › Llaves y Renov. Contratos* —de `PENDIENTE` a `
 
 No agrega ni modifica ningún script: la ayuda son archivos de `Ayuda/` (ver *La ayuda funcional*). El Centro de ayuda **no pide ningún permiso nuevo**: lo ve cualquier usuario identificado.
 
-**Lo que sí hay que verificar en el servidor**: la rama agrega `cashflow/.htaccess`, que niega los `.md` y los `.sql` del módulo —los README, los artículos de la ayuda y los scripts se descargaban sin iniciar sesión—. Apache lo respeta sólo con `AllowOverride` (al menos `AuthConfig`, o `All`) en el `<Directory>` de `htdocs`; sin eso lo ignora **en silencio** y todo sigue descargándose. Después de publicar: pedir `cashflow/README-cashflow.md` y `cashflow/sql/cashflow_llaves.sql` sin sesión tiene que dar **403**, y `cashflow/Js/main.js`, 200.
+**Lo que sí hay que verificar en el servidor**: la rama agrega `cashflow/.htaccess`, que niega los `.md` y los `.sql` del módulo —los README, los artículos de la ayuda y los scripts se descargaban sin iniciar sesión—. Apache lo respeta sólo con `AllowOverride` (al menos `AuthConfig`, o `All`) en el `<Directory>` de `htdocs`; sin eso lo ignora **en silencio** y todo sigue descargándose. Y agrega `cashflow/tests/.htaccess`, que niega **la carpeta entera**: pedir un `.php` de ahí lo ejecutaba, y `run.php` corre la suite contra la base. Después de publicar: pedir `cashflow/README-cashflow.md`, `cashflow/sql/cashflow_llaves.sql` y `cashflow/tests/lib.php` sin sesión tiene que dar **403**, y `cashflow/Js/main.js`, 200.
 
 ## Ejecución de los scripts — la instalación completa
 

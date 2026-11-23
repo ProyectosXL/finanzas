@@ -29,3 +29,12 @@ chequear('bloquea las dos extensiones', true,
 chequear('y no bloquea carpetas enteras', false, (bool) preg_match('/^\s*<Directory/mi', $htaccess));
 chequear('ni hay otro .htaccess en Ayuda/ que lo contradiga', false,
     file_exists(__DIR__ . '/../Ayuda/.htaccess'));
+
+seccion('las pruebas no se piden por URL');
+
+/* Pedir un .php de tests/ lo ejecuta: run.php corre la suite, que lee la base.
+   La carpeta entera se niega; las pruebas se corren por linea de comandos. */
+$rutaTests = __DIR__ . '/.htaccess';
+chequear('tests/.htaccess existe', true, file_exists($rutaTests));
+chequear('y niega todo', true,
+    file_exists($rutaTests) && (bool) preg_match('/^Require all denied\s*$/m', file_get_contents($rutaTests)));
