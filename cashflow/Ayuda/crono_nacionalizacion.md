@@ -2,7 +2,7 @@
 titulo: Crono Nacionalización
 pestana: crono_nacionalizacion
 categoria: Comercio Exterior
-estado: en_revision
+estado: completa
 actualizado: 2026-11-23
 usuarios: Comercio Exterior, Tesorería
 bajada: Cuánto falta pagar de la nacionalización de cada contenedor y cuándo, en pesos, con sus pagos parciales y su saldo.

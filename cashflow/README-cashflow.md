@@ -2551,7 +2551,7 @@ Se ve en dos lugares:
 titulo: Llaves y Renov. Contratos
 pestana: llaves_renov          (vacío en los generales)
 categoria: RRHH y Operativos   (la del menú, o General)
-estado: en_revision            (completa | en_revision | pendiente)
+estado: completa               (completa | en_revision | pendiente)
 actualizado: 2026-11-23
 usuarios: Tesorería, Administración
 bajada: Una línea bajo el título.
@@ -2592,9 +2592,11 @@ Nueve secciones, **en este orden y con estos títulos exactos** (`AyudaArticulo:
 
 | Estado | Cuándo | Cómo se ve |
 | --- | --- | --- |
-| `completa` | La validaron quienes usan la pestaña | Sin etiqueta |
-| `en_revision` | Escrita, sin validar; o cambió mucho desde la validación | *En revisión*, con la fecha |
+| `completa` | **Lo normal.** Escrita y verificada contra el código de la pestaña | Sin etiqueta |
+| `en_revision` | Sólo si hay algo puntual que confirmar antes de darla por buena | *En revisión*, con la fecha |
 | `pendiente` | Todavía incompleta | *Pendiente*, con la fecha |
+
+**Los artículos no esperan una validación de los usuarios**: lo que dicen sale del código, que es lo que hace la pantalla. Se publican `completa`, y si algo no coincide con lo que la gente ve, se corrige el artículo.
 
 Una pestaña **sin archivo** se ve *Pendiente* en el Centro y no se puede abrir.
 
@@ -2612,7 +2614,7 @@ Busca la frase escrita, sin acentos ni mayúsculas, con el criterio de `Proveedo
 
 ### La regla de mantenimiento
 
-> **Todo cambio que modifique lo que el usuario ve, carga o lee en una pestaña actualiza su artículo en la misma rama, y su fecha (`actualizado`). Si el cambio es grande, el estado vuelve a `en_revision`.**
+> **Todo cambio que modifique lo que el usuario ve, carga o lee en una pestaña actualiza su artículo en la misma rama, y su fecha (`actualizado`).**
 
 Una ayuda desactualizada es peor que no tener ayuda: dice con seguridad algo que ya no es cierto. La regla la controla `tests/test_ayuda_articulos.php`:
 

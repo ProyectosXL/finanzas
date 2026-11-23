@@ -2,7 +2,7 @@
 titulo: Proveedores Exterior
 pestana: proveedores_exterior
 categoria: Comercio Exterior
-estado: en_revision
+estado: completa
 actualizado: 2026-11-23
 usuarios: Comercio Exterior, Tesorería
 bajada: Lo que falta pagarle a cada proveedor del exterior, contenedor por contenedor, en pesos y con el dólar del momento en que se paga.

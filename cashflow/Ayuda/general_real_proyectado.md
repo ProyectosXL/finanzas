@@ -2,7 +2,7 @@
 titulo: Real y proyectado
 pestana:
 categoria: General
-estado: en_revision
+estado: completa
 actualizado: 2026-11-23
 usuarios: Tesorería, Administración, Dirección
 bajada: Qué parte de cada número ya está comprometida, qué parte es una estimación y cómo se distinguen en pantalla.

@@ -2,7 +2,7 @@
 titulo: Cómo leer el tablero
 pestana:
 categoria: General
-estado: en_revision
+estado: completa
 actualizado: 2026-11-23
 usuarios: Tesorería, Administración, Dirección
 bajada: Qué mide cada número de la pestaña Cashflow, cómo se arrastra el saldo y qué hacer cuando algo no cierra.
