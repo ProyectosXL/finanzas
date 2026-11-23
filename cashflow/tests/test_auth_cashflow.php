@@ -488,9 +488,9 @@ foreach (array_keys($tabsConEscritura) as $tab) {
     }
 }
 
-/* Catorce desde que Alquileres tiene escrituras propias: la columna de su
+/* Quince desde Llaves y Renovaciones ("Ya pagada" en su solapa Contratos). Catorce desde que Alquileres tiene escrituras propias: la columna de su
    exclusion en el Maestro y, despues, sus facturas. */
-chequear('las catorce pestañas', 14, count($tabsConEscritura));
+chequear('las quince pestañas', 15, count($tabsConEscritura));
 chequear('todas con data-puede-editar', [], $sinAtributo);
 
 $param = file_get_contents(__DIR__ . '/../Tabs/parametros.php');

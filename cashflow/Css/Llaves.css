@@ -1,0 +1,28 @@
+/* RRHH y Operativos › Llaves y Renov. Contratos */
+
+/* La jerarquia: operador, local, concepto. */
+#tablaLlaves tr.ll-n0 td:first-child { font-weight: 600; }
+#tablaLlaves tr.ll-n1 td:first-child { padding-left: 1.5rem; }
+#tablaLlaves tr.ll-n2 td:first-child { padding-left: 3rem; color: #495057; }
+#tablaLlaves tr.ll-grupo td:first-child { font-weight: 600; }
+#tablaLlaves .ll-toggle { cursor: pointer; display: inline-block; width: 1rem; }
+
+/* LO ESTIMADO SE VE DISTINTO, como la continuacion de Seguros: itálica y
+   atenuado. Lo de un contrato, una factura o cargado a mano va normal. */
+#tablaLlaves td.ll-estimado, .ll-estimado-muestra { font-style: italic; color: #6c757d; }
+
+/* El origen de cada importe: un chip chico, en la linea de los de Alquileres.
+   Lo dibuja el CSS desde data-etiqueta, asi el Excel se queda con el numero. */
+.ll-chip { display: inline-block; margin-left: .35rem; vertical-align: middle; }
+.ll-chip::after {
+    content: attr(data-etiqueta);
+    display: inline-block; padding: 0 .3rem; border-radius: .6rem; border: 1px solid transparent;
+    font-size: .65rem; line-height: 1.2; font-weight: 500; white-space: nowrap; font-style: normal;
+}
+.ll-chip-CONTRATO::after { background: #343a40; color: #fff; }
+.ll-chip-ESTIMADO::after { background: #f8f9fa; color: #6c757d; border-color: #dee2e6; }
+.ll-chip-MANUAL::after { background: #fff; color: #343a40; border-color: #343a40; }
+.ll-chip-FACTURA::after { background: #000; color: #fff; }
+.ll-chip-MIXTO::after { background: #fff; color: #6c757d; border: 1px dashed #6c757d; }
+
+#tablaLlContratos .ll-nota { font-size: .75rem; color: #6c757d; }

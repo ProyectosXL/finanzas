@@ -554,6 +554,242 @@ class Llaves {
     }
 
     /* ====================================================================
+       LA PESTAÑA
+       ==================================================================== */
+
+    /**
+     * Lo que la pestaña necesita: Proyeccion, Contratos, Facturas, tarjetas y
+     * avisos.
+     *
+     * @param Horizonte $h
+     * @return array
+     */
+    public function proyeccion($h) {
+        $ins = $this->insumos($h);
+
+        return self::armarPestana($this->calcular($h, $ins), $h, $ins);
+    }
+
+    /**
+     * La grilla de Proyeccion -operador -> local -> concepto, y aparte las
+     * aperturas y los compromisos-, la de Contratos, la de Facturas y las
+     * tarjetas, a partir de calcular().
+     *
+     * NO CALCULA NADA: agrupa la lista de pagos con EjeVista (la regla dia o
+     * mes de Horizonte::agrupar()). Por eso lo que la pestaña dice es lo mismo
+     * que dice el tablero, que acumula la misma lista; lo fija una prueba.
+     *
+     * @param array $c Lo de calcular()
+     * @param Horizonte $h
+     * @param array $ins Lo de insumos() (nombres y facturas)
+     * @return array
+     */
+    public static function armarPestana($c, $h, $ins = []) {
+        require_once __DIR__ . '/EjeVista.php';
+
+        $locales = $c['locales'];
+        $sinOp = 'Sin razón social';
+        $items = [];
+        $celdas = [];
+        $dias = $h->diasSet();
+        $meses = $h->mesesSet();
+
+        foreach ($c['pagos'] as $p) {
+            $agrupa = in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS, LlavesCalculo::OBRA], true)
+                && $p['nro'] !== null;
+
+            if ($agrupa) {
+                /* Bajo el operador DEL LOCAL, aunque la factura sea de otro (IRSA
+                   factura el FPC de DOT): la grilla es por local. */
+                $op = $locales[$p['nro']]['operador'] ?? ($locales[$p['nro']]['cod_provee'] ?? null) ?? $sinOp;
+                $claves = ['O|' . $op, 'L|' . $op . '|' . $p['nro'], 'C|' . $op . '|' . $p['nro'] . '|' . $p['concepto']];
+            } elseif ($p['concepto'] === LlavesCalculo::APERTURA) {
+                $claves = ['G|APERTURA', 'A|' . ($p['id_apertura'] ?? $p['local'])];
+            } else {
+                $claves = ['G|COMPROMISO', 'K|' . ($p['operador'] ?? $p['cod_provee']) . '|' . ($p['concepto_texto'] ?? '')];
+            }
+
+            $col = isset($dias[$p['fecha']]) ? 'DIA|' . $p['fecha']
+                : (isset($meses[substr($p['fecha'], 0, 7)]) ? 'MES|' . substr($p['fecha'], 0, 7) : null);
+
+            foreach ($claves as $k) {
+                $items[] = ['fila' => $k, 'fecha' => $p['fecha'], 'importe' => $p['importe']];
+
+                if ($col !== null) {
+                    $celdas[$k][$col]['origenes'][$p['origen']] = true;
+                    $celdas[$k][$col]['detalle'][] = LlavesCalculo::NOMBRE_ORIGEN[$p['origen']] . ' · '
+                        . LlavesCalculo::plata($p['importe']) . ' · ' . trim($p['detalle']);
+                }
+            }
+        }
+
+        $eje = EjeVista::armarAgrupado($h, $items, 'fila', 'fecha', 'importe');
+        $porClave = [];
+
+        foreach ($eje['filas'] as $f) {
+            $porClave[$f['fila']] = $f;
+        }
+
+        /* El total de la grilla: cada pago una sola vez (las filas repiten el
+           importe en cada nivel). */
+        $total = EjeVista::armarAgrupado($h, array_map(function ($p) {
+            return ['fila' => 'TOTAL', 'fecha' => $p['fecha'], 'importe' => $p['importe']];
+        }, $c['pagos']), 'fila', 'fecha', 'importe');
+        $eje['filas'] = [];
+        $eje['totales'] = $total['totales'];
+
+        $filas = [];
+        $agregar = function ($id, $nivel, $padre, $nombre, $sub, $tipo) use (&$filas, $porClave, $celdas) {
+            if (!isset($porClave[$id])) {
+                return;
+            }
+
+            $cel = [];
+
+            foreach ($celdas[$id] ?? [] as $col => $x) {
+                $orig = array_keys($x['origenes']);
+                $cel[$col] = ['origen' => (count($orig) === 1) ? $orig[0] : 'MIXTO',
+                              'chip' => (count($orig) === 1) ? LlavesCalculo::NOMBRE_ORIGEN[$orig[0]] : 'mixto',
+                              'tooltip' => implode("\n", $x['detalle'])];
+            }
+
+            $filas[] = ['id' => $id, 'nivel' => $nivel, 'padre' => $padre, 'nombre' => $nombre, 'sub' => $sub,
+                        'tipo' => $tipo, 'eje' => $porClave[$id], 'celdas' => $cel];
+        };
+
+        /* Operador -> local -> concepto, por nombre. */
+        $ops = [];
+
+        foreach (array_keys($porClave) as $k) {
+            if (strpos($k, 'L|') === 0) {
+                list(, $op, $nro) = explode('|', $k);
+                $ops[$op][] = (int) $nro;
+            }
+        }
+
+        ksort($ops);
+
+        foreach ($ops as $op => $nros) {
+            $agregar('O|' . $op, 0, null, $op, '', 'OPERADOR');
+            usort($nros, function ($a, $b) use ($locales, $ins) {
+                return strcmp($locales[$a]['nombre'] ?? ($ins['nombres'][$a] ?? ''), $locales[$b]['nombre'] ?? ($ins['nombres'][$b] ?? ''));
+            });
+
+            foreach ($nros as $nro) {
+                $l = $locales[$nro] ?? ['nombre' => $ins['nombres'][$nro] ?? ('Local ' . $nro), 'estado' => null];
+                $agregar('L|' . $op . '|' . $nro, 1, 'O|' . $op, $l['nombre'], (string) $nro, 'LOCAL');
+
+                foreach ([LlavesCalculo::LLAVE, LlavesCalculo::OTROS, LlavesCalculo::OBRA] as $con) {
+                    $agregar('C|' . $op . '|' . $nro . '|' . $con, 2, 'L|' . $op . '|' . $nro,
+                        LlavesCalculo::NOMBRE_CONCEPTO[$con], '', 'CONCEPTO');
+                }
+            }
+        }
+
+        $vistos = [];
+        $agregar('G|APERTURA', 0, null, 'Aperturas', '', 'GRUPO');
+
+        foreach ($c['pagos'] as $p) {
+            if ($p['concepto'] === LlavesCalculo::APERTURA && !isset($vistos['A|' . $p['id_apertura']])) {
+                $vistos['A|' . $p['id_apertura']] = true;
+                $agregar('A|' . $p['id_apertura'], 1, 'G|APERTURA', $p['local'], $p['segmento'] ?? '', 'APERTURA');
+            }
+        }
+
+        $agregar('G|COMPROMISO', 0, null, 'Compromisos a mano', '', 'GRUPO');
+
+        foreach ($c['pagos'] as $p) {
+            $k = 'K|' . ($p['operador'] ?? $p['cod_provee']) . '|' . ($p['concepto_texto'] ?? '');
+
+            if ($p['concepto'] === LlavesCalculo::COMPROMISO && !isset($vistos[$k])) {
+                $vistos[$k] = true;
+                $agregar($k, 1, 'G|COMPROMISO', $p['concepto_texto'] ?? 'Compromiso', $p['operador'] ?? $p['cod_provee'], 'COMPROMISO');
+            }
+        }
+
+        /* LAS TARJETAS */
+        $sum = function ($filtro) use ($c) {
+            return round(array_sum(array_column(array_filter($c['pagos'], $filtro), 'importe')), 2);
+        };
+        $renovaciones = [];
+
+        foreach ($c['pagos'] as $p) {
+            if (in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true) && !empty($p['clave'])) {
+                $renovaciones[$p['clave']] = true;
+            }
+        }
+
+        $sinDato = array_unique(array_filter(array_column($c['no_proyecta'], 'nro'), function ($n) { return $n !== null; }));
+
+        return [
+            'hoy' => $h->hoy(),
+            'eje' => $eje,
+            'filas' => $filas,
+            'kpis' => [
+                'total' => $sum(function () { return true; }),
+                'renovaciones_n' => count($renovaciones),
+                'renovaciones_importe' => $sum(function ($p) {
+                    return in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true)
+                        && $p['origen'] !== LlavesCalculo::FACTURA;
+                }),
+                'estimado' => $sum(function ($p) { return $p['origen'] === LlavesCalculo::ESTIMADO; }),
+                'firme' => $sum(function ($p) { return in_array($p['origen'], [LlavesCalculo::CONTRATO, LlavesCalculo::FACTURA], true); }),
+                'manual' => $sum(function ($p) { return $p['origen'] === LlavesCalculo::MANUAL; }),
+                'sin_dato_n' => count($sinDato),
+                'sin_dato' => array_values(array_unique(array_column($c['no_proyecta'], 'local')))
+            ],
+            'contratos' => self::armarContratos($c),
+            'facturas' => self::armarFacturas($ins['facturas'] ?? [], $ins['nombres'] ?? []),
+            'origenes' => LlavesCalculo::NOMBRE_ORIGEN,
+            'estados' => LlavesCalculo::NOMBRE_ESTADO,
+            'no_proyecta' => $c['no_proyecta'],
+            'tablas_ok' => $c['tablas_ok'] ?? false,
+            'script' => LlavesParametros::SCRIPT,
+            'avisos' => $c['avisos']
+        ];
+    }
+
+    /** La solapa Contratos: lo que hoy es la hoja "Detalles de vencimientos". */
+    private static function armarContratos($c) {
+        $out = [];
+
+        foreach ($c['locales'] as $nro => $l) {
+            $vig = $l['vigente'];
+            $ren = $l['renovacion'];
+            $rens = array_values(array_filter($l['renovaciones'] ?? [], function ($r) { return empty($r['vieja']); }));
+            $out[] = [
+                'nro' => $nro, 'nombre' => $l['nombre'], 'operador' => $l['operador'], 'cod_provee' => $l['cod_provee'],
+                'estado' => $l['estado'], 'nombre_estado' => LlavesCalculo::NOMBRE_ESTADO[$l['estado']] ?? $l['estado'],
+                'vigente' => $vig, 'meses' => $l['meses_vigente'], 'renovacion' => $ren, 'm2' => $l['m2'],
+                'segmento' => $l['segmento'], 'notas' => array_merge($l['notas'], ...array_map(function ($r) {
+                    return $r['notas'];
+                }, $rens ?: [['notas' => []]])),
+                'renovaciones' => array_map(function ($r) {
+                    return ['tipo' => $r['tipo'], 'ant' => $r['ant'], 'contrato' => $r['contrato'], 'inicio' => $r['inicio'],
+                            'mes1' => $r['mes1'], 'cuotas' => $r['cuotas'], 'llave' => $r['llave'], 'otros' => $r['otros']];
+                }, $rens),
+                'pagadas' => array_merge(...array_values($l['pagadas'] ?: [[]])),
+                'cantidad_contratos' => count($l['contratos'])
+            ];
+        }
+
+        usort($out, function ($a, $b) { return strcmp($a['nombre'], $b['nombre']); });
+
+        return $out;
+    }
+
+    /** La solapa Facturas: las marcadas como llave, pendientes y pagadas. */
+    private static function armarFacturas($facturas, $nombres) {
+        return array_map(function ($f) use ($nombres) {
+            return ['id' => $f['id'], 'comprobante' => $f['comprobante'], 'cod_provee' => $f['cod_provee'],
+                    'nro' => $f['nro'], 'local' => $nombres[$f['nro']] ?? ('Local ' . $f['nro']), 'concepto' => $f['concepto'],
+                    'nombre_concepto' => LlavesCalculo::NOMBRE_CONCEPTO[$f['concepto']] ?? $f['concepto'], 'mes' => $f['mes'],
+                    'ant' => $f['ant'], 'contrato' => $f['contrato'], 'pagada' => $f['pagada'], 'pagos' => $f['pagos'],
+                    'total' => round(array_sum(array_column($f['pagos'], 'importe')), 2), 'texto' => $f['texto']];
+        }, is_array($facturas) ? $facturas : []);
+    }
+
+    /* ====================================================================
        MARCAR UNA FACTURA COMO LLAVE (desde Alquileres -> Facturas)
        ==================================================================== */
 

@@ -50,6 +50,19 @@ try {
 
     switch ($action) {
         /* ================================================================
+           LA PESTAÑA: PROYECCION, CONTRATOS Y FACTURAS, en un pedido
+           ================================================================ */
+        case 'getProyeccion':
+            autorizarLectura('llaves_renov');
+
+            require_once __DIR__ . '/../Class/Parametros.php';
+            require_once __DIR__ . '/../Class/Horizonte.php';
+
+            $h = Horizonte::desdeParametros(new Parametros());
+            responder((new Llaves($h->hoy()))->proyeccion($h));
+            break;
+
+        /* ================================================================
            PARAMETROS -> LLAVES Y RENOVACIONES
            ================================================================ */
         case 'getParametros':
