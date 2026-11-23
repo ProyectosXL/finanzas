@@ -371,6 +371,96 @@ class AlquileresApp {
         return $out;
     }
 
+    /** El concepto de la app que guarda cada importe del contrato (guardarContratoAlquiler()) */
+    const CONTRATO_ID_LLAVE = 4;
+    const CONTRATO_ID_COMISIONES = 5;
+    const CONTRATO_ID_FPC = 18;
+
+    /**
+     * Los contratos de cada local CON SUS IMPORTES: valor llave (concepto 4,
+     * columna IMPORTE), comisiones (5, IMPORTE_2) y FPC lanzamiento (18,
+     * IMPORTE_3). Es lo que lee Llaves y Renovaciones; contratos() sigue
+     * devolviendo solo la vigencia, que es lo unico que Alquileres necesita, y
+     * no cambia.
+     *
+     * POR QUE ACA Y NO EN UNA CLASE DE LLAVES: esta es la UNICA clase que lee
+     * la app de alquileres, y una prueba fija que no escribe. Un segundo lector
+     * de la misma tabla tendria que repetir esa garantia, y el dia que la app
+     * cambie una columna habria dos lugares que arreglar.
+     *
+     * EL CONCEPTO SE MIRA, NO SE SUPONE. La app guarda cada importe al lado de
+     * su ID_CA (4, 5 y 18, hoy en las 52 filas). Si una fila trajera otro
+     * concepto en esa columna, ese importe queda en null: un numero que no se
+     * sabe que es no se proyecta como llave.
+     *
+     * ESTADO NO NULL ES UNA BAJA. La app no escribe la columna, pero la vista
+     * RO_V_CONTRATOS_VALOR_LLAVE -la que usa Costo de Ocupacion- filtra
+     * ESTADO IS NULL. Se sigue el mismo criterio: un contrato que la vista no
+     * considera, aca tampoco.
+     *
+     * Un importe vacio es null (sin dato), no 0. LLAVE = 1 se devuelve tal
+     * cual: es la marca de "tiene llave, monto desconocido" que administracion
+     * carga para que Costo de Ocupacion calcule el devengado, y quien la
+     * interpreta es LlavesCalculo.
+     *
+     * @return array NRO_SUCURS => [['id', 'desde', 'hasta', 'llave', 'comisiones', 'fpc']], por desde e id
+     */
+    public function contratosConImportes() {
+        $sql = "SELECT ID, NRO_SUCURS, VIG_DESDE, VIG_HASTA, ID_CA, IMPORTE, ID_CA_2, IMPORTE_2, ID_CA_3, IMPORTE_3
+                FROM dbo.RO_T_CONTRATOS_ALQUILERES
+                WHERE NRO_SUCURS IS NOT NULL AND VIG_DESDE IS NOT NULL AND VIG_HASTA IS NOT NULL
+                  AND ESTADO IS NULL
+                ORDER BY NRO_SUCURS, VIG_DESDE, ID";
+        $out = [];
+
+        foreach ($this->filas($sql, [], 'Error al leer los contratos de los locales con sus importes') as $r) {
+            $fila = self::contratoDeFila($r);
+
+            if ($fila !== null) {
+                $out[(int) $r['NRO_SUCURS']][] = $fila;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Una fila de RO_T_CONTRATOS_ALQUILERES como la devuelve
+     * contratosConImportes(). Pura: es la parte que se prueba sin base.
+     * Null si la vigencia esta al reves.
+     *
+     * @param array $r
+     * @return array|null
+     */
+    public static function contratoDeFila($r) {
+        $dia = function ($v) {
+            return ($v instanceof DateTime) ? $v->format('Y-m-d') : substr((string) $v, 0, 10);
+        };
+        $importe = function ($id, $esperado, $valor) {
+            if ($valor === null || trim((string) $valor) === '' || (int) trim((string) $id) !== $esperado) {
+                return null;
+            }
+
+            return round((float) $valor, 2);
+        };
+
+        $d = $dia($r['VIG_DESDE']);
+        $h = $dia($r['VIG_HASTA']);
+
+        if ($d > $h) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $r['ID'],
+            'desde' => $d,
+            'hasta' => $h,
+            'llave' => $importe($r['ID_CA'] ?? null, self::CONTRATO_ID_LLAVE, $r['IMPORTE'] ?? null),
+            'comisiones' => $importe($r['ID_CA_2'] ?? null, self::CONTRATO_ID_COMISIONES, $r['IMPORTE_2'] ?? null),
+            'fpc' => $importe($r['ID_CA_3'] ?? null, self::CONTRATO_ID_FPC, $r['IMPORTE_3'] ?? null)
+        ];
+    }
+
     /**
      * La venta NETA (sin IVA) por local y mes, de RO_T_RENTABILIDAD_BRUTA: la
      * misma que usa la app para los conceptos 7 y 17.

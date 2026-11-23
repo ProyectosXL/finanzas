@@ -141,3 +141,33 @@ if (!Pruebas::hayBase()) {
     chequear('en el ultimo cerrado se pudo medir el 6 o el 7 en algun local', true, $medidos > 0);
     chequear('en el ultimo cerrado el 6 y el 7 ya tienen restado el VMA', [], $distintos);
 }
+
+seccion('AlquileresApp: los contratos con sus importes (Llaves y Renovaciones)');
+
+$fila = ['ID' => 79, 'VIG_DESDE' => new DateTime('2026-01-15'), 'VIG_HASTA' => new DateTime('2029-01-14'),
+         'ID_CA' => '4', 'IMPORTE' => '75000000.00', 'ID_CA_2' => '5', 'IMPORTE_2' => 29452304, 'ID_CA_3' => '18',
+         'IMPORTE_3' => 7500000];
+chequear('una fila de la app: vigencia e importes por concepto',
+    ['id' => 79, 'desde' => '2026-01-15', 'hasta' => '2029-01-14', 'llave' => 75000000.0, 'comisiones' => 29452304.0,
+     'fpc' => 7500000.0], AlquileresApp::contratoDeFila($fila));
+chequear('la llave = 1 se devuelve tal cual (la marca la interpreta LlavesCalculo)', 1.0,
+    AlquileresApp::contratoDeFila(['IMPORTE' => 1] + $fila)['llave']);
+chequear('un importe vacio es null, no 0', null, AlquileresApp::contratoDeFila(['IMPORTE_3' => null] + $fila)['fpc']);
+chequear('un importe guardado con otro concepto no se toma como llave', null,
+    AlquileresApp::contratoDeFila(['ID_CA' => '7'] + $fila)['llave']);
+chequear('una vigencia al reves no es un contrato', null,
+    AlquileresApp::contratoDeFila(['VIG_HASTA' => new DateTime('2025-01-01')] + $fila));
+
+if (!Pruebas::hayBase()) {
+    Pruebas::saltear('sin conexion a la base');
+} else {
+    $app = new AlquileresApp();
+    $con = $app->contratosConImportes();
+    $vig = $app->contratos();
+    chequear('contratosConImportes() trae los mismos locales que contratos()', array_keys($vig), array_keys($con));
+    /* DOT (66) renovo el 20/10/2026 con llave 80 M (contrato 91). Solo
+       mientras administracion no lo corrija. */
+    $dot = array_values(array_filter($con[66] ?? [], function ($c) { return $c['id'] === 91; }));
+    chequear('DOT #91: llave 80.000.000 desde el 20/10/2026', [80000000.0, '2026-10-20'],
+        empty($dot) ? null : [$dot[0]['llave'], $dot[0]['desde']]);
+}
