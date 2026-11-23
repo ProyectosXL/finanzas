@@ -576,13 +576,34 @@ class CashflowRegistry {
             ]
         ],
 
+        /* ---- Llaves y Renovaciones ------------------------------------------
+           Como Alquileres, dos partes de UNA lista de pagos (Llaves::calcular(),
+           la misma que agrupa la pestaña): REAL, las facturas de alquiler
+           marcadas como llave; PROYECTADO, los contratos cargados en la app, lo
+           estimado y los compromisos a mano que ninguna factura reemplazo.
+
+           LA FILA DEL TABLERO ES AGRUPADA (sql/cashflow_llaves_fila.sql). PAGOS
+           es el total de las dos y queda para la fila de antes del split, que
+           ya apuntaba a LLAVES_RENOV / PAGOS y hasta hoy rendia cero: hasta que
+           se corre el script, esa fila muestra el total sin abrir. */
         'LLAVES_RENOV' => [
             'nombre' => 'Llaves y Renovaciones',
-            'descripcion' => 'Llaves de locales y obras de renovacion',
+            'descripcion' => 'Llaves de locales, otros gastos de las renovaciones de contrato, obras de imagen, '
+                . 'aperturas y compromisos pactados: las facturas marcadas como llave (real) y lo de los contratos '
+                . 'de la app, lo estimado y lo cargado a mano (proyectado), por dia de pago',
+            'archivo' => 'Providers/LlavesProvider.php',
+            'clase' => 'LlavesProvider',
             'moneda' => 'ARS',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'llaves_renov',
-            'series' => ['PAGOS' => 'Llaves y renovaciones']
+            'series' => [
+                'PAGOS' => 'Llaves y renovaciones, real + proyectado (la fila de antes del split)',
+                'REAL' => 'Facturas marcadas como llave o renovacion, en sus pagos',
+                'PROYECTADO' => 'Contratos de la app, lo estimado y los compromisos a mano que ninguna factura reemplazo'
+            ],
+            'componentes' => [
+                'PAGOS' => ['REAL', 'PROYECTADO']
+            ]
         ],
 
         'IMPUESTOS' => [

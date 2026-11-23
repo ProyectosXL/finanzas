@@ -759,11 +759,11 @@ class LlavesCalculo {
 
         if (($llave !== null || $otros !== null) && ($pctImp === null || $pctRet === null)) {
             if ($pctImp === null) {
-                $s['f']['sin_impuestos'][$l['operador'] ?? $l['cod_provee']][] = $nombre;
-            }
-
-            if ($pctRet === null) {
-                $s['f']['sin_retencion'][] = $nombre;
+                $op = $l['operador'] ?? $l['cod_provee'];
+                $s['f']['sin_impuestos'][$op]['locales'][] = $nombre;
+                $s['f']['sin_impuestos'][$op]['neto'] = ($s['f']['sin_impuestos'][$op]['neto'] ?? 0.0) + $netoFalta;
+            } elseif ($pctRet === null) {
+                $s['f']['sin_retencion'][$nombre] = ($s['f']['sin_retencion'][$nombre] ?? 0.0) + $netoFalta;
             }
 
             $s['no_proyecta'][] = ['nro' => $nro, 'local' => $nombre, 'concepto' => self::LLAVE,
@@ -1089,15 +1089,17 @@ class LlavesCalculo {
                 . 'Llaves y Renovaciones.', 'Proyección');
         }
 
-        foreach ($f['sin_impuestos'] as $op => $locales) {
+        foreach ($f['sin_impuestos'] as $op => $x) {
             $out[] = Aviso::nuevo(Aviso::WARNING, 'El operador ' . $op . ' no tiene % de impuestos sobre llave y otros '
-                . 'gastos: no se proyecta la llave ni los otros gastos de ' . $lista(array_unique($locales)) . '. Se carga '
+                . 'gastos: no se proyecta la llave ni los otros gastos de ' . $lista(array_unique($x['locales']))
+                . ($x['neto'] > 0 ? ', por ' . self::plata($x['neto']) . ' netos sin impuestos' : '') . '. Se carga '
                 . 'en Parámetros › Llaves y Renovaciones › Por operador.', 'Parámetros');
         }
 
         if (!empty($f['sin_retencion'])) {
             $out[] = Aviso::nuevo(Aviso::WARNING, 'Sin % de retención en Parámetros › Alquileres: '
-                . $lista(array_unique($f['sin_retencion'])) . '. No se proyecta su llave ni sus otros gastos.', 'Parámetros');
+                . $lista(array_map(function ($n, $v) { return $n . ($v > 0 ? ' (' . self::plata($v) . ' netos)' : ''); },
+                    array_keys($f['sin_retencion']), $f['sin_retencion'])) . '. No se proyecta su llave ni sus otros gastos.', 'Parámetros');
         }
 
         if (!empty($f['sin_pct_otros'])) {
