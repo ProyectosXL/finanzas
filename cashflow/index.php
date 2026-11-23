@@ -148,6 +148,10 @@ $tituloInicial = Menu::tituloTab($tabInicial);
         </div>
     </div>
 
+    <!-- El panel lateral con la ayuda de la pestaña: uno solo, afuera de
+         #tabContent para que sobreviva al cambio de pestaña. -->
+    <?php include 'Components/ayuda_panel.php'; ?>
+
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <!-- Bootstrap 5 -->

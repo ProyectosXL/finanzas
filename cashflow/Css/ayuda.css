@@ -19,6 +19,12 @@
     font-size: 13px;
 }
 
+/* En el Centro de ayuda no hay ayuda de la pestaña: ya se está ahí. Por CSS y
+   no por JS: el data-tab del <body> ya dice dónde se está. */
+body[data-tab="ayuda"] .btn-ayuda-pestana {
+    display: none;
+}
+
 /* ---------- Lo que dibuja el renderizador ---------- */
 
 .ayuda-contenido h2,

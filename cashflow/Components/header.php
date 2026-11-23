@@ -11,6 +11,14 @@
         </nav>
     </div>
     <div class="header-right">
+        <!-- La ayuda de la pestaña abierta, en un panel lateral
+             (Components/ayuda_panel.php, Js/ayuda.js). Uno solo para todas:
+             sabe cuál está abierta por el data-tab del <body>, que actualiza
+             loadTab(). En el Centro de ayuda no se muestra (Css/ayuda.css). -->
+        <button type="button" class="btn btn-sm btn-outline-primary btn-ayuda-pestana" id="btnAyudaPestana"
+                aria-controls="ayudaPanel" title="Ayuda de esta pestaña">
+            <i class="fas fa-circle-question"></i><span>Ayuda</span>
+        </button>
         <div class="header-date">
             <i class="fas fa-calendar-alt"></i>
             <span id="currentDate"><?php echo date('d/m/Y'); ?></span>

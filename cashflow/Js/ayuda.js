@@ -500,3 +500,252 @@ var AyudaCentro = (function() {
         esc: esc
     };
 })();
+
+/**
+ * El panel lateral: la ayuda de la pestaña abierta, sin salir de ella
+ * (Components/ayuda_panel.php, que se abre con el botón "Ayuda" del
+ * encabezado).
+ *
+ * QUÉ PESTAÑA ESTÁ ABIERTA lo dice el atributo data-tab del <body>, que pone
+ * index.php y actualiza updateHeader() de main.js en cada cambio de pestaña.
+ * No hay una segunda variable que mantener.
+ *
+ * CARGA CUANDO SE ABRE, Y UNA VEZ POR PESTAÑA, como las sub-pestañas de
+ * Parámetros: abrir el panel en una pestaña lo pide; volver a abrirlo ahí, no.
+ * El caché dura lo que la página. Si el panel queda abierto y se cambia de
+ * pestaña, se pide la ayuda de la nueva.
+ *
+ * EL BUSCADOR le pregunta al servidor qué secciones y preguntas contienen el
+ * texto y las recibe con el texto marcado: el criterio sin acentos ni
+ * mayúsculas está escrito una sola vez, en PHP, con su prueba.
+ */
+var AyudaPanel = (function() {
+    'use strict';
+
+    var URL = 'Controller/AyudaController.php';
+    var cache = {};
+    var tabMostrada = null;
+    var temporizador = null;
+    var busqueda = 0;
+    var esc = AyudaCentro.esc;
+
+    function el(id) {
+        return document.getElementById(id);
+    }
+
+    function tabActual() {
+        return document.body.getAttribute('data-tab') || '';
+    }
+
+    function panel() {
+        return bootstrap.Offcanvas.getOrCreateInstance(el('ayudaPanel'));
+    }
+
+    function abierto() {
+        return el('ayudaPanel').classList.contains('show');
+    }
+
+    function abrir() {
+        panel().show();
+        cargar(tabActual());
+    }
+
+    function cargar(tab) {
+        el('ayudaPanelBuscar').value = '';
+        tabMostrada = tab;
+
+        if (cache[tab]) {
+            pintar(tab, cache[tab], '');
+            return;
+        }
+
+        el('ayudaPanelTitulo').textContent = 'Ayuda';
+        el('ayudaPanelEstado').innerHTML = '';
+        el('ayudaPanelCuerpo').innerHTML = '';
+        el('ayudaPanelPreguntas').innerHTML = '';
+        el('ayudaPanelErrores').innerHTML = '';
+        Cargando.mostrar('ayudaPanelCargando', { titulo: 'Cargando la ayuda…' });
+
+        pedirJson(URL + '?action=getPanel&tab=' + encodeURIComponent(tab))
+            .then(function(d) {
+                Cargando.ocultar('ayudaPanelCargando');
+                cache[tab] = d;
+
+                // Si mientras tanto se cambió de pestaña, esto ya no se pinta.
+                if (tabMostrada === tab) {
+                    pintar(tab, d, '');
+                }
+            })['catch'](function(e) {
+                Cargando.ocultar('ayudaPanelCargando');
+                el('ayudaPanelCuerpo').innerHTML = '<div class="alert alert-danger small">No se pudo cargar la ayuda: '
+                    + esc(e.message) + '</div>';
+            });
+    }
+
+    function pintar(tab, d, q) {
+        tabMostrada = tab;
+        el('ayudaPanelTitulo').textContent = d.titulo;
+
+        if (!d.encontrado) {
+            el('ayudaPanelEstado').innerHTML = '';
+            el('ayudaPanelErrores').innerHTML = '';
+            el('ayudaPanelPreguntas').innerHTML = '';
+            el('ayudaPanelBuscar').style.display = 'none';
+            el('ayudaPanelCompleto').style.display = 'none';
+            el('ayudaPanelCuerpo').innerHTML = '<div class="text-center text-muted py-4">'
+                + '<i class="fas fa-book fa-2x mb-2 d-block"></i><p class="mb-2">Esta pestaña todavía no tiene ayuda.</p>'
+                + '<a href="?ayuda=" class="ayuda-panel-ir" data-articulo="">Ir al Centro de ayuda</a></div>';
+            return;
+        }
+
+        el('ayudaPanelBuscar').style.display = '';
+        el('ayudaPanelCompleto').style.display = '';
+        el('ayudaPanelCompleto').setAttribute('href', d.completo);
+        el('ayudaPanelCompleto').setAttribute('data-articulo', d.articulo);
+
+        // El estado sólo si no es Completa: lo normal no se marca.
+        el('ayudaPanelEstado').innerHTML = d.estado !== 'completa'
+            ? '<span class="ayuda-chip ayuda-chip-' + esc(d.estado) + '">' + esc(d.etiqueta) + '</span> '
+                + '<span class="text-muted">actualizado el ' + esc(d.actualizado) + '</span>'
+            : '';
+
+        var errores = '';
+
+        for (var e = 0; e < d.errores.length; e++) {
+            errores += '<li>' + esc(d.errores[e]) + '</li>';
+        }
+
+        el('ayudaPanelErrores').innerHTML = errores
+            ? '<div class="alert alert-warning small py-2">Este artículo tiene errores de formato y puede verse '
+                + 'incompleto:<ul class="mb-0">' + errores + '</ul></div>'
+            : '';
+
+        var html = '';
+        var hay = false;
+        var i;
+
+        for (i = 0; i < d.secciones.length; i++) {
+            var s = d.secciones[i];
+
+            hay = hay || s.coincide;
+            html += '<div class="' + (s.coincide ? '' : 'ayuda-oculta') + '">' + s.html + '</div>';
+        }
+
+        var preguntas = '';
+
+        for (i = 0; i < d.preguntas.length; i++) {
+            var p = d.preguntas[i];
+
+            if (p.coincide) {
+                hay = true;
+                preguntas += '<a href="' + esc(p.enlace) + '" class="ayuda-panel-ir" data-articulo="' + esc(d.articulo)
+                    + '" data-ancla="' + esc(p.ancla) + '"><i class="fas fa-chevron-right me-2 small"></i>'
+                    + p.titulo_html + '</a>';
+            }
+        }
+
+        if (q && !hay) {
+            html += '<p class="text-muted small">Nada de esta ayuda dice «' + esc(q) + '». Probá en el '
+                + '<a href="?ayuda=" class="ayuda-panel-ir" data-articulo="">Centro de ayuda</a>.</p>';
+        }
+
+        el('ayudaPanelCuerpo').innerHTML = html;
+        el('ayudaPanelPreguntas').innerHTML = preguntas
+            ? '<h2 class="h6 fw-bold mt-4">Preguntas frecuentes</h2>' + preguntas
+            : '';
+    }
+
+    function buscar() {
+        var tab = tabMostrada;
+        var q = el('ayudaPanelBuscar').value.replace(/^\s+|\s+$/g, '');
+        var n = ++busqueda;
+
+        if (!cache[tab]) {
+            return;
+        }
+
+        if (q.length < 2) {
+            pintar(tab, cache[tab], '');
+            return;
+        }
+
+        pedirJson(URL + '?action=getPanel&tab=' + encodeURIComponent(tab) + '&q=' + encodeURIComponent(q))
+            .then(function(d) {
+                // Una respuesta vieja, o de otra pestaña, no se pinta.
+                if (n === busqueda && tabMostrada === tab) {
+                    pintar(tab, d, q);
+                }
+            })['catch'](function() {
+                // Si la búsqueda falla, el artículo sigue entero a la vista.
+            });
+    }
+
+    /** Ir al Centro de ayuda desde el panel: cierra el panel y navega. */
+    function irAlCentro(articulo, ancla) {
+        panel().hide();
+        AyudaCentro.ir(articulo, ancla);
+    }
+
+    function conectar() {
+        var boton = el('btnAyudaPestana');
+
+        if (!boton || !el('ayudaPanel')) {
+            return;
+        }
+
+        boton.addEventListener('click', function() {
+            if (abierto() && tabMostrada === tabActual()) {
+                panel().hide();
+            } else {
+                abrir();
+            }
+        });
+
+        el('ayudaPanel').addEventListener('click', function(e) {
+            var a = e.target.closest('.ayuda-panel-ir, .ayuda-enlace, #ayudaPanelCompleto, #ayudaPanelCentro');
+
+            if (!a) {
+                return;
+            }
+
+            e.preventDefault();
+
+            if (a.id === 'ayudaPanelCentro') {
+                irAlCentro('', '');
+            } else {
+                irAlCentro(a.getAttribute('data-articulo') || '', a.getAttribute('data-ancla') || '');
+            }
+        });
+
+        el('ayudaPanelBuscar').addEventListener('input', function() {
+            clearTimeout(temporizador);
+            temporizador = setTimeout(buscar, 300);
+        });
+
+        // Con el panel abierto, cambiar de pestaña cambia la ayuda.
+        if (window.MutationObserver) {
+            new MutationObserver(function() {
+                var tab = tabActual();
+
+                if (tab === 'ayuda') {
+                    // En el Centro no hay panel: ya se está en la ayuda.
+                    if (abierto()) {
+                        panel().hide();
+                    }
+                } else if (abierto() && tab !== tabMostrada) {
+                    cargar(tab);
+                }
+            }).observe(document.body, { attributes: true, attributeFilter: ['data-tab'] });
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', conectar);
+    } else {
+        conectar();
+    }
+
+    return {
+        abrir: abrir
+    };
+})();

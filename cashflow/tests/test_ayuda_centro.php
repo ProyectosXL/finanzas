@@ -146,3 +146,33 @@ chequear('fuera de la ayuda, la direccion deja de decir ?ayuda=', true,
     strpos($main, "if (tabName !== 'ayuda' && /[?&]ayuda=/.test(window.location.search)") !== false);
 chequear('la pestana abierta queda en el body', true,
     strpos($main, "document.body.setAttribute('data-tab', tabName);") !== false);
+
+seccion('el boton Ayuda y el panel lateral');
+
+$header = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Components/header.php'));
+$panelHtml = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Components/ayuda_panel.php'));
+$ayudaJs = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Js/ayuda.js'));
+$ayudaCss = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Css/ayuda.css'));
+
+chequear('el boton esta en el encabezado, antes de la fecha', true,
+    strpos($header, 'id="btnAyudaPestana"') !== false
+    && strpos($header, 'id="btnAyudaPestana"') < strpos($header, 'class="header-date"'));
+chequear('con el signo de pregunta y el texto', true,
+    strpos($header, '<i class="fas fa-circle-question"></i><span>Ayuda</span>') !== false);
+chequear('index.php incluye el panel, fuera de #tabContent', true,
+    strpos($index, "include 'Components/ayuda_panel.php'") > strpos($index, '<div id="tabContent">'));
+chequear('es un offcanvas de Bootstrap a la derecha', true,
+    strpos($panelHtml, 'class="offcanvas offcanvas-end ayuda-panel"') !== false);
+chequear('sin fondo oscuro y sin bloquear el desplazamiento: la pestaña sigue a la vista', true,
+    strpos($panelHtml, 'data-bs-backdrop="false" data-bs-scroll="true"') !== false);
+chequear('con el buscador, el pie y el boton de cerrar', true,
+    strpos($panelHtml, 'id="ayudaPanelBuscar"') !== false && strpos($panelHtml, 'Ver el artículo completo') !== false
+    && strpos($panelHtml, 'Ir al Centro de ayuda') !== false && strpos($panelHtml, 'data-bs-dismiss="offcanvas"') !== false);
+chequear('sabe la pestaña por el data-tab del body', true,
+    strpos($ayudaJs, "return document.body.getAttribute('data-tab') || '';") !== false);
+chequear('carga una vez por pestaña', true,
+    strpos($ayudaJs, "if (cache[tab]) {\n            pintar(tab, cache[tab], '');") !== false);
+chequear('sin articulo, lo dice y ofrece el Centro', true,
+    strpos($ayudaJs, 'Esta pestaña todavía no tiene ayuda.') !== false);
+chequear('en el Centro de ayuda el boton no se ve', true,
+    strpos($ayudaCss, "body[data-tab=\"ayuda\"] .btn-ayuda-pestana {\n    display: none;") !== false);
