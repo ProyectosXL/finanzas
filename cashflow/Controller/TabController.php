@@ -39,7 +39,8 @@ $validTabs = [
     'llaves_renov',
     'pagos_tarjetas',
     'otros_socios',
-    'prestamos'
+    'prestamos',
+    'ayuda'
 ];
 
 // Validar tab

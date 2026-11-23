@@ -358,9 +358,21 @@ class AuthCashflow {
      */
     const CLAVES_RESERVADAS = [];
 
+    /**
+     * Pestañas que ve CUALQUIER usuario identificado, sin permiso propio.
+     *
+     * Hoy solo el Centro de ayuda: la ayuda explica como funciona cada
+     * pantalla, no muestra sus datos, y pedir un permiso para leerla seria
+     * esconderle la explicacion justo a quien todavia no sabe para que sirve
+     * una pestaña. Sin usuario se niega igual que todo lo demas: el menu
+     * anonimo sigue vacio (ver puede()).
+     */
+    const PARA_TODOS = ['ayuda'];
+
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
         'Alquileres' => ['getProyeccion', 'getParametros', 'getPagadasLlave'],
+        'Ayuda' => ['getPanel', 'getCentro', 'getArticulo', 'buscar'],
         'Cashflow' => ['getTablero', 'getAvisosPestana'],
         'CashflowEstructura' => ['getEstructura'],
         'CobElectronicos' => ['getPestana'],
@@ -528,8 +540,24 @@ class AuthCashflow {
     public static function puede($tab) {
         self::init();
 
+        // Las de todos piden solo estar identificado. Sin usuario, no: es la
+        // misma falla cerrada que el resto.
+        if (self::esParaTodos($tab)) {
+            return self::$usuario !== null;
+        }
+
         // Sin usuario no hay permisos cargados ni admin: permiteVer() deniega.
         return self::permiteVer(self::$permisos, self::$esAdmin, $tab);
+    }
+
+    /**
+     * Si una pestaña es de todos los usuarios identificados (PARA_TODOS). Pura.
+     *
+     * @param string $tab
+     * @return bool
+     */
+    public static function esParaTodos($tab) {
+        return in_array(trim((string) $tab), self::PARA_TODOS, true);
     }
 
     /**

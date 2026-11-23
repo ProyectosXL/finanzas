@@ -35,6 +35,13 @@ if (empty($tabsPermitidos)) {
 }
 
 $tabInicial = AuthCashflow::primeraTabPermitida('cashflow');
+
+// La dirección de un artículo de la ayuda (?ayuda=articulo#seccion) abre
+// directo el Centro de ayuda: es la que se copia y se comparte. Sin esto, la
+// página cargaría primero el tablero y recién después saltaría a la ayuda.
+if (isset($_GET['ayuda']) && AuthCashflow::puede('ayuda')) {
+    $tabInicial = 'ayuda';
+}
 $tabInicialFile = __DIR__ . '/Tabs/' . $tabInicial . '.php';
 require_once __DIR__ . '/Class/Menu.php';
 $tituloInicial = Menu::tituloTab($tabInicial);
@@ -81,6 +88,9 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          Lo usan Parámetros y Ventas, que llegan por AJAX: un solo archivo con
          los colores, cargado antes que las dos, así significan lo mismo. -->
     <link href="Css/mix-niveles.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- La ayuda funcional (Js/ayuda.js): el Centro de ayuda y el panel lateral
+         de cada pestaña, que existe en todas. -->
+    <link href="Css/ayuda.css?v=<?php echo time(); ?>" rel="stylesheet">
     <!-- El fondo de los días no hábiles del eje (vistas.marca() de
          Js/eje-vistas.js). Un solo color para el tablero y todas las
          pestañas con eje, que llegan por AJAX. -->
@@ -106,8 +116,15 @@ $tituloInicial = Menu::tituloTab($tabInicial);
     <!-- Las clases y la leyenda de los tipos de nivel del mix (Css/mix-niveles.css).
          En el <head> por lo mismo que avisos-panel.js. No depende de nada. -->
     <script src="Js/mix-niveles.js?v=<?php echo time(); ?>"></script>
+    <!-- La ayuda funcional. En el <head> por lo mismo que avisos-panel.js: el
+         Centro de ayuda puede ser la pestaña inicial (?ayuda=) y se incluye en
+         línea más abajo. Sus llamadas a jQuery, main.js y Bootstrap esperan a
+         DOMContentLoaded. -->
+    <script src="Js/ayuda.js?v=<?php echo time(); ?>"></script>
 </head>
-<body>
+<!-- data-tab: la pestaña abierta. La actualiza updateHeader() de Js/main.js, y
+     la lee el panel de ayuda para saber qué artículo mostrar. -->
+<body data-tab="<?php echo htmlspecialchars($tabInicial); ?>">
   
     <!-- Sidebar -->
     <?php include 'Components/sidebar.php'; ?>

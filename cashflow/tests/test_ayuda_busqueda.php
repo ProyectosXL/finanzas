@@ -81,7 +81,7 @@ chequear('la ruta: categoria, articulo y seccion',
     ['RRHH y Operativos', 'Llaves y Renov. Contratos', 'Para qué sirve'], $r['ruta']);
 chequear('el titulo de la seccion', 'Para qué sirve', $r['titulo']);
 chequear('el fragmento con el termino resaltado', 'Las <mark>cuotas</mark> de la llave.', $r['fragmento']);
-chequear('y el enlace al Centro, en la seccion', '#ayuda/llaves_renov/para-que-sirve', $r['enlace']);
+chequear('y el enlace al Centro, en la seccion', '?ayuda=llaves_renov#para-que-sirve', $r['enlace']);
 
 $r = AyudaBusqueda::buscar($indice, 'divisa');
 chequear('el titulo tambien se resalta', 'El Dólar <mark>divisa</mark>', $r[0]['titulo_html']);

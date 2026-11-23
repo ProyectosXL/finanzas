@@ -1,0 +1,676 @@
+/* ========================================
+   LA AYUDA FUNCIONAL: el Centro de ayuda (Tabs/ayuda.php), el panel lateral
+   de cada pestaña y lo que dibuja Class/AyudaRender.php adentro de los dos.
+
+   Se carga desde index.php y no desde la pestaña: el panel lateral existe en
+   todas las pestañas y muestra el mismo HTML que el artículo completo.
+
+   Los colores de los avisos NO están acá: son las variables --aviso-* de
+   Css/avisos-panel.css, para que un aviso explicado en la ayuda se vea igual
+   que en la pantalla donde aparece.
+   ======================================== */
+
+/* ---------- El encabezado: el botón Ayuda ---------- */
+
+.btn-ayuda-pestana {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+}
+
+/* ---------- Lo que dibuja el renderizador ---------- */
+
+.ayuda-contenido h2,
+.ayuda-contenido h3,
+.ayuda-contenido .ayuda-pregunta {
+    /* El encabezado de la página es fijo: sin esto, ir a una sección la deja
+       tapada debajo de él. */
+    scroll-margin-top: 96px;
+}
+
+.ayuda-contenido h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 28px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ayuda-contenido .ayuda-seccion:first-child h2 {
+    margin-top: 0;
+}
+
+.ayuda-contenido h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 20px 0 8px;
+}
+
+.ayuda-contenido p,
+.ayuda-contenido li {
+    line-height: 1.6;
+}
+
+.ayuda-contenido code {
+    color: var(--text-primary);
+    background: var(--bg-light);
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    padding: 0 4px;
+}
+
+.ayuda-contenido mark {
+    background: #ffe58f;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+
+.ayuda-tabla {
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.ayuda-tabla th {
+    background: var(--bg-light);
+    font-weight: 600;
+}
+
+.ayuda-img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin: 8px 0 16px;
+}
+
+/* Lo que no se pudo leer: se ve, como texto, y distinto. */
+.ayuda-roto {
+    font-family: monospace;
+    font-size: 12px;
+    background: #fff5f5;
+    border-left: 3px solid var(--danger-color);
+    padding: 8px 12px;
+}
+
+/* Fórmula: el recuadro oscuro del boceto. */
+.ayuda-formula {
+    background: #1f2433;
+    color: #f2f4f8;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.7;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 12px 0 16px;
+    overflow-x: auto;
+}
+
+.ayuda-formula code {
+    background: transparent;
+    border: 0;
+    color: inherit;
+}
+
+/* Ejemplo: borde punteado y su título. */
+.ayuda-ejemplo {
+    border: 2px dashed #b8c2d9;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 12px 0 16px;
+    background: var(--bg-white);
+}
+
+.ayuda-ejemplo-titulo {
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.ayuda-ejemplo-tipo {
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-left: 6px;
+}
+
+/* Diagrama: fuentes -> pestaña -> tablero, en cajas. */
+.ayuda-diagrama {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0 16px;
+}
+
+.ayuda-diagrama-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.ayuda-diagrama-flecha {
+    color: var(--text-muted);
+    flex: 0 0 auto;
+}
+
+.ayuda-caja {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--bg-white);
+    font-size: 13px;
+}
+
+.ayuda-caja strong {
+    display: block;
+}
+
+.ayuda-caja span {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.ayuda-caja-pestana {
+    border-color: var(--primary-color);
+    background: #eef3ff;
+}
+
+.ayuda-caja-tablero {
+    border-color: #1f2433;
+    background: #f2f4f8;
+}
+
+@media (max-width: 768px) {
+    /* En el celular el flujo va de arriba hacia abajo, nunca a lo ancho. */
+    .ayuda-diagrama {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .ayuda-diagrama-flecha {
+        text-align: center;
+        transform: rotate(90deg);
+    }
+}
+
+/* Pasos: los círculos numerados. */
+.ayuda-pasos {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0 8px;
+}
+
+.ayuda-pasos li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.ayuda-paso-num {
+    flex: 0 0 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ayuda-resultado {
+    background: #edf8f0;
+    border-left: 3px solid var(--success-color);
+    padding: 8px 12px;
+    border-radius: 4px;
+}
+
+/* Marcas: las letras naranjas de una captura. */
+.ayuda-marcas {
+    list-style: none;
+    padding: 0;
+}
+
+.ayuda-marcas li {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.ayuda-marca {
+    flex: 0 0 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #f57c00;
+    color: #fff;
+    font-weight: 700;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Avisos: la etiqueta con el color del panel de avisos. */
+.ayuda-nivel {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid;
+    border-radius: 10px;
+    padding: 1px 8px;
+    margin-bottom: 4px;
+}
+
+.ayuda-nivel.aviso-info {
+    background: var(--aviso-info-bg);
+    border-color: var(--aviso-info-borde);
+    color: var(--aviso-info-texto);
+}
+
+.ayuda-nivel.aviso-warning {
+    background: var(--aviso-warning-bg);
+    border-color: var(--aviso-warning-borde);
+    color: var(--aviso-warning-texto);
+}
+
+.ayuda-nivel.aviso-danger {
+    background: var(--aviso-danger-bg);
+    border-color: var(--aviso-danger-borde);
+    color: var(--aviso-danger-texto);
+}
+
+.ayuda-aviso-texto {
+    font-weight: 500;
+}
+
+/* Pregunta: el desplegable. */
+.ayuda-pregunta {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: var(--bg-white);
+}
+
+.ayuda-pregunta summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 10px 14px;
+}
+
+.ayuda-pregunta-cuerpo {
+    padding: 0 14px 6px;
+}
+
+/* ---------- El Centro de ayuda: el inicio ---------- */
+
+.ayuda-hero {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 24px;
+}
+
+.ayuda-hero-titulo {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 14px;
+}
+
+.ayuda-buscador {
+    position: relative;
+}
+
+.ayuda-buscador i {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+}
+
+.ayuda-buscador input {
+    padding-left: 44px;
+}
+
+.ayuda-frecuentes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.ayuda-resultados {
+    margin-top: 14px;
+}
+
+.ayuda-resultado {
+    display: block;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.ayuda-resultado:hover,
+.ayuda-resultado:focus {
+    background: var(--bg-light);
+}
+
+.ayuda-resultado-ruta {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.ayuda-resultado-titulo {
+    display: block;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.ayuda-resultado-fragmento {
+    display: block;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.ayuda-sin-resultados {
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.ayuda-bloque {
+    margin-bottom: 28px;
+}
+
+.ayuda-bloque-titulo {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+.ayuda-tarjeta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100%;
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px;
+    color: inherit;
+    text-decoration: none;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.ayuda-tarjeta:hover,
+.ayuda-tarjeta:focus {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow-md);
+}
+
+.ayuda-tarjeta-titulo {
+    font-weight: 700;
+}
+
+.ayuda-tarjeta-bajada {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.ayuda-tarjeta .ayuda-chip {
+    align-self: flex-start;
+}
+
+.ayuda-modulo {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 14px 16px;
+    height: 100%;
+}
+
+.ayuda-modulo h4 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.ayuda-modulo ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.ayuda-modulo li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.ayuda-modulo li:last-child {
+    border-bottom: 0;
+}
+
+.ayuda-modulo-sin {
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+.ayuda-preguntas-lista {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 6px 0;
+}
+
+.ayuda-pregunta-link {
+    display: block;
+    padding: 8px 16px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.ayuda-pregunta-link:hover {
+    background: var(--bg-light);
+    color: var(--primary-color);
+}
+
+/* Los estados de un artículo. */
+.ayuda-chip {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 1px 8px;
+    white-space: nowrap;
+}
+
+.ayuda-chip-completa {
+    background: #e6f4ea;
+    color: #1e6b34;
+}
+
+.ayuda-chip-en_revision {
+    background: #fff4dc;
+    color: #7c4a03;
+}
+
+.ayuda-chip-pendiente {
+    background: #eef0f5;
+    color: var(--text-secondary);
+}
+
+/* ---------- El Centro de ayuda: el artículo ---------- */
+
+.ayuda-ruta {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+}
+
+.ayuda-lateral {
+    position: sticky;
+    top: 96px;
+}
+
+.ayuda-indice {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.ayuda-indice summary {
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.ayuda-indice nav {
+    display: flex;
+    flex-direction: column;
+    margin-top: 6px;
+}
+
+.ayuda-indice a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    padding: 3px 8px;
+    border-left: 2px solid transparent;
+    font-size: 13px;
+}
+
+.ayuda-indice a.ayuda-indice-3 {
+    padding-left: 20px;
+    font-size: 12px;
+}
+
+.ayuda-indice a.activo {
+    color: var(--primary-color);
+    border-left-color: var(--primary-color);
+    font-weight: 600;
+}
+
+.ayuda-ficha {
+    font-size: 12px;
+    margin: 12px 4px 0;
+}
+
+.ayuda-ficha dt {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.ayuda-ficha dd {
+    margin-bottom: 6px;
+}
+
+.ayuda-articulo {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px 28px;
+}
+
+.ayuda-titulo {
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+
+.ayuda-bajada {
+    color: var(--text-secondary);
+    font-size: 15px;
+}
+
+.ayuda-estado {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.ayuda-copiar-seccion {
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+h2:hover > .ayuda-copiar-seccion,
+h3:hover > .ayuda-copiar-seccion,
+.ayuda-copiar-seccion:focus {
+    opacity: 1;
+}
+
+@media (max-width: 991.98px) {
+    /* Angosto: el índice va arriba, plegado, y deja de ser fijo. */
+    .ayuda-lateral {
+        position: static;
+    }
+
+    .ayuda-articulo {
+        padding: 16px;
+    }
+
+    .ayuda-copiar-seccion {
+        opacity: 1;
+    }
+}
+
+/* ---------- El panel lateral de la pestaña ---------- */
+
+.ayuda-panel.offcanvas-end {
+    width: 460px;
+    max-width: 100vw;
+}
+
+.ayuda-panel .offcanvas-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.ayuda-panel .ayuda-contenido h2 {
+    font-size: 1.05rem;
+    margin-top: 18px;
+}
+
+.ayuda-panel-pie {
+    border-top: 1px solid var(--border-color);
+    padding: 12px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.ayuda-panel .ayuda-diagrama {
+    /* En el panel no hay ancho para tres columnas: siempre de arriba abajo. */
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.ayuda-panel .ayuda-diagrama-flecha {
+    text-align: center;
+    transform: rotate(90deg);
+}
+
+.ayuda-panel-preguntas a {
+    display: block;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-light);
+    text-decoration: none;
+}
+
+.ayuda-oculta {
+    display: none !important;
+}

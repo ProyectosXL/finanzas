@@ -178,6 +178,13 @@ function initTabNavigation() {
  */
 function loadTab(tabName) {
 
+    // Fuera del Centro de ayuda la dirección deja de decir ?ayuda=: si no,
+    // recargar la página (o copiar la dirección) volvería a la ayuda y no a
+    // la pestaña en la que se está. Ver AyudaRender::direccion().
+    if (tabName !== 'ayuda' && /[?&]ayuda=/.test(window.location.search) && window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname);
+    }
+
     // Mostrar loader: el mismo componente que usan las pestañas adentro
     // (Js/cargando.js), con el nombre de la que se está abriendo.
     const link = $('.menu-link[data-tab="' + tabName + '"]').first();
@@ -239,6 +246,10 @@ function updateHeader(tabName) {
 
     $('#pageTitle').text(title);
     $('#breadcrumbCurrent').text(title);
+
+    // La pestaña abierta, donde la busca el botón Ayuda del encabezado
+    // (Js/ayuda.js): así sabe qué artículo mostrar sin una segunda variable.
+    document.body.setAttribute('data-tab', tabName);
 }
 
 /**

@@ -245,6 +245,27 @@ class AyudaRender {
         return htmlspecialchars((string) $s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
+    /**
+     * La direccion de un articulo, o de una seccion: "?ayuda=llaves_renov"
+     * o "?ayuda=llaves_renov#como-se-calcula".
+     *
+     * POR QUE UN PARAMETRO Y NO SOLO EL HASH: el servidor ve "?ayuda=" y abre el
+     * Centro de ayuda como pestaña inicial (index.php). Con un hash solo, la
+     * pagina cargaria primero el tablero entero -lo que se abre por defecto- y
+     * recien despues saltaria a la ayuda. La seccion si va en el hash: es lo
+     * que el navegador ya sabe llevar hasta un id.
+     *
+     * Es la que se copia de la barra de direcciones, la de los resultados de
+     * la busqueda y la de los enlaces "ayuda:" de los articulos: una sola.
+     *
+     * @param string $articulo
+     * @param string $ancla
+     * @return string
+     */
+    public static function direccion($articulo, $ancla = '') {
+        return '?ayuda=' . rawurlencode((string) $articulo) . ($ancla !== '' ? '#' . rawurlencode((string) $ancla) : '');
+    }
+
     /* ====================================================================
        LOS BLOQUES
        ==================================================================== */
@@ -806,7 +827,7 @@ class AyudaRender {
      * [texto](ayuda:articulo#ancla) o [texto](https://…)
      *
      * Un enlace de la ayuda lleva a la direccion del Centro de ayuda
-     * (#ayuda/articulo/ancla), la misma que se copia y se comparte: no hay un
+     * (?ayuda=articulo#ancla), la misma que se copia y se comparte: no hay un
      * segundo formato de enlace que mantener. Cualquier otro esquema
      * -javascript:, data:, una ruta relativa- se muestra como texto.
      */
@@ -828,7 +849,7 @@ class AyudaRender {
                 }
             }
 
-            return '<a class="ayuda-enlace" href="#ayuda/' . self::esc($art) . ($ancla !== '' ? '/' . self::esc($ancla) : '')
+            return '<a class="ayuda-enlace" href="' . self::esc(self::direccion($art, $ancla))
                 . '" data-articulo="' . self::esc($art) . '" data-ancla="' . self::esc($ancla) . '">' . $txt . '</a>';
         }
 

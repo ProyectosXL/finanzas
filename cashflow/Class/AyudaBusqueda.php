@@ -151,7 +151,7 @@ class AyudaBusqueda {
             $hallados[] = [
                 'articulo' => $u['articulo'],
                 'ancla' => $u['ancla'],
-                'enlace' => '#ayuda/' . $u['articulo'] . ($u['ancla'] !== '' ? '/' . $u['ancla'] : ''),
+                'enlace' => AyudaRender::direccion($u['articulo'], $u['ancla']),
                 'ruta' => $ruta,
                 'titulo' => $u['titulo'],
                 'titulo_html' => AyudaRender::resaltado($u['titulo'], $termino),

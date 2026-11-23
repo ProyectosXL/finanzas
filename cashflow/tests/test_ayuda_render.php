@@ -89,7 +89,7 @@ $dest = ['llaves_renov' => ['como-se-calcula'], 'general_tablero' => []];
 list($h, $e, $r) = render("## A\n[ver](ayuda:llaves_renov#como-se-calcula) y [tablero](ayuda:general_tablero)\n",
     ['destinos' => $dest]);
 chequear('un enlace de la ayuda va a la direccion del Centro', true,
-    tiene($h, 'href="#ayuda/llaves_renov/como-se-calcula"') && tiene($h, 'href="#ayuda/general_tablero"'));
+    tiene($h, 'href="?ayuda=llaves_renov#como-se-calcula"') && tiene($h, 'href="?ayuda=general_tablero"'));
 chequear('y se informa para validar', 2, count($r['enlaces']));
 chequear('sin errores si existen', [], $e);
 

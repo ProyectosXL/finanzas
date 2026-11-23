@@ -15,7 +15,11 @@
    tiene que verse igual en todas.
    ======================================== */
 
-.avisos-panel {
+/* .ayuda-avisos: la tabla de avisos de la ayuda (Css/ayuda.css) usa los
+   mismos colores, para que un aviso se vea igual en la ayuda que en su
+   pantalla. */
+.avisos-panel,
+.ayuda-avisos {
     --aviso-info-bg: #eef5fd;
     --aviso-info-borde: #c9ddf6;
     --aviso-info-texto: #1d4f8c;
