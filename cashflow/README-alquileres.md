@@ -82,7 +82,7 @@ La lista es **una sola constante**, `AlquileresConceptos::GRUPO`, por número de
 | **Variables** | 6, 7, 14, 16, 17 | Con la venta del local (parte 6) y los porcentajes de la app, con las fórmulas de la app (parte 7) |
 
 - **No se proyectan** 10, 12, 13 y 15. Tampoco se toman de un mes cerrado: la pestaña muestra siempre los mismos conceptos.
-- **Quedan fuera del cashflow** 4 (renovación de contrato / llave), 5 (comisiones) y 18 (FPC lanzamiento). Son de *Llaves y Renovaciones*.
+- **No se proyectan en Alquileres** 4 (renovación de contrato / llave), 5 (comisiones) y 18 (FPC lanzamiento): los proyecta **Llaves y Renovaciones** con los importes del contrato de la app (`RO_T_CONTRATOS_ALQUILERES`) o, sin renovación cargada, estimando la llave con el 1 + 2 + 8 que proyecta esta pestaña (`Alquileres::alquilerMensual()`). El 4 que la app guarda por mes en el detalle es el devengado de Costo de Ocupación, no un pago, y tampoco se lee. Ver `README-llaves-renovaciones.md`.
 
 ### El concepto 9 no es un importe fijo
 
@@ -317,7 +317,7 @@ Lo que la parte A dejó pendiente llegó con `feature/alquileres-facturas-exclus
 
 `Class/AlquileresFacturas.php` (la regla, pura) y `Class/AlquileresUniverso.php` (lee su contexto, una vez por pedido).
 
-**Una factura es de alquiler si su proveedor está dado de alta (vigente) en Parámetros › Alquileres › Razones sociales.** El rubro `ALQUILER` del maestro no decide nada. `AlquileresFacturas::destino()` dice a dónde va cada fila de `Proveedores::getPendientes()`: a Alquileres, a Proveedores Locales, o a ningún lado (excluida de Alquileres). La usan Proveedores Locales (grilla, tarjetas, exportar, planilla de pagos y su proveedor), Tarjetas, la pestaña y el tablero; una prueba fija que digan lo mismo.
+**Una factura es de alquiler si su proveedor está dado de alta (vigente) en Parámetros › Alquileres › Razones sociales.** El rubro `ALQUILER` del maestro no decide nada. `AlquileresFacturas::destino()` dice a dónde va cada fila de `Proveedores::getPendientes()`: a Alquileres, a Proveedores Locales, a **Llaves y Renovaciones** (`A_LLAVES`: la cuota se marcó como llave o renovación, parte 14.b) o a ningún lado (excluida de Alquileres). La usan Proveedores Locales (grilla, tarjetas, exportar, planilla de pagos y su proveedor), Tarjetas, la pestaña, Llaves y Renovaciones y el tablero; una prueba fija que digan lo mismo.
 
 **Una sola consulta a Tango**: el universo sale de `getPendientes()`, la misma de Proveedores Locales. (Hasta el 20/11/2026 traía también el neto gravado del comprobante, para sugerir la retención de la imputación por renglones; con las retenciones por tipo dejó de usarse y salió.)
 
@@ -329,7 +329,7 @@ Hasta el 20/11/2026 la condición miraba la cabecera de las imputaciones por ren
 
 ### La grilla
 
-Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, vencimiento de Tango, **vencimiento a considerar**, importe, pendiente, retención —**la parte de las retenciones de su imputación que le tocó**, con los tipos en el tooltip—, **a pagar** y estado (*Sin imputar*, *Imputada*, *Imputada parcialmente* —otra cuota del comprobante sin imputar—, *Pagada*, *Pagada, sin imputar*, *Ya no está en Tango*, *Sin dato de Tango*, *Imputación suspendida*, *Excluida*). Filtros por razón social y estado, *Ver pagadas de meses anteriores* (las del mes en curso se ven siempre), *Ver excluidas*, totales, exportar y cuatro tarjetas: **sin imputar** (cantidad e importe: plata que no suma en ningún lado), imputadas a pagar, pagos proyectados reemplazados y **excluidas** (cantidad e importe).
+Una fila por **vencimiento** (cuota): razón social, comprobante, emisión, vencimiento de Tango, **vencimiento a considerar**, importe, pendiente, retención —**la parte de las retenciones de su imputación que le tocó**, con los tipos en el tooltip—, **a pagar** y estado (*Sin imputar*, *Imputada*, *Imputada parcialmente* —otra cuota del comprobante sin imputar—, *Pagada*, *Pagada, sin imputar*, *Ya no está en Tango*, *Sin dato de Tango*, *Imputación suspendida*, *Excluida*, *Llave / renovación* y, al pedirlas, *Pagada, de un mes anterior*). Filtros por razón social y estado, *Ver pagadas de meses anteriores* (las del mes en curso se ven siempre; las de los 12 meses anteriores se piden aparte, para marcarlas como llave), *Ver excluidas* (también las marcadas como llave), totales, exportar y cuatro tarjetas: **sin imputar** (cantidad e importe: plata que no suma en ningún lado), imputadas a pagar, pagos proyectados reemplazados y **excluidas** (cantidad e importe).
 
 ### El vencimiento a considerar
 
@@ -391,9 +391,21 @@ Hasta el 20/11/2026 una imputación se repartía en **renglones** de conceptos �
 
 Se edita en la solapa **Maestro** de Proveedores Locales, una columna por módulo, **cada una con el permiso de su módulo** (`AuthCashflow::TAB_DEL_MODULO`).
 
-### 14.b Excluir una factura que no se paga por acá
+### 14.b Una factura que no es un alquiler: llave o renovación, o excluida
 
-`Class/AlquileresFacturaExclusion.php` (script 61). Hay facturas de las razones de alquiler que **no se pagan por este circuito** —los pagos de contrato—. En *Alquileres › Facturas* se excluyen **por cuota o las tildadas**, con **motivo obligatorio** (lo valida el servidor y el `CHECK`).
+Hay facturas de las razones de alquiler que no son alquiler. **Los pagos de contrato** —la «cuota inicial» de IRSA, la llave de Cencosud, las comisiones, el FPC de lanzamiento, una obra— **se marcan «Es llave / renovación»** y los cuenta Llaves y Renovaciones; **se excluyen** sólo las que no se pagan por ningún circuito del cashflow.
+
+#### Es llave / renovación
+
+`Class/LlavesFacturas.php` (script 68). En *Alquileres › Facturas*, junto a *Excluir*, **por cuota o las tildadas**: se elige el **local** (cualquiera: IRSA factura el FPC de DOT), el **concepto** (Llave / Otros gastos / Obra) y el **mes**; de a una factura pendiente, en cuántos **pagos** se paga (la factura no es el pago). Lo que vale es la previsualización del servidor.
+
+- **Sale de Alquileres y no vuelve a Proveedores Locales**: `AlquileresFacturas::destino()` devuelve `A_LLAVES`, la misma regla para todos. En Llaves reemplaza todo lo proyectado de ese local y concepto en esa renovación y suma como real. Ver `README-llaves-renovaciones.md`, parte 4.
+- Se marcan las *Sin imputar*, las *Pagada, sin imputar* y, con *Ver pagadas de meses anteriores*, las **pagadas de los últimos 12 meses** (*Pagada, de un mes anterior*): una pagada no suma y corta la estimación. **No se marca una imputada ni una excluida.**
+- **Ver excluidas** muestra también las marcadas: estado *Llave / renovación*, con el local, el concepto, el mes, quién y cuándo en el tooltip. **Deshacer** es baja lógica y la cuota vuelve a *Sin imputar*.
+
+#### Excluir
+
+`Class/AlquileresFacturaExclusion.php` (script 61). Las que **no se pagan por ningún circuito del cashflow** se excluyen **por cuota o las tildadas**, con **motivo obligatorio** (lo valida el servidor y el `CHECK`). Llaves y Renovaciones avisa cuántas hay excluidas, para reclasificar como llave las que lo sean (al 23/11/2026 no había ninguna).
 
 - **Una cuota excluida no suma en ningún lado**: ni en Alquileres, ni en el tablero, ni **vuelve a Proveedores Locales**. Lo decide `AlquileresFacturas::destino()` (`A_EXCLUIDA_FACTURA`), la misma regla para todos; Proveedores Locales lo dice en su aviso. Con la condición de seguridad sin cumplir, todo se queda en Proveedores Locales, como siempre.
 - Se excluyen las *Sin imputar* y las *Pagada, sin imputar*. **No se excluye una imputada** (primero se deshace) **ni se imputa una excluida**.
@@ -424,7 +436,7 @@ Se edita en la solapa **Maestro** de Proveedores Locales, una columna por módul
 | --- | --- |
 | `cashflow.tab.alquileres` | Ver la pestaña (`getProyeccion` la pide) |
 | `cashflow.editar.parametros.alquileres` | Todas las escrituras de Parámetros › Alquileres, incluidos los tipos de retención y los conceptos de cada razón social |
-| `cashflow.editar.alquileres` | Facturas: el vencimiento a considerar, imputar y deshacer, excluir y volver a incluir; y la columna *ALQUILERES* de la exclusión en el Maestro de Proveedores Locales |
+| `cashflow.editar.alquileres` | Facturas: el vencimiento a considerar, imputar y deshacer, excluir y volver a incluir, marcar como llave y deshacer la marca; y la columna *ALQUILERES* de la exclusión en el Maestro de Proveedores Locales |
 
 Las tres van en `sql/cashflow_alquileres_permisos.sql` y **no** en `sql/cashflow_permisos_edicion.sql`, porque ese le da la edición a todo rol que ve la pestaña. Toda escritura pasa por `AuthCashflow::usuarioDeEscritura()`. Sin permiso de edición, los controles no se dibujan. Marcar *Pagada* lo hace el sistema (`AlquileresImputaciones::usuarioSistema()`).
 
