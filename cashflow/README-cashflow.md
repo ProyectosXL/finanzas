@@ -515,6 +515,12 @@ Pestaña *RRHH y Operativos › Llaves y Renov. Contratos* —de `PENDIENTE` a `
 
 **Qué se mueve.** Lo mueve el código, no los scripts: `LLAVES_RENOV` pasa a disponible y la fila 17, activa y en cero hasta hoy, empieza a sumar. **Apenas corridos los scripts suma cero**: sin el % de impuestos de cada operador la llave no se proyecta, y la pestaña lo avisa. Con los sugeridos cargados (IRSA, Cencosud, DOT, Paseo del Siglo, Caballito), medido el 23/11/2026, la fila suma **$ 358,8 M** en el horizonte; marcando «Ya pagada» lo que ya salió de caja en agosto (Arcos, Abasto, DOT #91, Alto Palermo #90), **$ 143,5 M**. El detalle por mes está en `README-llaves-renovaciones.md`, parte 6.
 
+### Sin scripts, pero con `.htaccess`: `feature/cashflow-centro-ayuda`
+
+No agrega ni modifica ningún script: la ayuda son archivos de `Ayuda/` (ver *La ayuda funcional*). El Centro de ayuda **no pide ningún permiso nuevo**: lo ve cualquier usuario identificado.
+
+**Lo que sí hay que verificar en el servidor**: la rama agrega `cashflow/.htaccess`, que niega los `.md` y los `.sql` del módulo —los README, los artículos de la ayuda y los scripts se descargaban sin iniciar sesión—. Apache lo respeta sólo con `AllowOverride` (al menos `AuthConfig`, o `All`) en el `<Directory>` de `htdocs`; sin eso lo ignora **en silencio** y todo sigue descargándose. Después de publicar: pedir `cashflow/README-cashflow.md` y `cashflow/sql/cashflow_llaves.sql` sin sesión tiene que dar **403**, y `cashflow/Js/main.js`, 200.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -1798,9 +1804,9 @@ Con ellas se fue `nacionalizacion_2` de `$validTabs`, que no tenía archivo ni e
 
 **Otros Ingresos va después de Ingresos y aparte**: Ingresos agrupa lo que sale de un circuito del sistema y esa categoría agrupa lo que se tipea. La diferencia importa al leer un número — en una fila de Ingresos un cero es *"no hay movimientos"* y en una de esas es *"nadie cargó nada todavía"*. Ver `README-otros-ingresos.md`.
 
-### Parámetros va al pie
+### Parámetros y el Centro de ayuda van al pie
 
-No es un módulo de datos como los de arriba: es la configuración de todos ellos. Arriba competía por atención con el tablero, que es la pantalla que se abre para trabajar.
+No son módulos de datos como los de arriba: Parámetros es la configuración de todos ellos, y el **Centro de ayuda** (`feature/cashflow-centro-ayuda`) los explica. Ver *La ayuda funcional*. Arriba, Parámetros competía por atención con el tablero, que es la pantalla que se abre para trabajar.
 
 Los ítems de las categorías ahora tienen ícono propio, así que el sangrado de 44px que hacía de guía visual se reduce y el ícono ocupa ese lugar, alineándolos con las pestañas de nivel raíz.
 
@@ -2512,6 +2518,97 @@ Los permisos siguen viniendo de `FP_ROL_PERMISO` / `FP_PERMISOS` (módulo 7), co
 3. Poner `AuthCashflow::atributoEdicion('<pestaña>')` en la raíz de la pestaña y esconder sus controles con `$edita` y `Js/permisos.js`. La prueba verifica el atributo.
 4. Si la acción escribe una tabla nueva, crearla con las seis columnas y escribirlas con `Class/Auditoria.php`.
 
+## La ayuda funcional
+
+> Es **nueva**, de `feature/cashflow-centro-ayuda`. Antes había una sola ayuda, el modal de Proveedores Exterior y Crono Nacionalización (`Components/help_modal_comex.php`), con el texto escrito en el HTML y las dos pestañas mezcladas. Se retiró: cada pestaña tiene su artículo.
+
+**La ayuda explica cómo se usa cada pestaña, para quien la usa** —Tesorería, Administración, Dirección—. Estos README siguen siendo la documentación técnica; la ayuda no los reemplaza ni los repite.
+
+Se ve en dos lugares:
+
+- **El botón Ayuda del encabezado** (`Components/header.php`), uno solo para todas las pestañas: abre un panel lateral (`Components/ayuda_panel.php`, el *offcanvas* de Bootstrap) con *Para qué sirve*, *De dónde salen los datos*, *La pantalla* y las preguntas frecuentes de la pestaña abierta. Sin fondo oscuro, para seguir usando la pestaña. Sabe cuál está abierta por el `data-tab` del `<body>`, que actualiza `updateHeader()`. Carga al abrirse, una vez por pestaña. En el Cashflow abre `general_tablero`; en Parámetros, `general_permisos_parametros` (`Ayuda::ARTICULO_DE_TAB`). Una pestaña sin artículo lo dice y ofrece el Centro.
+- **El Centro de ayuda**, al pie del menú, al lado de Parámetros: buscador, *Primeros pasos* (los generales), *Ayuda por módulo* (las categorías del menú, con cada pestaña en `datos` y el estado de su artículo) y las preguntas frecuentes del tablero. **Lo ve cualquier usuario identificado, sin permiso propio** (`AuthCashflow::PARA_TODOS`); sin sesión, nadie. Todos ven todos los artículos, tengan o no permiso sobre la pestaña.
+
+**La dirección se comparte**: `index.php?ayuda=<artículo>#<sección>` abre directo el artículo en esa sección (`AyudaRender::direccion()`). Es un parámetro y no sólo un hash para que `index.php` abra el Centro como pestaña inicial, sin cargar antes el tablero. Al ir a otra pestaña, `loadTab()` saca el parámetro.
+
+### Dónde están y cómo se escriben
+
+**Un archivo Markdown por artículo en `Ayuda/`.** Los de pestaña llevan el `tab` de `Class/Menu.php` (`llaves_renov.md`); los generales, `general_<algo>.md`. **La ayuda la escribe y la mantiene Claude Code, en archivos del repo**: no hay edición desde la app ni tablas.
+
+```markdown
+---
+titulo: Llaves y Renov. Contratos
+pestana: llaves_renov          (vacío en los generales)
+categoria: RRHH y Operativos   (la del menú, o General)
+estado: en_revision            (completa | en_revision | pendiente)
+actualizado: 2026-11-23
+usuarios: Tesorería, Administración
+bajada: Una línea bajo el título.
+---
+## Para qué sirve
+...
+```
+
+Lo lee `Class/AyudaArticulo.php` y lo pasa a HTML `Class/AyudaRender.php`, los dos puros. El Markdown es un subconjunto: `##` y `###` con ancla propia (el título sin acentos, en minúsculas y con guiones), párrafos, negrita, itálica, código, listas, tablas, enlaces `[texto](ayuda:articulo#ancla)` y `https://…`, imágenes y comentarios `<!-- -->` de renglón entero. **Todo el texto se escapa**: el HTML escrito en un artículo sale como texto. Y siete bloques, que abren con `:::tipo` y cierran con `:::`:
+
+| Bloque | Qué dibuja |
+| --- | --- |
+| `:::formula` | El recuadro oscuro |
+| `:::ejemplo ilustrativo` | El recuadro punteado *Ejemplo* |
+| `:::diagrama` | Las cajas fuentes → pestaña → tablero, en HTML y CSS; `fuente:`, `pestana:`, `tablero:` y `alt:` (obligatorio) |
+| `:::pasos` | Los círculos numerados, con `Resultado:` al final (obligatorio) |
+| `:::marcas` | Las letras naranjas A, B, C… de una captura |
+| `:::aviso critico\|atencion\|info` | Una fila de la tabla de avisos, con los colores del panel de avisos; `texto:`, `significa:`, `corrige:` |
+| `:::pregunta ¿…?` | Un desplegable con la respuesta |
+
+Un bloque sin cerrar, un tipo que no existe o un enlace mal escrito **no rompen la página**: se muestran como texto, la pantalla avisa que el artículo tiene errores, y la prueba de formato no lo deja pasar.
+
+### La plantilla de los artículos de pestaña
+
+Nueve secciones, **en este orden y con estos títulos exactos** (`AyudaArticulo::SECCIONES_PESTANA`): *Para qué sirve*, *De dónde salen los datos*, *Cómo se calcula*, *La pantalla*, *Tareas frecuentes*, *Parámetros*, *Avisos y qué hacer*, *Preguntas frecuentes* y *Glosario*. La que no aplica va igual, con *"No aplica en esta pestaña."* y una línea del porqué. Los generales no llevan plantilla.
+
+**Cómo se escribe:**
+
+- Castellano rioplatense con voseo, como el resto de la app.
+- Para el usuario: sin nombres de clases, tablas, columnas, scripts, ramas ni constantes. "Contrato puente", sí; `MESES_PUENTE`, no. Las fuentes se nombran por la app o la pantalla ("la app de alquileres", "Tango"), nunca por la tabla.
+- Frases cortas; un párrafo dice una sola cosa. Botones, solapas y columnas como aparecen en pantalla, en negrita.
+- **Los ejemplos llevan números inventados, redondos y que cierren entre sí**, siempre en `:::ejemplo ilustrativo`: **nada de importes reales de proveedores, contratos ni saldos**, y tampoco nombres de locales u operadores con sus montos. Todos los usuarios ven todos los artículos, también los de pestañas que no pueden abrir. El renderizador no acepta otro tipo de ejemplo.
+- Los avisos, **todos** los que puede emitir la pestaña, con el texto como lo muestra la pantalla, sacados del código.
+- Cada afirmación tiene que estar respaldada por el código. Si un README dice otra cosa, manda el código. Lo que no está claro no se inventa: se pregunta.
+
+### Los estados
+
+| Estado | Cuándo | Cómo se ve |
+| --- | --- | --- |
+| `completa` | La validaron quienes usan la pestaña | Sin etiqueta |
+| `en_revision` | Escrita, sin validar; o cambió mucho desde la validación | *En revisión*, con la fecha |
+| `pendiente` | Todavía incompleta | *Pendiente*, con la fecha |
+
+Una pestaña **sin archivo** se ve *Pendiente* en el Centro y no se puede abrir.
+
+### Las imágenes
+
+Van en `Ayuda/img/<artículo>/` y se citan `![texto alternativo](img/<artículo>/archivo.png)`, con **texto alternativo obligatorio**: casi siempre son capturas con marcas, y sin él se pierde lo que la marca señala. Sólo png, jpg, gif y webp de esa carpeta. Los artículos de esta rama no tienen capturas: cada *La pantalla* deja el `:::marcas` armado y un comentario `<!-- Acá va la captura: … -->` con el nombre del archivo. Un diagrama de flujo se hace con `:::diagrama`, no con una imagen.
+
+**Los `.md` no se descargan por la URL** (`cashflow/.htaccess`, que niega los `.md` y los `.sql` de todo el módulo, README incluidos; requiere `AllowOverride` en el servidor). Las imágenes de `Ayuda/img/` sí, porque las pide el navegador.
+
+### La búsqueda
+
+Busca la frase escrita, sin acentos ni mayúsculas, con el criterio de `ProveedoresOpciones::claveOrden()`, el mismo de las listas del módulo. Ese criterio y no `Planilla::normalizarTitulo()` porque no cambia el largo del texto, así que se puede resaltar la coincidencia en el original. Cada sección, subsección y pregunta es un resultado. El orden: primero si coincide el título del artículo, después el de la sección, después el texto; adentro de cada nivel, por artículo y en el orden del artículo (`AyudaBusqueda`).
+
+**El índice no se guarda**: se lee de los archivos en cada búsqueda. Medido con los siete artículos de esta rama (141 KB), leer, indexar y buscar tarda unos 15 ms; armar un panel, unos 8. Un índice guardado sería otro lugar que se desactualiza.
+
+### La regla de mantenimiento
+
+> **Todo cambio que modifique lo que el usuario ve, carga o lee en una pestaña actualiza su artículo en la misma rama, y su fecha (`actualizado`). Si el cambio es grande, el estado vuelve a `en_revision`.**
+
+Una ayuda desactualizada es peor que no tener ayuda: dice con seguridad algo que ya no es cierto. La regla la controla `tests/test_ayuda_articulos.php`:
+
+- **Cobertura**: cada pestaña en `datos` del menú —principales, categorías y pie— tiene su artículo o está en `AYUDA_PENDIENTES`, la lista de pendientes a propósito de la prueba. Una pestaña nueva sin ayuda hace fallar la suite hasta que alguien escribe el artículo o la anota ahí. Una pendiente que ya tiene artículo también falla.
+- **Formato**: las nueve secciones en orden, el encabezado válido (estado conocido, fecha válida y no futura, pestaña del menú con su categoría), los enlaces `ayuda:` a artículos y secciones que existen, las imágenes en el disco y en su carpeta, y ningún bloque sin cerrar.
+
+La prueba no puede leer un artículo y saber si sigue siendo cierto: eso es de quien cambia la pantalla.
+
 ---
 
 ## Pruebas
@@ -2572,6 +2669,8 @@ new Cashflow($estructura, $parametros, $horizonte)   // el horizonte es opcional
 ```
 
 `test_cashflow.php` verifica la costura de forma explícita, para que si alguien la saca el mensaje de falla diga por qué fallan las otras noventa.
+
+De la **ayuda funcional**, sin base ni sesión: `tests/test_ayuda_formato.php` (el encabezado, la plantilla, las anclas), `tests/test_ayuda_render.php` (**que el HTML y los scripts escritos en un artículo salgan escapados**, los enlaces y las imágenes permitidos, cada bloque, y que lo roto se vea como texto con su renglón), `tests/test_ayuda_busqueda.php` (acentos, mayúsculas, el orden en tres niveles y el resaltado), `tests/test_ayuda_centro.php` (qué artículo le toca a cada pestaña, el inicio del Centro, el panel, quién lo ve y que el modal viejo de Comex no vuelva), `tests/test_ayuda_articulos.php` (**la regla de mantenimiento** sobre los artículos reales: cobertura y formato) y `tests/test_acceso_archivos.php` (el `.htaccess`).
 
 ---
 
@@ -2706,6 +2805,8 @@ De la rama `feature/logistica-local-parametros-generales`: `sql/cashflow_paramet
 De la rama `feature/cashflow-auditoria-usuario`: `sql/cashflow_permisos_edicion.sql` (base `apps`), `sql/cashflow_auditoria_usuario.sql`, `Class/Auditoria.php`, `Controller/autorizacion.php`, `Js/permisos.js`, `Js/auditoria.js` y `tests/test_auth_cashflow.php` (nuevos) · `Class/AuthCashflow.php` (`username()`, `exigirUsuario()`, `puedeEditar()`, `exigirEdicion()`, `exigirAccion()`, `origen()`, `atributoEdicion()`, el mapa `ESCRITURAS` / `LECTURAS` y `ORIGENES`) · los catorce controllers (la guarda antes del `switch`; se fueron los `usuarioActual()`; `VentasController` pierde `saveMixCobro` y `saveParametro`, que no tenían llamador) · todas las clases que escriben (las seis columnas, el usuario obligatorio) · los cuatro SP del histórico y de Comex (el origen `JOB:`) · las 13 pestañas con escrituras, las 11 sub-pestañas de Parámetros y sus JS (los controles se esconden sin permiso; el quién y cuándo) · `index.php` (`permisos.js`, `auditoria.js` y los orígenes en el `<head>`) · `Css/main.css` (`.auditoria-icono`).
 
 De la rama `feature/cronogramas-tarjetas-corporativas`: `sql/cashflow_cronograma_conceptos.sql`, `sql/cashflow_tarjetas_vto_mensual.sql`, `Class/TarjetasFacturaVto.php` y `Class/TarjetasMensual.php` (nuevos) · `Class/CronogramaPagos.php` (día y frecuencia por parámetro; `parte()`, `proximoPago()`, `requiereBaja()`) · `Class/CronogramaDatos.php` (todo por concepto; `guardarConfig()` con la baja de overrides) · `Class/Parametros.php`, `Controller/ParametrosController.php`, `Tabs/parametros_generales.php`, `Js/Parametros-Generales.js` (la card del cronograma por concepto) · `Class/Logistica.php`, `Class/LogisticaPlanilla.php`, `Js/Logistica-Local.js`, `Tabs/logistica_local.php` (el reparto y los textos salen de la configuración) · `Class/Proveedores.php`, `Controller/ProveedoresController.php`, `Providers/ProveedoresProvider.php`, `Js/Proveedores-Proveedores_locales.js`, `Tabs/proveedores_locales.php` y su CSS (los días de pago del cronograma; el aviso de `TARJETA CORP` partido) · `Class/TarjetasCorporativas.php`, `Class/PagosTarjetas.php`, `Class/TarjetasSupervisoras.php`, `Providers/TarjetasProvider.php`, `Controller/TarjetasController.php`, `Tabs/pagos_tarjetas.php`, `Js/Financiero-Pagos_tarjetas.js` y su CSS (sin vincular fuera del flujo, vencimiento corregido, estimaciones mensuales, lunes de supervisoras) · `Class/AuthCashflow.php` (seis acciones nuevas) · los tests de cronograma, logística, proveedores, providers y tarjetas, y `test_otros_ingresos.php` (se saltea sin conexión en vez de cortar la suite).
+
+De la rama `feature/cashflow-centro-ayuda`: `Ayuda/*.md` (siete artículos), `Ayuda/img/`, `Class/AyudaArticulo.php`, `Class/AyudaRender.php`, `Class/AyudaBusqueda.php`, `Class/Ayuda.php`, `Controller/AyudaController.php`, `Tabs/ayuda.php`, `Components/ayuda_panel.php`, `Js/ayuda.js`, `Css/ayuda.css`, `.htaccess` y seis archivos de pruebas (nuevos) · `Class/Menu.php` (el Centro de ayuda al pie) · `Class/AuthCashflow.php` (`PARA_TODOS`, `esParaTodos()`, las lecturas de `Ayuda`) · `Class/ProveedoresOpciones.php` (`claveOrden()` pasa a pública) · `Controller/TabController.php` · `Components/header.php` (el botón **Ayuda**) · `index.php` (`?ayuda=` como pestaña inicial, `data-tab` en el `<body>`, el panel, el JS y el CSS) · `Js/main.js` (`data-tab` y la dirección) · `Css/avisos-panel.css` (sus colores también para `.ayuda-avisos`) · `Tabs/proveedores_exterior.php`, `Tabs/crono_nacionalizacion.php`, `Css/Comex-Crono_nacionalizacion.css` (sin el modal) · **eliminado** `Components/help_modal_comex.php` · `tests/test_menu.php`, `tests/test_auth_cashflow.php`, `tests/test_cargando.php`, `tests/test_comex_dolar_divisa.php`, `tests/test_comex_nac_parcial.php`.
 
 Eliminado: `Tabs/resumen.php`.
 
