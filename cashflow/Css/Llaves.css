@@ -26,3 +26,17 @@
 .ll-chip-MIXTO::after { background: #fff; color: #6c757d; border: 1px dashed #6c757d; }
 
 #tablaLlContratos .ll-nota { font-size: .75rem; color: #6c757d; }
+
+/* NADA SE PARTE EN DOS RENGLONES: ni el texto de un boton (Abrir todo,
+   Exportar, Actualizar) ni un importe, una fecha o un numero de las grillas.
+   Si no entran, los botones bajan enteros (flex-wrap en su contenedor) y la
+   tabla scrollea a lo ancho. Un importe con su chip va en una sola linea. */
+.tab-llaves_renov .btn { white-space: nowrap; }
+#tablaLlaves th, #tablaLlaves td.text-end { white-space: nowrap; }
+#tablaLlContratos th,
+#tablaLlContratos td.text-end,
+#tablaLlContratos td:nth-child(3),
+#tablaLlContratos td:nth-child(4),
+#tablaLlContratos td:nth-child(5),
+#tablaLlFacturas th,
+#tablaLlFacturas td.text-end { white-space: nowrap; }
