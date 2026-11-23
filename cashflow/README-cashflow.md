@@ -30,7 +30,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ## Para pasar a producción: los scripts, en orden
 
-**Todos van contra `central`, salvo los de permisos**, que van contra `apps`: el de la sección que sigue y el 52, de Alquileres. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. **La única excepción es el 60**, de Alquileres, que borra las imputaciones del modelo de renglones y sus tablas (ver *Alquileres: la imputación por razón social*, más abajo). Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
+**Todos van contra `central`, salvo los de permisos**, que van contra `apps`: el de la sección que sigue, el 52, de Alquileres, y el 67, de Llaves y Renovaciones. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. **La única excepción es el 60**, de Alquileres, que borra las imputaciones del modelo de renglones y sus tablas (ver *Alquileres: la imputación por razón social*, más abajo). Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
 
 ### Primero que nada: auditoría y permisos de escritura (`feature/cashflow-auditoria-usuario`)
 
@@ -500,6 +500,21 @@ Con Fiserv a 1 día, la cobranza de las ventas de viernes a domingo se proyectab
 
 Contra `central`, reejecutable, **después del 35** y al publicar el código. **Mueve la cobranza de Fiserv de fecha, no de total**: medido el 22/11/2026, $ 169.981.675,18 cambian de día dentro del horizonte y el total baja $ 7.646.142,79, lo que cruza el borde del eje. Todo lo demás da igual al último bit, y sin el script el código da lo mismo que `develop` (486 celdas).
 
+### Llaves y Renovaciones (`feature/llaves-renovaciones`)
+
+Pestaña *RRHH y Operativos › Llaves y Renov. Contratos* —de `PENDIENTE` a `DATOS`— con la llave de cada renovación de contrato de local (la del contrato nuevo cargado en la app de alquileres o, si todavía no está, estimada con el criterio de Costo de Ocupación sobre el alquiler que proyecta Alquileres), los otros gastos de la renovación, las obras de imagen y las aperturas en dólares, y los compromisos pactados a mano; la sub-pestaña *Parámetros › Llaves y Renovaciones*; la acción **«Es llave / renovación»** en *Alquileres › Facturas* (la cuota sale de Alquileres, no vuelve a Proveedores Locales y la cuenta Llaves), y **Llaves y Renovaciones entra al tablero**: una fila agrupada en real y proyectado. Ver `README-llaves-renovaciones.md` y `README-alquileres.md` (partes 1, 12 y 14.b).
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 66 | `sql/cashflow_llaves.sql` | Las siete tablas de Parámetros › Llaves y Renovaciones con historial. Siembra sólo 25 % de llave, 4 cuotas y día 15 | La pestaña y Parámetros cargan y avisan en crítico; no se estima nada y Parámetros no guarda. El resto del cashflow, como hoy |
+| 67 | `sql/cashflow_llaves_permisos.sql` (**`apps`**) | `cashflow.tab.llaves_renov`, `cashflow.editar.llaves_renov` y `cashflow.editar.parametros.llaves_renov`, si no existen. **No asigna ningún rol** | Sólo el administrador ve la pestaña y edita su Parámetros |
+| 68 | `sql/cashflow_llaves_facturas.sql` | La marca «es llave» de una cuota de alquiler y sus N pagos, con índice único filtrado | *Es llave / renovación* no se dibuja; las facturas siguen como hoy |
+| 69 | `sql/cashflow_llaves_fila.sql` | Reemplaza la fila *Llaves y Renovaciones* (`LLAVES_RENOV/PAGOS`, activa y en cero) por dos filas agrupadas, `REAL` y `PROYECTADO`, en una transacción, con el control de doble conteo al pie | La fila de antes sigue activa y muestra el total, sin abrir |
+
+**Orden: 66 → 67 → 68 → 69.** El 66 y el 68 contra `central`, después de los de Alquileres (51 y 53); el 67 contra `apps`, en cualquier momento; el 69 después de `sql/cashflow_estructura_grupos.sql`.
+
+**Qué se mueve.** Lo mueve el código, no los scripts: `LLAVES_RENOV` pasa a disponible y la fila 17, activa y en cero hasta hoy, empieza a sumar. **Apenas corridos los scripts suma cero**: sin el % de impuestos de cada operador la llave no se proyecta, y la pestaña lo avisa. Con los sugeridos cargados (IRSA, Cencosud, DOT, Paseo del Siglo, Caballito), medido el 23/11/2026, la fila suma **$ 358,8 M** en el horizonte; marcando «Ya pagada» lo que ya salió de caja en agosto (Arcos, Abasto, DOT #91, Alto Palermo #90), **$ 143,5 M**. El detalle por mes está en `README-llaves-renovaciones.md`, parte 6.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -568,9 +583,14 @@ En este orden, contra `central`:
 -- 63. sql/cashflow_ventas_mix_corte_finde.sql   (Ventas: el corte de fin de semana del mix de cobro; Fiserv desde el viernes)
 -- 64. sql/cashflow_prov_locales_pago_n_medios.sql  (Prov. Locales: N pagos por comprobante, tambien en cuotas)
 -- 65. sql/cashflow_prov_locales_pago_agrupado.sql  (Prov. Locales: un cheque para varias facturas)
+-- 66. sql/cashflow_llaves.sql                     (Llaves y Renovaciones: parametros)
+-- 68. sql/cashflow_llaves_facturas.sql            (Llaves y Renovaciones: facturas de alquiler marcadas como llave)
+-- 69. sql/cashflow_llaves_fila.sql                (la fila Llaves y Renovaciones, real y proyectado)
 ```
 
 **El 63 va después del 35**, al que le agrega una columna. Corrido antes, lo dice y no hace nada.
+
+**El 66 y el 68 van después del 51 y del 53; el 69, después del 22 (grupos)**, y el **67, `sql/cashflow_llaves_permisos.sql`, va contra `apps`**, en cualquier momento. Ver *Llaves y Renovaciones*, más arriba.
 
 **El 64 va después del 49 y el 65 después del 64**: cada uno corta si falta el anterior. Ver *Proveedores Locales: N pagos por comprobante y un cheque para varias facturas*, más arriba.
 
@@ -1295,13 +1315,15 @@ El ícono de la fila mide **sólo las columnas de la vista activa**, igual que l
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales veinte: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Logística**, **Gastos Locales**, **Pagos con Tarjetas y Otros** (código interno `TARJETAS`), **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
+Hoy tienen datos reales veintidós: **Alquileres**, **Llaves y Renovaciones**, **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Logística**, **Gastos Locales**, **Pagos con Tarjetas y Otros** (código interno `TARJETAS`), **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
 
 > **Logística** y **Pagos con Tarjetas y Otros** son los dos últimos en sumarse, y los dos únicos del grupo de egresos pendientes que ya tienen proveedor.
 >
 > Logística no necesitó ningún script de estructura: su fila ya existía apuntada a `LOGISTICA/PAGOS`, así que alcanzó con escribir el proveedor y dar vuelta el flag, que es exactamente lo que este diseño promete. Ver `README-logistica-local.md`.
 >
 > Tarjetas sí necesitó uno, y por un motivo que conviene tener presente: **no existía ninguna fila para esa plata**. El Excel original no la tenía, así que la semilla de `cashflow_estructura.sql` no la sembró. Lo que el diseño sigue cumpliendo es lo otro: el motor no se tocó, y la fila se crea con un `INSERT` de tres líneas. **`FINANCIERO` no se tocó** —es otro circuito, préstamos y movimientos financieros, y su fila vive en la sección *Ajustes*, hoy inhabilitada—: meter las tarjetas ahí adentro habría mezclado dos cosas que se cargan y se miran por separado. Ver `README-pagos-tarjetas.md`.
+
+> **Llaves y Renovaciones** tampoco necesitó crear su fila: la semilla ya la tenía, activa y apuntada a `LLAVES_RENOV/PAGOS`, rindiendo cero con un aviso. Alcanzó con escribir el proveedor y dar vuelta el flag; `sql/cashflow_llaves_fila.sql` la parte en real y proyectado, como la de Alquileres. Ver `README-llaves-renovaciones.md`.
 
 > **Alquileres llegó en dos pasos.** Primero el proveedor sin activar —sólo la proyección, porque las facturas seguían en Cuentas a Pagar Locales y contarla habría duplicado cada alquiler—; después las facturas reales, que salen de Proveedores Locales, y el flag. Rinde `REAL` y `PROYECTADO` y su total `PAGOS`; la fila agrupada la arma `sql/cashflow_alquileres_fila.sql`. Lo que no se ve en ninguna serie es lo que no tiene que verse: las facturas sin imputar, que el aviso nombra. Ver `README-alquileres.md`.
 
@@ -1420,7 +1442,7 @@ Activar a la vez la serie total y sus componentes cuenta **dos veces** el mismo 
 
 ## Conceptos con parte real y proyectada
 
-Hay conceptos del tablero que son **dos cosas a la vez**: una parte ya comprometida y una parte estimada. La cobranza de franquicias es el caso que existe hoy —lo aceptado en una propuesta de pago contra lo que proyecta el PPP—, y el próximo van a ser las **compras proyectadas del exterior**.
+Hay conceptos del tablero que son **dos cosas a la vez**: una parte ya comprometida y una parte estimada. La cobranza de franquicias fue el primero —lo aceptado en una propuesta de pago contra lo que proyecta el PPP—; después vinieron las **compras proyectadas del exterior**, **Alquileres** (facturas imputadas contra la proyección por local) y **Llaves y Renovaciones** (facturas marcadas como llave contra lo de los contratos de la app, lo estimado y lo pactado).
 
 **La convención, para todo concepto futuro con parte real y proyectada:**
 

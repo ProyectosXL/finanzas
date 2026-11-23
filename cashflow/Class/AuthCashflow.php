@@ -137,7 +137,12 @@ class AuthCashflow {
             'guardarImputacion' => [['alquileres', null]],
             'deshacerImputacion' => [['alquileres', null]],
             'excluirFacturas' => [['alquileres', null]],
-            'incluirFacturas' => [['alquileres', null]]
+            'incluirFacturas' => [['alquileres', null]],
+            /* Marcar una factura de alquiler como llave es una decision sobre una
+               factura de alquiler: la toma quien maneja esas facturas, como excluir. */
+            'previsualizarLlave' => [['alquileres', null]],
+            'marcarLlave' => [['alquileres', null]],
+            'deshacerLlave' => [['alquileres', null]]
         ],
         'CashflowEstructura' => [
             'saveEstructura' => [['parametros', 'CASHFLOW']],
@@ -186,6 +191,23 @@ class AuthCashflow {
             // protegeria nada.
             'saveFechaCobroManualMasiva' => [['cobranzas_fr', null], ['cobranzas_may', null]],
             'deleteFechaCobroManualMasiva' => [['cobranzas_fr', null], ['cobranzas_may', null]]
+        ],
+        /* LLAVES Y RENOVACIONES: los parametros con su permiso de sub-pestaña.
+           "Ya pagada" se marca tambien desde la solapa Contratos de la pestaña:
+           con poder editar cualquiera de las dos alcanza, porque el endpoint
+           hace lo mismo venga de donde venga. */
+        'Llaves' => [
+            'guardarGeneral' => [['parametros', 'LLAVES_RENOV']],
+            'guardarOperador' => [['parametros', 'LLAVES_RENOV']],
+            'guardarLocal' => [['parametros', 'LLAVES_RENOV']],
+            'altaPagada' => [['parametros', 'LLAVES_RENOV'], ['llaves_renov', null]],
+            'bajaPagada' => [['parametros', 'LLAVES_RENOV'], ['llaves_renov', null]],
+            'altaObra' => [['parametros', 'LLAVES_RENOV']],
+            'bajaObra' => [['parametros', 'LLAVES_RENOV']],
+            'altaApertura' => [['parametros', 'LLAVES_RENOV']],
+            'bajaApertura' => [['parametros', 'LLAVES_RENOV']],
+            'altaCompromiso' => [['parametros', 'LLAVES_RENOV']],
+            'bajaCompromiso' => [['parametros', 'LLAVES_RENOV']]
         ],
         'Logistica' => [
             'saveFletero' => [['logistica_local', null], ['parametros', 'LOGISTICA']],
@@ -331,14 +353,14 @@ class AuthCashflow {
      *
      * Se declaran aca para que tests/test_auth_cashflow.php las reconozca: una
      * clave en un script que el codigo no pide es un error, salvo que este en
-     * esta lista. Hoy no hay ninguna: cashflow.editar.alquileres, la ultima,
-     * ya la piden la exclusion de Alquileres y sus facturas.
+     * esta lista. Hoy no hay ninguna: cashflow.editar.llaves_renov, la ultima,
+     * ya la pide "Ya pagada" desde la solapa Contratos de Llaves y Renovaciones.
      */
     const CLAVES_RESERVADAS = [];
 
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
-        'Alquileres' => ['getProyeccion', 'getParametros'],
+        'Alquileres' => ['getProyeccion', 'getParametros', 'getPagadasLlave'],
         'Cashflow' => ['getTablero', 'getAvisosPestana'],
         'CashflowEstructura' => ['getEstructura'],
         'CobElectronicos' => ['getPestana'],
@@ -349,6 +371,7 @@ class AuthCashflow {
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
         'GastosLocales' => ['getPlanilla', 'getComprobantes'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
+        'Llaves' => ['getParametros', 'getProyeccion'],
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento',

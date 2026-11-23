@@ -10,6 +10,7 @@ require_once __DIR__ . '/AlquileresImputacion.php';
 require_once __DIR__ . '/AlquileresImputaciones.php';
 require_once __DIR__ . '/AlquileresFacturaExclusion.php';
 require_once __DIR__ . '/AlquileresTiposRetencion.php';
+require_once __DIR__ . '/LlavesFacturas.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Inflacion.php';
 
@@ -265,7 +266,7 @@ class Alquileres {
         $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'dias' => [],
                 'pagadas_mes' => [], 'imputaciones' => [], 'en_tango' => [], 'avisos' => [],
                 'tabla_imputacion' => false, 'tipos' => [], 'tipos_vigentes' => [], 'excluidas_factura' => [],
-                'tabla_exclusion' => false];
+                'tabla_exclusion' => false, 'todos' => [], 'llaves_factura' => []];
 
         try {
             require_once __DIR__ . '/AlquileresUniverso.php';
@@ -280,6 +281,10 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
 
             $prov = new Proveedores();
             $todos = $prov->getPendientes($h->hoy());
+            /* TODOS LOS PENDIENTES, de cualquier proveedor: Llaves y Renovaciones
+               avisa con ellos las facturas de llave que quedan en Proveedores
+               Locales, sin volver a leer Tango. */
+            $out['todos'] = $todos;
 
             /* LOS DE RUBRO ALQUILER QUE NO ESTAN EN NINGUNA FILA: excluidos de
                Proveedores Locales y sin dar de alta aca. Va al tablero (por el
@@ -303,7 +308,12 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
             /* LAS EXCLUIDAS A MANO (no se pagan por aca): no suman, pero se ven
                con "Ver excluidas", con su motivo, para poder volver a incluirlas. */
             $out['excluidas_factura'] = $partes[AlquileresFacturas::A_EXCLUIDA_FACTURA];
+            /* LAS MARCADAS COMO LLAVE: las cuenta Llaves y Renovaciones. Aca se ven
+               (con "Ver excluidas") para poder deshacer la marca. */
+            $out['llaves_factura'] = $partes[AlquileresFacturas::A_LLAVES];
             $out['tabla_exclusion'] = (new AlquileresFacturaExclusion())->tablaCreada();
+            require_once __DIR__ . '/LlavesFacturas.php';
+            $out['tabla_llaves'] = (new LlavesFacturas())->tablaCreada();
             $out['vtos'] = (new AlquileresFacturaVto())->vigentes();
             $out['dias'] = $this->diasDeVencimiento();
 
@@ -319,6 +329,9 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
                 $out['excluidas_factura'] = array_merge($out['excluidas_factura'], array_map(function ($p) {
                     return ['IMPORTE_PENDIENTE' => 0.0, 'PAGADA_TANGO' => true] + $p;
                 }, $pm[AlquileresFacturas::A_EXCLUIDA_FACTURA]));
+                $out['llaves_factura'] = array_merge($out['llaves_factura'], array_map(function ($p) {
+                    return ['IMPORTE_PENDIENTE' => 0.0, 'PAGADA_TANGO' => true] + $p;
+                }, $pm[AlquileresFacturas::A_LLAVES]));
             } catch (Throwable $e) {
                 $out['avisos'][] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer de Tango las facturas de '
                     . 'alquiler ya pagadas este mes (' . $e->getMessage() . '): la grilla muestra sólo las pendientes.',
@@ -376,6 +389,33 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
     }
 
     /**
+     * El alquiler mensual proyectado de cada local: conceptos 1 (Alquiler), 2
+     * (Complementario) y 8 (VMA), NETOS, por mes del concepto. Es lo que pide
+     * Llaves y Renovaciones para estimar la llave de una renovacion (el 25 %
+     * de 1 + 2 + 8 de Costo de Ocupacion, llevado a la vigencia).
+     *
+     * NO SE VUELVE A CALCULAR: es la misma proyeccion de la pestaña, ANTES de
+     * las facturas -una factura imputada pisa el pago de un mes, no cambia
+     * cuanto vale el alquiler de ese mes-. Solo los meses del horizonte y los
+     * locales que proyectan: lo que Alquileres no tiene, Llaves no lo inventa.
+     *
+     * @param Horizonte $h
+     * @param array $ins Lo de insumos()
+     * @return array NRO_SUCURS => 'Y-m' => float
+     */
+    public function alquilerMensual($h, $ins) {
+        $out = [];
+
+        foreach ($this->calcularProyeccion($h, $ins)['pagos'] as $p) {
+            if (in_array($p['concepto'], [1, 2, 8], true)) {
+                $out[$p['nro']][$p['mes_concepto']] = round(($out[$p['nro']][$p['mes_concepto']] ?? 0.0) + $p['neto'], 2);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Aplica las facturas imputadas a la proyeccion. Estatica: no lee nada.
      *
      * @param array $out Lo de calcularProyeccion()
@@ -388,7 +428,7 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
                  'facturas_kpis' => ['sin_imputar_n' => 0, 'sin_imputar_importe' => 0.0, 'imputadas_n' => 0,
                                      'imputadas_a_pagar' => 0.0, 'reemplazado_a_pagar' => 0.0],
                  'fuera_horizonte_facturas' => 0.0, 'condicion' => null, 'tipos_vigentes' => [],
-                 'tabla_imputacion' => false];
+                 'tabla_imputacion' => false, 'tabla_llaves' => false];
         $f = $ins['facturas'] ?? null;
 
         if ($f === null) {
@@ -404,6 +444,7 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
 
         $out['tipos_vigentes'] = $f['tipos_vigentes'] ?? [];
         $out['tabla_exclusion'] = $f['tabla_exclusion'] ?? false;
+        $out['tabla_llaves'] = $f['tabla_llaves'] ?? false;
         $out['tabla_imputacion'] = $f['tabla_imputacion'] ?? false;
 
         /* El nombre de la razon social de cada imputacion, para la grilla y el tooltip. */
@@ -426,6 +467,8 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
             'dias' => $f['dias'] ?? [],
             'pagadas_mes' => $f['pagadas_mes'] ?? [],
             'excluidas_factura' => $f['excluidas_factura'] ?? [],
+            'llaves_factura' => $f['llaves_factura'] ?? [],
+            'llaves' => $f['ctx']['facturas_llaves'] ?? [],
             'exclusiones' => $f['ctx']['facturas_excluidas'] ?? [],
             'imputaciones' => $imputaciones,
             'en_tango' => $f['en_tango'],
@@ -1282,6 +1325,10 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
             'tablas' => !empty($c['tabla_imputacion']),
             'tabla_exclusion' => !empty($c['tabla_exclusion']),
             'script_exclusion' => AlquileresFacturaExclusion::SCRIPT,
+            /* Marcar una factura como llave (script 68): el boton se dibuja con la tabla y el permiso. */
+            'tabla_llaves' => !empty($c['tabla_llaves']),
+            'conceptos_llave' => LlavesFacturas::CONCEPTOS,
+            'locales_app' => array_map(function ($l) { return $l['nombre']; }, $c['locales']),
             'script' => AlquileresImputaciones::SCRIPT,
             'reemplazados' => count($c['reemplazados'])
         ];

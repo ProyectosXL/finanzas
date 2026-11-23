@@ -272,6 +272,14 @@
             <?php include __DIR__ . '/parametros_alquileres.php'; ?>
         </div>
 
+        <!-- Parámetros de Llaves y Renovaciones: generales, por operador, por
+             local, ya pagadas, obras, aperturas y compromisos. Va pegada a
+             Alquileres, de la que toma el operador de cada local. Mismo criterio
+             que los anteriores: archivo y JS propios, y clases con prefijo pll-. -->
+        <div class="tab-pane fade" id="paneParamLlaves_renov" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'LLAVES_RENOV'); ?>>
+            <?php include __DIR__ . '/parametros_llaves.php'; ?>
+        </div>
+
         <!-- Parámetros del módulo Compras Exterior (código COMPRAS_PROY): cuántos meses, cuánta
              historia para la cuota y los tres días de la cadena de fechas.
              Mismo criterio que los anteriores: archivo y JS propios, y clases

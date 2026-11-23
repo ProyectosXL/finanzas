@@ -199,7 +199,7 @@ foreach (glob(__DIR__ . '/../Controller/*Controller.php') as $archivo) {
     }
 }
 
-chequear('se leyeron los dieciseis controllers', 16, count($controllers));
+chequear('se leyeron los diecisiete controllers', 17, count($controllers));
 chequear('ninguna accion sin declarar como lectura o escritura', [], $sinMapear);
 chequear('ninguna accion declarada que ya no exista', [], $sobrantes);
 
@@ -281,13 +281,21 @@ $claves = function ($archivo) {
 $enEdicion = $claves('cashflow_permisos_edicion.sql');
 $enAlquileres = $claves('cashflow_alquileres_permisos.sql');
 $enCalendario = $claves('cashflow_calendario_permisos.sql');
-$enScript = array_values(array_unique(array_merge($enEdicion, $enAlquileres, $enCalendario)));
+$enLlaves = $claves('cashflow_llaves_permisos.sql');
+$enScript = array_values(array_unique(array_merge($enEdicion, $enAlquileres, $enCalendario, $enLlaves)));
 sort($enScript);
 
 chequear('las mismas claves en los scripts y en el codigo', $esperadas, $enScript);
 chequear('ninguna clave en dos scripts', [], array_values(array_unique(array_merge(
     array_intersect($enEdicion, $enAlquileres), array_intersect($enEdicion, $enCalendario),
-    array_intersect($enAlquileres, $enCalendario)))));
+    array_intersect($enAlquileres, $enCalendario), array_intersect($enLlaves, array_merge($enEdicion, $enAlquileres, $enCalendario))))));
+
+sort($enLlaves);
+chequear('el de Llaves y Renovaciones trae sus dos claves de edicion',
+    ['cashflow.editar.llaves_renov', 'cashflow.editar.parametros.llaves_renov'], $enLlaves);
+$scriptLl = file_get_contents(__DIR__ . '/../sql/cashflow_llaves_permisos.sql');
+chequear('y la de lectura de la pestaña', true, strpos($scriptLl, "('cashflow.tab.llaves_renov'") !== false);
+chequear('y no asigna ningun rol', false, (bool) preg_match('/INSERT\s+INTO\s+dbo\.FP_ROL_PERMISO/i', $scriptLl));
 
 /* CALENDARIO VA EN SU SCRIPT, que la asigna a quien hoy edita Generales: el
    cronograma, el horizonte y los feriados de comercio se editaban con ese
@@ -480,9 +488,9 @@ foreach (array_keys($tabsConEscritura) as $tab) {
     }
 }
 
-/* Catorce desde que Alquileres tiene escrituras propias: la columna de su
+/* Quince desde Llaves y Renovaciones ("Ya pagada" en su solapa Contratos). Catorce desde que Alquileres tiene escrituras propias: la columna de su
    exclusion en el Maestro y, despues, sus facturas. */
-chequear('las catorce pestañas', 14, count($tabsConEscritura));
+chequear('las quince pestañas', 15, count($tabsConEscritura));
 chequear('todas con data-puede-editar', [], $sinAtributo);
 
 $param = file_get_contents(__DIR__ . '/../Tabs/parametros.php');

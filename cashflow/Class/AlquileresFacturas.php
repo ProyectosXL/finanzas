@@ -86,6 +86,13 @@ class AlquileresFacturas {
     /** Una cuota excluida a mano en Alquileres -> Facturas (no se paga por aca) */
     const A_EXCLUIDA_FACTURA = 'ALQUILERES_EXCLUIDA_FACTURA';
     const A_PROV_LOCALES = 'PROV_LOCALES';
+    /**
+     * Una cuota marcada como llave o renovacion en Alquileres -> Facturas
+     * (LlavesFacturas, script 68): sale de Alquileres, NO vuelve a Proveedores
+     * Locales y la cuenta Llaves y Renovaciones, que reemplaza con ella lo
+     * proyectado de su local, concepto y renovacion.
+     */
+    const A_LLAVES = 'LLAVES';
 
     /** Por que la condicion de seguridad no se cumple */
     const SIN_MODULO = 'SIN_MODULO';
@@ -140,10 +147,11 @@ class AlquileresFacturas {
      * @param array $condicion Lo de condicion()
      * @param array $facturasExcluidas claveCuota() => fila de la exclusion: las cuotas
      *        excluidas a mano en Alquileres -> Facturas (script 61)
+     * @param array $facturasLlaves claveCuota() => marca: las cuotas marcadas como llave (script 68)
      * @return array ['razones' => [cod => true], 'excluidos' => [cod => true],
      *                'facturas_excluidas' => [claveCuota => fila], 'condicion' => array]
      */
-    public static function contexto($razones, $excluidos, $condicion, $facturasExcluidas = []) {
+    public static function contexto($razones, $excluidos, $condicion, $facturasExcluidas = [], $facturasLlaves = []) {
         $set = function ($lista) {
             $s = [];
 
@@ -162,6 +170,7 @@ class AlquileresFacturas {
             'razones' => $set($razones),
             'excluidos' => $set($excluidos),
             'facturas_excluidas' => is_array($facturasExcluidas) ? $facturasExcluidas : [],
+            'facturas_llaves' => is_array($facturasLlaves) ? $facturasLlaves : [],
             'condicion' => $condicion
         ];
     }
@@ -209,6 +218,8 @@ class AlquileresFacturas {
      *                   Alquileres: no entra a ningun lado, a proposito
      *   A_EXCLUIDA_FACTURA  es de alquiler y ESTA CUOTA se excluyo a mano (no se
      *                   paga por aca): tampoco entra a ningun lado
+     *   A_LLAVES        es de alquiler y ESTA CUOTA se marco como llave: la cuenta
+     *                   Llaves y Renovaciones, no Alquileres ni Proveedores Locales
      *   A_ALQUILERES    es de alquiler: la gestiona la pestaña Alquileres
      *
      * @param array $item
@@ -226,7 +237,13 @@ class AlquileresFacturas {
             return self::A_EXCLUIDA;
         }
 
-        return isset($ctx['facturas_excluidas'][self::claveCuota($item)]) ? self::A_EXCLUIDA_FACTURA : self::A_ALQUILERES;
+        $clave = self::claveCuota($item);
+
+        if (isset($ctx['facturas_llaves'][$clave])) {
+            return self::A_LLAVES;
+        }
+
+        return isset($ctx['facturas_excluidas'][$clave]) ? self::A_EXCLUIDA_FACTURA : self::A_ALQUILERES;
     }
 
     /**
@@ -234,11 +251,11 @@ class AlquileresFacturas {
      *
      * @param array $items
      * @param array $ctx
-     * @return array [A_ALQUILERES => [], A_EXCLUIDA => [], A_EXCLUIDA_FACTURA => [], A_PROV_LOCALES => []]
+     * @return array [A_ALQUILERES => [], A_EXCLUIDA => [], A_EXCLUIDA_FACTURA => [], A_LLAVES => [], A_PROV_LOCALES => []]
      */
     public static function partir($items, $ctx) {
         $out = [self::A_ALQUILERES => [], self::A_EXCLUIDA => [], self::A_EXCLUIDA_FACTURA => [],
-                self::A_PROV_LOCALES => []];
+                self::A_LLAVES => [], self::A_PROV_LOCALES => []];
 
         foreach (is_array($items) ? $items : [] as $item) {
             $out[self::destino($item, $ctx)][] = $item;
@@ -355,13 +372,14 @@ class AlquileresFacturas {
         $alq = $partes[self::A_ALQUILERES];
         $exc = $partes[self::A_EXCLUIDA];
         $excF = $partes[self::A_EXCLUIDA_FACTURA] ?? [];
+        $ll = $partes[self::A_LLAVES] ?? [];
 
-        if (empty($alq) && empty($exc) && empty($excF)) {
+        if (empty($alq) && empty($exc) && empty($excF) && empty($ll)) {
             return [];
         }
 
-        $texto = (count($alq) + count($exc) + count($excF)) . ' factura(s) de alquiler por '
-            . $plata($suma($alq) + $suma($exc) + $suma($excF))
+        $texto = (count($alq) + count($exc) + count($excF) + count($ll)) . ' factura(s) de alquiler por '
+            . $plata($suma($alq) + $suma($exc) + $suma($excF) + $suma($ll))
             . ' no se muestran acá ni suman en Cuentas a Pagar Locales: son de razones sociales dadas de alta '
             . 'en Parámetros › Alquileres y se gestionan en la pestaña Alquileres.';
 
@@ -373,6 +391,11 @@ class AlquileresFacturas {
         if (!empty($excF)) {
             $texto .= ' ' . count($excF) . ' por ' . $plata($suma($excF)) . ' se excluyeron a mano en Alquileres › '
                 . 'Facturas (no se pagan por ese circuito) y tampoco suman en ningún lado.';
+        }
+
+        if (!empty($ll)) {
+            $texto .= ' ' . count($ll) . ' por ' . $plata($suma($ll)) . ' están marcadas como llave o renovación: las '
+                . 'cuenta la pestaña Llaves y Renov. Contratos.';
         }
 
         return [Aviso::nuevo(Aviso::INFO, $texto)];

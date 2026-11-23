@@ -191,7 +191,8 @@ class ProveedoresProvider extends CashflowProvider {
      * sql/cashflow_alquileres_fila.sql lo verifica.
      *
      * Incluye las de proveedores excluidos de Alquileres: tampoco son de este
-     * modulo, y no vuelven a el por estar excluidas.
+     * modulo, y no vuelven a el por estar excluidas. Y las marcadas como llave
+     * (AlquileresFacturas::A_LLAVES), que suma Llaves y Renovaciones.
      */
     const SERIE_ALQUILERES = 'PAGOS_ALQUILERES';
 
@@ -247,7 +248,7 @@ class ProveedoresProvider extends CashflowProvider {
 
         $alquiler = array_map(function ($i) { return ['ALQUILER' => true] + $i; },
             array_merge($partes[AlquileresFacturas::A_ALQUILERES], $partes[AlquileresFacturas::A_EXCLUIDA],
-                $partes[AlquileresFacturas::A_EXCLUIDA_FACTURA]));
+                $partes[AlquileresFacturas::A_EXCLUIDA_FACTURA], $partes[AlquileresFacturas::A_LLAVES]));
 
         return $this->repartir($h, array_merge($items, $alquiler));
     }

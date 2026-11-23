@@ -104,6 +104,13 @@ class AlquileresImputacion {
     const EXCLUIDA = 'EXCLUIDA';
 
     /**
+     * Marcada como llave o renovacion (LlavesFacturas, script 68): la cuenta
+     * Llaves y Renovaciones. En Alquileres no suma; se ve con "Ver excluidas"
+     * para poder deshacer la marca.
+     */
+    const LLAVE = 'LLAVE';
+
+    /**
      * Emitida en el mes en curso y ya cancelada en Tango, SIN IMPUTAR. No genera
      * pago (ya salio la plata), pero la proyeccion del mes sigue en el flujo
      * hasta que se impute: imputada y pagada, la reemplaza.
@@ -119,7 +126,8 @@ class AlquileresImputacion {
         self::SIN_DATO => 'Sin dato de Tango',
         self::SUSPENDIDA => 'Imputación suspendida',
         self::PAGADA_SIN_IMPUTAR => 'Pagada, sin imputar',
-        self::EXCLUIDA => 'Excluida'
+        self::EXCLUIDA => 'Excluida',
+        self::LLAVE => 'Llave / renovación'
     ];
 
     /** De donde sale el vencimiento a considerar de una cuota (origenVto()) */
@@ -614,7 +622,9 @@ class AlquileresImputacion {
      *     'tipos' => ID => nombre de TODOS los tipos de retencion (opcional),
      *     'nombres_locales' => nro => nombre (opcional),
      *     'excluidas_factura' => las cuotas de destino A_EXCLUIDA_FACTURA (opcional),
-     *     'exclusiones' => claveCuota => fila de la exclusion: motivo, quien, cuando (opcional)
+     *     'exclusiones' => claveCuota => fila de la exclusion: motivo, quien, cuando (opcional),
+     *     'llaves_factura' => las cuotas de destino A_LLAVES (opcional),
+     *     'llaves' => claveCuota => marca de LlavesFacturas (opcional)
      * ]
      * @return array ['pagos', 'reemplazados', 'facturas', 'imputaciones', 'pagadas_nuevas',
      *                'fuera_horizonte', 'kpis', 'avisos']
@@ -865,6 +875,23 @@ class AlquileresImputacion {
                     'a_pagar' => 0.0,
                     'excluida' => ($x === null) ? null : ['motivo' => $x['MOTIVO'], 'usuario' => $x['USUARIO_ALTA'],
                                                           'fecha' => $x['FECHA_ALTA']],
+                    'fecha_pagada' => $p['FECHA_CANCELADO'] ?? null
+                ]);
+        }
+
+        /* LAS MARCADAS COMO LLAVE: las cuenta Llaves y Renovaciones; aca no
+           suman y se ven con "Ver excluidas", con el local, el concepto y el mes,
+           para poder deshacer la marca. */
+        foreach ($e['llaves_factura'] ?? [] as $p) {
+            $c = self::claveCuota($p);
+            $m = $e['llaves'][$c] ?? null;
+            $filas[] = array_merge(self::filaFactura($p, $e['vtos'], $dias, $e['habiles'], $hoy, self::LLAVE,
+                null, null, null), [
+                    'a_pagar' => 0.0,
+                    'llave' => ($m === null) ? null : ['id' => $m['ID'], 'nro' => $m['NRO_SUCURS'],
+                        'local' => $nombresLoc[$m['NRO_SUCURS']] ?? ('Local ' . $m['NRO_SUCURS']), 'concepto' => $m['CONCEPTO'],
+                        'mes' => $m['MES'], 'pagos' => count($m['PAGOS']), 'usuario' => $m['USUARIO_ALTA'],
+                        'fecha' => $m['FECHA_ALTA']],
                     'fecha_pagada' => $p['FECHA_CANCELADO'] ?? null
                 ]);
         }

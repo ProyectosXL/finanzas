@@ -262,6 +262,23 @@ class Parametros {
                controller del modulo. Mismo criterio que LOGISTICA y TARJETAS. */
             'endpoint' => 'Controller/AlquileresController.php'
         ],
+        /* VA PEGADA A ALQUILERES: el operador de cada local es su razon social
+           principal de ahi, y la llave se estima con el alquiler que esa
+           pestaña proyecta. El codigo es el de la pestaña (llaves_renov) para
+           que el permiso sea cashflow.editar.parametros.llaves_renov. */
+        'LLAVES_RENOV' => [
+            'nombre' => 'Llaves y Renovaciones',
+            'icono' => 'fa-key',
+            'descripcion' => 'Lo que la proyección de llaves, renovaciones, obras y aperturas necesita y la '
+                . 'app de alquileres no tiene: el % de llave, las cuotas, los cortes de segmento por m² y los '
+                . 'costos en dólares; por operador, el % de otros gastos, el escribano y el % de impuestos; por '
+                . 'local, si renueva y en qué condiciones, y lo que ya se pagó; las obras de imagen, las '
+                . 'aperturas y los compromisos pactados. Alimentan la pestaña RRHH y Operativos › Llaves y '
+                . 'Renov. Contratos. Los contratos (vigencia, llave, comisiones, FPC) salen de la app de '
+                . 'alquileres, que el cashflow sólo lee',
+            'secciones' => [],
+            'endpoint' => 'Controller/LlavesController.php'
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',
