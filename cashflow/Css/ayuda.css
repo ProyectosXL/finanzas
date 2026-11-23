@@ -423,6 +423,21 @@ body[data-tab="ayuda"] .btn-ayuda-pestana {
     box-shadow: var(--shadow-md);
 }
 
+/* El icono de cada tarjeta de Primeros pasos: un cuadrado suave, como los de
+   las tarjetas KPI de las pestañas. */
+.ayuda-tarjeta-icono {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #eef3ff;
+    color: var(--primary-color);
+    font-size: 16px;
+    margin-bottom: 4px;
+}
+
 .ayuda-tarjeta-titulo {
     font-weight: 700;
 }

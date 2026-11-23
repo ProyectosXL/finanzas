@@ -2,7 +2,7 @@
 titulo: Permisos y parámetros
 pestana:
 categoria: General
-estado: en_revision
+estado: completa
 actualizado: 2026-11-23
 usuarios: Tesorería, Administración, Dirección
 bajada: Quién puede ver y quién puede editar cada pestaña, dónde queda registrado quién cambió qué, y qué se configura en Parámetros.

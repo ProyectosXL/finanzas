@@ -187,3 +187,15 @@ foreach (['proveedores_exterior', 'crono_nacionalizacion'] as $tabComex) {
         strpos($srcTab, 'help_modal_comex') !== false || strpos($srcTab, 'btn-help-float') !== false);
     chequear($tabComex . ' tiene su articulo', true, file_exists(__DIR__ . '/../Ayuda/' . $tabComex . '.md'));
 }
+
+seccion('cada tarjeta de Primeros pasos lleva su icono');
+
+$conIcono = Ayuda::centro($menu, $articulos)['generales'];
+chequear('el del tablero, el de los avisos', ['fa-table-cells', 'fa-triangle-exclamation'],
+    array_column($conIcono, 'icono'));
+chequear('un general sin icono propio lleva el libro', Ayuda::ICONO_GENERAL,
+    (Ayuda::centro($menu, ['general_nuevo' => artCentro(['titulo' => 'x', 'pestana' => '', 'categoria' => 'General',
+        'estado' => 'completa', 'actualizado' => '2026-11-23', 'usuarios' => 'x'], "## A\nx\n")])['generales'][0]['icono']));
+chequear('los cuatro generales tienen el suyo', [], array_values(array_diff(Ayuda::GENERALES, array_keys(Ayuda::ICONOS))));
+chequear('y la tarjeta lo dibuja', true,
+    strpos(file_get_contents(__DIR__ . '/../Js/ayuda.js'), '<span class="ayuda-tarjeta-icono" aria-hidden="true"><i class="fas \'') !== false);

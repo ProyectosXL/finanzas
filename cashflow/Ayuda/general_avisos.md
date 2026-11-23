@@ -2,7 +2,7 @@
 titulo: Los avisos
 pestana:
 categoria: General
-estado: en_revision
+estado: completa
 actualizado: 2026-11-23
 usuarios: Tesorería, Administración, Dirección
 bajada: Qué dice cada nivel de aviso, dónde aparecen y cómo se corrige lo que avisan.

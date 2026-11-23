@@ -2,7 +2,7 @@
 titulo: Llaves y Renov. Contratos
 pestana: llaves_renov
 categoria: RRHH y Operativos
-estado: en_revision
+estado: completa
 actualizado: 2026-11-23
 usuarios: Tesorería, Administración
 bajada: Cuánto se paga de llave y otros gastos en cada renovación de contrato, de obras de imagen, de aperturas y de lo pactado a mano, y en qué fecha.

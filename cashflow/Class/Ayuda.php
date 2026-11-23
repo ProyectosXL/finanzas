@@ -55,6 +55,23 @@ class Ayuda {
         'general_permisos_parametros'
     ];
 
+    /**
+     * El icono de cada general en las tarjetas de "Primeros pasos" (Font
+     * Awesome 6.4.2 free, el que carga index.php). El del tablero es el mismo
+     * del menu para Cashflow, y el de los avisos, el de atencion del panel de
+     * avisos: asi la tarjeta se reconoce por lo que ya se ve en la app. Un
+     * general sin icono aca lleva el libro.
+     */
+    const ICONOS = [
+        'general_tablero' => 'fa-table-cells',
+        'general_real_proyectado' => 'fa-scale-balanced',
+        'general_avisos' => 'fa-triangle-exclamation',
+        'general_permisos_parametros' => 'fa-user-lock'
+    ];
+
+    /** El icono de un general que no esta en ICONOS */
+    const ICONO_GENERAL = 'fa-book';
+
     /* ====================================================================
        EL DISCO
        ==================================================================== */
@@ -260,7 +277,8 @@ class Ayuda {
             $generales[] = [
                 'articulo' => $nombre,
                 'titulo' => (string) ($meta['titulo'] ?? $nombre),
-                'bajada' => AyudaRender::enLinea($meta['bajada'] ?? '')
+                'bajada' => AyudaRender::enLinea($meta['bajada'] ?? ''),
+                'icono' => self::ICONOS[$nombre] ?? self::ICONO_GENERAL
             ] + self::estadoDe($articulos[$nombre]['art']);
         }
 

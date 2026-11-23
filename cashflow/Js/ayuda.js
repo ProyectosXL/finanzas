@@ -213,7 +213,8 @@ var AyudaCentro = (function() {
             var g = centro.generales[i];
 
             html += '<div class="col-md-6 col-xl-3"><a class="ayuda-tarjeta" href="' + esc(direccion(g.articulo))
-                + '" data-ayuda-ir="' + esc(g.articulo) + '"><span class="ayuda-tarjeta-titulo">' + esc(g.titulo)
+                + '" data-ayuda-ir="' + esc(g.articulo) + '"><span class="ayuda-tarjeta-icono" aria-hidden="true"><i class="fas '
+                + esc(g.icono) + '"></i></span><span class="ayuda-tarjeta-titulo">' + esc(g.titulo)
                 + '</span><span class="ayuda-tarjeta-bajada">' + g.bajada + '</span>'
                 + (g.estado !== 'completa' ? chip(g.estado, g.etiqueta) : '') + '</a></div>';
         }
