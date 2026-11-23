@@ -66,6 +66,9 @@ class AyudaRender {
     private $enlaces = [];
     private $imagenes = [];
 
+    /** Cuantas imagenes habia al empezar la seccion que se esta dibujando. Ver marcas(). */
+    private $imagenesAntesDeLaSeccion = 0;
+
     /**
      * Un articulo entero, seccion por seccion.
      *
@@ -98,6 +101,7 @@ class AyudaRender {
         $secciones = [];
 
         foreach ($art['secciones'] as $s) {
+            $r->imagenesAntesDeLaSeccion = count($r->imagenes);
             $ancla = $r->anclas[$s['linea']];
             $html = '<section class="ayuda-seccion" data-ancla="' . self::esc($ancla) . '">'
                 . '<h2 id="' . self::esc($ancla) . '">' . $r->texto($s['titulo']) . '</h2>'
@@ -150,9 +154,27 @@ class AyudaRender {
     public static function textoPlano($lineas) {
         $partes = [];
         $comentario = false;
+        $vioImagen = false;
+        $enMarcasOcultas = false;
 
         foreach ($lineas as $par) {
             $l = trim($par[1]);
+
+            /* Las marcas sin una captura antes no se ven (ver especial()), asi
+               que tampoco se buscan. */
+            if (strpos($l, '![') !== false) {
+                $vioImagen = true;
+            }
+
+            if ($enMarcasOcultas) {
+                $enMarcasOcultas = !preg_match('/^:::\s*$/', $l);
+                continue;
+            }
+
+            if (!$vioImagen && preg_match('/^:::marcas\s*$/', $l)) {
+                $enMarcasOcultas = true;
+                continue;
+            }
 
             if ($comentario) {
                 $comentario = strpos($l, '-->') === false;
@@ -536,7 +558,15 @@ class AyudaRender {
                 return $this->pasos($lineas, $num);
 
             case 'marcas':
-                return $this->marcas($lineas, $num);
+                /* LAS MARCAS SIN SU CAPTURA NO SE MUESTRAN. Son las letras que
+                   senalan zonas de una imagen: sin la imagen, "A: los avisos"
+                   no senala nada y se lee como una lista suelta. El bloque se
+                   escribe igual -y se valida igual, abajo- para que quede listo
+                   el dia que llegue la captura, y aparece solo cuando hay una
+                   imagen antes, en la misma seccion. */
+                $html = $this->marcas($lineas, $num);
+
+                return $this->hayImagenAntes($num) ? $html : '';
 
             case 'pregunta':
                 if ($args === '' || !isset($this->anclas[$num])) {
@@ -649,6 +679,19 @@ class AyudaRender {
 
         return $html . '</ol>' . ($resultado !== null
             ? '<p class="ayuda-resultado"><strong>Resultado:</strong> ' . $resultado . '</p>' : '');
+    }
+
+    /**
+     * Si en la seccion que se esta dibujando hay una imagen antes del renglon.
+     */
+    private function hayImagenAntes($num) {
+        foreach (array_slice($this->imagenes, $this->imagenesAntesDeLaSeccion) as $img) {
+            if ($img['linea'] < $num) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Las marcas naranjas de una captura: A, B, C… en orden */
