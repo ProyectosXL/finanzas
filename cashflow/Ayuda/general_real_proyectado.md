@@ -76,7 +76,7 @@ Algunas pestañas dicen de dónde sale cada importe con un **chip chico al lado 
 - En **Alquileres**: real con el período cerrado, cargado en la app con el período abierto, calculado con la venta real, estimado (o estimado por inflación desde un mes), y la factura imputada.
 - En **Llaves y Renov. Contratos**: contrato cargado, estimado, manual o factura. **Lo estimado va en itálica y atenuado.**
 
-El detalle de cada uno está en su ayuda, por ejemplo **Llaves y Renov. Contratos**.
+El detalle de cada uno está en su ayuda, por ejemplo [Llaves y Renov. Contratos](ayuda:llaves_renov).
 
 ## Lo vencido
 
@@ -92,7 +92,7 @@ Cuando alguien marca un pago como ya hecho, ese importe **sale de la proyección
 
 En **Proveedores Exterior** y **Crono Nacionalización** el panel de avisos dice cuánto salió por eso, y lo marcado se esconde detrás del interruptor **Ver pagados** (en Crono Nacionalización, **Ver pagadas**), que dice al lado cuántos esconde. Prendelo para verlos y destildar el que se haya marcado por error. Además, **Proveedores Exterior** proyecta sólo lo que falta pagar: un pago cargado en Comercio Exterior ya baja el importe, sin que nadie marque nada.
 
-En **Llaves y Renov. Contratos**, una renovación se marca con **Ya pagada** desde la solapa **Contratos**. Ver **Llaves y Renov. Contratos**.
+En **Llaves y Renov. Contratos**, una renovación se marca con **Ya pagada** desde la solapa **Contratos**. Ver [Llaves y Renov. Contratos](ayuda:llaves_renov).
 
 ## Pestañas que todavía no muestran datos reales
 

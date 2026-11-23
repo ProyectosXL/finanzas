@@ -75,7 +75,7 @@ Los parámetros están agrupados por la pestaña que afectan. Ninguno está escr
 | **Prov. Locales** | Las retenciones de las facturas que se pagan por orden de pago, el excedente permitido al importar pagos y las listas para clasificar a cada proveedor. |
 | **Tarjetas** | El maestro de tarjetas: tipo, banco, titular, porcentaje de cobertura y día de vencimiento del resumen. |
 | **Alquileres** | Lo que la proyección de alquileres necesita y la app de alquileres no tiene: vencimiento, razones sociales, datos de cada local y pagos extraordinarios. |
-| **Llaves y Renovaciones** | Lo que la proyección de llaves, renovaciones, obras y aperturas necesita y la app de alquileres no tiene. Ver **Llaves y Renov. Contratos**. |
+| **Llaves y Renovaciones** | Lo que la proyección de llaves, renovaciones, obras y aperturas necesita y la app de alquileres no tiene. Ver [Llaves y Renov. Contratos](ayuda:llaves_renov). |
 | **Cashflow** | Qué secciones y filas tiene el tablero, en qué orden, y de qué módulo saca sus datos cada fila. |
 
 ### Parámetros › Cashflow
