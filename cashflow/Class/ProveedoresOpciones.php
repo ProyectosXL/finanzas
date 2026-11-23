@@ -426,10 +426,19 @@ class ProveedoresOpciones {
      * caja: con un strcmp pelado, 'Ñandu' y 'Óptica' se van al final de la
      * lista por su codigo de caracter, que es justo donde nadie los busca.
      *
+     * ES PUBLICA PORQUE LA USA LA BUSQUEDA DE LA AYUDA (AyudaArticulo::
+     * normalizar()), por una propiedad que normalizarTitulo() no tiene: NO
+     * CAMBIA EL LARGO del texto. Cada letra acentuada se cambia por UNA letra,
+     * asi que una coincidencia encontrada en la clave cae en la misma posicion
+     * del texto original y se puede resaltar ahi. normalizarTitulo() saca
+     * espacios y simbolos: sirve para decidir si dos valores son el mismo, no
+     * para buscar una frase y marcarla. Asi el modulo tiene un solo criterio de
+     * "sin acentos y sin mayusculas", en las listas y en la ayuda.
+     *
      * @param string $valor
      * @return string
      */
-    private static function claveOrden($valor) {
+    public static function claveOrden($valor) {
         $v = mb_strtoupper(trim((string) $valor), 'UTF-8');
 
         return str_replace(
