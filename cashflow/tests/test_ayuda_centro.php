@@ -176,3 +176,14 @@ chequear('sin articulo, lo dice y ofrece el Centro', true,
     strpos($ayudaJs, 'Esta pestaña todavía no tiene ayuda.') !== false);
 chequear('en el Centro de ayuda el boton no se ve', true,
     strpos($ayudaCss, "body[data-tab=\"ayuda\"] .btn-ayuda-pestana {\n    display: none;") !== false);
+
+seccion('el modal de ayuda de Comex se reemplazo por el boton comun');
+
+chequear('el modal ya no existe', false, file_exists(__DIR__ . '/../Components/help_modal_comex.php'));
+
+foreach (['proveedores_exterior', 'crono_nacionalizacion'] as $tabComex) {
+    $srcTab = file_get_contents(__DIR__ . '/../Tabs/' . $tabComex . '.php');
+    chequear($tabComex . ' no lo incluye ni tiene su boton flotante', false,
+        strpos($srcTab, 'help_modal_comex') !== false || strpos($srcTab, 'btn-help-float') !== false);
+    chequear($tabComex . ' tiene su articulo', true, file_exists(__DIR__ . '/../Ayuda/' . $tabComex . '.md'));
+}

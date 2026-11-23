@@ -1014,7 +1014,7 @@ La pestaña suma el de *falta `sql/cashflow_comex_nac_pago.sql`* (warning), como
 
 - **La marca de la fila**, en la columna *Dólar aplicado*: BCRA lleva **borde verde lleno**, el ícono de banco y, debajo del valor, `BCRA dd/mm`. Las otras tres no cambiaron: la curva sin marca, la aproximada con borde punteado violeta y el override naranja con lápiz. En Compras Proyectadas, el mismo ícono de banco al lado de la cotización.
 - **El tooltip dice qué dólar se usó**: *"Dólar BCRA vendedor del 28/10/2026: $ 1.480,00. …"* o *"Dólar futuro ROFEX de Nov-26 (DLR/NOV26)."* Lo arma `DolarFuturo::explicar()`.
-- **El cartel de origen** de las tres pantallas suma la regla en una línea (`DolarFuturo::explicarRegla()`), con la fecha y el valor de la cotización BCRA. La ayuda de Comex, pestaña *El dólar*, la explica y suma la marca.
+- **El cartel de origen** de las tres pantallas suma la regla en una línea (`DolarFuturo::explicarRegla()`), con la fecha y el valor de la cotización BCRA. La ayuda de Proveedores Exterior (`Ayuda/proveedores_exterior.md`, sección *Con qué dólar se valúa*) la explica, con la marca.
 
 ### La curva ROFEX desactualizada
 
@@ -1096,7 +1096,7 @@ Medido contra la base el **31/10/2026** (sábado), sólo lectura, con la misma c
 - **El tooltip** del dólar aplicado y del importe en pesos: *"Dólar divisa vendedor del 05/11/2026: $ 1.546,00. …"* (`DolarFuturo::explicar()`).
 - **La marca de la fila**: borde **azul** lleno, el ícono de transferencia (`fa-money-bill-transfer`) y, debajo del valor, `Divisa dd/mm`. El BCRA sigue con borde verde y el banco; la curva sin marca; la aproximada con borde punteado violeta; el override naranja con lápiz.
 - **La línea de la regla** de la pestaña: *"Las nacionalizaciones de los próximos 7 días —hasta el 13/11/2026— y las vencidas van a dólar divisa vendedor del 05/11/2026 ($ 1.546,00); las posteriores, a dólar futuro ROFEX del mes en que caen."*
-- **La ayuda de Comex**, pestaña *El dólar*, suma el dólar divisa y su marca.
+- **La ayuda de Crono Nacionalización** (`Ayuda/crono_nacionalizacion.md`, *Con qué dólar se valúa la nacionalización*) explica el dólar divisa y su marca. Hasta `feature/cashflow-centro-ayuda` lo decía la pestaña *El dólar* del modal de ayuda compartido de Comex, que se retiró: cada pestaña tiene su artículo y se abre con el botón **Ayuda** del encabezado.
 
 ### Cuánto se movió el tablero
 
