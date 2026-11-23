@@ -117,7 +117,7 @@ Los operadores son las razones sociales dadas de alta en Alquileres.
 
 ### 2.c Por local
 
-Sólo los que tienen un contrato que vence dentro del horizonte o ya vencido, sin renovación cargada. Cuelga del **contrato que vence** (`ID_CONTRATO`), así que sigue ahí cuando administración carga el contrato nuevo. **Lo que define cuánto** —**No renueva**, **llave a mano**, **% propio** y **meses**— deja de aplicarse en ese momento: manda el importe real del contrato (con la marca de llave 1, sus meses y el % del operador o el general). **Lo que define cómo se paga** —**cuotas** y **mes de la primera cuota**— sigue valiendo, también sobre el contrato cargado: es una forma de pago acordada, no una estimación. La fila deja de verse en la tabla cuando la renovación se carga, pero lo cargado en esas dos columnas sigue aplicándose.
+Sólo los que tienen un contrato que vence dentro del horizonte o ya vencido, sin renovación cargada. Cuelga del **contrato que vence** (`ID_CONTRATO`), así que sigue ahí cuando administración carga el contrato nuevo. **Lo que define cuánto** —**No renueva**, **llave a mano**, **% propio** y **meses**— deja de aplicarse en ese momento: manda el importe real del contrato (con la marca de llave 1, sus meses y el % del operador o el general). **Lo que define cómo se paga** —**cuotas** y **mes de la primera cuota**— sigue valiendo, también sobre el contrato cargado: es una forma de pago acordada, no una estimación. **La tabla muestra también las renovaciones cargadas** (con pagos por delante): las dos columnas de cómo se paga se editan, y las cuatro de cuánto se ven deshabilitadas, con el tooltip *manda el contrato*.
 
 **No renueva** (con motivo obligatorio), **llave a mano** (reemplaza el cálculo; origen *Manual*), **% propio**, **meses del contrato nuevo** (por defecto, los del último contrato con llave), **cuotas** y **mes de la primera cuota**.
 
@@ -179,7 +179,7 @@ Su fecha y su monto, tal cual (origen *Manual*).
 - **Una factura marcada como llave**: todo lo proyectado de ese concepto en esa renovación (parte 4).
 - **Los pagos de hoy o anteriores no se proyectan.** Una cuota de un contrato firmado que ya pasó, del mes en curso o el anterior, sin factura ni marca, se avisa.
 
-Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factura*) y la cuenta en el tooltip: *«25% (general) × $ 18.927.137 (1 + 2 + 8 de enero de 2027…) × 41 meses = $ 194.003.154, cuota 2 de 4. Neto … + 21% de impuestos … − 1% de retención … = a pagar …»*.
+Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factura*) y la cuenta en el tooltip: *«25% (general) × $ 18.927.137 (alquiler + complementario + VMA de enero de 2027…) × 41 meses = $ 194.003.154, cuota 2 de 4. Neto … + 21% de impuestos … − 1% de retención … = a pagar …»*.
 
 ---
 

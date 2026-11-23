@@ -64,7 +64,7 @@ Lo que se cargó para un local en Parámetros vale para su renovación. Cuando a
 - **Deja de valer lo que dice cuánto**: **No renueva**, **Llave a mano ($)**, **% propio** y **Meses**. Manda el importe del contrato.
 - **Sigue valiendo lo que dice cómo se paga**: **Cuotas** y **1.ª cuota**, también sobre el contrato cargado.
 
-En la sección **Por local** la fila deja de verse cuando la renovación se carga, pero lo que tenía en **Cuotas** y **1.ª cuota** se sigue aplicando.
+En la sección **Por local** la renovación cargada sigue en la tabla, con **renueva con el #…** debajo del contrato. Ahí se pueden cambiar **Cuotas** y **1.ª cuota**; las otras columnas se ven deshabilitadas, y al pasar el mouse dicen que manda el contrato.
 
 ### La renovación estimada
 
@@ -265,7 +265,7 @@ Resultado: la llave y los otros gastos de los locales de ese operador se proyect
 
 :::pasos
 1. Andá a **Parámetros › Llaves y Renovaciones**, sección **Por local**.
-2. Buscá el local (sólo están los que vencen en el horizonte o ya vencieron, sin renovación cargada).
+2. Buscá el local (están los que vencen en el horizonte o ya vencieron; los que ya tienen la renovación cargada tienen esta columna deshabilitada).
 3. Escribí el motivo en la columna **No renueva** y tildá la casilla.
 4. Salí del campo: se guarda con el motivo.
 Resultado: el local pasa a **No renueva** en la solapa Contratos y no se estima nada de esa renovación.

@@ -117,3 +117,6 @@ chequear('la factura no suma una renovacion de mas', 2, $pF['kpis']['renovacione
 chequear('y su importe esta en la suma, con lo proyectado', round(array_sum(array_column($llOt, 'importe')), 2),
     $pF['kpis']['renovaciones_importe']);
 chequear('que incluye la factura', true, $pF['kpis']['renovaciones_importe'] - $p['kpis']['renovaciones_importe'] >= 500000.0 - 0.01);
+
+chequear('el tooltip nombra los conceptos del alquiler', true,
+    strpos($cel['tooltip'], 'alquiler + complementario + VMA de') !== false);

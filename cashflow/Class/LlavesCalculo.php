@@ -920,7 +920,10 @@ class LlavesCalculo {
         $llave = round($pct / 100 * $alq * $meses, 2);
 
         return ['llave' => $llave, 'cuenta' => self::pct($pct) . ' (' . $origenPct . ') × ' . self::plata($alq)
-            . ' (1 + 2 + 8 de ' . AlquileresImputacion::mesLargo($mes1) . ', como lo proyecta Alquileres, neto) × '
+            /* Los conceptos por su nombre y no por su numero (1 + 2 + 8): el
+               tooltip lo lee quien usa la pantalla, no quien conoce la app. */
+            . ' (alquiler + complementario + VMA de ' . AlquileresImputacion::mesLargo($mes1)
+            . ', como lo proyecta Alquileres, neto) × '
             . $meses . ' meses (' . $deMeses . ') = ' . self::plata($llave)];
     }
 
