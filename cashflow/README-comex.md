@@ -347,7 +347,7 @@ En los dos casos el universo (`..._TODO`) **no se movió**, el invariante cerró
 ### Cómo se usa
 
 - **El tilde actúa, no selecciona.** A diferencia del de Echeqs —donde el check elige filas y un botón confirma el lote con su motivo— acá cada clic guarda. La diferencia está en qué se afirma: allá es una decisión discutible que saca plata del disponible y necesita un motivo por escrito; acá es un hecho, *"este pago se hizo"*. Y se deshace con el mismo clic, que es lo que lo hace seguro. **En Crono, desde la sección 13, tildar pregunta primero qué se pagó** —completa o una parte—; destildar sigue siendo un clic.
-- **La observación es opcional**, por lo mismo. Obligar a escribir algo terminaría en doscientas filas que dicen "pagado".
+- **No lleva observación.** La pantalla no la pide ni la manda: el tilde guarda sólo quién marcó y cuándo (`Js/Comex-fechas.js`, el cuerpo de `marcarPagado`). El endpoint y la tabla aceptan una, pero nadie la carga. Obligar a escribir algo terminaría en doscientas filas que dicen "pagado".
 - **Interruptor *Ver pagados*, apagado por defecto**, con el conteo al lado. Igual que el de vencidas y que el *Ver excluidos* de Echeqs.
 - **No hay bajas físicas.** Destildar marca `VIGENTE = 0` y sella `FECHA_BAJA`; volver a marcar inserta una fila nueva. Quién marcó y cuándo va en el `title` de la casilla.
 - **Son dos tildes por contenedor y no se cruzan**: marcar el pago al proveedor del exterior no dice nada del gasto de nacionalización. Por eso la clave lleva `CONCEPTO`.
@@ -1255,6 +1255,8 @@ habían movido desde acá. Si esa tabla no existe, saltea el backfill con un
 ---
 
 ## Pendientes conocidos
+
+- **Un contenedor de Crono Nacionalización sin estimación se valúa en $ 0.** Si Comercio Exterior todavía no cargó la estimación de gastos de nacionalización pero el contenedor tiene fecha, `Comex::valuar()` toma el importe en dólares que falta como 0 (`Class/Comex.php:2442`, `$usd = isset($row[$campoImporte]) ? floatval(…) : 0`). La columna muestra *estimado $ 0,00* en vez de *sin costo*, y el pago parcial queda habilitado contra una base de cero (`Js/Comex-Crono_nacionalizacion.js:798`, `item.BASE_ARS !== null`). Es un error, detectado al escribir la ayuda (`feature/cashflow-centro-ayuda`); se arregla en una rama aparte. Cuando se arregle, revisar la sección *Cómo se calcula* de `Ayuda/crono_nacionalizacion.md`.
 
 - **El tilde de pagado no guarda CUÁNDO se pagó**, sólo cuándo se marcó. Nadie lo pidió y inventar una fecha de pago real que después nadie mantenga sería peor que no tenerla; si hace falta, es una columna más en `RO_T_CASHFLOW_COMEX_PAGADO`.
 - **El historial de marcas se guarda pero no tiene pantalla**: la casilla muestra en su `title` quién marcó y cuándo, y `getHistorialPagado` devuelve la lista completa con las no vigentes. Mismo estado que el historial de fechas.

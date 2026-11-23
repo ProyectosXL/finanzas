@@ -2221,11 +2221,22 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | Aviso | Nivel |
 | --- | --- |
 | No se pudo leer la curva de dólar futuro: fila en cero | danger |
+| La curva de dólar futuro está desactualizada (su última publicación es vieja) | warning |
+| Sin cotización del dólar BCRA para los próximos días o lo vencido: no se valúan (Proveedores Exterior) | danger |
+| No se pudo leer el dólar BCRA (Proveedores Exterior) | warning |
+| El dólar BCRA más reciente es viejo: se usa igual (Proveedores Exterior) | warning |
+| Sin cotización del dólar divisa para los próximos días o lo vencido: no se valúan, sin BCRA ni curva en su lugar (Crono Nacionalización) | danger |
+| No se pudo leer el dólar divisa (Crono Nacionalización) | danger |
+| El dólar divisa más reciente es viejo: se usa igual (Crono Nacionalización) | warning |
 | Sin fecha: no se pueden valuar | warning |
 | Valuados con el mes más cercano de la curva | info |
 | Cotización corregida a mano | info |
 | Fecha vencida: no suman | warning |
-| Fecha vencida dentro del mes en curso: sí entran | info |
+| Fecha vencida dentro del mes en curso: sí entran. **Hoy no lo emite ninguna pestaña**: lo vencido no suma en las dos y las dos piden el aviso sin el horizonte, así que todas caen en el de arriba. La capacidad queda en `Comex::avisosVencidosConNivel()` por si algo vencido vuelve a entrar | info |
+| Falta el script de la fecha maestra: no se edita la fecha | warning |
+| Falta el script del tilde de pagado: no se marca | warning |
+| Falta el script de la cotización a mano: no se corrige (Proveedores Exterior) | warning |
+| Falta el script del pago parcial: no se registra (Crono Nacionalización) | warning |
 | Marcados como ya hechos | info |
 | Ya pagados en Comercio Exterior (Proveedores Exterior) | info |
 | Sobrepago (Proveedores Exterior) | warning |
@@ -2494,7 +2505,7 @@ Los permisos siguen viniendo de `FP_ROL_PERMISO` / `FP_PERMISOS` (módulo 7), co
 
 - `cashflow.tab.<pestaña>` deja **ver** la pestaña. No cambió.
 - `cashflow.editar.<pestaña>` deja **escribir** en ella. Existe sólo para las 13 pestañas que tienen alguna escritura; las de sólo lectura —Dashboard, Exportaciones Tasky y las que todavía están en construcción— no llevan clave.
-- En Parámetros la lectura sigue siendo una sola, `cashflow.tab.parametros`, y la escritura va **por sub-pestaña**: `cashflow.editar.parametros.<código en minúscula>` (`generales`, `ventas`, `saldos`, `cob_electronicos`, `prechequeado`, `cobranzas`, `compras_proy`, `logistica`, `prov_locales`, `tarjetas`, `cashflow`). Quien carga las cuentas de Saldos no necesariamente es quien toca el horizonte de todo el módulo.
+- En Parámetros la lectura sigue siendo una sola, `cashflow.tab.parametros`, y la escritura va **por sub-pestaña**: `cashflow.editar.parametros.<código en minúscula>`, una por cada una de las **14 sub-pestañas** de `Parametros::$modulos`: `generales`, `calendario`, `ventas`, `saldos`, `cob_electronicos`, `prechequeado`, `cobranzas`, `compras_proy`, `logistica`, `prov_locales`, `tarjetas`, `alquileres`, `llaves_renov` y `cashflow`. Las once primeras las dio de alta `sql/cashflow_permisos_edicion.sql`; `calendario`, `alquileres` y `llaves_renov` vinieron después, con el script de su rama (57, 52 y 67). Quien carga las cuentas de Saldos no necesariamente es quien toca el horizonte de todo el módulo.
 - **Escribir implica leer**: una clave de edición sin la de la pestaña no habilita nada. Y el administrador (sector Proyectos con `es_admin` o `CONTROLTOTAL`) puede todo, como antes.
 
 **La seguridad es el servidor.** Cada controller llama una vez, antes de su `switch`, a `autorizar('<Controller>', $action)` (`Controller/autorizacion.php`), que pregunta al mapa de `AuthCashflow`: sin usuario corta con **401**, sin permiso con **403**, los dos con el `{success: false, message}` de siempre. Una acción que no está en el mapa **se rechaza**: un `case` nuevo no puede quedar abierto por olvido.
