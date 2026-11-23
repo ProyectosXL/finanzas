@@ -438,3 +438,51 @@ chequear('un contrato largo sin llave después de uno con llave (MDP Aldrey) no 
 $e['locales'][78]['contratos'] = [llContrato(1, '2021-11-01', '2025-06-30', 3000000.0), llContrato(74, '2025-07-01', '2025-07-31', 0.0),
                                   llContrato(40, '2025-08-08', '2026-12-31', 0.0)];
 chequear('un puente seguido de un contrato largo sin llave tampoco', [], llPagos(LlavesCalculo::proyectar($e), LlavesCalculo::LLAVE));
+
+seccion('LlavesCalculo: con el contrato nuevo cargado, el local dice como se paga, no cuanto');
+
+/* La regla: lo que define CUANTO (% propio, meses, llave a mano) deja de valer
+   cuando se carga el contrato nuevo, porque manda el importe real. Lo que
+   define COMO se paga (cuotas y mes de la 1.a cuota) sigue valiendo, tambien
+   sobre el contrato real. Los parametros por local cuelgan del contrato que
+   vence (78|22), asi que siguen ahi despues de cargar el #96. */
+$e = llEntrada();
+$e['locales'][78]['contratos'][] = llContrato(96, '2027-01-01', '2027-12-31', 40000000.0);
+$e['alquiler'][78]['2027-03'] = 20000000.0;
+$e['par']['locales']['78|22'] = ['pct_llave' => 50.0, 'meses' => 24, 'llave_manual' => 1000.0,
+                                 'cuotas' => 2, 'mes_primera_cuota' => '2027-03'];
+$ll = llPagos(LlavesCalculo::proyectar($e), LlavesCalculo::LLAVE);
+chequear('la llave es la del contrato, no la cargada a mano', 40000000.0,
+    round(array_sum(array_column($ll, 'importe')), 2));
+chequear('en las cuotas del local, desde el mes que dice el local', [2, '2027-03', '2027-04'],
+    [count($ll), $ll[0]['mes'] ?? null, $ll[1]['mes'] ?? null]);
+
+$e['locales'][78]['contratos'][1] = llContrato(96, '2027-01-01', '2027-12-31', 1.0);
+$ll = llPagos(LlavesCalculo::proyectar($e), LlavesCalculo::LLAVE);
+chequear('con la marca de 1, se estima con el % general y los meses del contrato, no con los del local',
+    round(0.25 * 20000000.0 * 12, 2), round(array_sum(array_column($ll, 'importe')), 2));
+chequear('y tambien en las cuotas y el mes del local', [2, '2027-03'], [count($ll), $ll[0]['mes'] ?? null]);
+
+seccion('LlavesCalculo: sin % de impuestos, el escribano se proyecta igual');
+
+$e = llEntrada();
+$e['par']['operadores']['SAARCO'] = ['pct_otros' => 40.0, 'escribano' => 300000.0];
+$r = LlavesCalculo::proyectar($e);
+chequear('no hay llave', [], llPagos($r, LlavesCalculo::LLAVE));
+$ot = llPagos($r, LlavesCalculo::OTROS);
+chequear('ni el % de otros gastos: queda solo el escribano', [1, 300000.0],
+    [count($ot), $ot[0]['importe'] ?? null]);
+chequear('y el aviso lo dice', true, strpos(llTextos($r), 'El escribano sí se proyecta: no lleva impuestos.') !== false);
+
+seccion('LlavesCalculo: un contrato corto con llave no se avisa');
+
+/* Hay shoppings que renuevan cada cinco o seis meses: un contrato corto con
+   llave es normal, y el aviso de "menos de 12 meses" se borro. */
+$e = llEntrada();
+$e['locales'][78]['contratos'] = [llContrato(85, '2026-07-01', '2026-12-31', 5000000.0)];
+$r = LlavesCalculo::proyectar($e);
+chequear('se estima con sus 6 meses', round(0.25 * 18927137.0 * 6, 2),
+    round(array_sum(array_column(llPagos($r, LlavesCalculo::LLAVE), 'importe')), 2));
+chequear('sin aviso de meses', false, strpos(llTextos($r), 'menos de 12') !== false);
+chequear('y el aviso no existe en el codigo', false,
+    strpos(file_get_contents(__DIR__ . '/../Class/LlavesCalculo.php'), 'meses_cortos') !== false);

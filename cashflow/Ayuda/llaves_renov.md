@@ -20,7 +20,7 @@ Reemplaza las hojas «LLves y Renov Contratos» y «Detalles de vencimientos» d
 
 :::diagrama
 fuente: La app de alquileres | los contratos de cada local: vigencia, llave, comisiones y FPC
-fuente: La pestaña Alquileres | el alquiler de cada mes (1 + 2 + 8), con el que se estima la llave
+fuente: La pestaña Alquileres | el alquiler de cada mes (alquiler, complementario y VMA), con el que se estima la llave
 fuente: Parámetros › Alquileres | el operador (la razón social principal) y el % de retención de cada local
 fuente: El gestor de locales | los m² de cada local, para el segmento de la obra
 fuente: Tango | las facturas de llave, para sugerir el % de impuestos de cada operador
@@ -33,7 +33,7 @@ alt: La app de alquileres, la pestaña Alquileres, Parámetros › Alquileres, e
 :::
 
 - **La app de alquileres**: cada contrato de cada local, con su vigencia, la llave, las comisiones y el FPC de lanzamiento. El cashflow sólo la lee: no escribe nada en ella.
-- **La pestaña Alquileres**: el alquiler mensual de cada local (los conceptos 1, 2 y 8, netos), tal como ella lo proyecta. Con ese importe se estima la llave. Acá no se recalcula ni se ajusta.
+- **La pestaña Alquileres**: el alquiler mensual de cada local (el alquiler, el complementario y el valor mínimo mensual —VMA—, netos), tal como ella lo proyecta. Con ese importe se estima la llave. Acá no se recalcula ni se ajusta.
 - **Parámetros › Alquileres**: el operador de cada local, que es su razón social principal, y el % de retención del local.
 - **El gestor de locales**: los m² totales de cada local (venta, depósito y baulera). Dicen si el local es chico, mediano o grande para la obra de imagen. También se lee sin escribir.
 - **Tango**: las facturas de llave de los últimos 24 meses. Sólo sirven para sugerir el % de impuestos de cada operador en Parámetros.
@@ -55,14 +55,23 @@ Las comisiones y el FPC del contrato van juntos, en un solo pago, el día de la 
 
 Vale para cualquier contrato con cuotas por delante, también el vigente si empezó hace poco.
 
-Si la app tiene una llave de 1, no es un importe: es una marca que quiere decir «tiene llave, monto desconocido». Esa llave se estima, con los meses de ese contrato. Nunca se pagan $ 1.
+Si la app tiene una llave de 1, no es un importe: es una marca que quiere decir «tiene llave, monto desconocido». Esa llave se estima, con los meses de ese contrato y el % del operador o el general. Nunca se pagan $ 1.
+
+### Los parámetros por local, cuando se carga el contrato nuevo
+
+Lo que se cargó para un local en Parámetros vale para su renovación. Cuando administración carga el contrato nuevo en la app:
+
+- **Deja de valer lo que dice cuánto**: **No renueva**, **Llave a mano ($)**, **% propio** y **Meses**. Manda el importe del contrato.
+- **Sigue valiendo lo que dice cómo se paga**: **Cuotas** y **1.ª cuota**, también sobre el contrato cargado.
+
+En la sección **Por local** la fila deja de verse cuando la renovación se carga, pero lo que tenía en **Cuotas** y **1.ª cuota** se sigue aplicando.
 
 ### La renovación estimada
 
 Si el contrato vigente vence dentro del horizonte, o ya venció, y la renovación no está cargada, se estima:
 
 :::formula
-llave estimada = % de llave × alquiler del mes de la primera cuota (1 + 2 + 8, como lo proyecta Alquileres) × meses
+llave estimada = % de llave × alquiler del mes de la primera cuota (alquiler + complementario + VMA, como lo proyecta Alquileres) × meses
 otros gastos estimados = % de otros gastos × llave estimada + escribano
 a pagar de cada pago = neto + neto × % de impuestos del operador − neto × % de retención del local
 :::
@@ -91,12 +100,12 @@ A la llave y a los otros gastos se les suma el % de impuestos del operador (lo q
 
 Las cuotas se reparten en partes iguales al centavo: siempre suman exacto el total.
 
-Sin % de impuestos del operador, o sin % de retención del local, la llave y los otros gastos de ese local no se proyectan. Un aviso dice cuánto neto queda afuera. El escribano sí se proyecta, porque no lleva impuestos ni retención.
+Sin % de impuestos del operador, o sin % de retención del local, la llave y los otros gastos de ese local no se proyectan. Un aviso dice cuánto neto queda afuera. **El escribano sí se proyecta**, porque no lleva impuestos ni retención.
 
 :::ejemplo ilustrativo
 Un local cuyo contrato vence el 31 de marzo y no tiene la renovación cargada. La renovación empieza el 1 de abril. El operador no tiene corrimiento.
 
-- Alquiler de abril (1 + 2 + 8, como lo proyecta Alquileres): **$ 8.000.000**.
+- Alquiler de abril (alquiler, complementario y VMA, como lo proyecta Alquileres): **$ 8.000.000**.
 - % de llave: 25 % (el general). Meses del contrato: 6. Cuotas: 4.
 - Llave estimada: 25 % × $ 8.000.000 × 6 = **$ 12.000.000**, en 4 cuotas de $ 3.000.000.
 - % de otros gastos del operador: 40 %. Otros gastos: 40 % × $ 12.000.000 = $ 4.800.000, más $ 300.000 de escribano.
@@ -161,7 +170,7 @@ H: La grilla.
 ### Las tarjetas
 
 - **Total del horizonte**: todo lo que se paga en el horizonte (llaves, renovaciones, obras, aperturas y compromisos).
-- **Renovaciones en el horizonte**: cuántas renovaciones tienen pagos de llave u otros gastos en el horizonte. Abajo, cuánto suman la llave y los otros gastos que todavía no tienen factura.
+- **Renovaciones en el horizonte**: cuántas renovaciones tienen pagos de llave u otros gastos en el horizonte, facturas incluidas. Abajo, cuánto suman esos mismos pagos. Una factura cuenta en la renovación a la que se imputó: no suma una renovación aparte.
 - **Estimado**: cuánto de lo que se paga es estimado. Abajo, contra cuánto está en un contrato o una factura y cuánto se cargó a mano.
 - **Locales sin dato**: cuántos locales no proyectan algo porque falta un dato. Pasá el mouse por el pie para ver cuáles.
 
@@ -315,12 +324,12 @@ Un campo vacío no es cero. Vacío en el % de llave o en las cuotas es «el de a
 | % impuestos | Por operador | Vacío = sin dato (en gris, el sugerido) | Lo que se suma a la llave y los otros gastos. Sin él, no se proyectan |
 | Cuotas | Por operador | Vacío = las generales | En cuántas cuotas se paga la llave de sus locales |
 | Corrim. | Por operador | Vacío = 0 | Cuántos meses se mueve la primera cuota respecto del inicio del contrato nuevo (negativo = antes) |
-| No renueva (con motivo) | Por local | Sin tildar | No se estima nada de esa renovación |
-| Llave a mano ($) | Por local | Vacío = calculada | Reemplaza la llave estimada (chip Manual) |
-| % propio | Por local | Vacío = el del operador o el general | El % de la llave estimada de ese local |
-| Meses | Por local | Vacío = los del contrato de llave | Los meses de la llave estimada |
-| Cuotas | Por local | Vacío = las del operador o las generales | En cuántas cuotas se paga la llave de ese local |
-| 1.ª cuota | Por local | Vacío = el mes del día siguiente al fin del contrato (el mes en curso, si ya venció) | El mes de la primera cuota |
+| No renueva (con motivo) | Por local | Sin tildar | No se estima nada de esa renovación. Deja de valer cuando se carga el contrato nuevo |
+| Llave a mano ($) | Por local | Vacío = calculada | Reemplaza la llave estimada (chip Manual). Deja de valer cuando se carga el contrato nuevo |
+| % propio | Por local | Vacío = el del operador o el general | El % de la llave estimada de ese local. Deja de valer cuando se carga el contrato nuevo |
+| Meses | Por local | Vacío = los del contrato de llave | Los meses de la llave estimada. Deja de valer cuando se carga el contrato nuevo |
+| Cuotas | Por local | Vacío = las del operador o las generales | En cuántas cuotas se paga la llave de ese local. Sigue valiendo con el contrato nuevo cargado |
+| 1.ª cuota | Por local | Vacío = el mes del día siguiente al fin del contrato (el mes en curso, si ya venció) | El mes de la primera cuota. Sigue valiendo con el contrato nuevo cargado |
 | Renovación, fecha, montos de llave y otros gastos, comprobante | Ya pagadas | Los dos conceptos tildados | El concepto marcado deja de proyectarse en esa renovación. No suma |
 | Local, mes estimado, segmento, costo propio | Obras de renovación de imagen | Segmento vacío = por sus m²; costo vacío = el del segmento | Una obra en ese mes, en pesos al dólar futuro. Una por local y mes |
 | Nombre, Nro., mes estimado, segmento, costo propio | Aperturas de locales nuevos | Segmento obligatorio; costo vacío = el del segmento | Una apertura en ese mes, en pesos al dólar futuro |
@@ -411,14 +420,14 @@ corrige: Revisá el local en Parámetros › Alquileres, o cargá la llave a man
 :::
 
 :::aviso atencion
-texto: Parámetros: El operador N no tiene % de impuestos sobre llave y otros gastos: no se proyecta la llave ni los otros gastos de N, por $ X netos sin impuestos. Se carga en Parámetros › Llaves y Renovaciones › Por operador.
-significa: Falta el % de impuestos del operador. Lo que se ve en el aviso es el neto que queda afuera.
+texto: Parámetros: El operador N no tiene % de impuestos sobre llave y otros gastos: no se proyectan la llave ni los otros gastos (el % de otros gastos, o las comisiones y el FPC del contrato) de N, por $ X netos sin impuestos. El escribano sí se proyecta: no lleva impuestos. Se carga en Parámetros › Llaves y Renovaciones › Por operador.
+significa: Falta el % de impuestos del operador. Lo que se ve en el aviso es el neto que queda afuera. El escribano se proyecta igual.
 corrige: Parámetros › Llaves y Renovaciones › Por operador, columna **% impuestos**. Si no factura impuestos, cargá `0`.
 :::
 
 :::aviso atencion
-texto: Parámetros: Sin % de retención en Parámetros › Alquileres: N ($ X netos). No se proyecta su llave ni sus otros gastos.
-significa: Al local le falta el % de retención.
+texto: Parámetros: Sin % de retención en Parámetros › Alquileres: N ($ X netos). No se proyectan su llave ni sus otros gastos; el escribano sí, porque no lleva retención.
+significa: Al local le falta el % de retención. El escribano se proyecta igual.
 corrige: Parámetros › Alquileres, en el local.
 :::
 
@@ -572,13 +581,15 @@ El número en gris es sólo una sugerencia y no se guarda. Para usarlo, escribil
 :::
 
 :::pregunta ¿Qué pasa cuando administración carga el contrato nuevo?
-La renovación deja de estimarse y pasa a usar la llave, las comisiones y el FPC del contrato, con el chip **Contrato cargado**. La excepción es una llave de 1 en la app: esa se sigue estimando. El local pasa a **Renovado** en la solapa Contratos.
+La renovación deja de estimarse y pasa a usar la llave, las comisiones y el FPC del contrato, con el chip **Contrato cargado**. La excepción es una llave de 1 en la app: esa se sigue estimando, con los meses del contrato. El local pasa a **Renovado** en la solapa Contratos.
+
+De lo cargado en **Por local**, el **% propio**, los **Meses**, la **Llave a mano** y **No renueva** dejan de valer: manda el contrato. Las **Cuotas** y la **1.ª cuota** siguen valiendo.
 
 Las marcas de **Ya pagada** y las facturas marcadas como llave siguen valiendo, porque se guardan por el contrato que vence.
 :::
 
 :::pregunta ¿Qué quiere decir una llave de 1 en la solapa Contratos?
-Es una marca de administración: el contrato tiene llave, pero el monto no se conoce. La pestaña nunca proyecta $ 1: estima la llave con el % y los meses de ese contrato.
+Es una marca de administración: el contrato tiene llave, pero el monto no se conoce. La pestaña nunca proyecta $ 1: estima la llave con los meses de ese contrato y el % del operador o el general.
 :::
 
 :::pregunta ¿Por qué no puedo marcar «Ya pagada» el primer contrato de un local?
@@ -608,7 +619,8 @@ Sí: suman los mismos pagos, columna por columna. En el tablero, la fila Llaves 
 | Llave | Lo que se paga al operador por renovar el contrato, en cuotas |
 | Operador | La razón social principal del local en Parámetros › Alquileres: el que cobra la llave |
 | Otros gastos | Lo que se paga en la firma además de la llave: comisiones y FPC (cargada), o un % de la llave más el escribano (estimada) |
-| FPC | El importe de «FPC lanzamiento» del contrato en la app de alquileres. Va con las comisiones, en los otros gastos |
+| FPC lanzamiento | Cargo del shopping que se paga al abrir o renovar el contrato. Va con las comisiones, en los otros gastos |
+| VMA | Valor mínimo mensual: con el alquiler y el complementario, forma el alquiler con el que se estima la llave |
 | Escribano y otros | Un importe fijo por renovación, por operador, que se suma a los otros gastos sin impuestos ni retención |
 | % de impuestos | Lo que el operador factura de más sobre la llave y los otros gastos |
 | Segmento | Chico, mediano o grande, según los m² totales del local. Define el costo en dólares de una obra o una apertura |

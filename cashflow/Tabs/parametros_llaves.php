@@ -152,8 +152,10 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
             <h5 class="mb-0">Por local</h5>
             <small class="text-muted">
                 Sólo los locales con un contrato que vence dentro del horizonte, o ya vencido, sin renovación
-                cargada en la app. Lo que se carga acá vale para <strong>esa</strong> renovación: cuando
-                administración carga el contrato nuevo, deja de aplicarse. Vacío = el valor de arriba.
+                cargada en la app. Lo que se carga acá vale para <strong>esa</strong> renovación. Cuando
+                administración carga el contrato nuevo, lo que dice <strong>cuánto</strong> (% propio, meses,
+                llave a mano) deja de aplicarse, porque manda el importe del contrato; lo que dice
+                <strong>cómo se paga</strong> (cuotas y 1.ª cuota) sigue valiendo. Vacío = el valor de arriba.
             </small>
         </div>
         <div class="card-body p-0">
