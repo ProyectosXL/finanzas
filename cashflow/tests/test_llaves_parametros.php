@@ -91,3 +91,33 @@ chequear('no hay bajas físicas', 0, preg_match_all('/\b(DELETE|DROP|TRUNCATE)\b
     preg_replace(['#/\*.*?\*/#s', '#--[^\n]*#'], '', $sql)));
 chequear('las claves de Generales del CHECK son las de la clase', true, array_reduce(array_keys(LlavesParametros::GENERALES),
     function ($ok, $k) use ($sql) { return $ok && strpos($sql, "'" . $k . "'") !== false; }, true));
+
+seccion('LlavesParametros: el cableado de la sub-pestaña');
+
+require_once __DIR__ . '/../Class/Parametros.php';
+require_once __DIR__ . '/../Class/AuthCashflow.php';
+
+$mods = array_column(Parametros::getModulos(), null, 'codigo');
+chequear('el módulo LLAVES_RENOV está declarado, con su controller', 'Controller/LlavesController.php',
+    $mods['LLAVES_RENOV']['endpoint'] ?? null);
+chequear('el permiso es cashflow.editar.parametros.llaves_renov', 'cashflow.editar.parametros.llaves_renov',
+    AuthCashflow::claveEdicion('parametros', 'LLAVES_RENOV'));
+$paramTab = file_get_contents(__DIR__ . '/../Tabs/parametros.php');
+chequear('el pane se incluye con su permiso', true,
+    strpos($paramTab, "id=\"paneParamLlaves_renov\"") !== false && strpos($paramTab, "include __DIR__ . '/parametros_llaves.php'") !== false);
+$jsLl = file_get_contents(__DIR__ . '/../Js/Parametros-Llaves.js');
+$ctrlLl = file_get_contents(__DIR__ . '/../Controller/LlavesController.php');
+preg_match_all("/escribir\('([A-Za-z]+)'/", $jsLl, $mJs);
+preg_match_all("/data-accion=\"' \+ accion/", $jsLl, $mBaja);
+$acciones = array_unique(array_merge($mJs[1], ['bajaPagada', 'bajaObra', 'bajaApertura', 'bajaCompromiso']));
+$sinCase = array_values(array_filter($acciones, function ($a) use ($ctrlLl) { return strpos($ctrlLl, "case '" . $a . "':") === false; }));
+chequear('cada acción del JS tiene su case en el controller', [], $sinCase);
+$sinMapa = array_values(array_filter($acciones, function ($a) { return !isset(AuthCashflow::ESCRITURAS['Llaves'][$a]); }));
+chequear('y está en el mapa de escrituras', [], $sinMapa);
+chequear('todas las escrituras de Parámetros piden la sub-pestaña', true, array_reduce(
+    ['guardarGeneral', 'guardarOperador', 'guardarLocal', 'altaObra', 'altaApertura', 'altaCompromiso'],
+    function ($ok, $a) { return $ok && AuthCashflow::ESCRITURAS['Llaves'][$a][0] === ['parametros', 'LLAVES_RENOV']; }, true));
+$codLl = preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', file_get_contents(__DIR__ . '/../Class/LlavesTango.php'));
+chequear('LlavesTango sólo lee', 0, preg_match_all('/\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|EXEC|DROP|ALTER|CREATE)\b/i', $codLl));
+chequear('sin permiso de edición, los controles no se dibujan', true,
+    substr_count(file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php'), 'if ($edita): ?>') >= 5);

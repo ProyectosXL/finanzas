@@ -265,7 +265,7 @@ class Alquileres {
         $out = ['ctx' => null, 'pendientes' => [], 'excluidas' => [], 'vtos' => [], 'dias' => [],
                 'pagadas_mes' => [], 'imputaciones' => [], 'en_tango' => [], 'avisos' => [],
                 'tabla_imputacion' => false, 'tipos' => [], 'tipos_vigentes' => [], 'excluidas_factura' => [],
-                'tabla_exclusion' => false];
+                'tabla_exclusion' => false, 'todos' => []];
 
         try {
             require_once __DIR__ . '/AlquileresUniverso.php';
@@ -280,6 +280,10 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
 
             $prov = new Proveedores();
             $todos = $prov->getPendientes($h->hoy());
+            /* TODOS LOS PENDIENTES, de cualquier proveedor: Llaves y Renovaciones
+               avisa con ellos las facturas de llave que quedan en Proveedores
+               Locales, sin volver a leer Tango. */
+            $out['todos'] = $todos;
 
             /* LOS DE RUBRO ALQUILER QUE NO ESTAN EN NINGUNA FILA: excluidos de
                Proveedores Locales y sin dar de alta aca. Va al tablero (por el
@@ -373,6 +377,33 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
      */
     public function calcular($h, $ins) {
         return self::conFacturas($this->calcularProyeccion($h, $ins), $ins, $h);
+    }
+
+    /**
+     * El alquiler mensual proyectado de cada local: conceptos 1 (Alquiler), 2
+     * (Complementario) y 8 (VMA), NETOS, por mes del concepto. Es lo que pide
+     * Llaves y Renovaciones para estimar la llave de una renovacion (el 25 %
+     * de 1 + 2 + 8 de Costo de Ocupacion, llevado a la vigencia).
+     *
+     * NO SE VUELVE A CALCULAR: es la misma proyeccion de la pestaña, ANTES de
+     * las facturas -una factura imputada pisa el pago de un mes, no cambia
+     * cuanto vale el alquiler de ese mes-. Solo los meses del horizonte y los
+     * locales que proyectan: lo que Alquileres no tiene, Llaves no lo inventa.
+     *
+     * @param Horizonte $h
+     * @param array $ins Lo de insumos()
+     * @return array NRO_SUCURS => 'Y-m' => float
+     */
+    public function alquilerMensual($h, $ins) {
+        $out = [];
+
+        foreach ($this->calcularProyeccion($h, $ins)['pagos'] as $p) {
+            if (in_array($p['concepto'], [1, 2, 8], true)) {
+                $out[$p['nro']][$p['mes_concepto']] = round(($out[$p['nro']][$p['mes_concepto']] ?? 0.0) + $p['neto'], 2);
+            }
+        }
+
+        return $out;
     }
 
     /**

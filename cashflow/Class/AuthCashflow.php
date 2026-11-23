@@ -187,6 +187,23 @@ class AuthCashflow {
             'saveFechaCobroManualMasiva' => [['cobranzas_fr', null], ['cobranzas_may', null]],
             'deleteFechaCobroManualMasiva' => [['cobranzas_fr', null], ['cobranzas_may', null]]
         ],
+        /* LLAVES Y RENOVACIONES: los parametros con su permiso de sub-pestaña.
+           "Ya pagada" se marca tambien desde la solapa Contratos de la pestaña:
+           con poder editar cualquiera de las dos alcanza, porque el endpoint
+           hace lo mismo venga de donde venga. */
+        'Llaves' => [
+            'guardarGeneral' => [['parametros', 'LLAVES_RENOV']],
+            'guardarOperador' => [['parametros', 'LLAVES_RENOV']],
+            'guardarLocal' => [['parametros', 'LLAVES_RENOV']],
+            'altaPagada' => [['parametros', 'LLAVES_RENOV']],
+            'bajaPagada' => [['parametros', 'LLAVES_RENOV']],
+            'altaObra' => [['parametros', 'LLAVES_RENOV']],
+            'bajaObra' => [['parametros', 'LLAVES_RENOV']],
+            'altaApertura' => [['parametros', 'LLAVES_RENOV']],
+            'bajaApertura' => [['parametros', 'LLAVES_RENOV']],
+            'altaCompromiso' => [['parametros', 'LLAVES_RENOV']],
+            'bajaCompromiso' => [['parametros', 'LLAVES_RENOV']]
+        ],
         'Logistica' => [
             'saveFletero' => [['logistica_local', null], ['parametros', 'LOGISTICA']],
             'activarFletero' => [['parametros', 'LOGISTICA']],
@@ -331,10 +348,11 @@ class AuthCashflow {
      *
      * Se declaran aca para que tests/test_auth_cashflow.php las reconozca: una
      * clave en un script que el codigo no pide es un error, salvo que este en
-     * esta lista. Hoy no hay ninguna: cashflow.editar.alquileres, la ultima,
-     * ya la piden la exclusion de Alquileres y sus facturas.
+     * esta lista. Hoy: cashflow.editar.llaves_renov, que crea
+     * sql/cashflow_llaves_permisos.sql junto con la de su sub-pestaña de
+     * Parametros, antes de que la pestaña tenga escrituras propias.
      */
-    const CLAVES_RESERVADAS = [];
+    const CLAVES_RESERVADAS = ['cashflow.editar.llaves_renov'];
 
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
@@ -349,6 +367,7 @@ class AuthCashflow {
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
         'GastosLocales' => ['getPlanilla', 'getComprobantes'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
+        'Llaves' => ['getParametros'],
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento',

@@ -99,13 +99,13 @@ foreach (glob($RAIZ . 'Tabs/*.php') as $f) {
         preg_match_all('/<div class="cargando-slot" id="\w+" data-cargando="[^"]+"><\/div>/', $s));
 }
 
-// 33 desde la Conciliacion Libro IVA de Ventas (loadingConciliacion, la segunda
+// 34 desde Parametros > Llaves y Renovaciones. 33 desde la Conciliacion Libro IVA de Ventas (loadingConciliacion, la segunda
 // pestaña de Control de Facturacion). 32 desde la pestaña Alquileres. 31 desde
 // Parametros > Alquileres. 30 antes. 29 desde el historial del % importado por
 // rubro, en Parametros > Compras Exterior. 28 desde que Pagos con Tarjetas y
 // Otros dejo de ser un placeholder y tiene el suyo. Antes eran 27, con el de
 // Logistica Local.
-chequear('los 33 lugares de las pestanas', 33, $slots);
+chequear('los 34 lugares de las pestanas', 34, $slots);
 
 foreach (glob($RAIZ . 'Css/*.css') as $f) {
     if (basename($f) === 'cargando.css') {
