@@ -283,7 +283,9 @@ seccion('la grilla distingue divisa de BCRA, curva, aproximada y override');
 
 $srcFechasJs = file_get_contents(__DIR__ . '/../Js/Comex-fechas.js');
 $srcCronoCss = file_get_contents(__DIR__ . '/../Css/Comex-Crono_nacionalizacion.css');
-$srcAyuda = file_get_contents(__DIR__ . '/../Components/help_modal_comex.php');
+// La ayuda de Crono es su articulo (Ayuda/crono_nacionalizacion.md), que
+// reemplazo al modal compartido de Comex.
+$srcAyuda = file_get_contents(__DIR__ . '/../Ayuda/crono_nacionalizacion.md');
 
 chequear('la celda marca la divisa con su clase', true,
     strpos($srcFechasJs, "clases.push('cotiz-divisa')") !== false);
@@ -294,9 +296,9 @@ chequear('y con el dia de la cotizacion debajo del valor', true,
     strpos($srcFechasJs, "'Divisa ' + fecha(item.COTIZ_BCRA_FECHA)") !== false);
 chequear('Crono Nacionalizacion tiene el estilo, con otro color que el BCRA', true,
     (bool) preg_match('/\.cotiz-divisa \{\s*border-left: 3px solid #1e88e5;/', $srcCronoCss));
-chequear('la ayuda de Comex nombra el dolar divisa para Crono Nacionalizacion', true,
-    strpos($srcAyuda, 'En Crono Nacionalización, al dólar divisa') !== false
-    && strpos($srcAyuda, 'fa-money-bill-transfer me-1"></i> Dólar divisa') !== false);
+chequear('la ayuda de Crono Nacionalizacion explica el dolar divisa y su marca', true,
+    strpos($srcAyuda, '- **Los próximos días van al dólar divisa vendedor**, no al BCRA.') !== false
+    && strpos($srcAyuda, 'Borde azul y un ícono de transferencia, con `Divisa` y la fecha') !== false);
 
 /* ================================================================
    PARAMETROS: LAS CLAVES SE QUEDAN, LOS ROTULOS CAMBIAN

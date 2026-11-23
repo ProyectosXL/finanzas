@@ -97,3 +97,26 @@ chequear('las claves son cashflow.tab.llaves_renov y cashflow.editar.llaves_reno
 $js = file_get_contents(__DIR__ . '/../Js/Llaves.js');
 chequear('el JS usa las tres vistas, columnas fijas y los totales arriba del eje', true,
     strpos($js, 'crearEjeVistas(') !== false && strpos($js, 'crearColumnasFijas(') !== false && strpos($js, 'pintarEjeTotales(') !== false);
+
+seccion('Llaves::armarPestana(): la tarjeta Renovaciones cuenta y suma lo mismo, facturas incluidas');
+
+/* DOT renueva con el #91 (la llave del contrato, proyectada) y tiene una
+   factura de otros gastos imputada a esa misma renovacion: es UNA renovacion,
+   y su importe entra en la suma. */
+$eF = lpEntrada($h);
+$eF['facturas'] = [['id' => 7, 'nro' => 66, 'concepto' => LlavesCalculo::OTROS, 'mes' => '2027-01', 'ant' => 32,
+                    'contrato' => 91, 'cod_provee' => 'SAPAMA', 'comprobante' => 'A 0001-00000007', 'pagada' => false,
+                    'pagos' => [['fecha' => '2027-01-11', 'importe' => 500000.0, 'nota' => '']], 'texto' => '']];
+$cF = LlavesCalculo::proyectar($eF);
+$cF['tablas_ok'] = true;
+$pF = Llaves::armarPestana($cF, $h, ['nombres' => [78 => 'DISTRITO ARCOS', 66 => 'DOT'], 'facturas' => []]);
+$llOt = array_filter($cF['pagos'], function ($x) {
+    return in_array($x['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true);
+});
+chequear('la factura no suma una renovacion de mas', 2, $pF['kpis']['renovaciones_n']);
+chequear('y su importe esta en la suma, con lo proyectado', round(array_sum(array_column($llOt, 'importe')), 2),
+    $pF['kpis']['renovaciones_importe']);
+chequear('que incluye la factura', true, $pF['kpis']['renovaciones_importe'] - $p['kpis']['renovaciones_importe'] >= 500000.0 - 0.01);
+
+chequear('el tooltip nombra los conceptos del alquiler', true,
+    strpos($cel['tooltip'], 'alquiler + complementario + VMA de') !== false);

@@ -481,7 +481,7 @@ class LlavesCalculo {
             'pagos' => [], 'locales' => [], 'no_proyecta' => [], 'cortados' => [],
             'f' => ['vencidos' => [], 'vencen' => [], 'sin_razon' => [], 'sin_alquiler' => [], 'sin_pct_otros' => [],
                     'sin_escribano' => [], 'sin_impuestos' => [], 'sin_retencion' => [], 'pasadas' => [],
-                    'sin_contrato' => [], 'meses_cortos' => [], 'sin_segmento' => [], 'sin_cortes' => false,
+                    'sin_contrato' => [], 'sin_segmento' => [], 'sin_cortes' => false,
                     'sin_costo' => [], 'sin_dolar' => [], 'sin_tablas' => empty($par['tablas_ok'])]
         ];
 
@@ -735,7 +735,14 @@ class LlavesCalculo {
                 $origenLlave = self::ESTIMADO;
             }
         } elseif (self::esMarca($c)) {
-            $est = self::estimarLlave($nro, $c, $mes1, $locP, $opP, $gen, $contratos, $e, $nombre, $s, true);
+            /* CON EL CONTRATO NUEVO CARGADO, LO QUE EL LOCAL DICE DE CUANTO YA NO
+               VALE: ni el % propio ni los meses (ni la llave a mano, que solo
+               mira la estimada). Manda el contrato real: sus meses y el % del
+               operador o el general. Lo que dice COMO se paga -las cuotas y el
+               mes de la primera- si sigue valiendo, tambien sobre el contrato
+               real: es una forma de pago acordada, no una estimacion. Por eso
+               aca va null y no $locP, y $n y $mes1 de arriba lo siguen usando. */
+            $est = self::estimarLlave($nro, $c, $mes1, null, $opP, $gen, $contratos, $e, $nombre, $s, true);
             $llave = $est['llave'];
             $cuenta = 'La app tiene llave = 1 (tiene llave, monto desconocido): se estima. ' . $est['cuenta'];
             $origenLlave = self::ESTIMADO;
@@ -805,7 +812,11 @@ class LlavesCalculo {
             return $out;
         }
 
-        /* ---- IMPUESTOS Y RETENCION: sin alguno, no se proyecta ---- */
+        /* ---- IMPUESTOS Y RETENCION: sin alguno, no se proyecta ----
+           La llave y los otros gastos, que son netos y llevan impuestos y
+           retencion. EL ESCRIBANO SI: es un importe final, sin impuestos ni
+           retencion, asi que no le falta nada para proyectarse. Los avisos lo
+           dicen asi. */
         $netoFalta = (float) $llave + (float) $otros;
 
         if (($llave !== null || $otros !== null) && ($pctImp === null || $pctRet === null)) {
@@ -884,11 +895,9 @@ class LlavesCalculo {
         } else {
             $conLlave = $propios ? $base : self::ultimoConLlave($contratos, $base);
             $deMeses = ($conLlave === null) ? 'meses del contrato vigente' : 'meses del contrato #' . $conLlave['id'];
+            /* Un contrato corto con llave es normal (hay shoppings que renuevan
+               cada cinco o seis meses): no se avisa. */
             $meses = self::meses(($conLlave ?? $base)['desde'], ($conLlave ?? $base)['hasta']);
-
-            if ($conLlave === null && $meses < 12) {
-                $s['f']['meses_cortos'][] = $nombre . ' (' . $meses . ')';
-            }
         }
 
         /* EL ALQUILER ES EL QUE PROYECTA ALQUILERES PARA ESE MES: si no lo
@@ -911,7 +920,10 @@ class LlavesCalculo {
         $llave = round($pct / 100 * $alq * $meses, 2);
 
         return ['llave' => $llave, 'cuenta' => self::pct($pct) . ' (' . $origenPct . ') × ' . self::plata($alq)
-            . ' (1 + 2 + 8 de ' . AlquileresImputacion::mesLargo($mes1) . ', como lo proyecta Alquileres, neto) × '
+            /* Los conceptos por su nombre y no por su numero (1 + 2 + 8): el
+               tooltip lo lee quien usa la pantalla, no quien conoce la app. */
+            . ' (alquiler + complementario + VMA de ' . AlquileresImputacion::mesLargo($mes1)
+            . ', como lo proyecta Alquileres, neto) × '
             . $meses . ' meses (' . $deMeses . ') = ' . self::plata($llave)];
     }
 
@@ -1086,6 +1098,10 @@ class LlavesCalculo {
             foreach (array_values($f['pagos']) as $i => $p) {
                 $s['pagos'][] = self::pago($f['concepto'], self::FACTURA, $l, $p['fecha'], round($p['importe'], 2), [
                     'cuota' => $i + 1, 'cuotas' => $n, 'clave' => 'F' . $f['id'], 'id_factura' => $f['id'],
+                    /* La renovacion de la factura, con la misma clave que la de
+                       lo proyectado: asi la tarjeta la cuenta una sola vez. */
+                    'clave_renovacion' => ($f['ant'] ?? null) !== null ? $f['nro'] . '|' . $f['ant']
+                        : (($f['contrato'] ?? null) !== null ? $f['nro'] . '|C' . $f['contrato'] : null),
                     'detalle' => 'Factura ' . $f['comprobante'] . ' (' . $f['cod_provee'] . ') imputada a '
                         . self::NOMBRE_CONCEPTO[$f['concepto']] . ($n > 1 ? ', pago ' . ($i + 1) . ' de ' . $n : '') . ': '
                         . self::plata($p['importe']) . '. ' . ($p['nota'] ?? '') . ' ' . ($f['texto'] ?? '')
@@ -1143,15 +1159,18 @@ class LlavesCalculo {
 
         foreach ($f['sin_impuestos'] as $op => $x) {
             $out[] = Aviso::nuevo(Aviso::WARNING, 'El operador ' . $op . ' no tiene % de impuestos sobre llave y otros '
-                . 'gastos: no se proyecta la llave ni los otros gastos de ' . $lista(array_unique($x['locales']))
-                . ($x['neto'] > 0 ? ', por ' . self::plata($x['neto']) . ' netos sin impuestos' : '') . '. Se carga '
-                . 'en Parámetros › Llaves y Renovaciones › Por operador.', 'Parámetros');
+                . 'gastos: no se proyectan la llave ni los otros gastos (el % de otros gastos, o las comisiones y el FPC '
+                . 'del contrato) de ' . $lista(array_unique($x['locales']))
+                . ($x['neto'] > 0 ? ', por ' . self::plata($x['neto']) . ' netos sin impuestos' : '') . '. El escribano '
+                . 'sí se proyecta: no lleva impuestos. Se carga en Parámetros › Llaves y Renovaciones › Por operador.',
+                'Parámetros');
         }
 
         if (!empty($f['sin_retencion'])) {
             $out[] = Aviso::nuevo(Aviso::WARNING, 'Sin % de retención en Parámetros › Alquileres: '
                 . $lista(array_map(function ($n, $v) { return $n . ($v > 0 ? ' (' . self::plata($v) . ' netos)' : ''); },
-                    array_keys($f['sin_retencion']), $f['sin_retencion'])) . '. No se proyecta su llave ni sus otros gastos.', 'Parámetros');
+                    array_keys($f['sin_retencion']), $f['sin_retencion'])) . '. No se proyectan su llave ni sus otros gastos; el '
+                . 'escribano sí, porque no lleva retención.', 'Parámetros');
         }
 
         if (!empty($f['sin_pct_otros'])) {
@@ -1164,12 +1183,6 @@ class LlavesCalculo {
             $out[] = Aviso::nuevo(Aviso::WARNING, 'Operador sin escribano y otros por renovación: '
                 . $lista(array_keys($f['sin_escribano'])) . '. Se proyecta la parte del % y el escribano no se suma; si es '
                 . '0, cargá 0 en Parámetros › Llaves y Renovaciones › Por operador.', 'Parámetros');
-        }
-
-        if (!empty($f['meses_cortos'])) {
-            $out[] = Aviso::nuevo(Aviso::INFO, 'Sin un contrato anterior con llave, la renovación se estima con los meses '
-                . 'del contrato vigente, que son menos de 12: ' . $lista($f['meses_cortos']) . '. Si el contrato nuevo es '
-                . 'más largo, cargá los meses en Parámetros › Llaves y Renovaciones › Por local.', 'Proyección');
         }
 
         if (!empty($f['pasadas'])) {

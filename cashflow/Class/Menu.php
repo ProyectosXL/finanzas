@@ -109,7 +109,11 @@ class Menu {
      * tablero, que es la pantalla que se abre para trabajar.
      */
     private static $pie = [
-        ['tab' => 'parametros', 'nombre' => 'Parámetros', 'icono' => 'fa-sliders', 'estado' => self::DATOS]
+        ['tab' => 'parametros', 'nombre' => 'Parámetros', 'icono' => 'fa-sliders', 'estado' => self::DATOS],
+        /* El Centro de ayuda va al pie por lo mismo que Parametros: no es un
+           modulo de datos, es sobre todos ellos. Lo ve cualquiera que entre
+           (AuthCashflow::PARA_TODOS). */
+        ['tab' => 'ayuda', 'nombre' => 'Centro de ayuda', 'icono' => 'fa-circle-question', 'estado' => self::DATOS]
     ];
 
     /**

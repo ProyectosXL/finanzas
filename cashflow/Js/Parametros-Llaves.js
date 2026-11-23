@@ -203,12 +203,24 @@
             }).join('; ') + '.';
     }
 
-    function campo(nombre, valor, placeholder, titulo) {
+    function campo(nombre, valor, placeholder, titulo, deshabilitado) {
         return '<input type="text" class="form-control form-control-sm" data-campo="' + nombre + '" inputmode="decimal" '
             + 'value="' + (valor === null || valor === undefined ? '' : esc(numeroEditable(valor))) + '" '
             + 'placeholder="' + esc(placeholder === undefined || placeholder === null ? '' : placeholder) + '" '
-            + 'title="' + esc(titulo || '') + '">';
+            + 'title="' + esc(titulo || '') + '"' + (deshabilitado ? ' disabled' : '') + '>';
     }
+
+    /**
+     * El tooltip de lo que no se edita en una renovacion ya cargada.
+     *
+     * LA REGLA: con el contrato nuevo cargado, lo que dice CUANTO (no renueva,
+     * llave a mano, % propio, meses) deja de valer, porque manda el importe del
+     * contrato; lo que dice COMO SE PAGA (cuotas y 1.a cuota) sigue valiendo.
+     * Ver LlavesCalculo::proyectarRenovacion(). Por eso esas cuatro columnas se
+     * ven, con lo que tenian, pero deshabilitadas: editarlas no cambiaria nada.
+     */
+    var MANDA_EL_CONTRATO = 'El contrato nuevo ya está cargado en la app: manda el contrato. Este valor no se usa; '
+        + 'sólo valen las Cuotas y la 1.ª cuota.';
 
     /* ================================================================
        3. POR LOCAL
@@ -216,31 +228,36 @@
 
     function pintarLocales() {
         var cuerpo = document.getElementById('pllLocalesBody');
-        var rens = (datos.renovaciones || []).filter(function(r) { return r.tipo === 'ESTIMADA'; });
+        /* Las estimadas y las CARGADAS: de una cargada siguen valiendo las cuotas
+           y el mes de la 1.a cuota, asi que tienen que poder verse y cambiarse. */
+        var rens = (datos.renovaciones || []).filter(function(r) { return r.tipo === 'ESTIMADA' || r.tipo === 'CARGADA'; });
         var g = datos.generales || {};
 
         if (!rens.length) {
             cuerpo.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">Ningún local vence dentro del '
-                + 'horizonte ni está vencido sin renovación cargada.</td></tr>';
+                + 'horizonte, está vencido sin renovación cargada ni tiene una renovación cargada con pagos por delante.</td></tr>';
             return;
         }
 
         cuerpo.innerHTML = rens.map(function(r) {
             var p = r.parametros || {};
             var v = r.vigente;
+            var cargada = r.tipo === 'CARGADA';
+            var dis = cargada ? ' disabled title="' + esc(MANDA_EL_CONTRATO) + '"' : '';
 
-            return '<tr data-nro="' + r.nro + '" data-contrato="' + r.ant + '">'
+            return '<tr data-nro="' + r.nro + '" data-contrato="' + r.ant + '"' + (cargada ? ' class="pll-cargada"' : '') + '>'
                 + '<td><strong>' + esc(r.local) + '</strong><br><small class="text-muted">' + esc(r.operador || 'sin razón social') + '</small></td>'
-                + '<td><small>#' + v.id + ' · ' + fecha(v.desde) + ' a ' + fecha(v.hasta) + '<br>llave ' + llaveTexto(v.llave) + '</small></td>'
+                + '<td><small>#' + v.id + ' · ' + fecha(v.desde) + ' a ' + fecha(v.hasta) + '<br>llave ' + llaveTexto(v.llave)
+                    + (cargada ? '<br>renueva con el #' + r.contrato.id + ' desde el ' + fecha(r.contrato.desde) : '') + '</small></td>'
                 + '<td><span class="badge ' + (r.estado === 'VENCIDO' ? 'bg-warning text-dark' : 'bg-light text-dark border') + '">'
-                    + esc(r.nombre_estado) + '</span>' + (r.tiene_llave ? '' : '<br><small class="text-muted" title="Criterio de Costo de Ocupación">sin llave: no se estima</small>') + '</td>'
+                    + esc(r.nombre_estado) + '</span>' + (r.tiene_llave || cargada ? '' : '<br><small class="text-muted" title="Criterio de Costo de Ocupación">sin llave: no se estima</small>') + '</td>'
                 + '<td><div class="d-flex gap-1 align-items-center"><input type="checkbox" class="form-check-input" data-campo="no_renueva"'
-                    + (p.no_renueva ? ' checked' : '') + '>'
+                    + (p.no_renueva ? ' checked' : '') + dis + '>'
                     + '<input type="text" class="form-control form-control-sm" data-campo="motivo_no_renueva" maxlength="300" placeholder="motivo" value="'
-                    + esc(p.motivo_no_renueva || '') + '"></div></td>'
-                + '<td>' + campo('llave_manual', p.llave_manual, 'calculada', 'Reemplaza el cálculo') + '</td>'
-                + '<td>' + campo('pct_llave', p.pct_llave, numero(g.PCT_LLAVE), 'Vacío = el del operador o el general') + '</td>'
-                + '<td>' + campo('meses', p.meses, r.meses_defecto, 'Vacío = los del último contrato con llave') + '</td>'
+                    + esc(p.motivo_no_renueva || '') + '"' + dis + '></div></td>'
+                + '<td>' + campo('llave_manual', p.llave_manual, 'calculada', cargada ? MANDA_EL_CONTRATO : 'Reemplaza el cálculo', cargada) + '</td>'
+                + '<td>' + campo('pct_llave', p.pct_llave, numero(g.PCT_LLAVE), cargada ? MANDA_EL_CONTRATO : 'Vacío = el del operador o el general', cargada) + '</td>'
+                + '<td>' + campo('meses', p.meses, r.meses_defecto, cargada ? MANDA_EL_CONTRATO : 'Vacío = los del último contrato con llave', cargada) + '</td>'
                 + '<td>' + campo('cuotas', p.cuotas, '', 'Vacío = las del operador o las generales') + '</td>'
                 + '<td><input type="month" class="form-control form-control-sm" data-campo="mes_primera_cuota" value="' + esc(p.mes_primera_cuota || '')
                     + '" title="Vacío = ' + esc(r.mes1_defecto) + '"></td>'

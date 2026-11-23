@@ -321,8 +321,6 @@
     </div>
 </div>
 
-<?php include __DIR__ . '/../Components/help_modal_comex.php'; ?>
-
 <!-- La celda de fecha editable y el buscador, compartidos por las dos
      pestanas de Comercio Exterior. Ver su encabezado. -->
 <script src="Js/Comex-fechas.js?v=<?php echo time(); ?>"></script>

@@ -331,7 +331,8 @@ $jsCrono = file_get_contents(__DIR__ . '/../Js/Comex-Crono_nacionalizacion.js');
 $jsExt = file_get_contents(__DIR__ . '/../Js/Comex-Proveedores_exterior.js');
 $jsFechas = file_get_contents(__DIR__ . '/../Js/Comex-fechas.js');
 $tabCrono = file_get_contents(__DIR__ . '/../Tabs/crono_nacionalizacion.php');
-$ayuda = file_get_contents(__DIR__ . '/../Components/help_modal_comex.php');
+// La ayuda de Crono es su articulo, que reemplazo al modal compartido de Comex.
+$ayuda = file_get_contents(__DIR__ . '/../Ayuda/crono_nacionalizacion.md');
 
 /* EL TILDE ES LA ÚNICA ENTRADA: al tocarlo pregunta si se pago completa o una
    parte. No hay un boton "Pago parcial" aparte. */
@@ -368,7 +369,7 @@ chequear('el interruptor "Ver con costos reales" pasa por el filtro compartido',
     && strpos($jsFechas, 'if (!estado.conCostos && f.costos) {') !== false);
 chequear('el encabezado del dialogo explica cuando usar el tilde', true,
     strpos($tabCrono, 'Registrá lo que pagaste. Lo que falta se sigue proyectando como saldo en la') !== false);
-chequear('la ayuda tiene "Cómo registrar un pago", con su ejemplo', true,
-    strpos($ayuda, 'Cómo registrar un pago') !== false && strpos($ayuda, '$ 6.000.000 el 30/11') !== false);
+chequear('la ayuda explica el pago parcial, con su tarea y su ejemplo', true,
+    strpos($ayuda, '### Registrar un pago parcial') !== false && strpos($ayuda, ':::ejemplo ilustrativo') !== false);
 chequear('el tooltip de la marca real dice que la composicion cambia', true,
     strpos($jsCrono, 'Incluye el flete internacional y no los') !== false);

@@ -199,7 +199,7 @@ foreach (glob(__DIR__ . '/../Controller/*Controller.php') as $archivo) {
     }
 }
 
-chequear('se leyeron los diecisiete controllers', 17, count($controllers));
+chequear('se leyeron los dieciocho controllers', 18, count($controllers));
 chequear('ninguna accion sin declarar como lectura o escritura', [], $sinMapear);
 chequear('ninguna accion declarada que ya no exista', [], $sobrantes);
 

@@ -1,0 +1,12 @@
+# Las pruebas no se piden desde el navegador: ningun archivo de esta carpeta.
+#
+# POR QUE: pedir un .php de aca lo EJECUTA. run.php corre la suite entera, que
+# lee la base de produccion (el .env apunta ahi), y cualquiera que supiera la
+# direccion podia hacerlo sin iniciar sesion. Los demas archivos (las .wsf, el
+# .html de integracion) no tienen ningun uso desde el navegador.
+#
+# Va por CARPETA, a diferencia del .htaccess de cashflow/, que va por
+# extension: aca no hay nada que tenga que seguir sirviendose. Las pruebas se
+# corren por linea de comandos (php cashflow/tests/run.php), que no pasa por
+# Apache. Requiere AllowOverride, como el de cashflow/.
+Require all denied

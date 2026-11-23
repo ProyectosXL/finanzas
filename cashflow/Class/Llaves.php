@@ -713,9 +713,16 @@ class Llaves {
         };
         $renovaciones = [];
 
+        /* LA CANTIDAD Y EL IMPORTE MIDEN LO MISMO: los pagos de llave y otros
+           gastos, sea cual sea su origen, facturas incluidas. Una factura se
+           cuenta en la renovacion a la que se imputo (clave_renovacion), asi una
+           renovacion con la llave facturada y los otros gastos proyectados es
+           una sola. */
         foreach ($c['pagos'] as $p) {
-            if (in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true) && !empty($p['clave'])) {
-                $renovaciones[$p['clave']] = true;
+            $clave = $p['clave_renovacion'] ?? $p['clave'] ?? null;
+
+            if (in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true) && !empty($clave)) {
+                $renovaciones[$clave] = true;
             }
         }
 
@@ -729,8 +736,7 @@ class Llaves {
                 'total' => $sum(function () { return true; }),
                 'renovaciones_n' => count($renovaciones),
                 'renovaciones_importe' => $sum(function ($p) {
-                    return in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true)
-                        && $p['origen'] !== LlavesCalculo::FACTURA;
+                    return in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true);
                 }),
                 'estimado' => $sum(function ($p) { return $p['origen'] === LlavesCalculo::ESTIMADO; }),
                 'firme' => $sum(function ($p) { return in_array($p['origen'], [LlavesCalculo::CONTRATO, LlavesCalculo::FACTURA], true); }),

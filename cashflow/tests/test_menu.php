@@ -34,6 +34,12 @@ $arriba = array_map(function ($i) { return $i['tab']; }, $menu['principales']);
 
 chequear('y no quedo tambien arriba', false, in_array('parametros', $arriba, true));
 
+// El Centro de ayuda, al pie y despues de Parametros: tampoco es un modulo de
+// datos, es sobre todos ellos.
+chequear('el Centro de ayuda va al pie, despues de Parametros', ['parametros', 'ayuda'],
+    array_column($menu['pie'], 'tab'));
+chequear('con el icono del signo de pregunta', 'fa-circle-question', $menu['pie'][1]['icono']);
+
 seccion('todos los items estan completos');
 
 // Un item sin icono o sin estado dibuja un enlace roto. Se juntan TODOS los
@@ -44,9 +50,10 @@ foreach ($menu['categorias'] as $cat) {
     $todos = array_merge($todos, $cat['items']);
 }
 
-// 2 arriba + 19 en las cinco categorias + 1 al pie. Eran 26 hasta que se
-// sacaron Cronograma, Seguros, Bopreal y Pagos Div. Marzo.
-chequear('el menu tiene los 23 items', 23, count($todos));
+// 2 arriba + 19 en las cinco categorias + 2 al pie (Parametros y el Centro de
+// ayuda). Eran 26 hasta que se sacaron Cronograma, Seguros, Bopreal y Pagos
+// Div. Marzo, y 23 hasta el Centro de ayuda.
+chequear('el menu tiene los 24 items', 24, count($todos));
 
 $incompletos = [];
 
@@ -320,7 +327,8 @@ if (AuthCashflow::estaAutenticado()) {
 
     chequear('sin sesion no se ve ninguna pestana principal', 0, count($filtrado['principales']));
     chequear('ni ninguna categoria', 0, count($filtrado['categorias']));
-    chequear('ni Parametros al pie', 0, count($filtrado['pie']));
+    chequear('ni Parametros ni el Centro de ayuda al pie', 0, count($filtrado['pie']));
+    chequear('el Centro de ayuda tampoco se ve sin usuario', false, AuthCashflow::puede('ayuda'));
 
     chequear('puede() deniega una pestana que existe', false, AuthCashflow::puede('cashflow'));
     chequear('y tambien la nueva', false, AuthCashflow::puede('logistica_local'));
@@ -331,7 +339,7 @@ if (AuthCashflow::estaAutenticado()) {
 /* LA ESTRUCTURA COMPLETA NO SE FILTRA NUNCA. Si alguien le pusiera el filtro,
    todo lo de arriba pasaria a medir permisos sin que el nombre lo diga. */
 chequear('estructuraCompleta no depende de la sesion',
-    23, count(Menu::estructuraCompleta()['principales'])
+    24, count(Menu::estructuraCompleta()['principales'])
         + count(Menu::estructuraCompleta()['pie'])
         + array_sum(array_map(function ($c) { return count($c['items']); },
                               Menu::estructuraCompleta()['categorias'])));
@@ -374,7 +382,7 @@ foreach ($items as $item) {
 }
 
 chequear('cada enlace del menu lleva su tooltip', [], $malos);
-chequear('y son todos los del menu', 23, count($items));
+chequear('y son todos los del menu', 24, count($items));
 
 $sidebarSrc = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Components/sidebar.php'));
 

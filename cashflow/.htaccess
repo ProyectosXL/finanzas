@@ -1,0 +1,19 @@
+# Lo que el navegador NO puede pedir directo.
+#
+# POR QUE: los README, los articulos de la ayuda (Ayuda/*.md) y los scripts de
+# sql/ se servian a cualquiera que supiera la direccion, sin iniciar sesion.
+# Los README y los scripts describen tablas, columnas y reglas internas; los
+# articulos los lee PHP (Class/Ayuda.php) despues de verificar la sesion, asi
+# que pedirlos por la URL no tiene ningun uso legitimo.
+#
+# Se bloquea por EXTENSION y no por carpeta: los .md estan en la raiz del
+# modulo, en docs/ y en Ayuda/, y Ayuda/img/ tiene que seguir sirviendose
+# porque las imagenes de los articulos las pide el navegador.
+#
+# Requiere AllowOverride (al menos AuthConfig o All) en el <Directory> de
+# htdocs. Sin eso Apache ignora este archivo EN SILENCIO y todo sigue
+# descargandose: tests/test_acceso_archivos.php fija el contenido, pero no
+# puede ver la configuracion del servidor.
+<FilesMatch "\.(md|sql)$">
+    Require all denied
+</FilesMatch>

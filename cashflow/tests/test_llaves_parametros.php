@@ -147,3 +147,41 @@ foreach (['Tabs/llaves_renov.php' => 'll-pag-concepto', 'Tabs/parametros_llaves.
     chequear($archivo . ': los dos conceptos, tildados por defecto', 2,
         preg_match_all('/class="form-check-input ' . $clase . '" type="checkbox" id="\w+" value="(LLAVE|OTROS)" checked>/', $html));
 }
+
+seccion('Por local: tambien las renovaciones cargadas, con cuotas y 1.a cuota editables');
+
+/* Con el contrato nuevo cargado siguen valiendo las cuotas y el mes de la 1.a
+   cuota (LlavesCalculo::proyectarRenovacion()), asi que la renovacion tiene que
+   seguir en la tabla para poder verlas y cambiarlas. Lo que dice cuanto se ve
+   deshabilitado: manda el contrato. */
+$pllJs = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Js/Parametros-Llaves.js'));
+chequear('la tabla muestra las estimadas y las cargadas', true,
+    strpos($pllJs, "return r.tipo === 'ESTIMADA' || r.tipo === 'CARGADA';") !== false);
+chequear('en una cargada, no renueva y su motivo deshabilitados con el tooltip', 2,
+    substr_count($pllJs, "+ dis + '"));
+foreach (['llave_manual', 'pct_llave', 'meses'] as $campoCuanto) {
+    chequear($campoCuanto . ' deshabilitado en una cargada', true,
+        (bool) preg_match("/campo\('" . $campoCuanto . "',[^\n]*cargada \? MANDA_EL_CONTRATO[^\n]*, cargada\)/", $pllJs));
+}
+chequear('cuotas sigue editable', true, strpos($pllJs, "campo('cuotas', p.cuotas, '', 'Vacío = las del operador o las generales')") !== false);
+chequear('y la 1.a cuota tambien', false,
+    (bool) preg_match('/data-campo="mes_primera_cuota"[^\n]*dis/', $pllJs));
+chequear('el tooltip dice que manda el contrato', true,
+    strpos($pllJs, "var MANDA_EL_CONTRATO = 'El contrato nuevo ya está cargado en la app: manda el contrato.") !== false);
+
+seccion('la pantalla nombra los conceptos del alquiler, no sus numeros');
+
+$sinNumeros = [];
+
+foreach (['Class/LlavesCalculo.php', 'Class/Llaves.php', 'Class/LlavesSugeridos.php', 'Js/Llaves.js', 'Js/Parametros-Llaves.js',
+          'Tabs/llaves_renov.php', 'Tabs/parametros_llaves.php'] as $archivoLl) {
+    $src = file_get_contents(__DIR__ . '/../' . $archivoLl);
+    // Solo los textos entre comillas y el HTML: los comentarios pueden numerarlos.
+    $sinComentarios = preg_replace(['#/\*.*?\*/#s', '#^\s*//.*$#m', '#^\s*\*.*$#m', '#<!--.*?-->#s'], '', $src);
+
+    if (preg_match('/1 \+ 2 \+ 8/', $sinComentarios)) {
+        $sinNumeros[] = $archivoLl;
+    }
+}
+
+chequear('ningun texto de la pantalla de Llaves dice "1 + 2 + 8"', [], $sinNumeros);

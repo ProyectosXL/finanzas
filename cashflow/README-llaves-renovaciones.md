@@ -117,7 +117,7 @@ Los operadores son las razones sociales dadas de alta en Alquileres.
 
 ### 2.c Por local
 
-Sólo los que tienen un contrato que vence dentro del horizonte o ya vencido, sin renovación cargada. Cuelga del **contrato que vence** (`ID_CONTRATO`): cuando se carga el contrato nuevo, deja de aplicarse.
+Sólo los que tienen un contrato que vence dentro del horizonte o ya vencido, sin renovación cargada. Cuelga del **contrato que vence** (`ID_CONTRATO`), así que sigue ahí cuando administración carga el contrato nuevo. **Lo que define cuánto** —**No renueva**, **llave a mano**, **% propio** y **meses**— deja de aplicarse en ese momento: manda el importe real del contrato (con la marca de llave 1, sus meses y el % del operador o el general). **Lo que define cómo se paga** —**cuotas** y **mes de la primera cuota**— sigue valiendo, también sobre el contrato cargado: es una forma de pago acordada, no una estimación. **La tabla muestra también las renovaciones cargadas** (con pagos por delante): las dos columnas de cómo se paga se editan, y las cuatro de cuánto se ven deshabilitadas, con el tooltip *manda el contrato*.
 
 **No renueva** (con motivo obligatorio), **llave a mano** (reemplaza el cálculo; origen *Manual*), **% propio**, **meses del contrato nuevo** (por defecto, los del último contrato con llave), **cuotas** y **mes de la primera cuota**.
 
@@ -142,7 +142,8 @@ La llave, los otros gastos **o los dos** de una renovación que **ya salieron de
 - **Llave**: su importe en N cuotas mensuales iguales y consecutivas (local > operador > general), la primera el día de inicio del contrato (+ corrimiento del operador), cada una corrida al hábil siguiente.
 - **Comisiones + FPC**: un pago, el día de la primera cuota (la firma).
 - Vale para **cualquier contrato con cuotas por delante**, también el vigente si empezó hace poco (DOT #91).
-- **Llave = 1**: se estima (3.b) con los meses de ese contrato; nunca se pagan $ 1.
+- **Llave = 1**: se estima (3.b) con los meses de ese contrato y el % del operador o el general —no el % propio del local, que es de la estimación—; nunca se pagan $ 1.
+- **De los parámetros por local valen las cuotas y el mes de la primera cuota**, también sobre el contrato cargado; el % propio, los meses y la llave a mano, no (ver 2.c).
 
 ### 3.b Sin la renovación cargada
 
@@ -152,7 +153,7 @@ llave estimada = % × (1 + 2 + 8 del mes de la primera cuota, como lo proyecta A
 
 - Sólo si **el contrato de llave tiene llave** (> 0, la marca incluida): el criterio de Costo de Ocupación (`verificarValorLlaveNegocio()`). El contrato de llave (`LlavesCalculo::contratoDeLlave()`) es el vigente o, si el vigente es un **puente** —sin llave y de menos de 12 meses—, el último contrato anterior que no lo sea. **Un puente no hace que el local deje de pagar llave**: Solar, cuyo vigente es el puente #88 (tres meses, sin llave), estima con el #8 (llave $ 6,3 M, 36 meses). Un contrato largo sin llave sí corta: Gurruchaga y MDP Aldrey (#75, 48 meses, después de uno con llave de 2019) no estiman llave, pero sí otros gastos.
 - El alquiler es el **neto** que proyecta Alquileres (`Alquileres::alquilerMensual()`, antes de las facturas). Si Alquileres no tiene ese mes para el local, **no proyecta** y avisa.
-- Meses: los del local; si no, los del **contrato de llave** (el vigente, o el anterior al puente); si no hay, los del vigente, con aviso si son menos de 12.
+- Meses: los del local; si no, los del **contrato de llave** (el vigente, o el anterior al puente). **Un contrato corto con llave no se avisa**: es normal (Alto Palermo renueva cada 5 o 6 meses). El aviso de "menos de 12 meses" que hubo se borró.
 - Primera cuota: el mes del día siguiente al fin del vigente + corrimiento, o el del local. **Vencido sin renovar**: la primera cuota va al primer hábil después de hoy, con aviso de atención.
 
 ### 3.c Otros gastos estimados
@@ -161,7 +162,7 @@ llave estimada = % × (1 + 2 + 8 del mes de la primera cuota, como lo proyecta A
 
 ### 3.d Impuestos y retención
 
-`neto × (1 + % de impuestos del operador) − neto × % de retención del local`, con `AlquileresPago::importes()` —la misma regla de redondeo que Alquileres— pasándole el % de impuestos como la única alícuota. Por qué no un helper propio: así la suma, la retención sobre el neto y el redondeo a centavos están escritos una sola vez, sin agregarle a `importes()` un caso que Alquileres no tiene. Sin % de impuestos o sin % de retención, la llave y los otros gastos de ese local **no se proyectan**, y el aviso dice el neto que falta.
+`neto × (1 + % de impuestos del operador) − neto × % de retención del local`, con `AlquileresPago::importes()` —la misma regla de redondeo que Alquileres— pasándole el % de impuestos como la única alícuota. Por qué no un helper propio: así la suma, la retención sobre el neto y el redondeo a centavos están escritos una sola vez, sin agregarle a `importes()` un caso que Alquileres no tiene. Sin % de impuestos o sin % de retención, la llave y los otros gastos de ese local —el % de otros gastos, o las comisiones y el FPC del contrato— **no se proyectan**, y el aviso dice el neto que falta. **El escribano sí se proyecta**: es un importe final, sin impuestos ni retención, así que no le falta nada. Los dos avisos lo dicen.
 
 ### 3.e Obras y aperturas
 
@@ -178,7 +179,7 @@ Su fecha y su monto, tal cual (origen *Manual*).
 - **Una factura marcada como llave**: todo lo proyectado de ese concepto en esa renovación (parte 4).
 - **Los pagos de hoy o anteriores no se proyectan.** Una cuota de un contrato firmado que ya pasó, del mes en curso o el anterior, sin factura ni marca, se avisa.
 
-Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factura*) y la cuenta en el tooltip: *«25% (general) × $ 18.927.137 (1 + 2 + 8 de enero de 2027…) × 41 meses = $ 194.003.154, cuota 2 de 4. Neto … + 21% de impuestos … − 1% de retención … = a pagar …»*.
+Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factura*) y la cuenta en el tooltip: *«25% (general) × $ 18.927.137 (alquiler + complementario + VMA de enero de 2027…) × 41 meses = $ 194.003.154, cuota 2 de 4. Neto … + 21% de impuestos … − 1% de retención … = a pagar …»*.
 
 ---
 
@@ -204,7 +205,7 @@ Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factur
 - **Proyección**: operador → local → *Llave*, *Otros gastos*, *Obra de imagen*; aparte *Aperturas* y *Compromisos a mano*. Las tres vistas, columnas fijas, totales arriba del eje, buscador, abrir todo y exportar con todo abierto. **Lo estimado va en itálica y atenuado**, con el chip del origen (*mixto* si una celda junta varios) y la cuenta en el tooltip. `Llaves::armarPestana()` sólo agrupa la lista de pagos con `EjeVista`.
 - **Contratos**: lo que era la hoja *Detalles de vencimientos* — vigente (desde, hasta, meses, llave, comisiones, FPC), renovación cargada, estado, operador, m² y segmento, con las notas de lo que corta y el botón **Ya pagada**.
 - **Facturas**: las marcadas como llave, pendientes o pagadas, con sus pagos.
-- **Tarjetas**: total del horizonte, renovaciones con pagos en el horizonte (cantidad e importe), estimado frente a lo que está en un contrato o una factura (y lo manual), locales sin dato.
+- **Tarjetas**: total del horizonte, renovaciones con pagos en el horizonte (cantidad e importe, **los dos sobre el mismo universo**: los pagos de llave y otros gastos de cualquier origen, facturas incluidas; una factura cuenta en la renovación a la que se imputó, así que no suma una renovación aparte), estimado frente a lo que está en un contrato o una factura (y lo manual), locales sin dato.
 
 ---
 
@@ -244,7 +245,7 @@ Lo estimado se anota en cada celda con `detalle` (no suma). **La pestaña y el t
 
 ## 7. Avisos
 
-Cada hecho, un aviso aparte: contrato vencido sin renovación cargada (atención); contratos que vencen en el horizonte (informativo); local sin contrato en la app; local sin razón social en Alquileres; mes sin alquiler proyectado en Alquileres; operador sin % de impuestos, sin % de otros gastos o sin escribano; local sin % de retención; meses del vigente menos de 12; local sin m² ni segmento; cortes sin confirmar; segmento sin costo en U$S; mes sin dólar futuro; cuota de contrato firmado ya pasada sin factura (mes en curso y anterior); facturas excluidas como pago de contrato; facturas con leyenda de llave en Proveedores Locales; facturas marcadas que ya no están en Tango o cuyo pendiente cambió; falta correr un script.
+Cada hecho, un aviso aparte: contrato vencido sin renovación cargada (atención); contratos que vencen en el horizonte (informativo); local sin contrato en la app; local sin razón social en Alquileres; mes sin alquiler proyectado en Alquileres; operador sin % de impuestos (no se proyectan la llave ni los otros gastos; el escribano, sí), sin % de otros gastos o sin escribano; local sin % de retención (ídem); local sin m² ni segmento; cortes sin confirmar; segmento sin costo en U$S; mes sin dólar futuro; cuota de contrato firmado ya pasada sin factura (mes en curso y anterior); facturas excluidas como pago de contrato; facturas con leyenda de llave en Proveedores Locales; facturas marcadas que ya no están en Tango o cuyo pendiente cambió; falta correr un script.
 
 ---
 
