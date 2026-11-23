@@ -154,18 +154,16 @@ Se paga en los pagos que se le cargaron o, si no tiene, entera en su vencimiento
 
 ## La pantalla
 
-<!-- Acá va la captura: img/llaves_renov/pantalla.png con las marcas A, B, … dibujadas -->
+La pantalla, de arriba hacia abajo:
 
-:::marcas
-A: El enlace a Parámetros › Llaves y Renovaciones y el botón **Actualizar**.
-B: Los avisos.
-C: Las cuatro tarjetas.
-D: Las solapas **Proyección**, **Contratos** y **Facturas**.
-E: El buscador y los botones de las tres vistas del eje.
-F: Los botones **Abrir todo** y **Exportar**.
-G: El período que se mide y la leyenda de los chips de origen.
-H: La grilla.
-:::
+- El enlace a Parámetros › Llaves y Renovaciones y el botón **Actualizar**.
+- Los avisos.
+- Las cuatro tarjetas.
+- Las solapas **Proyección**, **Contratos** y **Facturas**.
+- El buscador y los botones de las tres vistas del eje.
+- Los botones **Abrir todo** y **Exportar**.
+- El período que se mide y la leyenda de los chips de origen.
+- La grilla.
 
 ### Las tarjetas
 

@@ -142,7 +142,8 @@ chequear('pasos con circulos numerados y el resultado', true,
 list(, $e) = render("## A\n:::pasos\n1. Uno.\n:::\n");
 chequear('unos pasos sin resultado se avisan', 1, count($e));
 
-list($h, $e) = render("## A\n:::marcas\nA: Las solapas.\nB: Las tarjetas.\n:::\n");
+// Con su captura antes: sin ella no se dibujan (ver el final de este archivo).
+list($h, $e) = render("## A\n![La pantalla](img/x/pantalla.png)\n\n:::marcas\nA: Las solapas.\nB: Las tarjetas.\n:::\n");
 chequear('marcas', true, tiene($h, '<span class="ayuda-marca" aria-hidden="true">B</span>'));
 list(, $e) = render("## A\n:::marcas\nA: uno\nC: tres\n:::\n");
 chequear('marcas fuera de orden se avisan', 1, count($e));
@@ -191,3 +192,28 @@ chequear('todas las veces', 2, substr_count(AyudaRender::resaltado('cuota y cuot
 chequear('el texto plano saca la sintaxis', 'La llave y Tango. ¿Por qué?',
     AyudaRender::textoPlano([[1, '**La** [llave](ayuda:x) y `Tango`.'], [2, ':::pregunta ¿Por qué?'], [3, ':::']]));
 chequear('enLinea escapa y marca', '<strong>a</strong> &lt;b&gt;', AyudaRender::enLinea('**a** <b>'));
+
+seccion('las marcas sin su captura no se muestran');
+
+/* Son las letras que senalan zonas de una imagen: sin la imagen no senalan
+   nada. Se muestran solo si hay una imagen antes, en la misma seccion. */
+list($h, $e) = render("## La pantalla\n<!-- Acá va la captura -->\n:::marcas\nA: Los avisos.\nB: Las tarjetas.\n:::\n");
+chequear('sin captura, la lista no se dibuja', false, tiene($h, 'ayuda-marcas'));
+chequear('y no es un error: queda lista para cuando llegue la captura', [], $e);
+
+list($h) = render("## La pantalla\n![La pantalla con las marcas](img/x/pantalla.png)\n\n:::marcas\nA: Los avisos.\n:::\n");
+chequear('con la captura antes, se dibuja', true, tiene($h, '<ol class="ayuda-marcas">'));
+
+list($h) = render("## La pantalla\n:::marcas\nA: Los avisos.\n:::\n\n![Otra](img/x/otra.png)\n");
+chequear('una captura despues no cuenta', false, tiene($h, 'ayuda-marcas'));
+
+list($h) = render("## Para qué sirve\n![Una imagen](img/x/a.png)\n## La pantalla\n:::marcas\nA: Los avisos.\n:::\n");
+chequear('ni una de otra seccion', false, tiene($h, 'ayuda-marcas'));
+
+list(, $e) = render("## La pantalla\n:::marcas\nA: uno\nC: tres\n:::\n");
+chequear('escondida, se valida igual', 1, count($e));
+
+chequear('el buscador no encuentra lo que no se ve', 'Texto.',
+    AyudaRender::textoPlano([[1, 'Texto.'], [2, ':::marcas'], [3, 'A: Los avisos.'], [4, ':::']]));
+chequear('con la captura, si', true, strpos(AyudaRender::textoPlano([[1, '![Alt](img/x/a.png)'], [2, ':::marcas'],
+    [3, 'A: Los avisos.'], [4, ':::']]), 'Los avisos.') !== false);

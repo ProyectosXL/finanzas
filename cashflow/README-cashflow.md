@@ -2568,7 +2568,7 @@ Lo lee `Class/AyudaArticulo.php` y lo pasa a HTML `Class/AyudaRender.php`, los d
 | `:::ejemplo ilustrativo` | El recuadro punteado *Ejemplo* |
 | `:::diagrama` | Las cajas fuentes → pestaña → tablero, en HTML y CSS; `fuente:`, `pestana:`, `tablero:` y `alt:` (obligatorio) |
 | `:::pasos` | Los círculos numerados, con `Resultado:` al final (obligatorio) |
-| `:::marcas` | Las letras naranjas A, B, C… de una captura |
+| `:::marcas` | Las letras naranjas A, B, C… de una captura. **Sólo se dibuja si hay una imagen antes, en la misma sección**: sin captura, las letras no señalan nada (y el buscador tampoco las encuentra). Hoy ningún artículo lo usa |
 | `:::aviso critico\|atencion\|info` | Una fila de la tabla de avisos, con los colores del panel de avisos; `texto:`, `significa:`, `corrige:` |
 | `:::pregunta ¿…?` | Un desplegable con la respuesta |
 
@@ -2586,6 +2586,7 @@ Nueve secciones, **en este orden y con estos títulos exactos** (`AyudaArticulo:
 - **Los ejemplos llevan números inventados, redondos y que cierren entre sí**, siempre en `:::ejemplo ilustrativo`: **nada de importes reales de proveedores, contratos ni saldos**, y tampoco nombres de locales u operadores con sus montos. Todos los usuarios ven todos los artículos, también los de pestañas que no pueden abrir. El renderizador no acepta otro tipo de ejemplo.
 - Los avisos, **todos** los que puede emitir la pestaña, con el texto como lo muestra la pantalla, sacados del código.
 - Cada afirmación tiene que estar respaldada por el código. Si un README dice otra cosa, manda el código. Lo que no está claro no se inventa: se pregunta.
+- **Por ahora los artículos van sin capturas de pantalla.** *La pantalla* describe sus partes de arriba hacia abajo, en una lista. Si algún día se agrega una captura, va **con los datos tapados** —nombres de proveedores, despachantes y cualquier otro tercero, e importes— con bloques lisos, y **la original no se sube nunca**: ni al repo, ni a un commit, ni a una rama. Se tapa fuera del repo y se borra al terminar. Lo que una captura muestra lo ve cualquiera que entre al cashflow, igual que el texto.
 
 ### Los estados
 
@@ -2599,7 +2600,7 @@ Una pestaña **sin archivo** se ve *Pendiente* en el Centro y no se puede abrir.
 
 ### Las imágenes
 
-Van en `Ayuda/img/<artículo>/` y se citan `![texto alternativo](img/<artículo>/archivo.png)`, con **texto alternativo obligatorio**: casi siempre son capturas con marcas, y sin él se pierde lo que la marca señala. Sólo png, jpg, gif y webp de esa carpeta. Los artículos de esta rama no tienen capturas: cada *La pantalla* deja el `:::marcas` armado y un comentario `<!-- Acá va la captura: … -->` con el nombre del archivo. Un diagrama de flujo se hace con `:::diagrama`, no con una imagen.
+Van en `Ayuda/img/<artículo>/` y se citan `![texto alternativo](img/<artículo>/archivo.png)`, con **texto alternativo obligatorio**: casi siempre son capturas con marcas, y sin él se pierde lo que la marca señala. Sólo png, jpg, gif y webp de esa carpeta. **Hoy ningún artículo tiene imágenes** (ver *Cómo se escribe*: sin capturas por ahora, y con los datos tapados si se agregan). Un diagrama de flujo se hace con `:::diagrama`, no con una imagen.
 
 **Los `.md` no se descargan por la URL** (`cashflow/.htaccess`, que niega los `.md` y los `.sql` de todo el módulo, README incluidos; requiere `AllowOverride` en el servidor). Las imágenes de `Ayuda/img/` sí, porque las pide el navegador.
 
