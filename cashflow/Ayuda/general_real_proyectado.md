@@ -84,7 +84,7 @@ Una fecha que ya pasó y no se pagó ni se cobró no es una proyección. Cada m�
 
 - **Cobranzas Franquicias y Mayoristas**: las facturas proyectadas vencidas, de hasta 180 días atrás, entran en la columna de hoy. Las más viejas no entran. El aviso dice cuántas son y cuánto suman.
 - **Exportaciones Tasky**: las facturas cuya fecha de cobro estimada ya venció se ubican hoy, con el aviso y la anotación en la celda.
-- **Proveedores Exterior** y **Crono Nacionalización**: lo vencido no suma en el tablero; o ya se pagó, o hay que corregirle la fecha. En la pestaña se esconde detrás del interruptor **Ver vencidas**, que dice al lado cuántas esconde. Ver **Proveedores Exterior** y **Crono Nacionalización**.
+- **Proveedores Exterior** y **Crono Nacionalización**: lo vencido no suma en el tablero; o ya se pagó, o hay que corregirle la fecha. En la pestaña se esconde detrás del interruptor **Ver vencidas**, que dice al lado cuántas esconde. Ver [Proveedores Exterior](ayuda:proveedores_exterior) y [Crono Nacionalización](ayuda:crono_nacionalizacion).
 
 ## Lo marcado como ya pagado
 

@@ -30,7 +30,7 @@ require_once __DIR__ . '/../Class/Ayuda.php';
  */
 const AYUDA_PENDIENTES = [
     'ventas', 'saldos', 'echeqs', 'cobranzas_fr', 'cobranzas_may', 'cob_electronicos', 'exportaciones_tasky',
-    'proveedores_exterior', 'crono_nacionalizacion', 'compras_proyectadas',
+    'compras_proyectadas',
     'proveedores_locales', 'logistica_local', 'gastos_locales',
     'alquileres',
     'pagos_tarjetas'
