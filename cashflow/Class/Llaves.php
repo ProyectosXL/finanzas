@@ -461,11 +461,11 @@ class Llaves {
                 $estado = LlavesCalculo::estado($vig, $ren, !empty($locP['no_renueva']), $this->hoy, $ultimoMes);
 
                 if (in_array($estado, [LlavesCalculo::VENCE, LlavesCalculo::VENCIDO, LlavesCalculo::NO_RENUEVA], true)) {
-                    $conLlave = LlavesCalculo::ultimoConLlave($ks, $vig);
+                    $conLlave = LlavesCalculo::contratoDeLlave($ks, $vig);
                     $sig = date('Y-m-d', strtotime($vig['hasta'] . ' +1 day'));
                     $out[] = ['nro' => $nro, 'local' => $l['nombre'], 'operador' => $l['operador'], 'tipo' => LlavesCalculo::ESTIMADA,
                               'estado' => $estado, 'nombre_estado' => LlavesCalculo::NOMBRE_ESTADO[$estado],
-                              'ant' => $vig['id'], 'contrato' => null, 'vigente' => $vig, 'tiene_llave' => LlavesCalculo::tieneLlave($vig),
+                              'ant' => $vig['id'], 'contrato' => null, 'vigente' => $vig, 'tiene_llave' => $conLlave !== null,
                               'meses_defecto' => LlavesCalculo::meses(($conLlave ?? $vig)['desde'], ($conLlave ?? $vig)['hasta']),
                               'mes1_defecto' => ($vig['hasta'] < $this->hoy) ? substr($this->hoy, 0, 7) : substr($sig, 0, 7),
                               'parametros' => $locP];

@@ -246,6 +246,45 @@ class LlavesCalculo {
         return $ant;
     }
 
+    /** Un contrato de menos de esto, sin llave, es un puente entre dos contratos */
+    const MESES_PUENTE = 12;
+
+    /**
+     * Si un contrato es un PUENTE: sin llave y de menos de 12 meses. Son los
+     * que administracion carga para cubrir el tiempo entre el fin de un
+     * contrato y la firma del siguiente (Unicenter #74, un mes; Solar #88, tres
+     * meses; Caballito #33, dos). Un puente no dice que el local dejo de pagar
+     * llave: la proxima renovacion la vuelve a tener.
+     */
+    public static function esPuente($c) {
+        return $c !== null && !self::tieneLlave($c) && self::meses($c['desde'], $c['hasta']) < self::MESES_PUENTE;
+    }
+
+    /**
+     * El contrato que dice si la renovacion del vigente tiene llave, y con
+     * cuantos meses se estima: el vigente o, si es un puente, el ultimo contrato
+     * antes de el que no lo sea (salteando puentes seguidos). Null si ese
+     * contrato no tiene llave: el criterio de Costo de Ocupacion.
+     *
+     * POR QUE SOLO SE SALTEAN PUENTES y no se busca el ultimo contrato con
+     * llave de toda la historia: un contrato largo sin llave (MDP Aldrey #75,
+     * 48 meses, despues de uno con llave de 2019) dice que el local ya no paga
+     * llave, y estimarle una por un contrato de hace siete años seria inventar
+     * un egreso.
+     *
+     * @return array|null
+     */
+    public static function contratoDeLlave($contratos, $vig) {
+        $c = $vig;
+        $vistos = 0;
+
+        while ($c !== null && self::esPuente($c) && $vistos++ < 50) {
+            $c = self::anteriorDe($contratos, $c);
+        }
+
+        return ($c !== null && self::tieneLlave($c)) ? $c : null;
+    }
+
     /** El ultimo contrato con llave (> 0 o la marca) que empezo hasta el inicio de $c, $c incluido. */
     public static function ultimoConLlave($contratos, $c) {
         $out = null;
@@ -670,15 +709,27 @@ class LlavesCalculo {
         $origenLlave = null;
         $cuenta = '';
 
+        /* EL CRITERIO DE "TIENE LLAVE" Y LOS MESES salen del contrato de llave: el
+           vigente o, si es un puente, el anterior a el (contratoDeLlave()). Solar:
+           su vigente es el puente #88, sin llave; estima con el #8. */
+        $deLlave = $estimada ? self::contratoDeLlave($contratos, $vig) : null;
+        $out['contrato_llave'] = ($deLlave === null) ? null : $deLlave['id'];
+
         if ($estimada) {
-            if (!self::tieneLlave($vig)) {
+            if ($deLlave === null) {
                 $out['notas'][] = 'El contrato vigente no tiene llave: no se estima (el criterio de Costo de Ocupación).';
             } elseif (($locP['llave_manual'] ?? null) !== null) {
                 $llave = (float) $locP['llave_manual'];
                 $origenLlave = self::MANUAL;
                 $cuenta = 'Llave cargada a mano en Parámetros: ' . self::plata($llave);
             } else {
-                $est = self::estimarLlave($nro, $vig, $mes1, $locP, $opP, $gen, $contratos, $e, $nombre, $s);
+                $est = self::estimarLlave($nro, $deLlave, $mes1, $locP, $opP, $gen, $contratos, $e, $nombre, $s);
+
+                if ($deLlave['id'] !== $vig['id']) {
+                    $est['cuenta'] .= ' (el vigente, #' . $vig['id'] . ', es un puente sin llave: el criterio y los meses son del #'
+                        . $deLlave['id'] . ')';
+                }
+
                 $llave = $est['llave'];
                 $cuenta = $est['cuenta'];
                 $origenLlave = self::ESTIMADO;
@@ -816,7 +867,8 @@ class LlavesCalculo {
     /**
      * La llave estimada: % x (1 + 2 + 8 del mes de la primera cuota) x meses.
      *
-     * @param array $base El contrato del que salen los meses por defecto (el vigente, o la renovacion con la marca)
+     * @param array $base El contrato del que salen los meses por defecto (el de llave del vigente -contratoDeLlave()-,
+     *        o la renovacion cargada con la marca)
      * @param bool $propios Si los meses son los de $base (una renovacion cargada con la marca) en vez de los del
      *        ultimo contrato con llave
      * @return array ['llave' => float|null, 'cuenta' => string]

@@ -417,3 +417,24 @@ chequear('IRSA: cuota inicial L6 98,25 M sobre llave 75 M = 31 %', 31.0, $imp['S
 chequear('el sellado no es una llave', 1, count($imp['SAPALA']['cruces']));
 chequear('Cencosud: LLAVE L2 = llave + comisiones, sin impuestos (0 %)', 0.0, $imp['SAUNIC']['pct'] ?? null);
 chequear('Caballito: las 4 CTA juntas, 25,41 M / 21 M = 21 %', 21.0, $imp['SAELSE']['pct'] ?? null);
+
+seccion('LlavesCalculo: un contrato puente no saca la llave');
+
+$solar = [llContrato(8, '2023-07-01', '2026-06-30', 6300000.0, 1566000.0), llContrato(88, '2026-07-01', '2026-09-30', 0.0)];
+chequear('el #88 (3 meses, sin llave) es un puente', true, LlavesCalculo::esPuente($solar[1]));
+chequear('el contrato de llave de Solar es el #8', 8, LlavesCalculo::contratoDeLlave($solar, $solar[1])['id']);
+$e = llEntrada();
+$e['locales'][78]['contratos'] = $solar;
+$r = LlavesCalculo::proyectar($e);
+$ll = llPagos($r, LlavesCalculo::LLAVE);
+chequear('Solar, vencido con un puente: estima con el % general, el alquiler del mes en curso y los 36 meses del #8',
+    round(0.25 * 2000000.0 * 36, 2), round(array_sum(array_column($ll, 'importe')), 2));
+chequear('la primera cuota, el primer hábil después de hoy', '2026-11-24', $ll[0]['fecha'] ?? null);
+chequear('el tooltip dice que el vigente es un puente', true, strpos($ll[0]['detalle'] ?? '', 'es un puente sin llave') !== false);
+
+$e['locales'][78]['contratos'] = [llContrato(25, '2019-10-31', '2023-10-31', 337440.0), llContrato(75, '2023-11-01', '2026-12-31', 0.0)];
+chequear('un contrato largo sin llave después de uno con llave (MDP Aldrey) no estima: no es un puente', [],
+    llPagos(LlavesCalculo::proyectar($e), LlavesCalculo::LLAVE));
+$e['locales'][78]['contratos'] = [llContrato(1, '2021-11-01', '2025-06-30', 3000000.0), llContrato(74, '2025-07-01', '2025-07-31', 0.0),
+                                  llContrato(40, '2025-08-08', '2026-12-31', 0.0)];
+chequear('un puente seguido de un contrato largo sin llave tampoco', [], llPagos(LlavesCalculo::proyectar($e), LlavesCalculo::LLAVE));

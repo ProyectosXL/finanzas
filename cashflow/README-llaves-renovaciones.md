@@ -150,9 +150,9 @@ La llave o los otros gastos de una renovación que **ya salieron de caja**: fech
 llave estimada = % × (1 + 2 + 8 del mes de la primera cuota, como lo proyecta Alquileres) × meses
 ```
 
-- Sólo si **el vigente tiene llave** (> 0, la marca incluida): el criterio de Costo de Ocupación (`verificarValorLlaveNegocio()`). Gurruchaga, MDP Aldrey y Solar no estiman llave, pero sí otros gastos.
+- Sólo si **el contrato de llave tiene llave** (> 0, la marca incluida): el criterio de Costo de Ocupación (`verificarValorLlaveNegocio()`). El contrato de llave (`LlavesCalculo::contratoDeLlave()`) es el vigente o, si el vigente es un **puente** —sin llave y de menos de 12 meses—, el último contrato anterior que no lo sea. **Un puente no hace que el local deje de pagar llave**: Solar, cuyo vigente es el puente #88 (tres meses, sin llave), estima con el #8 (llave $ 6,3 M, 36 meses). Un contrato largo sin llave sí corta: Gurruchaga y MDP Aldrey (#75, 48 meses, después de uno con llave de 2019) no estiman llave, pero sí otros gastos.
 - El alquiler es el **neto** que proyecta Alquileres (`Alquileres::alquilerMensual()`, antes de las facturas). Si Alquileres no tiene ese mes para el local, **no proyecta** y avisa.
-- Meses: los del local; si no, los del **último contrato con llave**; si no hay, los del vigente, con aviso si son menos de 12.
+- Meses: los del local; si no, los del **contrato de llave** (el vigente, o el anterior al puente); si no hay, los del vigente, con aviso si son menos de 12.
 - Primera cuota: el mes del día siguiente al fin del vigente + corrimiento, o el del local. **Vencido sin renovar**: la primera cuota va al primer hábil después de hoy, con aviso de atención.
 
 ### 3.c Otros gastos estimados
@@ -303,5 +303,5 @@ php tests/run.php llaves
 - **Comisiones de Cencosud (SAUNIS, Unicenter SA).** Las factura otro proveedor, que no está dado de alta en Alquileres: una factura suya queda en Cuentas a Pagar Locales y, si el concepto también está en Llaves (contrato o estimado), se cuenta dos veces. Hoy no hay ninguna pendiente; un aviso informativo las nombra cuando aparezcan. **Falta decidir si SAUNIS se da de alta en Alquileres** para poder marcarlas como llave.
 - **Los % de impuestos de los operadores sin historia en Tango** (Arcos, BA Mall, Los Gallegos, Continental Urbana, Condominio Rubinstein, Emprendimientos Terminal, Fortín Maure): sin cargarlos, su llave no se proyecta.
 - **Las renovaciones ya pagadas y no cargadas** (Arcos y Abasto): hasta que administración cargue los contratos, se marcan «Ya pagada».
-- **Contratos «puente» de la app** (Unicenter #74, Solar #88, Caballito #33): se toman como contratos; Solar está vencido con un puente sin llave, así que no estima llave (sí otros gastos).
+- **El corte de 12 meses de un puente** (`LlavesCalculo::MESES_PUENTE`). Hoy cubre Unicenter #74 (1 mes), Solar #88 (3) y Caballito #33 (2); Alto Palermo #85 y #90 y Parque Brown #84 son cortos pero tienen llave, así que no son puentes. Un contrato sin llave de 12 meses o más corta la llave.
 - **Un contrato cargado sin anterior** (el primero de un local) no se puede marcar «Ya pagada»: su clave es el contrato que renueva, y no hay. Hoy ninguno tiene cuotas por delante.
