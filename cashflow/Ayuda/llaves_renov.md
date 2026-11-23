@@ -341,54 +341,6 @@ El operador de cada local y su % de retención no se cargan acá: salen de Pará
 
 Cada aviso sale arriba de la pestaña, con la parte de la pantalla a la que se refiere adelante. También llegan al tablero. Para cómo se leen los avisos en general, mirá [los avisos](ayuda:general_avisos).
 
-:::aviso critico
-texto: Parámetros: Faltan las tablas de Parámetros › Llaves y Renovaciones: hay que correr sql/cashflow_llaves.sql contra la base central. Sin ellas se proyectan sólo las llaves de los contratos cargados en la app si el operador tiene % de impuestos, que tampoco se puede cargar: no se proyecta nada.
-significa: La sección de parámetros todavía no está instalada. La pestaña no proyecta nada.
-corrige: Sistemas, instalando la sección de parámetros.
-:::
-
-:::aviso critico
-texto: No se pudieron leer los locales y contratos de la app de alquileres (…): no hay nada que proyectar.
-significa: No se pudo leer la app de alquileres. Entre paréntesis va el error.
-corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
-:::
-
-:::aviso critico
-texto: No se pudo proyectar llaves y renovaciones: …
-significa: La pestaña no pudo cargar. Después de los dos puntos va el error.
-corrige: Tocá **Actualizar**. Si sigue, avisá a sistemas.
-:::
-
-:::aviso atencion
-texto: Faltan las tablas de Parámetros › Alquileres (sql/cashflow_alquileres.sql): sin el operador de cada local no se proyecta ninguna llave.
-significa: Parámetros › Alquileres no está instalado, así que ningún local tiene operador.
-corrige: Sistemas, instalando Parámetros › Alquileres.
-:::
-
-:::aviso atencion
-texto: No se pudieron leer los parámetros de Alquileres (…): sin el operador de cada local no se proyecta ninguna llave.
-significa: Falló la lectura de Parámetros › Alquileres. Ninguna llave se proyecta.
-corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
-:::
-
-:::aviso atencion
-texto: No se pudieron leer los m² de los locales (…): no hay segmento por m² para las obras.
-significa: No se pudo leer el gestor de locales. Las obras sin segmento a mano no se proyectan.
-corrige: Tocá **Actualizar** más tarde, o cargá el segmento a mano en la obra.
-:::
-
-:::aviso atencion
-texto: Proyección: No se pudo leer el alquiler proyectado de Alquileres (…): no se estima ninguna llave. Los contratos cargados se proyectan igual.
-significa: Sin el alquiler de la pestaña Alquileres no hay con qué estimar. Lo cargado en la app sí se ve.
-corrige: Revisá que la pestaña Alquileres cargue bien y tocá **Actualizar**.
-:::
-
-:::aviso atencion
-texto: Proyección: No se pudo leer la curva del dólar futuro (…): las obras y las aperturas no se proyectan en pesos.
-significa: Sin el dólar futuro, las obras y las aperturas quedan afuera.
-corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
-:::
-
 :::aviso atencion
 texto: Contratos: El contrato de N venció el dd/mm/aaaa; si se renovó, cargá el contrato nuevo en la app de alquileres. Mientras tanto se estima su renovación con la primera cuota en el mes en curso (si su contrato tiene llave), o marcalo como «No renueva» en Parámetros › Llaves y Renovaciones.
 significa: El contrato del local venció y no hay contrato nuevo en la app. Se estima igual, con la primera cuota después de hoy.
@@ -467,12 +419,6 @@ significa: Falta el costo en dólares de ese segmento.
 corrige: Parámetros › Llaves y Renovaciones › Generales, tabla **Costo en U$S por segmento**, o un costo propio en la obra o la apertura.
 :::
 
-:::aviso atencion
-texto: Proyección: Sin dólar futuro para el mes: N (Obra de imagen, aaaa-mm, U$S X). No se proyectan en pesos.
-significa: No hay ninguna cotización de dólar futuro con qué pasar a pesos esa obra o apertura.
-corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
-:::
-
 :::aviso info
 texto: Facturas: Facturas marcadas como llave que ya no están pendientes en Tango: …. Se toman como pagadas (no suman y siguen cortando lo proyectado). Si alguna se anuló, deshacé la marca.
 significa: Las facturas se pagaron, o se anularon, desde que se marcaron.
@@ -499,7 +445,79 @@ corrige: Marcá **Ya pagada** el concepto de esa renovación, o cargá el pago c
 
 ### En Parámetros › Llaves y Renovaciones
 
-Además de los avisos de lectura de la app, de Parámetros › Alquileres y del gestor de locales, esa sección puede mostrar estos:
+Esa sección también puede mostrar estos:
+
+:::aviso atencion
+texto: Generales: Faltan confirmar los cortes de segmento por m²: sin ellos ninguna obra sin segmento a mano se proyecta. Se sugieren los terciles de los m² de los locales de hoy.
+significa: Los cortes chico y mediano no están cargados.
+corrige: **Confirmar los sugeridos**, o cargá los dos cortes.
+:::
+
+:::aviso info
+texto: Generales: Locales sin m² en el Gestor de Locales: N. Una obra en ellos necesita el segmento a mano.
+significa: Esos locales no tienen m², así que no tienen segmento.
+corrige: Cargá los m² en el gestor de locales, o el segmento a mano en cada obra.
+:::
+
+### Avisos para Sistemas
+
+Los de instalación y los de lectura: falta una tabla, falta correr un script o no se pudo leer algo. No los corrige quien usa la pantalla: hay que avisar a sistemas, con el texto del aviso.
+
+:::aviso critico
+texto: Parámetros: Faltan las tablas de Parámetros › Llaves y Renovaciones: hay que correr sql/cashflow_llaves.sql contra la base central. Sin ellas se proyectan sólo las llaves de los contratos cargados en la app si el operador tiene % de impuestos, que tampoco se puede cargar: no se proyecta nada.
+significa: La sección de parámetros todavía no está instalada. La pestaña no proyecta nada.
+corrige: Sistemas, instalando la sección de parámetros.
+:::
+
+:::aviso critico
+texto: No se pudieron leer los locales y contratos de la app de alquileres (…): no hay nada que proyectar.
+significa: No se pudo leer la app de alquileres. Entre paréntesis va el error.
+corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
+:::
+
+:::aviso critico
+texto: No se pudo proyectar llaves y renovaciones: …
+significa: La pestaña no pudo cargar. Después de los dos puntos va el error.
+corrige: Tocá **Actualizar**. Si sigue, avisá a sistemas.
+:::
+
+:::aviso atencion
+texto: Faltan las tablas de Parámetros › Alquileres (sql/cashflow_alquileres.sql): sin el operador de cada local no se proyecta ninguna llave.
+significa: Parámetros › Alquileres no está instalado, así que ningún local tiene operador.
+corrige: Sistemas, instalando Parámetros › Alquileres.
+:::
+
+:::aviso atencion
+texto: No se pudieron leer los parámetros de Alquileres (…): sin el operador de cada local no se proyecta ninguna llave.
+significa: Falló la lectura de Parámetros › Alquileres. Ninguna llave se proyecta.
+corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
+:::
+
+:::aviso atencion
+texto: No se pudieron leer los m² de los locales (…): no hay segmento por m² para las obras.
+significa: No se pudo leer el gestor de locales. Las obras sin segmento a mano no se proyectan.
+corrige: Tocá **Actualizar** más tarde, o cargá el segmento a mano en la obra. Si sigue, avisá a sistemas.
+:::
+
+:::aviso atencion
+texto: Proyección: No se pudo leer el alquiler proyectado de Alquileres (…): no se estima ninguna llave. Los contratos cargados se proyectan igual.
+significa: Sin el alquiler de la pestaña Alquileres no hay con qué estimar. Lo cargado en la app sí se ve.
+corrige: Revisá que la pestaña Alquileres cargue bien y tocá **Actualizar**. Si sigue, avisá a sistemas.
+:::
+
+:::aviso atencion
+texto: Proyección: No se pudo leer la curva del dólar futuro (…): las obras y las aperturas no se proyectan en pesos.
+significa: Sin el dólar futuro, las obras y las aperturas quedan afuera.
+corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
+:::
+
+:::aviso atencion
+texto: Proyección: Sin dólar futuro para el mes: N (Obra de imagen, aaaa-mm, U$S X). No se proyectan en pesos.
+significa: No hay ninguna cotización de dólar futuro con qué pasar a pesos esa obra o apertura.
+corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
+:::
+
+En Parámetros › Llaves y Renovaciones:
 
 :::aviso critico
 texto: Faltan las tablas de Parámetros › Llaves y Renovaciones: hay que correr sql/cashflow_llaves.sql contra la base central. Hasta entonces no se estima ninguna llave, obra ni apertura, y no se cargan compromisos; los contratos de la app se ven igual.
@@ -514,27 +532,15 @@ corrige: Tocá **Actualizar**. Si sigue, avisá a sistemas.
 :::
 
 :::aviso atencion
-texto: Generales: Faltan confirmar los cortes de segmento por m²: sin ellos ninguna obra sin segmento a mano se proyecta. Se sugieren los terciles de los m² de los locales de hoy.
-significa: Los cortes chico y mediano no están cargados.
-corrige: **Confirmar los sugeridos**, o cargá los dos cortes.
-:::
-
-:::aviso info
-texto: Generales: Locales sin m² en el Gestor de Locales: N. Una obra en ellos necesita el segmento a mano.
-significa: Esos locales no tienen m², así que no tienen segmento.
-corrige: Cargá los m² en el gestor de locales, o el segmento a mano en cada obra.
-:::
-
-:::aviso atencion
 texto: Por operador: No se pudo medir el % sugerido de cada operador (…).
 significa: No hay sugeridos de % de llave ni de % de otros gastos. Lo cargado se usa igual.
-corrige: Tocá **Actualizar** más tarde.
+corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
 :::
 
 :::aviso atencion
 texto: Por operador: No se pudieron leer de Tango las facturas de llave (…): no hay % de impuestos sugerido.
 significa: No hay sugerido de % de impuestos. Lo cargado se usa igual.
-corrige: Tocá **Actualizar** más tarde, o cargá el % a mano.
+corrige: Tocá **Actualizar** más tarde, o cargá el % a mano. Si sigue, avisá a sistemas.
 :::
 
 ## Preguntas frecuentes

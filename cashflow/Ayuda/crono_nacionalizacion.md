@@ -278,30 +278,6 @@ Los dos primeros son los mismos que usa Proveedores Exterior: allá deciden el d
 
 Los avisos se ven arriba de la tabla, con los que el tablero dice de esta pestaña. Ver [cómo se leen los avisos](ayuda:general_avisos).
 
-:::aviso critico
-texto: No se pudo leer la curva de dólar futuro ROFEX (…), así que los gastos de nacionalización no se pueden pasar a pesos: la pestaña los muestra en dólares y la fila del tablero va en cero.
-significa: Sin curva no hay a cuánto convertir. La columna en dólares está; las de pesos, no.
-corrige: Avisale a Sistemas. Cuando la curva vuelve, se valúa solo.
-:::
-
-:::aviso critico
-texto: No se pudo leer el dólar divisa (…), así que las nacionalizaciones de los próximos N días y las vencidas no se pueden pasar a pesos y quedan fuera del tablero. No se usa el dólar BCRA ni la curva en su lugar. (el motivo)
-significa: Falló la lectura del dólar divisa. Las nacionalizaciones más cercanas quedan sin valuar.
-corrige: Avisale a Sistemas con el motivo.
-:::
-
-:::aviso critico
-texto: N contenedor(es) por U$S X caen en los próximos días o ya vencieron y van a dólar divisa vendedor, pero no hay ninguna cotización publicada, así que no se pueden valuar en pesos y quedan fuera del tablero. No se usa el dólar BCRA ni la curva en su lugar.
-significa: Se pudo leer el dólar divisa, pero no hay ninguna cotización. Esas nacionalizaciones no entran al tablero.
-corrige: Avisale a Sistemas que falta la cotización divisa.
-:::
-
-:::aviso critico
-texto: La tabla quedó vacía. (y el mensaje del servidor)
-significa: La pestaña no pudo cargar, o el servidor no devolvió ningún contenedor.
-corrige: Probá con **Actualizar**. Si vuelve a pasar, pasale a Sistemas el mensaje del cartel.
-:::
-
 :::aviso atencion
 texto: N contenedor(es) por $ X tienen la fecha de nacionalización ya vencida, así que NO suman en ninguna columna del período. No se los reubica en hoy, porque nadie afirmó que ese importe se mueve hoy: cargales la fecha nueva y entran solos.
 significa: Nacionalizaciones con la fecha pasada que nadie dio por pagadas. Si alguno tiene pagos parciales, el texto dice "fecha de nacionalización —o la del saldo, si tienen pagos parciales—": lo vencido es la fecha del saldo.
@@ -324,42 +300,6 @@ corrige: Abrí los pagos desde **Pagado ($)** y anulá el que esté de más, si 
 texto: Hay N contenedores en el cronograma pero ninguno tiene gastos de nacionalización estimados cargados, así que la fila va en cero.
 significa: La fila del tablero da cero porque no hay estimaciones, no porque no haya contenedores.
 corrige: Cargar la estimación en Comercio Exterior.
-:::
-
-:::aviso atencion
-texto: La curva de dólar futuro ROFEX se actualizó por última vez el dd/mm/aaaa hh:mm. Los pagos posteriores a los próximos N días se valúan con esa curva.
-significa: La curva no es la del último día hábil. Los números salen igual, con la última que hay.
-corrige: Puede salir un día hábil temprano, antes de que corra el proceso que baja la curva. Si sigue durante el día, avisale a Sistemas.
-:::
-
-:::aviso atencion
-texto: La última cotización del dólar divisa es del dd/mm/aaaa; se usa ésa para las nacionalizaciones de los próximos N días.
-significa: La cotización divisa tiene más días que **Antigüedad máxima del dólar del día anterior**. Se usa igual.
-corrige: Avisale a Sistemas que no se está cargando el dólar divisa.
-:::
-
-:::aviso atencion
-texto: El pago parcial de la nacionalización está apagado: faltan las tablas …. Corré … contra la base central y el botón aparece solo.
-significa: Falta instalar algo del cashflow. La pregunta del tilde no ofrece el pago parcial, se proyecta la nacionalización entera y los contenedores con costos reales no se muestran.
-corrige: Sistemas, corriendo el script que nombra el aviso.
-:::
-
-:::aviso atencion
-texto: La edición de fechas está apagada: falta la tabla …. Corré … contra la base central y las fechas se vuelven editables solas.
-significa: Todo se lee igual; lo único que no se puede es cambiar fechas.
-corrige: Sistemas, corriendo el script que nombra el aviso.
-:::
-
-:::aviso atencion
-texto: El tilde de «pagado» está apagado: falta la tabla …. Corré … contra la base central y la columna se vuelve marcable sola.
-significa: **Pagada completa** no está disponible. Mientras tanto no hay nada marcado y el tablero proyecta todo lo pendiente.
-corrige: Sistemas, corriendo el script que nombra el aviso.
-:::
-
-:::aviso atencion
-texto: No se pudieron traer los avisos del tablero para esta pestaña.
-significa: Se ven los avisos de la pestaña, pero no los que el tablero dice de ella.
-corrige: Probá con **Actualizar**.
 :::
 
 :::aviso info
@@ -406,6 +346,70 @@ Si el tablero no responde, esos dos últimos salen con el texto de la grilla, qu
 | "El saldo se proyecta ahora en la fecha nueva. La anterior queda en el historial." | Se cambió la fecha del saldo. |
 
 Si algo falla, el diálogo o la notificación dicen por qué, y no se guarda nada.
+
+### Avisos para Sistemas
+
+Los de instalación y los de lectura: falta una tabla, falta correr un script o no se pudo leer algo. No los corrige quien usa la pantalla: hay que avisar a sistemas, con el texto del aviso.
+
+:::aviso critico
+texto: No se pudo leer la curva de dólar futuro ROFEX (…), así que los gastos de nacionalización no se pueden pasar a pesos: la pestaña los muestra en dólares y la fila del tablero va en cero.
+significa: Sin curva no hay a cuánto convertir. La columna en dólares está; las de pesos, no.
+corrige: Avisale a Sistemas. Cuando la curva vuelve, se valúa solo.
+:::
+
+:::aviso critico
+texto: No se pudo leer el dólar divisa (…), así que las nacionalizaciones de los próximos N días y las vencidas no se pueden pasar a pesos y quedan fuera del tablero. No se usa el dólar BCRA ni la curva en su lugar. (el motivo)
+significa: Falló la lectura del dólar divisa. Las nacionalizaciones más cercanas quedan sin valuar.
+corrige: Avisale a Sistemas con el motivo.
+:::
+
+:::aviso critico
+texto: N contenedor(es) por U$S X caen en los próximos días o ya vencieron y van a dólar divisa vendedor, pero no hay ninguna cotización publicada, así que no se pueden valuar en pesos y quedan fuera del tablero. No se usa el dólar BCRA ni la curva en su lugar.
+significa: Se pudo leer el dólar divisa, pero no hay ninguna cotización. Esas nacionalizaciones no entran al tablero.
+corrige: Avisale a Sistemas que falta la cotización divisa.
+:::
+
+:::aviso critico
+texto: La tabla quedó vacía. (y el mensaje del servidor)
+significa: La pestaña no pudo cargar, o el servidor no devolvió ningún contenedor.
+corrige: Probá con **Actualizar**. Si vuelve a pasar, pasale a Sistemas el mensaje del cartel.
+:::
+
+:::aviso atencion
+texto: La curva de dólar futuro ROFEX se actualizó por última vez el dd/mm/aaaa hh:mm. Los pagos posteriores a los próximos N días se valúan con esa curva.
+significa: La curva no es la del último día hábil. Los números salen igual, con la última que hay.
+corrige: Puede salir un día hábil temprano, antes de que corra el proceso que baja la curva. Si sigue durante el día, avisale a Sistemas.
+:::
+
+:::aviso atencion
+texto: La última cotización del dólar divisa es del dd/mm/aaaa; se usa ésa para las nacionalizaciones de los próximos N días.
+significa: La cotización divisa tiene más días que **Antigüedad máxima del dólar del día anterior**. Se usa igual.
+corrige: Avisale a Sistemas que no se está cargando el dólar divisa.
+:::
+
+:::aviso atencion
+texto: El pago parcial de la nacionalización está apagado: faltan las tablas …. Corré … contra la base central y el botón aparece solo.
+significa: Falta instalar algo del cashflow. La pregunta del tilde no ofrece el pago parcial, se proyecta la nacionalización entera y los contenedores con costos reales no se muestran.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
+:::aviso atencion
+texto: La edición de fechas está apagada: falta la tabla …. Corré … contra la base central y las fechas se vuelven editables solas.
+significa: Todo se lee igual; lo único que no se puede es cambiar fechas.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
+:::aviso atencion
+texto: El tilde de «pagado» está apagado: falta la tabla …. Corré … contra la base central y la columna se vuelve marcable sola.
+significa: **Pagada completa** no está disponible. Mientras tanto no hay nada marcado y el tablero proyecta todo lo pendiente.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
+:::aviso atencion
+texto: No se pudieron traer los avisos del tablero para esta pestaña.
+significa: Se ven los avisos de la pestaña, pero no los que el tablero dice de ella.
+corrige: Probá con **Actualizar**. Si sigue, avisá a sistemas.
+:::
 
 ## Preguntas frecuentes
 

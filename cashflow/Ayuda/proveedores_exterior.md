@@ -325,30 +325,6 @@ Ver [permisos y parámetros](ayuda:general_permisos_parametros).
 
 Los avisos se ven arriba de la tabla, con los que el tablero dice de esta pestaña. Ver [cómo se leen los avisos](ayuda:general_avisos).
 
-:::aviso critico
-texto: No se encuentra la tabla … de Comercio Exterior, así que no se puede saber qué se le pagó ya a cada proveedor del exterior: esta pantalla y la fila del tablero proyectan el FOB COMPLETO de cada contenedor, que es de más si hay pagos hechos.
-significa: No se pudieron leer los pagos cargados en Comercio Exterior. Se proyecta de más: plata que quizás ya salió.
-corrige: Es de la otra aplicación: avisale a quien administra la base.
-:::
-
-:::aviso critico
-texto: No se pudo leer la curva de dólar futuro ROFEX (…), así que los pagos al exterior no se pueden pasar a pesos: la pestaña los muestra en dólares y la fila del tablero va en cero.
-significa: Sin curva no hay a cuánto convertir. Las columnas en dólares están; las de pesos, no.
-corrige: Avisale a Sistemas. Cuando la curva vuelve, se valúa solo.
-:::
-
-:::aviso critico
-texto: N contenedor(es) por U$S X se pagan en los próximos días y van a dólar BCRA vendedor, pero no hay ninguna cotización publicada, así que no se pueden valuar en pesos y quedan fuera del tablero. No se usa la curva en su lugar.
-significa: Son los pagos más cercanos, y no entran al tablero por falta de cotización.
-corrige: Avisale a Sistemas que falta la cotización BCRA.
-:::
-
-:::aviso critico
-texto: La tabla quedó vacía. (y el mensaje del servidor)
-significa: La pestaña no pudo cargar, o el servidor no devolvió ningún contenedor.
-corrige: Probá con **Actualizar**. Si vuelve a pasar, pasale a Sistemas el mensaje del cartel.
-:::
-
 :::aviso atencion
 texto: N contenedor(es) por $ X tienen la fecha estimada de pago ya vencida, así que NO suman en ninguna columna del período. No se los reubica en hoy, porque nadie afirmó que ese importe se mueve hoy: cargales la fecha nueva y entran solos.
 significa: Pagos con la fecha pasada que nadie tildó. No están en el tablero.
@@ -365,48 +341,6 @@ corrige: Cargales la **Fecha Est. Pago**, acá o en Comercio Exterior.
 texto: N contenedor(es) tienen cargado en Comercio Exterior MÁS de lo que dice su FOB: U$S X de más. El pendiente de esos se toma como CERO —el cashflow no proyecta egresos negativos, que serían un ingreso que nadie afirmó— así que la diferencia no se ve en ninguna columna. Revisá en Comercio Exterior si hay un pago imputado al contenedor equivocado o un FOB desactualizado.
 significa: Los pagos superan el FOB. Las filas llevan la etiqueta **Sobrepago**.
 corrige: En Comercio Exterior: el pago o el FOB.
-:::
-
-:::aviso atencion
-texto: La curva de dólar futuro ROFEX se actualizó por última vez el dd/mm/aaaa hh:mm. Los pagos posteriores a los próximos N días se valúan con esa curva.
-significa: La curva no es la del último día hábil. Los números salen igual, con la última que hay.
-corrige: Puede salir un día hábil temprano, antes de que corra el proceso que baja la curva. Si sigue durante el día, avisale a Sistemas.
-:::
-
-:::aviso atencion
-texto: La última cotización del dólar BCRA es del dd/mm/aaaa; se usa ésa para los pagos de los próximos N días.
-significa: La cotización BCRA tiene más días que **Antigüedad máxima del dólar del día anterior**. Se usa igual.
-corrige: Avisale a Sistemas que no se está cargando el dólar BCRA.
-:::
-
-:::aviso atencion
-texto: No se pudo leer el dólar BCRA para los pagos de los próximos N días: (el motivo)
-significa: Falló la lectura del dólar BCRA. Esos pagos quedan sin valuar y lo cuenta el aviso crítico de arriba.
-corrige: Avisale a Sistemas con el motivo.
-:::
-
-:::aviso atencion
-texto: La edición de fechas está apagada: falta la tabla …. Corré … contra la base central y las fechas se vuelven editables solas.
-significa: Falta instalar algo del cashflow. Todo se lee igual; lo único que no se puede es cambiar fechas.
-corrige: Sistemas, corriendo el script que nombra el aviso.
-:::
-
-:::aviso atencion
-texto: El tilde de «pagado» está apagado: falta la tabla …. Corré … contra la base central y la columna se vuelve marcable sola.
-significa: La casilla **Pagado** se ve deshabilitada. Mientras tanto no hay nada marcado y el tablero proyecta todo lo pendiente.
-corrige: Sistemas, corriendo el script que nombra el aviso.
-:::
-
-:::aviso atencion
-texto: La corrección manual de la cotización está apagada: falta la columna …. Corré … contra la base central y la columna se vuelve editable sola.
-significa: **Dólar aplicado** no se puede corregir. Los pagos se valúan con la curva igual.
-corrige: Sistemas, corriendo el script que nombra el aviso.
-:::
-
-:::aviso atencion
-texto: No se pudieron traer los avisos del tablero para esta pestaña.
-significa: Se ven los avisos de la pestaña, pero no los que el tablero dice de ella.
-corrige: Probá con **Actualizar**.
 :::
 
 :::aviso info
@@ -467,6 +401,76 @@ No son avisos: aparecen un momento después de cada acción.
 | "No se pudo guardar el tilde de pagado: …" | Falló. El tilde vuelve solo a donde estaba. |
 
 Los mensajes de error no se cierran solos: el texto del servidor es lo que explica qué pasó.
+
+### Avisos para Sistemas
+
+Los de instalación y los de lectura: falta una tabla, falta correr un script o no se pudo leer algo. No los corrige quien usa la pantalla: hay que avisar a sistemas, con el texto del aviso.
+
+:::aviso critico
+texto: No se encuentra la tabla … de Comercio Exterior, así que no se puede saber qué se le pagó ya a cada proveedor del exterior: esta pantalla y la fila del tablero proyectan el FOB COMPLETO de cada contenedor, que es de más si hay pagos hechos.
+significa: No se pudieron leer los pagos cargados en Comercio Exterior. Se proyecta de más: plata que quizás ya salió.
+corrige: Es de la otra aplicación: avisale a quien administra la base.
+:::
+
+:::aviso critico
+texto: No se pudo leer la curva de dólar futuro ROFEX (…), así que los pagos al exterior no se pueden pasar a pesos: la pestaña los muestra en dólares y la fila del tablero va en cero.
+significa: Sin curva no hay a cuánto convertir. Las columnas en dólares están; las de pesos, no.
+corrige: Avisale a Sistemas. Cuando la curva vuelve, se valúa solo.
+:::
+
+:::aviso critico
+texto: N contenedor(es) por U$S X se pagan en los próximos días y van a dólar BCRA vendedor, pero no hay ninguna cotización publicada, así que no se pueden valuar en pesos y quedan fuera del tablero. No se usa la curva en su lugar.
+significa: Son los pagos más cercanos, y no entran al tablero por falta de cotización.
+corrige: Avisale a Sistemas que falta la cotización BCRA.
+:::
+
+:::aviso critico
+texto: La tabla quedó vacía. (y el mensaje del servidor)
+significa: La pestaña no pudo cargar, o el servidor no devolvió ningún contenedor.
+corrige: Probá con **Actualizar**. Si vuelve a pasar, pasale a Sistemas el mensaje del cartel.
+:::
+
+:::aviso atencion
+texto: La curva de dólar futuro ROFEX se actualizó por última vez el dd/mm/aaaa hh:mm. Los pagos posteriores a los próximos N días se valúan con esa curva.
+significa: La curva no es la del último día hábil. Los números salen igual, con la última que hay.
+corrige: Puede salir un día hábil temprano, antes de que corra el proceso que baja la curva. Si sigue durante el día, avisale a Sistemas.
+:::
+
+:::aviso atencion
+texto: La última cotización del dólar BCRA es del dd/mm/aaaa; se usa ésa para los pagos de los próximos N días.
+significa: La cotización BCRA tiene más días que **Antigüedad máxima del dólar del día anterior**. Se usa igual.
+corrige: Avisale a Sistemas que no se está cargando el dólar BCRA.
+:::
+
+:::aviso atencion
+texto: No se pudo leer el dólar BCRA para los pagos de los próximos N días: (el motivo)
+significa: Falló la lectura del dólar BCRA. Esos pagos quedan sin valuar y lo cuenta el aviso crítico de arriba.
+corrige: Avisale a Sistemas con el motivo.
+:::
+
+:::aviso atencion
+texto: La edición de fechas está apagada: falta la tabla …. Corré … contra la base central y las fechas se vuelven editables solas.
+significa: Falta instalar algo del cashflow. Todo se lee igual; lo único que no se puede es cambiar fechas.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
+:::aviso atencion
+texto: El tilde de «pagado» está apagado: falta la tabla …. Corré … contra la base central y la columna se vuelve marcable sola.
+significa: La casilla **Pagado** se ve deshabilitada. Mientras tanto no hay nada marcado y el tablero proyecta todo lo pendiente.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
+:::aviso atencion
+texto: La corrección manual de la cotización está apagada: falta la columna …. Corré … contra la base central y la columna se vuelve editable sola.
+significa: **Dólar aplicado** no se puede corregir. Los pagos se valúan con la curva igual.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
+:::aviso atencion
+texto: No se pudieron traer los avisos del tablero para esta pestaña.
+significa: Se ven los avisos de la pestaña, pero no los que el tablero dice de ella.
+corrige: Probá con **Actualizar**. Si sigue, avisá a sistemas.
+:::
 
 ## Preguntas frecuentes
 
