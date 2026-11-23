@@ -85,18 +85,16 @@ La **fecha del saldo** no cambia la cotización: sólo decide en qué columna ca
 
 ## La pantalla
 
-<!-- Acá va la captura: img/crono_nacionalizacion/pantalla.png con las marcas A, B, C, D, E, F, G y H dibujadas -->
+La pantalla, de arriba hacia abajo:
 
-:::marcas
-A: Los avisos de la pestaña: los de la grilla y los que el tablero dice de ella.
-B: Las tres tarjetas, una por vista.
-C: El buscador y los interruptores **Ver vencidas**, **Ver pagadas** y **Ver con costos reales**.
-D: Los botones de vista, **Columnas fijas**, **Actualizar** y **Exportar**.
-E: La línea que dice qué período se mide y con qué dólar está valuada la tabla.
-F: Las columnas de cada contenedor, de **Fecha Est. EMB** a **Pagada**.
-G: Las cuatro columnas del pago parcial: **Costo ($)**, **Pagado ($)**, **Saldo ($)** y **Fecha del saldo**.
-H: Las columnas del período, con su total arriba de cada fecha, **Total** y el pie **TOTALES**.
-:::
+- Los avisos de la pestaña: los de la grilla y los que el tablero dice de ella.
+- Las tres tarjetas, una por vista.
+- El buscador y los interruptores **Ver vencidas**, **Ver pagadas** y **Ver con costos reales**.
+- Los botones de vista, **Columnas fijas**, **Actualizar** y **Exportar**.
+- La línea que dice qué período se mide y con qué dólar está valuada la tabla.
+- Las columnas de cada contenedor, de **Fecha Est. EMB** a **Pagada**.
+- Las cuatro columnas del pago parcial: **Costo ($)**, **Pagado ($)**, **Saldo ($)** y **Fecha del saldo**.
+- Las columnas del período, con su total arriba de cada fecha, **Total** y el pie **TOTALES**.
 
 Las tarjetas (**Vista Días**, **Vista Meses**, **Período Completo**), las tres vistas, el buscador, **Columnas fijas** y **Exportar** funcionan igual que en Proveedores Exterior: ver [las tarjetas](ayuda:proveedores_exterior#las-tarjetas) y [las tres vistas](ayuda:proveedores_exterior#las-tres-vistas). Acá las columnas fijas por defecto también son **Proveedor** y **Contenedor**.
 
