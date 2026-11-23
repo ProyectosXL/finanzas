@@ -207,6 +207,68 @@ try {
                 : $n . ' factura(s) incluida(s) de nuevo: vuelven a Sin imputar. La exclusión queda en el historial.');
             break;
 
+        /* MARCAR COMO LLAVE O RENOVACION (script 68): la cuota sale de Alquileres,
+           no vuelve a Proveedores Locales y la cuenta Llaves y Renovaciones, que
+           reemplaza con ella lo proyectado de su local, concepto y renovacion. La
+           previsualizacion y el guardado son la misma validacion
+           (LlavesFacturas::validar()), contra lo de AHORA. */
+        case 'previsualizarLlave':
+            require_once __DIR__ . '/../Class/Llaves.php';
+
+            $h = horizonteAlq();
+            $ll = new Llaves($h->hoy());
+            responder($ll->previsualizarMarca(bodyJson(), $ll->contextoMarcar($h)));
+            break;
+
+        case 'marcarLlave':
+            require_once __DIR__ . '/../Class/Llaves.php';
+
+            $data = bodyJson();
+            $h = horizonteAlq();
+            $v = LlavesFacturas::validar($data, (new Llaves($h->hoy()))->contextoMarcar($h));
+
+            if (!$v['ok']) {
+                throw new InvalidArgumentException('No se marcó: ' . implode(' ', $v['errores']));
+            }
+
+            $ids = (new LlavesFacturas())->marcar($v, $usuario);
+            AlquileresUniverso::olvidar();
+            responder(['ids' => $ids], count($ids) . ' factura(s) marcada(s) como ' . strtolower(LlavesFacturas::CONCEPTOS[$v['concepto']])
+                . ': salen de Alquileres y las cuenta Llaves y Renovaciones'
+                . ($v['pagada'] ? ' (ya pagadas: no suman, cortan lo proyectado).' : ', como real.'));
+            break;
+
+        case 'deshacerLlave':
+            require_once __DIR__ . '/../Class/LlavesFacturas.php';
+
+            $data = bodyJson();
+            $habia = (new LlavesFacturas())->deshacer((int) ($data['id'] ?? 0), $usuario);
+            AlquileresUniverso::olvidar();
+            responder(['habia' => $habia], $habia ? 'Marca deshecha: la factura vuelve a Sin imputar en Alquileres y lo '
+                . 'proyectado en Llaves vuelve. Queda en el historial.' : 'Esa marca ya no estaba vigente.');
+            break;
+
+        /* LAS PAGADAS DE LOS ULTIMOS 12 MESES, para marcarlas como llave: se piden
+           al tildar "Ver pagadas", no con cada carga de la pestaña. */
+        case 'getPagadasLlave':
+            autorizarLectura('alquileres');
+            require_once __DIR__ . '/../Class/Llaves.php';
+
+            $h = horizonteAlq();
+            $e = (new Llaves($h->hoy()))->contextoMarcar($h);
+            $filas = [];
+
+            foreach ($e['pagadas_12'] as $clave => $p) {
+                $filas[] = ['clave' => $clave, 'cod_provee' => Planilla::codigo($p['COD_PROVEE']),
+                            'razon' => $p['NOM_PROVEE'] ?? '', 't_comp' => $p['T_COMP'], 'n_comp' => $p['N_COMP'],
+                            'leyenda' => $p['LEYENDA'] ?? '', 'emision' => $p['FECHA_EMIS'] ?? null,
+                            'vto_tango' => substr((string) $p['FECHA_VTO'], 0, 10), 'importe' => (float) $p['IMPORTE_VTO'],
+                            'a_imputar' => (float) $p['IMPORTE_VTO'], 'fecha_pagada' => $p['FECHA_CANCELADO'] ?? null];
+            }
+
+            responder(['filas' => $filas]);
+            break;
+
         /* ================================================================
            PARAMETROS -> ALQUILERES
            ================================================================ */

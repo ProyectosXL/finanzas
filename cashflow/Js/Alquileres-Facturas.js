@@ -30,7 +30,7 @@
     var previsto = null;
 
     var ESTADOS_PENDIENTES = ['SIN_IMPUTAR', 'IMPUTADA', 'PARCIAL', 'SUSPENDIDA'];
-    var ESTADOS_PAGADAS = ['PAGADA'];
+    var ESTADOS_PAGADAS = ['PAGADA', 'PAGADA_ANTERIOR'];
     /* Las que se pueden tildar e imputar: las pendientes y las ya pagadas del mes que nadie imputo. */
     var ESTADOS_IMPUTABLES = ESTADOS_PENDIENTES.concat(['PAGADA_SIN_IMPUTAR']);
 
@@ -70,6 +70,10 @@
         datos = d.facturas || { filas: [], imputaciones: [], kpis: {}, estados: {} };
         hoy = d.hoy;
         seleccion = {};
+        /* Una recarga trae las filas de nuevo: las pagadas anteriores se vuelven a pedir si «Ver pagadas» sigue tildado. */
+        pagadasCargadas = false;
+        var vp = document.getElementById('alqFactVerPagadas');
+        if (vp && vp.checked) { setTimeout(cargarPagadas, 0); }
         html('alqFactSinScript', datos.tablas ? '' : '<div class="alert alert-danger small py-2">'
             + '<strong>No se puede imputar:</strong> falta correr ' + esc(datos.script) + ' contra la base central. '
             + 'Las facturas se ven pero no suman, y la proyección no se reemplaza con nada.</div>');
@@ -128,6 +132,8 @@
             if (!pagadas && !f.del_mes && ESTADOS_PAGADAS.indexOf(f.estado) !== -1) { return false; }
             /* Las excluidas no suman en ningun lado: se ven con "Ver excluidas". */
             if (!verExcluidas && f.estado === 'EXCLUIDA' && e !== 'EXCLUIDA') { return false; }
+            /* Las marcadas como llave las cuenta Llaves y Renovaciones: se ven con "Ver excluidas". */
+            if (!verExcluidas && f.estado === 'LLAVE' && e !== 'LLAVE') { return false; }
 
             return true;
         });
@@ -172,7 +178,7 @@
                 + '<td class="text-end" data-orden="' + (f.retencion || 0) + '"' + tituloRetencion(f) + '>'
                 +   (f.retencion === null ? '<span class="text-muted">—</span>' : importe(f.retencion)) + '</td>'
                 + '<td class="text-end fw-semibold" data-orden="' + f.a_pagar + '">' + importe(f.a_pagar) + '</td>'
-                + '<td>' + chipEstado(f) + accionExclusion(f) + '</td>'
+                + '<td>' + chipEstado(f) + accionExclusion(f) + accionLlave(f) + '</td>'
                 + '</tr>';
         }).join(''));
 
@@ -204,6 +210,18 @@
             btn.addEventListener('click', function() {
                 excluir([cuotaDeFila(btn)]);
             });
+        });
+
+        document.querySelectorAll('#alqFactBody .alq-fact-llave').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var clave = btn.closest('tr').getAttribute('data-clave');
+
+                abrirLlave(datos.filas.filter(function(x) { return x.clave === clave; }));
+            });
+        });
+
+        document.querySelectorAll('#alqFactBody .alq-fact-desllave').forEach(function(btn) {
+            btn.addEventListener('click', function() { deshacerLlave(Number(btn.getAttribute('data-id'))); });
         });
 
         document.querySelectorAll('#alqFactBody .alq-fact-incluir').forEach(function(btn) {
@@ -304,7 +322,7 @@
         var cls = { SIN_IMPUTAR: 'bg-danger', IMPUTADA: 'bg-success', PARCIAL: 'bg-warning text-dark',
                     PAGADA: 'bg-secondary', ANULADA: 'bg-warning text-dark', SIN_DATO: 'bg-warning text-dark',
                     SUSPENDIDA: 'bg-warning text-dark', PAGADA_SIN_IMPUTAR: 'bg-danger',
-                    EXCLUIDA: 'bg-dark' }[f.estado] || 'bg-light text-dark';
+                    EXCLUIDA: 'bg-dark', LLAVE: 'bg-info text-dark', PAGADA_ANTERIOR: 'bg-secondary' }[f.estado] || 'bg-light text-dark';
         var t = datos.estados[f.estado] || f.estado;
         var r = f.imputacion_resumen;
         var tip = f.imputacion ? 'Imputación #' + f.imputacion
@@ -317,6 +335,16 @@
         if (f.estado === 'EXCLUIDA' && f.excluida) {
             tip += 'No se paga por este circuito: no suma en ningún lado.\nMotivo: ' + f.excluida.motivo + '\n'
                 + Auditoria.texto({ alta: { usuario: f.excluida.usuario, fecha: f.excluida.fecha } });
+        }
+        if (f.estado === 'LLAVE' && f.llave) {
+            tip += 'Marcada como ' + ((datos.conceptos_llave || {})[f.llave.concepto] || f.llave.concepto).toLowerCase()
+                + ' de ' + f.llave.local + ', ' + rotuloMes(f.llave.mes) + (f.llave.pagos ? ', en ' + f.llave.pagos + ' pago(s)' : '')
+                + ': la cuenta Llaves y Renovaciones, no suma acá.\n'
+                + Auditoria.texto({ alta: { usuario: f.llave.usuario, fecha: f.llave.fecha } });
+        }
+        if (f.estado === 'PAGADA_ANTERIOR') {
+            tip += 'Pagada en Tango' + (f.fecha_pagada ? ' el ' + fecha(f.fecha_pagada) : '') + ' y sin imputar. Se puede marcar '
+                + 'como llave para cortar lo proyectado (no suma).';
         }
         if (f.estado === 'PAGADA_SIN_IMPUTAR') {
             tip += '\nNo se paga otra vez, pero la proyección de lo que cubre sigue en el flujo hasta que se impute '
@@ -456,6 +484,7 @@
     function actualizarBoton() {
         var b = document.getElementById('btnAlqImputar');
         var x = document.getElementById('btnAlqExcluir');
+        var ll = document.getElementById('btnAlqLlave');
 
         /* El encabezado sigue a lo tildado: cada cambio de tilde pasa por acá. */
         pintarSelTodas();
@@ -472,6 +501,224 @@
             x.style.display = puedeExcluir() ? '' : 'none';
             x.disabled = !fs.length || fs.some(function(f) { return ESTADOS_EXCLUIBLES.indexOf(f.estado) === -1; });
         }
+
+        /* MARCAR LAS TILDADAS COMO LLAVE: también sólo si todas son marcables. */
+        if (ll) {
+            var ts = tildadas();
+
+            ll.style.display = puedeMarcarLlave() ? '' : 'none';
+            ll.disabled = !ts.length || ts.some(function(f) { return ESTADOS_MARCABLES.indexOf(f.estado) === -1; });
+        }
+    }
+
+    /* ================================================================
+       ES LLAVE / RENOVACIÓN (script 68)
+
+       La cuota sale de Alquileres, no vuelve a Proveedores Locales y la cuenta
+       Llaves y Renovaciones. Se pide el local, el concepto y el mes; de a UNA
+       factura pendiente, en cuántos pagos se paga (la factura no es el pago).
+       Lo que vale es la previsualización del servidor (LlavesFacturas::validar()).
+       ================================================================ */
+
+    /** Las que se pueden marcar: las que no suman ni están imputadas, y las pagadas de meses anteriores. */
+    var ESTADOS_MARCABLES = ['SIN_IMPUTAR', 'PAGADA_SIN_IMPUTAR', 'PAGADA_ANTERIOR'];
+    var marcando = [];
+    var pagosLlave = [];
+    var previstaLlave = null;
+    var pagadasCargadas = false;
+
+    function puedeMarcarLlave() {
+        return puedeEditar() && !!datos.tabla_llaves;
+    }
+
+    function accionLlave(f) {
+        if (!puedeMarcarLlave()) { return ''; }
+
+        if (ESTADOS_MARCABLES.indexOf(f.estado) !== -1) {
+            return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 alq-fact-llave" data-exportar-omitir '
+                + 'title="Es una llave, una renovación o una obra: sale de Alquileres y la cuenta Llaves y Renovaciones">'
+                + 'Es llave</button>';
+        }
+
+        if (f.estado === 'LLAVE' && f.llave) {
+            return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 alq-fact-desllave" data-exportar-omitir '
+                + 'data-id="' + f.llave.id + '" title="Vuelve a Sin imputar en Alquileres; lo proyectado en Llaves vuelve">'
+                + 'Deshacer</button>';
+        }
+
+        return '';
+    }
+
+    function abrirLlave(fs) {
+        if (!fs.length) { return; }
+
+        marcando = fs;
+        pagosLlave = [];
+        previstaLlave = null;
+
+        html('alqLlaveFacturas', fs.map(function(f) {
+            return '<tr><td title="' + esc(f.leyenda || '') + '">' + esc(f.razon || f.cod_provee) + ' · '
+                + esc(f.t_comp + ' ' + f.n_comp) + (f.leyenda ? ' <small class="text-muted">«' + esc(f.leyenda) + '»</small>' : '')
+                + '</td><td>' + fecha(f.vto_considerar || f.vto_tango) + '</td><td class="text-end">' + importe(f.a_imputar)
+                + (f.estado !== 'SIN_IMPUTAR' ? ' <span class="badge bg-secondary" title="Ya pagada en Tango: no suma, '
+                    + 'corta lo proyectado">pagada</span>' : '') + '</td></tr>';
+        }).join(''));
+
+        var loc = datos.locales_app || {};
+        document.getElementById('alqLlaveLocal').innerHTML = '<option value="">Elegí el local</option>'
+            + Object.keys(loc).sort(function(a, b) { return String(loc[a]).localeCompare(String(loc[b])); }).map(function(n) {
+                return '<option value="' + esc(n) + '">' + esc(loc[n] + ' (' + n + ')') + '</option>';
+            }).join('');
+
+        var con = datos.conceptos_llave || {};
+        document.getElementById('alqLlaveConcepto').innerHTML = Object.keys(con).map(function(k) {
+            return '<option value="' + esc(k) + '">' + esc(con[k]) + '</option>';
+        }).join('');
+
+        document.getElementById('alqLlaveMes').value = datos.mes_actual || '';
+        document.getElementById('alqLlaveRetencion').value = '';
+        document.getElementById('alqLlaveObs').value = '';
+
+        /* REPARTIR SÓLO DE A UNA FACTURA PENDIENTE: con varias, o una ya pagada,
+           cada una va entera en su vencimiento a considerar. */
+        var reparte = fs.length === 1 && fs[0].estado === 'SIN_IMPUTAR';
+        document.getElementById('alqLlavePagosCaja').style.display = reparte ? '' : 'none';
+        dibujarPagosLlave();
+        cambioLlave();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('modalAlqLlave')).show();
+    }
+
+    function dibujarPagosLlave() {
+        var suma = pagosLlave.reduce(function(a, p) { return a + (Number(String(p.importe).replace(',', '.')) || 0); }, 0);
+
+        html('alqLlavePagos', pagosLlave.length ? '<table class="table table-sm small mb-1"><thead><tr><th>#</th><th>Fecha</th>'
+            + '<th class="text-end">Importe</th><th></th></tr></thead><tbody>' + pagosLlave.map(function(p, i) {
+                return '<tr><td>' + (i + 1) + '</td>'
+                    + '<td><input type="date" class="form-control form-control-sm alq-llave-pago" data-i="' + i + '" data-campo="fecha" value="' + esc(p.fecha) + '"></td>'
+                    + '<td><input type="text" class="form-control form-control-sm text-end alq-llave-pago" data-i="' + i + '" data-campo="importe" inputmode="decimal" value="' + esc(p.importe) + '"></td>'
+                    + '<td><button type="button" class="btn btn-link btn-sm text-danger p-0 alq-llave-quitar" data-i="' + i + '"><i class="fas fa-times"></i></button></td></tr>';
+            }).join('') + '</tbody><tfoot><tr class="fw-semibold"><td colspan="2">Suman</td><td class="text-end">'
+            + importe(suma) + '</td><td></td></tr></tfoot></table>'
+            : '<small class="text-muted">Sin pagos: va entera en su vencimiento a considerar.</small>');
+
+        document.querySelectorAll('#alqLlavePagos .alq-llave-pago').forEach(function(el) {
+            el.addEventListener('change', function() {
+                pagosLlave[Number(el.getAttribute('data-i'))][el.getAttribute('data-campo')] = el.value;
+                dibujarPagosLlave();
+                cambioLlave();
+            });
+        });
+
+        document.querySelectorAll('#alqLlavePagos .alq-llave-quitar').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                pagosLlave.splice(Number(btn.getAttribute('data-i')), 1);
+                dibujarPagosLlave();
+                cambioLlave();
+            });
+        });
+    }
+
+    /** Cualquier cambio invalida la previsualización: Marcar se apaga hasta volver a previsualizar. */
+    function cambioLlave() {
+        previstaLlave = null;
+        document.getElementById('btnAlqLlaveGuardar').disabled = true;
+        html('alqLlaveResultado', '');
+    }
+
+    function borradorLlave() {
+        return {
+            cuotas: marcando.map(function(f) { return { cod_provee: f.cod_provee, t_comp: f.t_comp, n_comp: f.n_comp, vto_tango: f.vto_tango }; }),
+            nro: document.getElementById('alqLlaveLocal').value,
+            concepto: document.getElementById('alqLlaveConcepto').value,
+            mes: document.getElementById('alqLlaveMes').value,
+            retencion: document.getElementById('alqLlavePagosCaja').style.display === 'none' ? '' : document.getElementById('alqLlaveRetencion').value,
+            pagos: pagosLlave.map(function(p) { return { fecha: p.fecha, importe: String(p.importe).replace(',', '.') }; }),
+            observacion: document.getElementById('alqLlaveObs').value
+        };
+    }
+
+    function previsualizarLlave(repartir) {
+        var b = borradorLlave();
+
+        if (repartir) { b.pagos = []; }
+
+        pedirJson(ENDPOINT + '?action=previsualizarLlave', b)
+            .then(function(d) {
+                var v = d.data;
+
+                if (repartir) {
+                    pagosLlave = (v.pagos_defecto || []).map(function(p) { return { fecha: p.fecha, importe: String(p.importe) }; });
+                    dibujarPagosLlave();
+                    cambioLlave();
+
+                    return;
+                }
+
+                previstaLlave = v.ok ? v : null;
+                document.getElementById('btnAlqLlaveGuardar').disabled = !v.ok;
+                html('alqLlaveResultado', v.ok
+                    ? '<div class="alert alert-success small py-2 mb-0">' + esc(marcando.length + ' factura(s) por ' + importeTexto(v.total)
+                        + ' como ' + (datos.conceptos_llave[v.concepto] || v.concepto).toLowerCase() + ' de ' + v.local
+                        + (v.renovacion ? ': reemplaza lo proyectado de la ' + v.renovacion : ', obra de ' + v.mes)
+                        + '. ' + (v.pagada ? 'Ya pagada: no suma, sólo corta lo proyectado.'
+                            : (v.pagos.length ? 'Se paga en ' + v.pagos.length + ' pago(s).' : 'Va entera en su vencimiento a considerar.'))) + '</div>'
+                    : '<div class="alert alert-danger small py-2 mb-0">' + v.errores.map(esc).join('<br>') + '</div>');
+            })
+            .catch(function(e) { Notificacion.error(e.message); });
+    }
+
+    function guardarLlave() {
+        if (!previstaLlave) { return; }
+
+        pedirJson(ENDPOINT + '?action=marcarLlave', borradorLlave())
+            .then(function(d) {
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('modalAlqLlave')).hide();
+                seleccion = {};
+                Notificacion.exito(d.message || 'Listo.');
+                recargar();
+            })
+            .catch(function(e) { Notificacion.error(e.message); });
+    }
+
+    function deshacerLlave(id) {
+        Notificacion.confirmar({
+            titulo: 'Deshacer la marca de llave',
+            mensaje: '¿La factura vuelve a Sin imputar en Alquileres?',
+            detalle: 'Lo proyectado en Llaves y Renovaciones vuelve. La marca queda en el historial.',
+            confirmar: 'Deshacer'
+        }).then(function(si) {
+            if (si) { guardar('deshacerLlave', { id: id }); }
+        });
+    }
+
+    /**
+     * LAS PAGADAS DE MESES ANTERIORES (los últimos 12) se piden al tildar «Ver
+     * pagadas», una vez: se ven para marcarlas como llave, que corta la
+     * estimación sin sumar.
+     */
+    function cargarPagadas() {
+        if (pagadasCargadas || !puedeMarcarLlave()) { return; }
+
+        pagadasCargadas = true;
+        pedirJson(ENDPOINT + '?action=getPagadasLlave', {})
+            .then(function(d) {
+                var ya = {};
+
+                datos.filas.forEach(function(f) { ya[f.clave] = true; });
+                (d.data.filas || []).forEach(function(p) {
+                    if (ya[p.clave]) { return; }
+
+                    datos.filas.push({ clave: p.clave, cod_provee: p.cod_provee, razon: p.razon, t_comp: p.t_comp,
+                        n_comp: p.n_comp, leyenda: p.leyenda, emision: p.emision, vto_tango: p.vto_tango,
+                        vto_considerar: p.vto_tango, vto_origen: 'TANGO', importe: p.importe, pendiente: 0,
+                        a_imputar: p.a_imputar, retencion: null, a_pagar: 0, estado: 'PAGADA_ANTERIOR', del_mes: false,
+                        fecha_pagada: p.fecha_pagada, pendiente_al_imputar: null });
+                });
+                datos.estados.PAGADA_ANTERIOR = 'Pagada, de un mes anterior';
+                llenarFiltros();
+                dibujar();
+            })
+            .catch(function(e) { pagadasCargadas = false; Notificacion.error('No se pudieron leer las pagadas: ' + e.message); });
     }
 
     /* ================================================================
@@ -833,6 +1080,29 @@
                 }));
             });
         }
+
+        var ll = document.getElementById('btnAlqLlave');
+        if (ll) { ll.addEventListener('click', function() { abrirLlave(tildadas()); }); }
+
+        var vp = document.getElementById('alqFactVerPagadas');
+        if (vp) { vp.addEventListener('change', function() { if (vp.checked && datos) { cargarPagadas(); } }); }
+
+        ['alqLlaveLocal', 'alqLlaveConcepto', 'alqLlaveMes', 'alqLlaveRetencion', 'alqLlaveObs'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) { el.addEventListener('change', cambioLlave); }
+        });
+
+        var lp = document.getElementById('btnAlqLlavePago');
+        if (lp) { lp.addEventListener('click', function() { pagosLlave.push({ fecha: '', importe: '' }); dibujarPagosLlave(); cambioLlave(); }); }
+
+        var lr = document.getElementById('btnAlqLlaveRepartir');
+        if (lr) { lr.addEventListener('click', function() { previsualizarLlave(true); }); }
+
+        var lv = document.getElementById('btnAlqLlavePrevisualizar');
+        if (lv) { lv.addEventListener('click', function() { previsualizarLlave(false); }); }
+
+        var lg = document.getElementById('btnAlqLlaveGuardar');
+        if (lg) { lg.addEventListener('click', guardarLlave); }
 
         var r = document.getElementById('btnAlqImpRetencion');
         if (r) { r.addEventListener('click', function() { retenciones.push({ tipo: '', importe: '' }); dibujarRetenciones(); }); }

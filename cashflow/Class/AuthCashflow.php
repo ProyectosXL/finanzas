@@ -137,7 +137,12 @@ class AuthCashflow {
             'guardarImputacion' => [['alquileres', null]],
             'deshacerImputacion' => [['alquileres', null]],
             'excluirFacturas' => [['alquileres', null]],
-            'incluirFacturas' => [['alquileres', null]]
+            'incluirFacturas' => [['alquileres', null]],
+            /* Marcar una factura de alquiler como llave es una decision sobre una
+               factura de alquiler: la toma quien maneja esas facturas, como excluir. */
+            'previsualizarLlave' => [['alquileres', null]],
+            'marcarLlave' => [['alquileres', null]],
+            'deshacerLlave' => [['alquileres', null]]
         ],
         'CashflowEstructura' => [
             'saveEstructura' => [['parametros', 'CASHFLOW']],
@@ -356,7 +361,7 @@ class AuthCashflow {
 
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
-        'Alquileres' => ['getProyeccion', 'getParametros'],
+        'Alquileres' => ['getProyeccion', 'getParametros', 'getPagadasLlave'],
         'Cashflow' => ['getTablero', 'getAvisosPestana'],
         'CashflowEstructura' => ['getEstructura'],
         'CobElectronicos' => ['getPestana'],

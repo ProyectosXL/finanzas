@@ -309,6 +309,13 @@
                             title="Las tildadas no se pagan por este circuito (pagos de contrato): salen de todos los totales">
                         <i class="fas fa-ban me-1"></i> Excluir
                     </button>
+                    <!-- Marcar las tildadas como llave o renovación (script 68): salen de
+                         Alquileres y las cuenta Llaves y Renovaciones. El JS lo muestra
+                         sólo con permiso y con el script. -->
+                    <button id="btnAlqLlave" class="btn btn-sm btn-outline-info" disabled style="display: none;"
+                            title="Las tildadas son una llave, una renovación o una obra: salen de Alquileres y las cuenta Llaves y Renovaciones">
+                        <i class="fas fa-key me-1"></i> Es llave / renovación
+                    </button>
                     <button id="btnAlqImputar" class="btn btn-sm btn-primary" disabled
                             title="Tildá una o varias facturas de una razón social">
                         <i class="fas fa-file-signature me-1"></i> Imputar
@@ -411,6 +418,69 @@
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
                     <button type="button" class="btn btn-outline-primary" id="btnAlqImpPrevisualizar">Previsualizar</button>
                     <button type="button" class="btn btn-primary" id="btnAlqImpGuardar" disabled>Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MARCAR COMO LLAVE O RENOVACIÓN: el local, el concepto y el mes al que se
+         imputa, y -de a una factura pendiente- en cuántos pagos se paga (la
+         factura no es el pago: IRSA factura la cuota inicial una vez y la paga
+         en cuotas). Lo que vale es la previsualización del servidor. -->
+    <div class="modal fade" id="modalAlqLlave" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Es llave / renovación</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <table id="tablaAlqLlaveFacturas" class="table table-sm small">
+                        <thead><tr><th>Comprobante</th><th>Vence</th><th class="text-end">Importe</th></tr></thead>
+                        <tbody id="alqLlaveFacturas"></tbody>
+                    </table>
+                    <div class="row g-2">
+                        <div class="col-md-5">
+                            <label class="form-label small mb-0" for="alqLlaveLocal">Local</label>
+                            <select class="form-select form-select-sm" id="alqLlaveLocal"></select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0" for="alqLlaveConcepto">Concepto</label>
+                            <select class="form-select form-select-sm" id="alqLlaveConcepto"></select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0" for="alqLlaveMes">Mes al que se imputa</label>
+                            <input type="month" class="form-control form-control-sm" id="alqLlaveMes">
+                        </div>
+                    </div>
+                    <div class="form-text">La llave y los otros gastos reemplazan lo proyectado de esa renovación del local (la que
+                        empieza más cerca del mes); la obra, la de ese local en ese mes.</div>
+                    <div id="alqLlavePagosCaja" class="mt-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">Pagos</h6>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="btnAlqLlaveRepartir">Repartir en las cuotas del operador</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="btnAlqLlavePago"><i class="fas fa-plus me-1"></i> Pago</button>
+                            </div>
+                        </div>
+                        <div class="form-text">Sin pagos, va entera en su vencimiento a considerar. Los pagos suman el pendiente menos la retención.</div>
+                        <div class="row g-2 mt-1">
+                            <div class="col-md-4">
+                                <label class="form-label small mb-0" for="alqLlaveRetencion">Retención</label>
+                                <input type="text" class="form-control form-control-sm" id="alqLlaveRetencion" inputmode="decimal" placeholder="0">
+                            </div>
+                        </div>
+                        <div id="alqLlavePagos" class="mt-2"></div>
+                    </div>
+                    <div class="mt-2">
+                        <input type="text" class="form-control form-control-sm" id="alqLlaveObs" maxlength="300" placeholder="Observación (opcional)">
+                    </div>
+                    <div id="alqLlaveResultado" class="mt-3"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-outline-primary" id="btnAlqLlavePrevisualizar">Previsualizar</button>
+                    <button type="button" class="btn btn-primary" id="btnAlqLlaveGuardar" disabled>Marcar</button>
                 </div>
             </div>
         </div>

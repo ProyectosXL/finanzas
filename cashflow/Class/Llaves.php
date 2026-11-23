@@ -155,6 +155,30 @@ class Llaves {
             $ins['habiles'] = $insA['habiles'];
             $ins['facturas_alq'] = $insA['facturas'] ?? null;
             $ins['alquiler'] = $alq->alquilerMensual($h, $insA);
+
+            /* LAS FACTURAS MARCADAS COMO LLAVE: las marcas son del contexto de
+               Alquileres (la misma lectura que decide su destino) y lo pendiente,
+               las cuotas de destino A_LLAVES. Sin la condicion de seguridad de
+               Alquileres no hay ninguna: las facturas siguen en Proveedores
+               Locales y lo proyectado no se corta. */
+            $f = $insA['facturas'] ?? [];
+
+            if (!empty($f['ctx']) && !empty($f['ctx']['condicion']['cumple'])) {
+                require_once __DIR__ . '/LlavesFacturas.php';
+
+                $pend = [];
+
+                foreach ($f['llaves_factura'] ?? [] as $p) {
+                    if (empty($p['PAGADA_TANGO'])) {
+                        $pend[AlquileresFacturas::claveCuota($p)] = $p;
+                    }
+                }
+
+                $pc = LlavesFacturas::paraCalculo($f['ctx']['facturas_llaves'] ?? [], $pend, $f['vtos'] ?? [],
+                    $f['dias'] ?? [], $ins['habiles'], $h->hoy());
+                $ins['facturas'] = $pc['facturas'];
+                $avisos = array_merge($avisos, $pc['avisos']);
+            }
         } catch (Throwable $e) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer el alquiler proyectado de Alquileres ('
                 . $e->getMessage() . '): no se estima ninguna llave. Los contratos cargados se proyectan igual.',
@@ -527,6 +551,103 @@ class Llaves {
         }
 
         return $out;
+    }
+
+    /* ====================================================================
+       MARCAR UNA FACTURA COMO LLAVE (desde Alquileres -> Facturas)
+       ==================================================================== */
+
+    /**
+     * Lo que valida marcar una factura como llave (LlavesFacturas::validar()),
+     * leido AHORA: las cuotas que se pueden marcar -las pendientes de alquiler,
+     * las pagadas del mes sin imputar y las pagadas de los ultimos 12 meses-,
+     * las imputadas en Alquileres, las excluidas, las ya marcadas, los locales
+     * y sus contratos, y las cuotas por defecto de cada operador.
+     *
+     * Lanza si la condicion de seguridad de Alquileres no se cumple: las
+     * facturas de alquiler siguen en Proveedores Locales y no se marcan.
+     *
+     * @param Horizonte $h
+     * @return array El $e de LlavesFacturas::validar() + 'vtos', 'dias', 'habiles', 'cuotas', 'pagadas_12'
+     */
+    public function contextoMarcar($h) {
+        require_once __DIR__ . '/Alquileres.php';
+        require_once __DIR__ . '/AlquileresUniverso.php';
+        require_once __DIR__ . '/AlquileresFacturaVto.php';
+        require_once __DIR__ . '/LlavesFacturas.php';
+        require_once __DIR__ . '/Proveedores.php';
+
+        $alq = new Alquileres($h->hoy());
+        $e = $alq->contextoImputacion($h);
+        $ctx = AlquileresUniverso::delPedido();
+        $imputadas = [];
+
+        foreach ($e['imputaciones'] as $imp) {
+            foreach ($imp['facturas'] as $fi) {
+                $imputadas[AlquileresImputacion::claveCuota($fi)] = $imp['id'];
+            }
+        }
+
+        /* LAS PAGADAS DE LOS ULTIMOS 12 MESES que nadie imputo: se marcan como
+           llave para cortar la estimacion, sin sumar. */
+        $pagadas12 = [];
+        $desde = date('Y-m-01', strtotime(substr($h->hoy(), 0, 7) . '-01 -' . LlavesFacturas::MESES_PAGADAS . ' month'));
+        $pm = AlquileresFacturas::partir((new Proveedores())->getCanceladasEmitidas(array_keys($ctx['razones']), $desde,
+            date('Y-m-t', strtotime($h->hoy()))), $ctx);
+
+        foreach ($pm[AlquileresFacturas::A_ALQUILERES] as $p) {
+            $c = AlquileresImputacion::claveCuota($p);
+
+            if (!isset($e['pendientes'][$c]) && !isset($imputadas[$c])) {
+                $e['pendientes'][$c] = AlquileresImputacion::comoPendiente($p);
+                $pagadas12[$c] = $e['pendientes'][$c];
+            }
+        }
+
+        $avisos = [];
+        $base = $this->base($avisos);
+        $par = $this->par->todo();
+        $cuotas = [];
+
+        foreach ($base['razones'] as $cod => $r) {
+            $cuotas[$cod] = (int) ($par['operadores'][$cod]['cuotas'] ?? $par['generales']['CUOTAS'] ?? 1);
+        }
+
+        return [
+            'imputables' => $e['pendientes'], 'imputadas' => $imputadas, 'excluidas' => $e['excluidas'],
+            'llaves' => $ctx['facturas_llaves'] ?? [], 'locales' => $base['nombres'], 'contratos' => $base['contratos'],
+            'hoy' => $h->hoy(), 'vtos' => (new AlquileresFacturaVto())->vigentes(), 'dias' => $e['dias'],
+            'cuotas' => $cuotas, 'cuotas_general' => (int) ($par['generales']['CUOTAS'] ?? 1), 'pagadas_12' => $pagadas12
+        ];
+    }
+
+    /**
+     * La previsualizacion de una marca: la validacion, la renovacion que corta
+     * y, de a una factura pendiente sin pagos cargados, los pagos por defecto
+     * (las cuotas del operador desde su vencimiento a considerar). Los
+     * habiles salen del calendario.
+     *
+     * @return array Lo de validar() + 'pagos_defecto', 'vto', 'local'
+     */
+    public function previsualizarMarca($d, $e) {
+        $v = LlavesFacturas::validar($d, $e);
+        $v['pagos_defecto'] = [];
+        $v['local'] = $e['locales'][(int) ($d['nro'] ?? 0)] ?? null;
+
+        if (count($v['cuotas']) === 1 && !$v['pagada']) {
+            require_once __DIR__ . '/CronogramaDatos.php';
+
+            $f = $v['cuotas'][0];
+            $vto = AlquileresImputacion::vtoAConsiderar($f, $e['vtos'], $e['dias']);
+            $n = $e['cuotas'][Planilla::codigo($f['COD_PROVEE'])] ?? $e['cuotas_general'];
+            $habiles = (new CronogramaDatos())->habilesEntre(substr($e['hoy'], 0, 8) . '01',
+                date('Y-m-t', strtotime($vto . ' +' . ($n + 1) . ' month')));
+            $v['vto'] = $vto;
+            $v['pagos_defecto'] = LlavesFacturas::pagosDefecto(round($v['total'] - (float) $v['retencion'], 2), $n, $vto,
+                $habiles, $e['hoy']);
+        }
+
+        return $v;
     }
 
     /**

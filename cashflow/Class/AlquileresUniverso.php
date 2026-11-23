@@ -62,7 +62,8 @@ class AlquileresUniverso {
             $this->excluidos($avisos),
             AlquileresFacturas::condicion($this->disponible(), $this->seriesActivas($avisos),
                                          $this->tablas($avisos)),
-            $this->facturasExcluidas($avisos)
+            $this->facturasExcluidas($avisos),
+            $this->facturasLlaves($avisos)
         ) + ['avisos' => $avisos];
     }
 
@@ -125,6 +126,28 @@ class AlquileresUniverso {
         } catch (Throwable $e) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer las facturas de alquiler excluidas ('
                 . $e->getMessage() . '): mientras tanto se toman como no excluidas (sin imputar, no suman).');
+
+            return [];
+        }
+    }
+
+    /**
+     * Las cuotas marcadas como llave en Alquileres -> Facturas (script 68).
+     * Sin la tabla no hay ninguna, que es lo cierto. Si no se puede leer,
+     * tampoco, y se avisa: tomarlas como no marcadas las deja en Alquileres sin
+     * imputar, donde no suman, y Llaves sigue proyectando lo suyo; nada se
+     * cuenta dos veces.
+     *
+     * @return array claveCuota => marca
+     */
+    protected function facturasLlaves(&$avisos) {
+        try {
+            require_once __DIR__ . '/LlavesFacturas.php';
+
+            return (new LlavesFacturas())->vigentes();
+        } catch (Throwable $e) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer las facturas marcadas como llave ('
+                . $e->getMessage() . '): mientras tanto se toman como no marcadas (sin imputar en Alquileres).');
 
             return [];
         }
