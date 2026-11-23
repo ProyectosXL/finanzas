@@ -294,7 +294,6 @@
                 ? 'renovación del contrato que vence el ' + fecha(r.vigente.hasta)
                 : 'contrato #' + r.contrato.id + ' del ' + fecha(r.contrato.desde)) };
         }), 'Elegí la renovación');
-        opciones('pllPagadaConcepto', objeto(datos.conceptos_pagada));
         opciones('pllObraLocal', locales.map(function(l) {
             return { valor: l.nro, texto: l.nombre + (l.m2 === null ? ' (sin m²)' : ' (' + numero(l.m2) + ' m²'
                 + (l.segmento ? ', ' + segs[l.segmento].toLowerCase() : '') + ')') };
@@ -351,14 +350,28 @@
 
         if (!ren) { Notificacion.advertencia('Elegí la renovación.'); return; }
 
+        if (!conceptosTildados('pll-pag-concepto', 'pllPagadaMonto').length) {
+            Notificacion.advertencia('Tildá qué se pagó: la llave, los otros gastos o los dos.');
+            return;
+        }
+
         escribir('altaPagada', {
             nro: ren.split('|')[0], id_contrato_ant: ren.split('|')[1],
-            concepto: document.getElementById('pllPagadaConcepto').value,
+            conceptos: conceptosTildados('pll-pag-concepto', 'pllPagadaMonto'),
             fecha: document.getElementById('pllPagadaFecha').value,
-            monto: document.getElementById('pllPagadaMonto').value,
             comprobante: document.getElementById('pllPagadaComp').value,
             observacion: document.getElementById('pllPagadaObs').value
         });
+    }
+
+    /**
+     * Los conceptos tildados de un formulario de "Ya pagada", cada uno con su
+     * monto (el input con el prefijo + el concepto). Los dos vienen tildados:
+     * lo normal es marcar la renovacion entera.
+     */
+    function conceptosTildados(clase, prefijoMonto) {
+        return Array.prototype.filter.call(document.querySelectorAll('.' + clase), function(c) { return c.checked; })
+            .map(function(c) { return { concepto: c.value, monto: document.getElementById(prefijoMonto + c.value).value }; });
     }
 
     /* ================================================================
@@ -572,6 +585,11 @@
         enganchar('pllBtnRefresh', 'click', cargar);
         enganchar('pllBtnCortes', 'click', confirmarCortes);
         enganchar('pllBtnPagada', 'click', marcarPagada);
+
+        /* Un concepto sin tildar no pide monto. */
+        document.querySelectorAll('.pll-pag-concepto').forEach(function(c) {
+            c.addEventListener('change', function() { document.getElementById('pllPagadaMonto' + c.value).disabled = !c.checked; });
+        });
         enganchar('pllBtnObra', 'click', agregarObra);
         enganchar('pllBtnApertura', 'click', agregarApertura);
         enganchar('pllBtnCompromiso', 'click', agregarCompromiso);

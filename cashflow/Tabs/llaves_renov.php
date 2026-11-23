@@ -120,7 +120,7 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
                     </div>
                     <div id="vistasLl"></div>
                 </div>
-                <div class="d-flex gap-2">
+                <div class="d-flex gap-2 flex-wrap justify-content-end">
                     <div id="colFijasLl"></div>
                     <button id="btnExpandirLl" class="btn btn-sm btn-outline-secondary" title="Abrir o cerrar todo">
                         <i class="fas fa-up-down me-1"></i> Abrir todo
@@ -159,7 +159,7 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
                     <small class="text-muted">El contrato vigente de cada local de la app de alquileres, si tiene la
                         renovación cargada y qué se proyecta de ella.</small>
                 </div>
-                <div class="d-flex gap-2 align-items-center">
+                <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end">
                     <select id="llContEstado" class="form-select form-select-sm" style="width: auto;"></select>
                     <button class="btn btn-sm btn-success" data-exportar="tablaLlContratos" data-exportar-nombre="Llaves_Contratos"
                             title="Exportar a Excel lo que se está viendo">
@@ -223,14 +223,22 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
                     <div class="row g-2">
                         <div class="col-12"><label class="form-label small mb-0" for="llPagRen">Renovación</label>
                             <select id="llPagRen" class="form-select form-select-sm"></select></div>
-                        <div class="col-md-6"><label class="form-label small mb-0" for="llPagConcepto">Concepto</label>
-                            <select id="llPagConcepto" class="form-select form-select-sm">
-                                <option value="LLAVE">Llave</option><option value="OTROS">Otros gastos</option>
-                            </select></div>
+                        <!-- Los dos conceptos tildados por defecto: lo normal es marcar la
+                             renovación entera, y marcar sólo la llave deja los otros
+                             gastos proyectados sin que nadie lo note. -->
+                        <div class="col-12"><span class="form-label small mb-0 d-block">Qué se pagó</span>
+                            <div class="row g-2 align-items-center">
+                                <div class="col-5"><div class="form-check mb-0">
+                                    <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagLlave" value="LLAVE" checked>
+                                    <label class="form-check-label small" for="llPagLlave">Llave</label></div></div>
+                                <div class="col-7"><input type="text" id="llPagMontoLLAVE" class="form-control form-control-sm" inputmode="decimal" placeholder="Monto ($)"></div>
+                                <div class="col-5"><div class="form-check mb-0">
+                                    <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagOtros" value="OTROS" checked>
+                                    <label class="form-check-label small" for="llPagOtros">Otros gastos</label></div></div>
+                                <div class="col-7"><input type="text" id="llPagMontoOTROS" class="form-control form-control-sm" inputmode="decimal" placeholder="Monto ($)"></div>
+                            </div></div>
                         <div class="col-md-6"><label class="form-label small mb-0" for="llPagFecha">Fecha del pago</label>
                             <input type="date" id="llPagFecha" class="form-control form-control-sm"></div>
-                        <div class="col-md-6"><label class="form-label small mb-0" for="llPagMonto">Monto ($)</label>
-                            <input type="text" id="llPagMonto" class="form-control form-control-sm" inputmode="decimal"></div>
                         <div class="col-md-6"><label class="form-label small mb-0" for="llPagComp">Comprobante</label>
                             <input type="text" id="llPagComp" class="form-control form-control-sm" maxlength="40" placeholder="opcional"></div>
                         <div class="col-12"><input type="text" id="llPagObs" class="form-control form-control-sm" maxlength="300" placeholder="Observación (opcional)"></div>

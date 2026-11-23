@@ -265,15 +265,25 @@
             return '<option value="' + r.ant + '">' + esc(r.tipo === 'ESTIMADA' ? 'Renovación estimada desde ' + fecha(r.inicio)
                 : 'Contrato #' + r.contrato + ' desde ' + fecha(r.inicio)) + '</option>';
         }).join('');
-        ['llPagFecha', 'llPagMonto', 'llPagComp', 'llPagObs'].forEach(function(id) { document.getElementById(id).value = ''; });
+        ['llPagFecha', 'llPagMontoLLAVE', 'llPagMontoOTROS', 'llPagComp', 'llPagObs'].forEach(function(id) { document.getElementById(id).value = ''; });
+        /* Los dos conceptos tildados: lo normal es marcar la renovacion entera. */
+        document.querySelectorAll('.ll-pag-concepto').forEach(function(c) {
+            c.checked = true;
+            document.getElementById('llPagMonto' + c.value).disabled = false;
+        });
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalLlPagada')).show();
     }
 
     function guardarPagada() {
+        var conceptos = Array.prototype.filter.call(document.querySelectorAll('.ll-pag-concepto'), function(c) { return c.checked; })
+            .map(function(c) { return { concepto: c.value, monto: document.getElementById('llPagMonto' + c.value).value }; });
+
+        if (!conceptos.length) { Notificacion.advertencia('Tildá qué se pagó: la llave, los otros gastos o los dos.'); return; }
+
         pedir(ENDPOINT + '?action=altaPagada', {
             nro: pagadaNro, id_contrato_ant: document.getElementById('llPagRen').value,
-            concepto: document.getElementById('llPagConcepto').value, fecha: document.getElementById('llPagFecha').value,
-            monto: document.getElementById('llPagMonto').value, comprobante: document.getElementById('llPagComp').value,
+            conceptos: conceptos, fecha: document.getElementById('llPagFecha').value,
+            comprobante: document.getElementById('llPagComp').value,
             observacion: document.getElementById('llPagObs').value
         }).then(function(d) {
             bootstrap.Modal.getOrCreateInstance(document.getElementById('modalLlPagada')).hide();
@@ -353,6 +363,11 @@
         enganchar('btnExpandirLl', 'click', function() { abrirTodo(!Object.keys(abiertos).length); });
         enganchar('llContEstado', 'change', dibujarContratos);
         enganchar('btnLlPagGuardar', 'click', guardarPagada);
+
+        /* Un concepto sin tildar no pide monto. */
+        document.querySelectorAll('.ll-pag-concepto').forEach(function(c) {
+            c.addEventListener('change', function() { document.getElementById('llPagMonto' + c.value).disabled = !c.checked; });
+        });
 
         var buscar = document.getElementById('busquedaLl');
 

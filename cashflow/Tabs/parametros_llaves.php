@@ -200,16 +200,25 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                     <select id="pllPagadaRen" class="form-select form-select-sm"></select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label form-label-sm" for="pllPagadaConcepto">Concepto</label>
-                    <select id="pllPagadaConcepto" class="form-select form-select-sm"></select>
-                </div>
-                <div class="col-md-2">
                     <label class="form-label form-label-sm" for="pllPagadaFecha">Fecha del pago</label>
                     <input type="date" id="pllPagadaFecha" class="form-control form-control-sm">
                 </div>
+                <!-- Los dos conceptos tildados por defecto: lo normal es marcar la
+                     renovación entera; marcar sólo la llave deja los otros gastos
+                     proyectados sin que nadie lo note. Cada uno con su monto. -->
                 <div class="col-md-2">
-                    <label class="form-label form-label-sm" for="pllPagadaMonto">Monto ($)</label>
-                    <input type="text" id="pllPagadaMonto" class="form-control form-control-sm" inputmode="decimal">
+                    <div class="form-check mb-1">
+                        <input class="form-check-input pll-pag-concepto" type="checkbox" id="pllPagadaLlave" value="LLAVE" checked>
+                        <label class="form-check-label small" for="pllPagadaLlave">Llave ($)</label>
+                    </div>
+                    <input type="text" id="pllPagadaMontoLLAVE" class="form-control form-control-sm" inputmode="decimal">
+                </div>
+                <div class="col-md-2">
+                    <div class="form-check mb-1">
+                        <input class="form-check-input pll-pag-concepto" type="checkbox" id="pllPagadaOtros" value="OTROS" checked>
+                        <label class="form-check-label small" for="pllPagadaOtros">Otros gastos ($)</label>
+                    </div>
+                    <input type="text" id="pllPagadaMontoOTROS" class="form-control form-control-sm" inputmode="decimal">
                 </div>
                 <div class="col-md-2">
                     <label class="form-label form-label-sm" for="pllPagadaComp">Comprobante</label>

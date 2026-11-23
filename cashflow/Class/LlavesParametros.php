@@ -316,6 +316,44 @@ class LlavesParametros {
     }
 
     /**
+     * "Ya pagada" de UNO O VARIOS conceptos de la misma renovacion: la fecha,
+     * el comprobante y la observacion son comunes, y cada concepto lleva su
+     * monto. Lo normal es marcar la renovacion entera (la llave y los otros
+     * gastos): marcar solo la llave deja los otros gastos proyectados sin que
+     * nadie lo note (Abasto, 23/11/2026). Por eso la pantalla ofrece los dos
+     * tildados, y aca se validan juntos.
+     *
+     * Acepta tambien el formato de un solo concepto ('concepto' y 'monto').
+     *
+     * @param array $d ['conceptos' => [['concepto', 'monto']], 'fecha', 'comprobante', 'observacion']
+     * @param string $hoy 'Y-m-d'
+     * @return array ['fecha', 'comprobante', 'observacion', 'conceptos' => [['concepto', 'monto']]]
+     */
+    public static function validarPagadas($d, $hoy) {
+        $lista = (isset($d['conceptos']) && is_array($d['conceptos'])) ? $d['conceptos']
+            : [['concepto' => $d['concepto'] ?? '', 'monto' => $d['monto'] ?? null]];
+        $out = null;
+        $conceptos = [];
+
+        foreach ($lista as $c) {
+            $v = self::validarPagada(['concepto' => $c['concepto'] ?? '', 'monto' => $c['monto'] ?? null] + $d, $hoy);
+
+            if (isset($conceptos[$v['concepto']])) {
+                throw new InvalidArgumentException('Ese concepto vino dos veces.');
+            }
+
+            $conceptos[$v['concepto']] = ['concepto' => $v['concepto'], 'monto' => $v['monto']];
+            $out = $out ?? ['fecha' => $v['fecha'], 'comprobante' => $v['comprobante'], 'observacion' => $v['observacion']];
+        }
+
+        if (empty($conceptos)) {
+            throw new InvalidArgumentException('Elegí qué se pagó: la llave, los otros gastos o los dos.');
+        }
+
+        return $out + ['conceptos' => array_values($conceptos)];
+    }
+
+    /**
      * Una obra de imagen. El segmento es opcional (vacio = el de los m2); el
      * costo propio tambien (vacio = el del segmento).
      *
@@ -729,11 +767,13 @@ class LlavesParametros {
     }
 
     /**
-     * Marca como ya pagada la llave o los otros gastos de la renovacion del
-     * contrato $idContratoAnt. Una sola vigente por concepto: para corregirla,
-     * se da de baja y se carga otra.
+     * Marca como ya pagados uno o varios conceptos (llave, otros gastos) de la
+     * renovacion del contrato $idContratoAnt, en una transaccion. Una sola
+     * marca vigente por concepto: el que ya estaba marcado no se toca y se
+     * informa en 'ya'; si estaban todos, no se guarda nada y se dice. Para
+     * corregir una marca, se da de baja y se carga otra.
      *
-     * @return array ['id'] + validarPagada()
+     * @return array ['ids', 'marcados' => [concepto], 'ya' => [concepto]] + validarPagadas()
      */
     public function altaPagada($nro, $idContratoAnt, $datos, $contratosDelLocal, $hoy, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
@@ -746,30 +786,39 @@ class LlavesParametros {
                 . 'la pantalla.');
         }
 
-        $v = self::validarPagada($datos, $hoy);
-        $nuevo = null;
+        $v = self::validarPagadas($datos, $hoy);
+        $ids = [];
+        $marcados = [];
+        $ya = [];
 
-        $this->enTransaccion(function () use ($n, $id, $v, $usuario, &$nuevo) {
-            $hay = $this->fila("SELECT ID FROM dbo." . self::T_PAGADA . " WITH (UPDLOCK, HOLDLOCK)
-                                WHERE NRO_SUCURS = ? AND ID_CONTRATO_ANT = ? AND CONCEPTO = ? AND VIGENTE = 1",
-                [$n, $id, $v['concepto']], 'Error al verificar la marca');
+        $this->enTransaccion(function () use ($n, $id, $v, $usuario, &$ids, &$marcados, &$ya) {
+            foreach ($v['conceptos'] as $c) {
+                $hay = $this->fila("SELECT ID FROM dbo." . self::T_PAGADA . " WITH (UPDLOCK, HOLDLOCK)
+                                    WHERE NRO_SUCURS = ? AND ID_CONTRATO_ANT = ? AND CONCEPTO = ? AND VIGENTE = 1",
+                    [$n, $id, $c['concepto']], 'Error al verificar la marca');
 
-            if ($hay !== null) {
-                throw new InvalidArgumentException('Esa renovación ya tiene marcado como pagado ese concepto: dala de baja '
-                    . 'primero para cargar otra.');
+                if ($hay !== null) {
+                    $ya[] = $c['concepto'];
+                    continue;
+                }
+
+                $r = $this->fila("INSERT INTO dbo." . self::T_PAGADA . "
+                        (NRO_SUCURS, ID_CONTRATO_ANT, CONCEPTO, FECHA, MONTO, COMPROBANTE, OBSERVACION, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
+                     OUTPUT INSERTED.ID VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                    [$n, $id, $c['concepto'], $v['fecha'], $c['monto'], $v['comprobante'], $v['observacion'], $usuario, $usuario],
+                    'Error al marcar como pagada');
+                $ids[] = (int) $r['ID'];
+                $marcados[] = $c['concepto'];
             }
 
-            $r = $this->fila("INSERT INTO dbo." . self::T_PAGADA . "
-                    (NRO_SUCURS, ID_CONTRATO_ANT, CONCEPTO, FECHA, MONTO, COMPROBANTE, OBSERVACION, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
-                 OUTPUT INSERTED.ID VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-                [$n, $id, $v['concepto'], $v['fecha'], $v['monto'], $v['comprobante'], $v['observacion'], $usuario, $usuario],
-                'Error al marcar como pagada');
-            $nuevo = (int) $r['ID'];
+            if (empty($marcados)) {
+                throw new InvalidArgumentException('Esa renovación ya tiene marcado como pagado todo lo elegido: dalo de baja '
+                    . 'primero para cargar otra marca.');
+            }
         });
 
-        return ['id' => $nuevo] + $v;
+        return ['ids' => $ids, 'marcados' => $marcados, 'ya' => $ya] + $v;
     }
-
     /** Baja logica de una fila por ID en una de las tablas de altas sueltas. @return bool Si estaba vigente */
     public function baja($tabla, $id, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);

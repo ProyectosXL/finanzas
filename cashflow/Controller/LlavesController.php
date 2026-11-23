@@ -99,8 +99,12 @@ try {
             $nro = (int) ($data['nro'] ?? 0);
             $r = $par->altaPagada($nro, $data['id_contrato_ant'] ?? null, $data, $ctx['contratos'][$nro] ?? [],
                 date('Y-m-d'), $usuario);
-            responder($r, LlavesParametros::CONCEPTOS_PAGADA[$r['concepto']] . ' de ' . ($ctx['locales'][$nro] ?? 'el local')
-                . ' marcada como ya pagada: ese concepto deja de proyectarse en esa renovación.');
+            $nombres = function ($cs) {
+                return implode(' y ', array_map(function ($c) { return mb_strtolower(LlavesParametros::CONCEPTOS_PAGADA[$c]); }, $cs));
+            };
+            responder($r, ucfirst($nombres($r['marcados'])) . ' de ' . ($ctx['locales'][$nro] ?? 'el local')
+                . ' marcado como ya pagado: deja de proyectarse en esa renovación.'
+                . (empty($r['ya']) ? '' : ' ' . ucfirst($nombres($r['ya'])) . ' ya estaba marcado: no se tocó.'));
             break;
 
         case 'bajaPagada':

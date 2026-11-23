@@ -121,3 +121,29 @@ $codLl = preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', file_get_contents(__DI
 chequear('LlavesTango sólo lee', 0, preg_match_all('/\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|EXEC|DROP|ALTER|CREATE)\b/i', $codLl));
 chequear('sin permiso de edición, los controles no se dibujan', true,
     substr_count(file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php'), 'if ($edita): ?>') >= 5);
+
+seccion('LlavesParametros: ya pagada de la renovación entera');
+
+$v = LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => '92750000'],
+    ['concepto' => 'otros', 'monto' => '9741393,38']], 'fecha' => '2026-08-31', 'comprobante' => 'FAC A0003000013817'], '2026-11-23');
+chequear('llave y otros gastos juntos, cada uno con su monto', [['concepto' => 'LLAVE', 'monto' => 92750000.0],
+    ['concepto' => 'OTROS', 'monto' => 9741393.38]], $v['conceptos']);
+chequear('con la fecha y el comprobante en común', ['2026-08-31', 'FAC A0003000013817'], [$v['fecha'], $v['comprobante']]);
+chequear('el formato de un solo concepto sigue sirviendo', [['concepto' => 'LLAVE', 'monto' => 1.0]],
+    LlavesParametros::validarPagadas(['concepto' => 'LLAVE', 'monto' => '1', 'fecha' => '2026-08-31'], '2026-11-23')['conceptos']);
+chequearLanza('sin ningún concepto tildado', function () {
+    LlavesParametros::validarPagadas(['conceptos' => [], 'fecha' => '2026-08-31'], '2026-11-23');
+});
+chequearLanza('un concepto sin monto', function () {
+    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => '1'], ['concepto' => 'OTROS', 'monto' => '']],
+        'fecha' => '2026-08-31'], '2026-11-23');
+});
+chequearLanza('el mismo concepto dos veces', function () {
+    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => '1'], ['concepto' => 'LLAVE', 'monto' => '2']],
+        'fecha' => '2026-08-31'], '2026-11-23');
+});
+foreach (['Tabs/llaves_renov.php' => 'll-pag-concepto', 'Tabs/parametros_llaves.php' => 'pll-pag-concepto'] as $archivo => $clase) {
+    $html = file_get_contents(__DIR__ . '/../' . $archivo);
+    chequear($archivo . ': los dos conceptos, tildados por defecto', 2,
+        preg_match_all('/class="form-check-input ' . $clase . '" type="checkbox" id="\w+" value="(LLAVE|OTROS)" checked>/', $html));
+}

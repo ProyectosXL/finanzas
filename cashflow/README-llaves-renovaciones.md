@@ -123,7 +123,7 @@ Sólo los que tienen un contrato que vence dentro del horizonte o ya vencido, si
 
 ### 2.d Ya pagadas
 
-La llave o los otros gastos de una renovación que **ya salieron de caja**: fecha, monto, comprobante opcional. Corta ese concepto en esa renovación, cargada o estimada, y **sigue valiendo cuando se carga el contrato nuevo**. No suma. Se marca desde Parámetros o desde la solapa *Contratos* (con el permiso de la pestaña).
+La llave, los otros gastos **o los dos** de una renovación que **ya salieron de caja**: fecha y comprobante en común, y un monto por concepto. **El formulario trae los dos conceptos tildados**: lo normal es marcar la renovación entera, y marcar sólo la llave deja los otros gastos proyectados sin que nadie lo note (Abasto: la cuota inicial y la publicidad de lanzamiento se facturaron juntas en agosto). Un concepto que ya estaba marcado no se toca y se informa. Corta cada concepto marcado en esa renovación, cargada o estimada, y **sigue valiendo cuando se carga el contrato nuevo**. No suma. Se marca desde Parámetros o desde la solapa *Contratos* (con el permiso de la pestaña).
 
 ### 2.e Obras, aperturas y compromisos
 
