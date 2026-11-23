@@ -19,7 +19,7 @@ Reemplaza las hojas «LLves y Renov Contratos» y «Detalles de vencimientos» d
 ## De dónde salen los datos
 
 :::diagrama
-fuente: La app de alquileres | los contratos de cada local: vigencia, llave, comisiones y FPC
+fuente: La app de alquileres | los contratos de cada local: vigencia, llave, comisiones y FPC (Fondo de Promoción Colectiva)
 fuente: La pestaña Alquileres | el alquiler de cada mes (alquiler, complementario y VMA), con el que se estima la llave
 fuente: Parámetros › Alquileres | el operador (la razón social principal) y el % de retención de cada local
 fuente: El gestor de locales | los m² de cada local, para el segmento de la obra
@@ -625,7 +625,7 @@ Sí: suman los mismos pagos, columna por columna. En el tablero, la fila Llaves 
 | Llave | Lo que se paga al operador por renovar el contrato, en cuotas |
 | Operador | La razón social principal del local en Parámetros › Alquileres: el que cobra la llave |
 | Otros gastos | Lo que se paga en la firma además de la llave: comisiones y FPC (cargada), o un % de la llave más el escribano (estimada) |
-| FPC lanzamiento | Cargo del shopping que se paga al abrir o renovar el contrato. Va con las comisiones, en los otros gastos |
+| FPC lanzamiento | Fondo de Promoción Colectiva: el aporte al fondo de promoción del shopping que se paga al abrir o renovar el contrato. Va con las comisiones, en los otros gastos. |
 | VMA | Valor mínimo mensual: con el alquiler y el complementario, forma el alquiler con el que se estima la llave |
 | Escribano y otros | Un importe fijo por renovación, por operador, que se suma a los otros gastos sin impuestos ni retención |
 | % de impuestos | Lo que el operador factura de más sobre la llave y los otros gastos |
