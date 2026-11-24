@@ -509,8 +509,10 @@ chequear('el comprobante se cuenta una vez', [true, false], array_map(['Proveedo
 
 $crono = [['fecha' => '2026-10-28', 'nombre' => '4to miércoles'], ['fecha' => '2026-11-25', 'nombre' => '4to miércoles']];
 $p = Proveedores::abrirEnMedios($items, $ap, $hoy, $crono);
-chequear('del cronograma: el saldo va al próximo día de pago', ['2026-11-25', true],
-    [$p[1]['Pago'], $p[1]['PAGO_CRONO']]);
+/* El vencimiento de Tango futuro manda sobre el cronograma (Administracion,
+   24/11/2026): el saldo que vence el 20/11 queda el 20/11, no el 25. */
+chequear('del cronograma con vencimiento futuro: el saldo queda en su vencimiento',
+    ['2026-11-20', false], [$p[1]['Pago'], $p[1]['PAGO_CRONO']]);
 
 $vencido = [$item('PROVA', 'A0001', 1000000.0, '2026-10-01', null, ['CRONOGRAMA' => false])];
 $p = Proveedores::abrirEnMedios($vencido, $ap, $hoy);

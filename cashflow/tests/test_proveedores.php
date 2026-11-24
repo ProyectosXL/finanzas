@@ -2638,22 +2638,17 @@ $rPL = function ($fechaPago, $vto, $pagos, $delCrono = true, $emis = null, $plaz
         $pagos, $delCrono);
 };
 
+/* EL VENCIMIENTO DE TANGO FUTURO MANDA SOBRE EL CRONOGRAMA (Administracion,
+   24/11/2026): planilla, vencimiento, cronograma. */
 $entre = $rPL(null, '2026-10-20', $pagosPL);
-chequear('vence entre dos pagos (20/10): se paga el siguiente, el 28',
-    '2026-10-28', $entre['fecha']);
-chequear('y queda marcado como del cronograma, con su base', [true, '2026-10-20'],
-    [$entre['crono'], $entre['base']]);
-chequear('el pago se nombra', '4to miércoles', $entre['pago_nombre']);
-chequear('el origen sigue siendo el vencimiento', 'VENCIMIENTO', $entre['origen']);
+chequear('vence entre dos pagos (20/10): se proyecta en su vencimiento, el 20',
+    '2026-10-20', $entre['fecha']);
+chequear('y NO queda marcado como del cronograma', [false, '2026-10-20', 'VENCIMIENTO'],
+    [$entre['crono'], $entre['base'], $entre['origen']]);
 
-chequear('vence el mismo dia de pago: se paga ese dia', '2026-10-28',
-    $rPL(null, '2026-10-28', $pagosPL)['fecha']);
-
-/* ENTRE EL PAGO CORRIDO Y EL TEORICO: el 28 es feriado y el pago se hizo el 27.
-   Una factura que vence el 28 ya no llega a ese pago: va al siguiente. Es
-   correcto y esta documentado; quien quiera otra cosa mueve el pago a mano. */
-chequear('vence el 28 con el pago corrido al 27: va al siguiente, el 11/11',
-    '2026-11-11', $rPL(null, '2026-10-28', $pagosFer)['fecha']);
+chequear('vence hoy (05/10, que no es dia de pago): se proyecta hoy, no el 14',
+    ['2026-10-05', false], (function ($r) { return [$r['fecha'], $r['crono']]; })(
+        $rPL(null, '2026-10-05', $pagosPL)));
 
 $vencida = $rPL(null, '2026-09-01', $pagosPL);
 chequear('vencida sin fecha: va al proximo pago (14/10), NO al primer dia del eje',
@@ -2665,6 +2660,16 @@ $porPlazo = $rPL(null, null, $pagosPL, true, '2026-09-20', 30);
 chequear('sin vencimiento, la base es emision + plazo (20/10) y va al 28',
     ['2026-10-28', 'PLAZO', '2026-10-20'],
     [$porPlazo['fecha'], $porPlazo['origen'], $porPlazo['base']]);
+chequear('el pago se nombra', '4to miércoles', $porPlazo['pago_nombre']);
+
+chequear('por plazo, cae el mismo dia de pago: se paga ese dia', '2026-10-28',
+    $rPL(null, null, $pagosPL, true, '2026-09-28', 30)['fecha']);
+
+/* ENTRE EL PAGO CORRIDO Y EL TEORICO: el 28 es feriado y el pago se hizo el 27.
+   Una factura cuya base es el 28 ya no llega a ese pago: va al siguiente. Es
+   correcto y esta documentado; quien quiera otra cosa mueve el pago a mano. */
+chequear('base el 28 con el pago corrido al 27: va al siguiente, el 11/11',
+    '2026-11-11', $rPL(null, null, $pagosFer, true, '2026-09-28', 30)['fecha']);
 
 seccion('una fecha cargada futura se respeta; una vencida va al cronograma');
 
@@ -2692,11 +2697,14 @@ seccion('sin pagos en el horizonte despues de la base');
 /* El horizonte termina el 31/12. Una factura que vence el 30/12 ya no tiene un
    pago adentro: va al primero del mes extra, el 13/01, que queda FUERA del
    horizonte y se informa como tal. Sin el mes extra caeria el 30/12, adentro. */
-$finAno = $rPL(null, '2026-12-30', $pagosPL);
-chequear('vence el 30/12: va al 13/01, despues del fin del eje', '2027-01-13', $finAno['fecha']);
+$finAno = $rPL(null, null, $pagosPL, true, '2026-11-30', 30);
+chequear('base el 30/12: va al 13/01, despues del fin del eje', '2027-01-13', $finAno['fecha']);
 chequear('que es fuera del horizonte', true, $finAno['fecha'] > $hPL->fin());
 
-$lejos = $rPL(null, '2027-03-01', $pagosPL);
+$lejos = $rPL(null, null, $pagosPL, true, '2027-01-30', 30);
+chequear('un vencimiento de Tango del 30/12 se proyecta el 30/12, sin cronograma',
+    ['2026-12-30', false], (function ($r) { return [$r['fecha'], $r['crono']]; })(
+        $rPL(null, '2026-12-30', $pagosPL)));
 chequear('sin ningun pago despues: queda en su fecha, tambien fuera del horizonte',
     ['2027-03-01', false], [$lejos['fecha'], $lejos['crono']]);
 
@@ -2708,12 +2716,16 @@ seccion('mover un pago a mano arrastra todas sus facturas');
 $pagosOv = CronogramaPagos::paraHorizonte($hPL, $cfgPL, calendarioPL('2026-09-01', '2027-01-31'),
     ['2026-11' => [1 => ['fecha' => '2026-11-12', 'motivo' => 'feria bancaria']]], 1)['pagos'];
 
+/* Por plazo: los vencimientos futuros ya no pasan por el cronograma. */
+$porPlazoOv = function ($pagos, $emis) use ($rPL) {
+    return $rPL(null, null, $pagos, true, $emis, 30);
+};
 chequear('sin el override, las dos van el 11/11', ['2026-11-11', '2026-11-11'],
-    [$rPL(null, '2026-10-29', $pagosPL)['fecha'], $rPL(null, '2026-11-05', $pagosPL)['fecha']]);
+    [$porPlazoOv($pagosPL, '2026-09-29')['fecha'], $porPlazoOv($pagosPL, '2026-10-06')['fecha']]);
 chequear('con el pago movido al 12, las dos van el 12', ['2026-11-12', '2026-11-12'],
-    [$rPL(null, '2026-10-29', $pagosOv)['fecha'], $rPL(null, '2026-11-05', $pagosOv)['fecha']]);
+    [$porPlazoOv($pagosOv, '2026-09-29')['fecha'], $porPlazoOv($pagosOv, '2026-10-06')['fecha']]);
 chequear('y dice que ese pago se movio a mano', true,
-    $rPL(null, '2026-10-29', $pagosOv)['pago_override']);
+    $porPlazoOv($pagosOv, '2026-09-29')['pago_override']);
 
 seccion('sin cronograma, todo como antes');
 

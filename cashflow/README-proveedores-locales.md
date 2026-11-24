@@ -8,7 +8,7 @@ Rama: `feature/proveedores-locales-pagos-reales`
 
 ## La idea en una línea
 
-**Tango dice cuánto se debe y cuándo vence; acá se decide cuándo se paga. Sin decisión, lo del cronograma se paga en el próximo día de pago, y lo demás en su vencimiento.**
+**Tango dice cuánto se debe y cuándo vence; acá se decide cuándo se paga. Sin decisión, se paga en su vencimiento; lo del cronograma que ya venció, en el próximo día de pago.**
 
 ```
 Tango (CPA04 + CPA54 + CPA01, con las imputaciones de CPA05)
@@ -178,9 +178,12 @@ Escrita una sola vez, en `Proveedores::resolverFechaPago()`:
 3. si no hay vencimiento usable, EMISIÓN + PLAZO del maestro
 4. si nada de eso alcanza, sin fecha
 
-y encima, si la forma vigente es del cronograma y no hay fecha cargada futura:
+y encima, si la forma vigente es del cronograma y la fecha de 1-3 ya pasó
+(o es emisión + plazo):
 5. el PRÓXIMO DÍA DE PAGO del cronograma PROV_LOCALES a partir de esa fecha (o de hoy)
 ```
+
+> **El orden lo definió Administración el 24/11/2026: 1) la fecha de la planilla —o la cargada a mano—, 2) el vencimiento de Tango, 3) el cronograma.** Antes, un vencimiento de Tango futuro de una factura del cronograma también se corría al próximo día de pago: la FAC A0000500001790 de MTDODI, que vence el lunes 21/12/2026, se proyectaba el miércoles 23/12. Ahora se proyecta el 21/12.
 
 **El vencimiento va antes que el plazo, y no al revés.** El vencimiento es un dato de *esta* factura; el plazo es una costumbre del proveedor. Cuando los dos existen, el que la describe es el vencimiento.
 
@@ -259,7 +262,9 @@ Las facturas que se pagan por cronograma no salen el día que vencen: salen **el
 
 | Factura | Qué pasa |
 | --- | --- |
-| Forma vigente **del cronograma** (echeq, transferencia, o sin forma conocida: `esDelCronograma()`) **sin fecha cargada** —origen vencimiento o plazo— | Va al **próximo día de pago** |
+| Forma vigente **del cronograma** (echeq, transferencia, o sin forma conocida: `esDelCronograma()`) **sin fecha cargada, con vencimiento de Tango futuro** | **Se proyecta en su vencimiento**: el vencimiento manda sobre el cronograma (desde el 24/11/2026) |
+| Del cronograma, sin fecha cargada, con **vencimiento que ya pasó** | Va al **próximo día de pago** a partir de hoy |
+| Del cronograma, sin vencimiento, con **emisión + plazo** | Va al **próximo día de pago** a partir de esa fecha |
 | Del cronograma, con **fecha cargada que ya pasó** | Va al **próximo día de pago** a partir de hoy |
 | Del cronograma, con **fecha cargada futura** | **Se respeta tal cual**, como siempre |
 | Débito automático, caja, `TARJETA CORP` | **Conserva su fecha**: no se paga en un día de pago. Su vencido sigue en el primer día del eje |
@@ -267,13 +272,13 @@ Las facturas que se pagan por cronograma no salen el día que vencen: salen **el
 
 ### La regla
 
-**Fecha de pago = el primer pago del cronograma con fecha efectiva ≥ max(fecha base, hoy).** La fecha base es el vencimiento, la emisión + plazo, o la fecha cargada vencida. Lo resuelve `CronogramaPagos::proximoPago()`, que es puro y recibe los pagos ya resueltos.
+**Fecha de pago = el primer pago del cronograma con fecha efectiva ≥ max(fecha base, hoy).** La fecha base es el vencimiento vencido, la emisión + plazo, o la fecha cargada vencida. Un vencimiento futuro no pasa por acá. Lo resuelve `CronogramaPagos::proximoPago()`, que es puro y recibe los pagos ya resueltos.
 
-- **"Fecha efectiva" es la del pago ya corrido al hábil anterior, o la del override, nunca la teórica.** Una factura que vence el miércoles 28 cuando el 28 es feriado y el pago se hizo el martes 27 va al pago siguiente: el del 27 ya pasó cuando venció. Es correcto, y si no es lo que se quiere, se mueve el pago a mano en Parámetros.
-- **Una factura que vence el mismo día de pago se paga ese día.**
+- **"Fecha efectiva" es la del pago ya corrido al hábil anterior, o la del override, nunca la teórica.** Una factura cuya emisión + plazo da el miércoles 28 cuando el 28 es feriado y el pago se hizo el martes 27 va al pago siguiente: el del 27 ya pasó para esa fecha. Es correcto, y si no es lo que se quiere, se mueve el pago a mano en Parámetros.
+- **Una factura cuya base cae el mismo día de pago se paga ese día.**
 - **El pago de hoy cuenta.** Si hoy es día de pago, lo vencido del cronograma cae en la columna de hoy. Es **distinto de Logística**, donde el pago de hoy no se proyecta porque ya se hizo: acá la factura sigue pendiente en Tango, así que todavía no se pagó, y cuando se pague sale de pendientes y del eje.
 - **Lo vencido del cronograma ya no se apila en el primer día del eje**: va al próximo pago. Esto reemplaza, para estas facturas, la reubicación de `Ingresos::ubicarCobroVencido()`. **Nada del cronograma cae en el primer día del eje salvo que ese día sea de pago.**
-- **Si no hay ningún pago en el horizonte después de la fecha base**, la factura queda fuera del horizonte y se informa, como antes. Para eso `getPendientes()` pide el cronograma con **un mes más** que el horizonte: una factura que vence el 30/12 con el horizonte terminando el 31/12 va al primer pago de enero, que está afuera, y no cae el 30/12 adentro del eje.
+- **Si no hay ningún pago en el horizonte después de la fecha base**, la factura queda fuera del horizonte y se informa, como antes. Para eso `getPendientes()` pide el cronograma con **un mes más** que el horizonte: una factura por plazo que da el 30/12 con el horizonte terminando el 31/12 va al primer pago de enero, que está afuera, y no cae el 30/12 adentro del eje.
 
 ### No se graba nada por factura
 
