@@ -1,6 +1,6 @@
 # Módulo Gastos Locales — la caja de los locales
 
-Pestaña **Proveedores → Gastos Locales**, la fila *Gastos Locales* del tablero (sección *Costos Indirectos*), el concepto **Gastos Locales** del cronograma de pagos y la tarjeta **Gastos Locales** de *Parámetros › Generales*.
+Pestaña **Proveedores → Gastos Locales**, la fila *Gastos Locales* del tablero (sección *Costos Indirectos*), el concepto **Gastos Locales** del cronograma de pagos (*Parámetros › Calendario*) y la tarjeta **Gastos Locales** de *Parámetros › Generales*.
 
 Rama: `feature/gastos-locales-fleteros-no-habituales`
 
@@ -11,10 +11,10 @@ Rama: `feature/gastos-locales-fleteros-no-habituales`
 **Lo que los locales propios pagan con la caja se proyecta con el promedio de los últimos 90 días: una semana de gasto por pago en el tramo diario, el día del cronograma, y un importe por mes después, con inflación compuesta desde el mes en curso.**
 
 ```
-CTA29 / CTA28  (servidor 'locales')            Parámetros › Generales
+CTA29 / CTA28  (servidor 'locales')            Parámetros › Calendario
   egresos (D_H = 'D')                            cronograma GASTOS_LOCALES (lunes, semanal)
-  cuentas que empiezan con 5                     cuentas excluidas (522400)
-  menos las excluidas                            inflación mensual
+  cuentas que empiezan con 5                     Parámetros › Generales
+  menos las excluidas                            cuentas excluidas (522400), inflación mensual
   locales PROPIOS y HABILITADOS                          │
   90 días que terminan AYER                              │
         │                                                │
@@ -49,7 +49,7 @@ Todos contra `central`, en este orden:
 
 ### Después de correrlos
 
-- Dar el permiso **`cashflow.tab.gastos_locales`** a los roles que corresponda, en Gestión de Usuarios. **No hay `cashflow.editar.gastos_locales`**: la pestaña es de sólo lectura. Lo que se edita —el día y las cuentas— está en *Parámetros › Generales* y pide `cashflow.editar.parametros.generales`.
+- Dar el permiso **`cashflow.tab.gastos_locales`** a los roles que corresponda, en Gestión de Usuarios. **No hay `cashflow.editar.gastos_locales`**: la pestaña es de sólo lectura. Lo que se edita está en Parámetros: el día en *Calendario*, con `cashflow.editar.parametros.calendario`, y las cuentas en *Generales*, con `cashflow.editar.parametros.generales`.
 - Mirar el control 2b del script de la fila: si alguna fila de Proveedores Locales usa `PAGOS_TODO` o `PAGOS_FUERA_CRONOGRAMA`, lo pagado con caja podría contarse dos veces (ver *El doble conteo*).
 
 ---
@@ -114,17 +114,17 @@ Un local propio habilitado que no pagó nada con la caja en 90 días va en la gr
 
 ---
 
-## 3. El cronograma: el único que se corre hacia adelante
+## 3. El cronograma: se corre hacia adelante, como Supervisoras
 
-Es el concepto `GASTOS_LOCALES` del cronograma de *Parámetros › Calendario* (ver `README-logistica-local.md`, sección 3). Tres diferencias con los otros tres conceptos, declaradas en `CronogramaPagos::CONCEPTOS`:
+Es el concepto `GASTOS_LOCALES` del cronograma de *Parámetros › Calendario* (ver `README-logistica-local.md`, sección 3). Tres diferencias con los otros conceptos, declaradas en `CronogramaPagos::CONCEPTOS`:
 
 | | Gastos Locales | Los otros |
 | --- | --- | --- |
-| Si el día no es hábil | Al hábil **siguiente** (`DiasHabiles::siguiente()`) | Al hábil anterior |
+| Si el día no es hábil | Al hábil **siguiente** (`DiasHabiles::siguiente()`) | Al hábil anterior, salvo **Supervisoras**, que también va al siguiente (desde `fix/correcciones-cashflow`, 03/11/2026) |
 | Frecuencia | **Semanal, fija**: el importe es una semana de gasto | Quincenal o semanal |
 | Mover un pago a mano | **No**: nadie mueve el día de un promedio | Sí, con motivo |
 
-**Es una decisión del negocio para este concepto**: el reintegro de la caja de los locales sale el día hábil siguiente. La dirección viaja en la configuración (`'corrimiento'`), así que los otros tres no se enteran; una prueba fija que siguen yendo para atrás.
+**Es una decisión del negocio para este concepto**: el reintegro de la caja de los locales sale el día hábil siguiente. La dirección viaja en la configuración (`'corrimiento'`), así que los otros no se enteran. Supervisoras usa la misma configuración para correrse al siguiente; Proveedores Locales y Logística siguen yendo para atrás.
 
 Por correrse hacia adelante, el calendario se lee **una semana después** del fin del eje: el último pago puede caer feriado y correrse afuera.
 
@@ -144,11 +144,11 @@ Tarjeta **Gastos Locales** en *Parámetros › Generales*: una lista de códigos
 
 ## 5. La pestaña
 
-- **Tres tarjetas**: total de los 90 días (con las fechas de la ventana y cuántos locales), promedio mensual (diario × 30) y lo proyectado **en la vista activa**.
+- **Tres tarjetas**: total de los 90 días (con las fechas de la ventana y cuántos locales), promedio mensual (diario × 30) y lo proyectado **en la vista activa**. Miden todos los locales: no cambian con el buscador, que sí cambia el pie.
 - **La grilla**: una fila por local con su total de 90 días, su gasto diario y el eje en las tres vistas (`EjeVista::armarAgrupado()`). Cada importe tiene su explicación en el tooltip: cuántos días, qué factor y de qué meses. El total al pie.
 - **Al abrir un local**: el detalle por cuenta (código, descripción, movimientos, total y diario) y un enlace a sus comprobantes de los 90 días.
-- **Sólo lectura.** El día y las cuentas se cambian en *Parámetros › Generales*.
-- Avisos con nivel en el panel de siempre, junto con los que el tablero dice de esta pestaña. Exportar en los dos cuadros.
+- **Sólo lectura.** El día se cambia en *Parámetros › Calendario*; las cuentas, en *Parámetros › Generales*.
+- Avisos en el panel de siempre, junto con los que el tablero dice de esta pestaña. Los de la pestaña llegan **sólo como texto** (`GastosLocalesController` manda `avisos`, los textos; `avisos_con_nivel` no viaja), así que se dibujan como de atención aunque sean críticos; el nivel lo traen sólo los avisos del tablero (`Js/avisos-panel.js`). Exportar en los dos cuadros.
 
 ---
 
