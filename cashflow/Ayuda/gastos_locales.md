@@ -103,7 +103,7 @@ Dice qué día se paga cada concepto que no tiene una fecha propia. Se cambia en
 | --- | --- | --- | --- | --- |
 | **Proveedores Locales** | Cuentas a Pagar Locales | El 2do y el 4to miércoles | Se paga el hábil anterior | Sí |
 | **Logística Local** | [Logística Local](ayuda:logistica_local) | El 2do y el 4to viernes | Se paga el hábil anterior | Sí |
-| **Supervisoras** | La parte en efectivo de Gastos Supervisoras, en Pagos con Tarjetas y Otros | Todos los lunes | Se paga el hábil siguiente | Sí |
+| **Supervisoras** | La parte en efectivo de Gastos Supervisoras, en [Pagos con Tarjetas y Otros](ayuda:pagos_tarjetas) | Todos los lunes | Se paga el hábil siguiente | Sí |
 | **Gastos Locales** | Gastos Locales, en las semanas del tramo diario | Todos los lunes | Se paga el hábil siguiente | No |
 
 El valor por defecto es el que se usa si el cronograma de ese concepto no está configurado, con un aviso.
@@ -176,7 +176,7 @@ Factor del mes M = (1 + % del mes siguiente al base ÷ 100) × … × (1 + % de 
 
 - **El mes base vale 1**: no se ajusta, y un mes anterior al base tampoco.
 - **En Gastos Locales el mes base es el mes en curso.** Lo que se paga este mes va sin ajuste; el mes que viene lleva su %; el siguiente, los dos compuestos. El % del mes en curso no se usa.
-- En las solapas de Pagos con Tarjetas y Otros, el mes base es el del dato del que parte cada una. Lo explica ese artículo.
+- En las solapas de [Pagos con Tarjetas y Otros](ayuda:pagos_tarjetas), el mes base es el del dato del que parte cada una. Lo explica ese artículo.
 
 :::ejemplo ilustrativo
 Hoy es noviembre. La grilla dice 2 % para diciembre y 3 % para enero.
@@ -196,7 +196,7 @@ Un ajuste pactado se enuncia como una suma, y así se calcula: sin componer.
 
 - **Logística Local**: el ajuste trimestral del valor hora de los fleteros suma la inflación del mes del ajuste y la de los dos anteriores. Ver [Logística Local](ayuda:logistica_local).
 - **Alquileres**: el ajuste de cada local suma la inflación de los meses de su frecuencia de ajuste.
-- **Seguros**, en Pagos con Tarjetas y Otros: la continuación de una póliza en pesos suma la inflación de los meses de su vigencia anterior.
+- **Seguros**, en [Pagos con Tarjetas y Otros](ayuda:pagos_tarjetas): la continuación de una póliza en pesos suma la inflación de los meses de su vigencia anterior.
 
 Por eso la grilla guarda los meses que ya pasaron: un ajuste de este mes puede necesitar la inflación de los dos anteriores.
 
