@@ -208,17 +208,17 @@ $edita = AuthCashflow::puedeEditar('parametros', 'TARJETAS');
     <!-- ================================================================
          PROVEEDORES QUE PROYECTAN
          Reemplaza a "marcar mensual" de la grilla de Pagos Corporativos: se
-         marca el PROVEEDOR, y sus facturas del último mes se repiten.
+         marca el PROVEEDOR, y todas sus facturas pendientes vinculadas se repiten.
          ================================================================ -->
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
                 <h5 class="mb-0">Proveedores que proyectan</h5>
                 <small class="text-muted">
-                    Las facturas vinculadas del <strong>último mes</strong> de un proveedor marcado
-                    —por su vencimiento de Tango— se repiten en Tarjetas Pagos Corporativos todos
-                    los meses siguientes, con el importe de su cuota y en el débito de su tarjeta.
-                    Cuando se carga la del mes siguiente, pasa a ser ésa la que se repite.
+                    <strong>Todas las facturas pendientes</strong> vinculadas de un proveedor marcado
+                    se repiten en Tarjetas Pagos Corporativos todos los meses siguientes, con el
+                    importe de su cuota <strong>ajustado por la inflación</strong> de Parámetros ›
+                    Generales y en el débito de su tarjeta. Cuando se paga una, deja de repetirse.
                 </small>
             </div>
         </div>

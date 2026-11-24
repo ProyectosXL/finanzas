@@ -648,7 +648,7 @@
             '<td colspan="4" class="fw-bold text-end">TOTALES</td>' +
             valores.map(function(suma, i) {
                 return '<td class="text-end fw-bold ' + vistas.marca(columnas[i]).clase + '">'
-                    + celdaEje(suma) + '</td>';
+                    + celdaEjeTotal(suma) + '</td>';
             }).join('') +
             '<td class="text-end fw-bold">' + celdaTotal(total) + '</td>' +
         '</tr>';
@@ -657,13 +657,17 @@
             columnas: columnas,
             valores: valores,
             total: total,
-            formato: celdaEje,
+            formato: celdaEjeTotal,
             formatoTotal: celdaTotal
         });
     }
 
-    /** Una celda de totales del eje: un guión gris en cero */
-    function celdaEje(suma) {
+    /**
+     * Una celda de totales del eje: un guión gris en cero. No se llama celdaEje:
+     * dos funciones con el mismo nombre en este bloque se pisan, gana la última
+     * y las celdas de cada fletero quedaban en guión (fix/cashflow-hallazgos-ayuda).
+     */
+    function celdaEjeTotal(suma) {
         return suma === 0 ? '<span class="text-muted">—</span>' : importe(suma);
     }
 
@@ -897,7 +901,7 @@
             (enTramo.length
                 ? '; dentro del tramo diario caen ' + enTramo.length + ' fecha(s).'
                 : '.') +
-            ' Las fechas se ven y se editan en Parámetros › Generales.';
+            ' Las fechas se ven y se editan en Parámetros › Calendario.';
     }
 
     /* ================================================================
