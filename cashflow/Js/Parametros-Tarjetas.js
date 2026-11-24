@@ -722,8 +722,9 @@
                 Notificacion.confirmar({
                     titulo: 'Proveedor que proyecta',
                     mensaje: '¿' + nombre + ' proyecta?',
-                    detalle: 'Sus facturas vinculadas del último mes se van a repetir todos los meses '
-                        + 'siguientes, hasta el fin del horizonte, con el importe de su cuota.',
+                    detalle: 'Todas sus facturas pendientes vinculadas se van a repetir todos los meses '
+                        + 'siguientes, hasta el fin del horizonte, con el importe de su cuota ajustado '
+                        + 'por la inflación.',
                     confirmar: 'Marcar'
                 }).then(function(si) {
                     if (si) { escribirProveedor('marcarProveedorProyecta', cod); }

@@ -1553,7 +1553,10 @@
                 VENCIMIENTO: 'el vencimiento de Tango del ',
                 PLAZO: 'la emisión más el plazo del maestro, el '
             }[f.FUENTE_FECHA] || 'la fecha del ';
-            var yaPaso = (f.ORIGEN_FECHA === 'CARGADA') ? ', que ya pasó' : '';
+            /* Un vencimiento de Tango futuro ya no pasa por el cronograma: si
+               la base es una fecha cargada o un vencimiento, es porque ya pasó. */
+            var yaPaso = (f.ORIGEN_FECHA === 'CARGADA' || f.ORIGEN_FECHA === 'VENCIMIENTO')
+                ? ', que ya pasó' : '';
 
             return { clase: 'prov-fuente-crono', etiqueta: 'crono',
                      titulo: 'Se paga en el próximo día de pago del cronograma de Proveedores '

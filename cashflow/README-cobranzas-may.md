@@ -123,8 +123,8 @@ El texto del aviso lo arma `Ingresos::avisoSinSaldo()`, estático y con pruebas 
 
 - **Cálculo de Proyección:**
   $$\text{Fecha Probable de Cobro} = \text{Fecha Emisión} + \text{Días de Plazo}$$
-- **Las vencidas entran, ubicadas en hoy.** Antes se excluían los comprobantes cuya fecha probable de cobro fuera anterior al día de corte, y esa plata desaparecía de la pantalla sin aviso. Ahora entran si la fecha cae dentro de los últimos `Ingresos::DIAS_COBRO_VENCIDO` (180) días, se ubican en el primer día del eje y se marcan. La regla es la misma para las tres pestañas de cobranza proyectada y vive en `Ingresos::ubicarCobroVencido()`; está explicada en `README-cobranzas-fr.md`. **Una fecha cargada a mano no se reubica**: la pactó una persona, y moverla con una regla automática le mostraría su propia carga en otra columna. Se marca vencida —eso es un hecho— pero se dibuja donde está.
-- **Días de Plazo:** Se obtienen desde `RO_T_CASHFLOW_PARAMETROS` (`cobranzas_may_dias_vto`, por defecto 60 días).
+- **Las vencidas entran, ubicadas en hoy.** Antes se excluían los comprobantes cuya fecha probable de cobro fuera anterior al día de corte, y esa plata desaparecía de la pantalla sin aviso. Ahora entran si la fecha cae dentro de los últimos `Ingresos::DIAS_COBRO_VENCIDO` (180) días, se ubican en el primer día del eje y se marcan. **Las de más de 180 días se descartan sin aviso** (`ubicarCobroVencido()` devuelve `descartar` y `getCobranzasMay()` las saltea): con el plazo de 60, son las emitidas hace más de 240 días. La regla es la misma para las tres pestañas de cobranza proyectada y vive en `Ingresos::ubicarCobroVencido()`; está explicada en `README-cobranzas-fr.md`. **Una fecha cargada a mano no se reubica**: la pactó una persona, y moverla con una regla automática le mostraría su propia carga en otra columna. Se marca vencida —eso es un hecho— pero se dibuja donde está.
+- **Días de Plazo:** Se obtienen desde `RO_T_CASHFLOW_PARAMETROS` (`cobranzas_may_dias_vto`, por defecto 60 días). En Parámetros › Cobranzas la tarjeta lo llama **Plazo de Proyección Mayoristas**; la descripción de la sub-pestaña, *Plazo de Vencimiento Mayorista* (`Tabs/parametros_cobranzas.php:16`). Es el mismo.
 
 > **La fecha de cobro NO sale de `GVA46.FECHA_VTO`, aunque ahora la consulta toque esa tabla.** El `GROUP BY` junta los vencimientos y devuelve **una fila por comprobante**, así que no hay una sola fecha de vencimiento que nombrar. La regla no cambió: `FECHA_EMIS` + el parámetro, con la fecha manual mandando por encima, y las vencidas reubicadas en el primer día del eje.
 
@@ -244,22 +244,18 @@ En **Parámetros → Cobranzas**, se incorporó una tarjeta dedicada para **Cobr
 
 La pestaña **Cobranzas May** cuenta con todos los componentes estándar del sistema:
 
-1. **Tarjetas de KPI en Cabecera:**
-   - Total Pendiente Proyectado.
-   - Cantidad de Comprobantes.
-   - Clientes Mayoristas con deuda pendiente.
-   - Plazo Promedio Aplicado (días).
+1. **Tarjetas de KPI en Cabecera:** las tres de las vistas del eje, **Vista Días**, **Vista Meses** y **Período Completo**. Cambian con los filtros de emisión y de vendedor (son server-side), no con el buscador.
 2. **Barra de Herramientas:**
-   - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o comprobante.
+   - **Buscador rápido:** filtrado en tiempo real. Esconde las filas que no tienen el texto en **ninguna celda** (también fechas e importes), pero el pie **TOTALES**, el total arriba de cada fecha, el check del encabezado y la barra de selección cuentan sólo las filas cuyo código de cliente, razón social, vendedor o número de comprobante tienen el texto (`Js/Ingresos-Cobranzas_may.js`, `filtrarTabla()` contra `filasFiltradas()`). Si la tabla se recarga con texto escrito, vuelven a verse todas las filas y el pie sigue filtrando.
    - **Filtro por fecha de emisión (desde – hasta):** dos `<input type="date">` y un botón de limpiar. Es **server-side**: los extremos se mandan como parámetros y los items se filtran antes de `EjeVista`, porque filtrar escondiendo filas dejaría las columnas del eje, el pie de totales y las tarjetas mostrando el total sin filtrar. La validación (formato, calendario y `desde <= hasta`) corre en el servidor. Está explicado en `README-cobranzas-fr.md`.
    - **Filtro por vendedor:** Todos, un vendedor o *Sin vendedor*. También server-side, y no cambia el tablero. Ver *El vendedor de cada cliente*.
    - **Resumen vs Detalle Facturas**, en sub-solapas anidadas (`nav nav-tabs`) directamente arriba de la tabla. Antes eran un `btn-group`; el cambio está explicado en `README-cobranzas-fr.md`. El nombre viejo era *Deep Dive*: se renombró sólo de cara al usuario, y el identificador interno sigue siendo `deepdive`.
-     - *Resumen:* **una fila por cliente**, con los importes repartidos en las columnas de la grilla según la fecha de cobro de cada comprobante. Quedan `COD_CLI`, `RAZON_SOC`, `Importe Factura`, `SALDO PENDIENTE` e `Importe Neto`.
-     - *Detalle Facturas:* apertura individual por comprobante con fecha de emisión, tipo, número, importe y fecha de cobro.
+     - *Resumen:* **una fila por cliente**, con los importes repartidos en las columnas de la grilla según la fecha de cobro de cada comprobante. Quedan `COD_CLI`, `RAZON_SOC`, `Vendedor`, `Importe Factura`, `SALDO PENDIENTE` e `Importe Neto`.
+     - *Detalle Facturas:* una fila por comprobante, con la casilla de selección, `COD_CLI`, `RAZON_SOC`, `Vendedor`, `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Dias`, `Importe Factura`, `SALDO PENDIENTE`, `Importe Neto` y `Cobro`.
 
      Antes el Resumen agrupaba por cliente **y fecha**, así que un cliente con cobros en tres fechas ocupaba tres filas. El agrupado ahora lo hace `EjeVista::armarAgrupado()` sumando las series, no la consulta: así cada importe conserva la fecha que lo ubica en la grilla y la fila es una sola. `Ingresos::getCobranzasMay()` perdió su parámetro `$summary` — devuelve siempre una fila por comprobante. Ver `README-cobranzas-fr.md`.
    - **Selector de Eje Temporal:** Alterna entre vistas de *Días*, *Meses* y *Período Completo* (`Js/eje-vistas.js`).
-   - **Acciones:** Botón de *Actualizar* y *Exportar a Excel*.
+   - **Acciones:** los botones *Actualizar* y *Exportar* (baja a Excel lo que se ve).
 3. **La columna *Importe Factura*** va antes de las dos del pendiente, **en gris y marcada como informativa** en su `title`. Está apagada a propósito: si se leyera como un importe más del cuadro, el lector sumaría tres columnas de plata que miden dos cosas distintas. En *Resumen* se suma por cliente, igual que las otras dos.
 
 4. **Abre ordenada por fecha de cobro ascendente**, como Cobranzas FR:
@@ -276,7 +272,7 @@ El proveedor `IngresosProvider` registra la serie en `CashflowRegistry`:
 
 | Código Proveedor | Serie | Descripción | Fila en Cashflow |
 | --- | --- | --- | --- |
-| `COBRANZAS_MAY` | `COBRANZA` | Cobranza proyectada de mayoristas (+60 días), por el **pendiente real** | Cobranza Mayoristas |
+| `COBRANZAS_MAY` | `COBRANZA` | Cobranza proyectada de mayoristas (+60 días), por el **pendiente real** | Cobranzas Mayoristas |
 
 `IngresosProvider` consolida `getCobranzasMayTotales()`, que agrega `getCobranzasMay()` por fecha de cobro sumando `importe_neto` — el pendiente. `IMPORTE_FACTURA` no interviene en ningún punto del camino al tablero. El proveedor además repite el aviso de pendientes negativos: una factura sobre-imputada no puede salir del cuadro sin que nadie lo diga.
 

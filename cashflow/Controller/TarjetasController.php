@@ -602,8 +602,8 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => $r['nuevo']
-                    ? ($prov['RAZON_SOC'] . ' proyecta: las facturas vinculadas de su último mes se '
-                       . 'repiten hasta el fin del horizonte.')
+                    ? ($prov['RAZON_SOC'] . ' proyecta: sus facturas pendientes vinculadas se '
+                       . 'repiten hasta el fin del horizonte, con inflación.')
                     : ($prov['RAZON_SOC'] . ' ya proyectaba.'),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);

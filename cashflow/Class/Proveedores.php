@@ -2310,12 +2310,19 @@ class Proveedores {
      * cuya forma de pago vigente es del cronograma (esDelCronograma(): echeq,
      * transferencia, o forma desconocida):
      *
-     *   - sin fecha cargada (VENCIMIENTO o PLAZO), y
+     *   - con vencimiento de Tango que YA PASO, sin fecha cargada,
+     *   - sin vencimiento, con emision + plazo (PLAZO), y
      *   - con fecha cargada que YA PASO
      *
      * se pagan en el PRIMER PAGO DEL CRONOGRAMA con fecha efectiva >= max(fecha
      * base, hoy). La fecha base es el vencimiento, la emision + plazo, o la fecha
-     * cargada vencida. Lo resuelve CronogramaPagos::proximoPago(), que es puro y
+     * cargada vencida.
+     *
+     * UN VENCIMIENTO DE TANGO FUTURO NO PASA POR EL CRONOGRAMA: se proyecta en
+     * su fecha. El orden lo definio Administracion (24/11/2026): 1) la fecha de
+     * la planilla -o la cargada a mano-, 2) el vencimiento de Tango, 3) el
+     * cronograma. Hasta entonces una factura que vencia el lunes 21 iba al
+     * miercoles de pago siguiente. Lo resuelve CronogramaPagos::proximoPago(), que es puro y
      * recibe los pagos ya resueltos -corridos al habil anterior y con los
      * overrides aplicados-: una factura que vence entre el pago corrido y el
      * teorico va al siguiente, y eso es correcto.
@@ -2452,7 +2459,15 @@ class Proveedores {
             'sin_fecha_cargada' => $ubic['vencida']
         ];
 
-        return $usaCrono
+        /* EL VENCIMIENTO DE TANGO FUTURO MANDA SOBRE EL CRONOGRAMA. Es el orden
+           que pidio Administracion: planilla, vencimiento de Tango, cronograma.
+           Una factura que vence el lunes 21 se proyecta el 21, no el miercoles
+           23. El cronograma queda para lo que el vencimiento no resuelve: el
+           vencimiento que ya paso y la emision + plazo, que no es un dato de
+           Tango sino una costumbre del proveedor. */
+        $alCrono = $usaCrono && ($origen === 'PLAZO' || $r['vencida']);
+
+        return $alCrono
             ? self::alCronograma($r, $base, $pagosCrono, $hoyStr)
             : self::sinCronograma($r, $base);
     }

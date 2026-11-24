@@ -13,8 +13,9 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
     Las cuentas a pagar salen de Tango y no se editan acá: lo que se carga es
     CUÁNDO se piensa pagar cada comprobante.
 
-    LO QUE SE PAGA POR CRONOGRAMA (echeq, transferencia) Y NO TIENE FECHA CARGADA
-    -o la tiene vencida- se proyecta en el PRÓXIMO DÍA DE PAGO del cronograma de
+    LA FECHA: planilla (o cargada a mano), vencimiento de Tango, cronograma.
+    LO QUE SE PAGA POR CRONOGRAMA (echeq, transferencia) CON SU FECHA YA PASADA
+    -cargada o vencimiento- o SIN VENCIMIENTO se proyecta en el PRÓXIMO DÍA DE PAGO del cronograma de
     Proveedores Locales (Parámetros › Generales), no en el primer día del eje. Lo
     de las otras formas (débito, caja, tarjeta) conserva su fecha, y su vencido
     sigue en el primer día del eje.
@@ -38,12 +39,13 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
     <div class="alert alert-info d-flex align-items-start gap-2 py-2 px-3 mb-3">
         <i class="fas fa-circle-info mt-1"></i>
         <small>
-            Las facturas que se pagan por <strong>echeq o transferencia</strong> y no tienen
-            fecha cargada —o la tienen y ya pasó— se proyectan en el <strong>próximo día de
-            pago del cronograma</strong> de Proveedores Locales (<em>Parámetros › Calendario</em>),
-            a partir de su vencimiento o de hoy. En la columna de fecha llevan la etiqueta
-            <strong>crono</strong>. Una fecha cargada futura se respeta tal cual. Mover un día
-            de pago en Parámetros mueve todas sus facturas.
+            La fecha de pago sale, en este orden, de la <strong>fecha de la planilla</strong>
+            (o cargada a mano), del <strong>vencimiento de Tango</strong> y del
+            <strong>cronograma</strong>. Las facturas que se pagan por <strong>echeq o
+            transferencia</strong> cuya fecha ya pasó —o que no tienen vencimiento— se proyectan
+            en el <strong>próximo día de pago del cronograma</strong> de Proveedores Locales
+            (<em>Parámetros › Calendario</em>), y en la columna de fecha llevan la etiqueta
+            <strong>crono</strong>. Mover un día de pago en Parámetros mueve todas sus facturas.
         </small>
     </div>
 
