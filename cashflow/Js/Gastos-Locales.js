@@ -379,7 +379,7 @@
         el.innerHTML = 'Se paga <strong>' + esc(regla || 'según el cronograma') + '</strong>' +
             (semanas.length ? ': ' + semanas.length + ' semana(s) en el tramo diario' : '') +
             '. Cuentas excluidas: <strong>' + esc(datos.cuentas_excluidas || 'ninguna') + '</strong>.' +
-            ' El día y las cuentas se cambian en Parámetros › Generales.';
+            ' El día se cambia en Parámetros › Calendario; las cuentas, en Parámetros › Generales.';
     }
 
     /* ================================================================

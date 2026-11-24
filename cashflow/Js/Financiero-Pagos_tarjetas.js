@@ -423,7 +423,7 @@
             + '<td class="text-nowrap">' + estadoCorp(f)
                 + (f.PROVEEDOR_PROYECTA
                     ? ' <i class="fas fa-repeat text-primary" title="El proveedor proyecta: '
-                      + 'sus facturas del último mes se repiten en Estimaciones mensuales"></i>'
+                      + 'sus facturas pendientes se repiten en Estimaciones mensuales, con inflación"></i>'
                     : '')
             + '</td>'
             + celdasEje(f, cols, true)

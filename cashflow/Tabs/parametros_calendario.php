@@ -159,8 +159,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'CALENDARIO');
                     semana y su frecuencia: <em>quincenal</em> es el 2do y el 4to de ese día
                     del mes; <em>semanal</em>, todos los de ese día. Si el día no es hábil, el
                     pago se corre al día hábil <strong>anterior</strong>, salvo
-                    <strong>Gastos Locales</strong>, que se corre al <strong>siguiente</strong>,
-                    es siempre semanal y no se mueve a mano.
+                    <strong>Supervisoras</strong> y <strong>Gastos Locales</strong>, que se
+                    corren al <strong>siguiente</strong>. Gastos Locales, además, es siempre
+                    semanal y no se mueve a mano.
                 </small>
             </div>
             <button class="btn btn-sm btn-outline-success" data-exportar="pcalTablaCronograma"
