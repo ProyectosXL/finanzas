@@ -4,7 +4,7 @@ pestana: cobranzas_may
 categoria: Ingresos
 estado: completa
 actualizado: 2026-11-24
-usuarios: Tesorería
+usuarios: Tesorería, Comercial
 bajada: Lo que falta cobrar de cada factura de los clientes mayoristas y en qué fecha se espera cobrarlo: la emisión más el plazo, o la fecha pactada a mano.
 ---
 
