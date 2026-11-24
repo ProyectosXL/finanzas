@@ -29,7 +29,7 @@ Contra `central`, reejecutables y sin borrar nada.
 | 3 | `sql/cashflow_echeqs_acreditado.sql` | Crea `RO_T_CASHFLOW_ECHEQ_ACREDITADO`: las marcas **ya acreditó**, con su origen e historial | El botón *Ya acreditó* no se dibuja, la pestaña avisa qué script falta y los depositados **se proyectan hasta su fecha de acreditación** |
 | 4 | `sql/cashflow_echeqs_vencidos.sql` | Crea `RO_T_CASHFLOW_ECHEQ_FECHA_ACREDITACION` —la fecha de acreditación interna de los cheques en plazo de presentación, con historial— y siembra `echeqs_dias_vencidos_cartera` (el plazo de presentación) en **30** sin pisarlo. **Ya corrido** el 22/10/2026. El nombre del script y la clave dicen "vencidos" por historia: ver *El plazo de presentación* | Los cheques de día hábil pasado **no se leen**, la pestaña avisa qué script falta (atención; el tablero no dice nada) y todo lo demás —el corrimiento incluido— anda igual |
 
-**El 1 y el 2 ya están corridos en producción** —verificado el 16/10/2026: las alícuotas (IIBB 2,5% y SICREB 0,6%), el plazo en 2 y las dos filas de `ECHEQS` activas—; volver a correr el 1 no cambia nada. **El 3 y el 4 son los nuevos**: van después de `sql/cashflow_auditoria_usuario.sql`, en cualquier orden entre ellos, y no dependen de los otros.
+**El 1 y el 2 ya están corridos en producción** —verificado el 16/10/2026: las alícuotas (IIBB 2,5% y SICREB 0,6%, cargadas en *Parámetros › Cheques*: el script **no siembra alícuotas**, sólo el plazo; sin ninguna vigente, los depositados no se proyectan), el plazo en 2 y las dos filas de `ECHEQS` activas—; volver a correr el 1 no cambia nada. **El 3 y el 4 son los nuevos**: van después de `sql/cashflow_auditoria_usuario.sql`, en cualquier orden entre ellos, y no dependen de los otros.
 
 **El código se puede publicar antes que el 3**: sin la marca, la pestaña y el tablero ya leen los depósitos de Tango.
 
@@ -38,7 +38,7 @@ Contra `central`, reejecutables y sin borrar nada.
 - *Echeqs en cartera* (`A_COBRAR`) y *Echeqs depositados* (`DEPOSITADOS`) **activas las dos**, en los órdenes 20 y 25. Son dos partes distintas: activas juntas es lo correcto.
 - **Ninguna fila activa con `ECHEQS → A_COBRAR_TODO`**: es el total, incluye a las dos, y el validador lo rechaza al lado de cualquiera.
 - En la pestaña Echeqs aparecen los botones *Ya acreditó* y *Deshacer ya acreditó* al seleccionar un depositado, y el aviso del script de la marca ya no está.
-- Después del 4: en *Parámetros › Cheques* aparece *Plazo de presentación de los cheques* en 30, y en la pestaña Echeqs ya no está el aviso del script. Si hay cheques en plazo de presentación, aparecen su aviso y la tarjeta *En plazo de presentación*; si hay vencidos, su aviso.
+- Después del 4: en *Parámetros › Cheques* aparece *Plazo de presentación de los cheques* en 30, y en la pestaña Echeqs ya no está el aviso del script. La tarjeta *En plazo de presentación* se ve siempre (con *Ninguno* si no hay); si hay cheques en plazo de presentación, aparece además su aviso, y si hay vencidos, el suyo.
 
 ### Lo que mueve el tablero
 
@@ -196,7 +196,7 @@ Un mes que no está en `RO_T_CALENDARIO` usa el respaldo de lunes a viernes, y e
 | Caso | Qué pasa |
 | --- | --- |
 | La fecha llega **hoy** y el cheque sigue en cartera | Cae en la columna de hoy, como un cheque fechado hoy |
-| La fecha **ya pasó** y el cheque sigue en cartera | `FECHA_PASADA`: no suma, y la pestaña y el tablero avisan con nivel **atención**: *"N cheque(s) en plazo de presentación por $ X tenían fecha de acreditación ya pasada y siguen en cartera: reasignales la fecha"*. Se ve siempre, aunque el switch esté apagado, y en la tarjeta cuenta entre los sin fecha |
+| La fecha **ya pasó** y el cheque sigue en cartera | `FECHA_PASADA`: no suma, y la pestaña y el tablero avisan con nivel **atención**: *"N cheque(s) en plazo de presentación por $ X tenían fecha de acreditación ya pasada y siguen en cartera: reasignales la fecha en Ingresos › Echeqs."*. Se ve siempre, aunque el switch esté apagado, y en la tarjeta cuenta entre los sin fecha |
 | Tesorería **lo deposita** en Tango | Pasa a `A` y entra en *Echeqs depositados* con la regla de las 48 hs. La fecha asignada deja de aplicar sin aviso y queda en el historial |
 | Se **rechaza o se anula** | Sale solo |
 | **Supera el plazo** de presentación | Pasa a **vencido**: deja de sumar, su fecha asignada deja de aplicar y queda en el historial, y avisa |
@@ -438,7 +438,7 @@ universo en bruto = A_COBRAR_TODO + retención de los depositados
 | --- | --- |
 | **Dónde cae el importe en el eje** | Uno de cartera, en su día hábil —o, uno en plazo de presentación, en su fecha asignada— y por el bruto (`resolverFechaCartera()`); un depositado que se proyecta, en su acreditación y por el neto; uno en plazo sin fecha, uno vencido, uno acreditado o uno sin datos, en ninguna columna (`FECHA_EJE` null, `IMPORTE_EJE` 0). El eje se arma con `FECHA_EJE` / `IMPORTE_EJE` |
 | **Fecha de pago** | La fecha del cheque, la escrita. Conserva su nombre: es la que ancla el orden guardado |
-| **Acredita** | **Dónde cae el importe**: el día hábil de uno de cartera —la fecha corrida, si se corrió—, la acreditación de un depositado, la fecha asignada de uno en plazo de presentación. En uno en plazo es un **selector de fecha**, sólo con permiso de edición; sin permiso, la fecha o un guion. Un vencido no tiene |
+| **Acredita** | **Dónde cae el importe**: el día hábil de uno de cartera —la fecha corrida, si se corrió—, la acreditación de un depositado, la fecha asignada de uno en plazo de presentación. En uno en plazo es un **selector de fecha**, sólo con permiso de edición; sin permiso, la fecha o un guion. Si la fecha asignada ya pasó, el selector aparece **vacío** y la fecha pasada queda sólo en el tooltip de la marca *fecha asignada pasada*. Un vencido no tiene |
 | **Retención y Neto** | **Siempre visibles**, vacías —no en cero— en los de cartera. Aparecer y desaparecer movería los índices de las columnas fijas, el orden guardado y lo que baja el export |
 | **Marcas** | **corrida** (cae en el hábil siguiente; sólo en los vigentes), **en plazo · sin fecha**, **en plazo · fecha asignada**, **fecha asignada pasada**, **vencido**, **depositado** (se proyecta), **acreditado (por plazo)** (acredita hoy), **acreditado** (marcado) y **depositado, sin proyectar** (le falta un dato) |
 | **Tooltip de la marca** | *Corrida*: de qué día a cuál y por qué. *En plazo* y *vencido*: la fecha del cheque, los días que pasaron y hasta cuándo va —o cuándo venció— el plazo de presentación; la fecha asignada con quién la dio, cuándo y la observación, y las anteriores con quién las dio de baja. *Depositado*: la boleta de Tango —número y fecha—, la cuenta donde se depositó con su descripción, `TIPO_SAL` y `CTA_DESTIN`, el banco emisor, la fecha del cheque, la acreditación con el plazo, el bruto, la tasa con su desglose y el neto; si está marcado, quién, cuándo, el origen y la observación, y las marcas deshechas |
