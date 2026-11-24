@@ -126,7 +126,7 @@ Cuando la fila del tablero queda en **cero** teniendo movimientos cargados, el p
 | Recálculo (`recalcularPendientes()`) | Sólo recalcula lo que está en el corte o después |
 | Importador (`compararImportacion()`) | Lo anterior al corte es *"ya acreditada"*: no se importa, y tampoco se propone dar de baja |
 
-En la pantalla, el formulario de alta propone como fecha **mañana** y no hoy: un movimiento fechado hoy nacería *"ya acreditado"* y no entraría al tablero.
+En la pantalla, el formulario de alta propone como fecha **mañana** y no hoy, **si el campo está vacío** (si ya tenía una fecha, la conserva): un movimiento fechado hoy nacería *"ya acreditado"* y no entraría al tablero. No hay validación de fecha mínima: uno cargado con fecha de hoy o anterior se guarda igual, ya acreditado.
 
 ---
 
@@ -196,11 +196,11 @@ Las columnas y sus sinónimos se definen **una sola vez** (`columnasImportacion(
 
 | Columna | Obligatoria | Sinónimos aceptados |
 | --- | --- | --- |
-| `PROCESADORA` | sí | `RAZON_SOCIAL`, `RAZON_SOC` |
-| `IMPORTE_BRUTO` | sí | `IMPORTE`, `BRUTO` |
-| `FECHA_ACREDITACION` | sí | `FECHA`, `COBRO`, `FECHA_COBRO` |
-| `ID_EXTERNO` | no | `LIQUIDACION`, `NRO_LIQUIDACION` |
-| `OBSERVACIONES` | no | `OBSERVACION`, `NOTAS` |
+| `PROCESADORA` | sí | `RAZON_SOCIAL`, `RAZON_SOC`, `RAZONSOCIAL` |
+| `IMPORTE_BRUTO` | sí | `IMPORTE`, `BRUTO`, `IMPORTEBRUTO` |
+| `FECHA_ACREDITACION` | sí | `FECHA`, `COBRO`, `FECHA_COBRO`, `FECHAACREDITACION` |
+| `ID_EXTERNO` | no | `LIQUIDACION`, `ID_LIQUIDACION`, `IDEXTERNO`, `NRO_LIQUIDACION` |
+| `OBSERVACIONES` | no | `OBSERVACION`, `NOTAS`, `COMENTARIOS` |
 
 Los sinónimos incluyen **los nombres de la hoja original** (`RAZON_SOC`, `Importe`, `Cobro`) para poder pegar las columnas del Excel viejo sin renombrar nada. Los títulos se comparan sin acentos, sin espacios y sin mayúsculas, y una columna de más no molesta — una columna de neto en el archivo, por ejemplo, **se ignora**: el neto lo calcula el servidor, y eso tiene prueba.
 
@@ -292,7 +292,7 @@ Las columnas `E` (copia de `C`) y `F:AK` del Excel —la matriz de vencimientos 
 | `RAZON_SOCIAL` única, normalizada (trim + case-insensitive) | *"payway"* y *"Payway"* serían dos procesadoras con dos juegos de alícuotas, y los movimientos se repartirían entre las dos |
 | Sin bajas físicas: `ACTIVO = 0` | — |
 
-**Dos movimientos de la misma procesadora y la misma fecha se avisan, no se bloquean.** Puede haber dos liquidaciones el mismo día, así que no hay `UNIQUE (procesadora, fecha)`. El aviso alcanza para detectar el pegado doble, que es el error real que se quiere atrapar, y lo dice sin tratarlo como error: *"puede ser correcto, pero también es lo que se ve cuando una carga quedó pegada dos veces"*.
+**Dos movimientos de la misma procesadora y la misma fecha se avisan, no se bloquean.** Puede haber dos liquidaciones el mismo día, así que no hay `UNIQUE (procesadora, fecha)`. El aviso alcanza para detectar el pegado doble, que es el error real que se quiere atrapar, y lo dice sin tratarlo como error: *"puede ser correcto, pero también es lo que se ve cuando una carga quedó pegada dos veces"*. **Al guardar no se ve**: el alta arma el aviso, pero la pantalla muestra su propio mensaje de guardado y lo descarta (`Js/Cob-Electronicos.js`, en el `then` del alta). Aparece después, en el panel de avisos de la pestaña, y sólo si los dos movimientos están dentro del filtro. En la importación es distinto: dos filas de la misma procesadora y fecha sin `ID_EXTERNO` son un error.
 
 **La suma se valida sobre el estado resultante**, no sobre lo que manda el cliente: las otras vigentes más la nueva. Es el mismo criterio que usa `ParametrosController` con el mix de cobro y el validador de la estructura del tablero.
 
@@ -309,11 +309,11 @@ Una sola pestaña, sin sub-pestañas.
 | Fecha de acreditación | **sí** | Es un dato de entrada. Al cambiarla, **la tasa se vuelve a resolver**: se resuelve contra esa fecha, y dejar la tasa vieja con una fecha nueva guardaría un neto que ninguna vigencia justifica |
 | Tasa aplicada | **no** | Es del servidor |
 | Importe neto | **no** | Es del servidor |
-| Origen del dato | no | `MANUAL` hoy; `ARCHIVO`/`API` cuando entre la importación |
+| Origen del dato | no | `MANUAL` en la carga a mano; `ARCHIVO` en lo importado. `API` está previsto y no se usa |
 
 La tasa y el neto se muestran en cursiva y atenuados, y en la fila en edición se reemplazan por la leyenda *"la tasa y el neto se recalculan al guardar"*. Convertirlos en inputs sería ofrecer editar un número que el servidor va a descartar.
 
-Las acreditaciones **ya ocurridas no se muestran, las de hoy incluidas**: el filtro arranca mañana (`pendientes_desde` en el payload) y hay un switch para traerlas. Es lo que hace que el total de la pantalla coincida con el del tablero sin tener que explicar una diferencia. Cuando se traen, van en gris y marcadas *"ya acreditada"* — la marca es neutra, no roja: no son un problema.
+Las acreditaciones **ya ocurridas no se muestran, las de hoy incluidas**: el filtro arranca mañana (`pendientes_desde` en el payload) y hay un switch para traerlas. Con el filtro de siempre, el total de la pantalla es el del tablero más lo posterior al horizonte. Cuando se traen —con el switch, o con un *desde* de hoy o anterior— van en gris y marcadas *"ya acreditada"* (la marca es neutra, no roja), y **suman en la pantalla**: en las tarjetas, el pie, *Totales por procesadora* y los cuadros por día y por mes. En el tablero no suman nunca.
 
 El formulario de alta dibuja una **vista previa del neto** mientras se tipea, y dice explícitamente que el definitivo lo calcula el servidor con la alícuota vigente a la fecha elegida. La previa usa la tasa vigente **a hoy**, que es la que trae el payload; si la fecha de acreditación cae en otra vigencia, el mensaje del guardado informa la que se usó de verdad.
 
@@ -501,7 +501,7 @@ Con los dos scripts ya corridos:
 | Fila del tablero | *Cobranzas Pagos Electrónicos* con 516.698.068,64 y el mismo detalle por día (9/9: 35.200.603,31) |
 | Reejecutabilidad de la migración | Una segunda corrida no insertaría nada: 34 filas *"Ya estaba cargado"* + 4 *"Ya acreditado"*. Verificado corriendo su diagnóstico **sin la escritura** |
 | Importador, contra los 34 movimientos reales | Un archivo armado desde lo cargado, con una fila de más, una con otro importe y una quitada: el diff dijo **1 alta, 1 cambio, 14 iguales, 1 ya acreditada, 0 errores**, con la diferencia de neto exacta. Con la ventana inferida, 0 bajas; declarando el período, propuso la única que el archivo dejó de traer. **Nada se escribió**: 34 movimientos antes y después |
-| Los endpoints por HTTP, contra Apache | `getPestana` responde el filtro efectivo (`desde` = inicio del eje, por defecto). La previsualización con una subida real `multipart` detectó el cambio contra la fila cargada, ignoró la ya acreditada y rechazó la procesadora inexistente. *(Esto fue con el CSV. La subida real sigue aceptándose, pero la pantalla ahora manda el texto del Excel en `contenido`: ver la fila siguiente)* |
+| Los endpoints por HTTP, contra Apache | `getPestana` responde el filtro efectivo (`desde` = inicio del eje, por defecto; hoy el defecto es **mañana**, el corte de lo pendiente: `CobElectronicos::getPestana()`). La previsualización con una subida real `multipart` detectó el cambio contra la fila cargada, ignoró la ya acreditada y rechazó la procesadora inexistente. *(Esto fue con el CSV. La subida real sigue aceptándose, pero la pantalla ahora manda el texto del Excel en `contenido`: ver la fila siguiente)* |
 | El Excel, en un Chrome real con la zona horaria de Argentina (`feature/cashflow-excel-medios-ux`) | La plantilla se armó con la definición del backend, se escribió como `.xlsx` y se volvió a leer con `PlanillaExcel.leer()`: los mismos títulos y ejemplos, con las fechas como `aaaa-mm-dd`. Un Excel con varias hojas, filas vacías arriba y en el medio, y fechas de **todos los fines de mes de 2026 y el 29/02/2028** —algunas a las 23:59— dio cada fecha en su día y cada fila en su número de fila. Un CSV, un CSV renombrado a `.xlsx` y un ZIP dañado se rechazaron en el navegador, cada uno con su mensaje. Con cdnjs bloqueado, el mensaje dice que falta la librería y el reintento vuelve a probar |
 | El "todo o nada" lo hace cumplir el servidor | Confirmando **con las filas con problemas incluidas**, el servidor respondió *"El archivo tiene 1 fila(s) con problemas, así que no se importó nada"* y la base quedó en 34 movimientos. La regla no depende de que el navegador filtre nada |
 | Las tres sentencias de escritura del importador | `INSERT` con `ORIGEN_DATO='ARCHIVO'` + `ID_EXTERNO` + `ARCHIVO_ORIGEN`, `UPDATE` y baja lógica, ejecutadas contra la base real y **deshechas con un `rollback` explícito**: las tres válidas, el índice único filtrado de `ID_EXTERNO` rechazó un segundo movimiento con el mismo número de liquidación, y la tabla volvió a 34 filas |
