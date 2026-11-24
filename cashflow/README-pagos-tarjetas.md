@@ -36,7 +36,7 @@ Rama: `feature/financiero-pagos-tarjetas`
                                                     (Costos Indirectos, orden 45)
 ```
 
-**Un resumen cargado pisa la estimación de su mes, en los tres casos**, con su importe y con su fecha.
+**Un resumen cargado pisa la estimación de su mes, en los tres casos**, con su importe y con su fecha. En Supervisoras pisa sólo la **parte tarjeta**: la parte en efectivo de ese mes se sigue proyectando (`PagosTarjetas`, al armar las filas de supervisoras). Y allí usa sólo el importe en **$**: el de U$S no suma, así que un resumen cargado sólo en dólares deja ese mes de la tarjeta en cero (`TarjetasSupervisoras::tarjetaDelMes()`).
 
 ---
 
@@ -49,7 +49,7 @@ Todos contra `central`, reejecutables, y ninguno borra nada.
 | 1 | `sql/cashflow_tarjetas.sql` | Crea `RO_T_CASHFLOW_TARJETAS` y `RO_T_CASHFLOW_TARJETAS_RESUMEN`. **No siembra ninguna tarjeta** | La pestaña **no falla**: las tres sub-pestañas se ven vacías avisando qué script falta, y la sub-pestaña de Parámetros se dibuja apagada. La fila del tablero va en **cero** y el proveedor lo dice |
 | 2 | `sql/cashflow_tarjetas_facturas.sql` | Crea `RO_T_CASHFLOW_TARJETAS_FACTURA` y `RO_T_CASHFLOW_TARJETAS_FACTURA_EXCLUIDA` | Pagos Corporativos **se lee igual** —las facturas salen de Tango— pero no se puede vincular ni excluir ninguna: los botones de la barra se dibujan apagados nombrando el archivo, no hay cobertura y nadie está excluido |
 | 4 | `sql/cashflow_tarjetas_vto_mensual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_FACTURA_VTO` (el vencimiento corregido de una cuota) y `RO_T_CASHFLOW_TARJETAS_MENSUAL` (las facturas marcadas como mensuales). **Corta si falta el 1**: la segunda tiene una FK contra el maestro | Pagos Corporativos se lee igual: los controles de **corregir el vencimiento** y **marcar mensual** se dibujan apagados nombrando el archivo, todas las cuotas usan el vencimiento de Tango y no hay estimaciones. El tablero no cambia |
-| 3 | `sql/cashflow_tarjetas_fila.sql` | Crea la fila `TARJETAS_PAGOS` en *Costos Indirectos*, orden 45, apuntada a `TARJETAS` / `TOTAL` | **El tablero queda exactamente como hoy** y no falta nada, porque hasta hoy esta plata no estaba en el cuadro. La pestaña funciona igual y avisa que lo que muestra todavía no llega al tablero |
+| 3 | `sql/cashflow_tarjetas_fila.sql` | Crea la fila `TARJETAS_PAGOS` en *Costos Indirectos*, orden 45, apuntada a `TARJETAS` / `TOTAL` | **El tablero queda exactamente como hoy** y no falta nada, porque hasta hoy esta plata no estaba en el cuadro. La pestaña funciona igual; **no avisa** que lo que muestra todavía no llega al tablero |
 | 5 | `sql/cashflow_tarjetas_resumen_compartido.sql` | Crea `RO_T_CASHFLOW_TARJETAS_RESUMEN_TARJETA`: las tarjetas **adicionales** de un resumen compartido. **No migra nada**: los resúmenes que ya están son de una tarjeta, que es su titular | Todo funciona igual, con resúmenes de una sola tarjeta. En el formulario no aparece la lista de tarjetas, y el servidor rechaza un resumen de varias nombrando el script |
 | 7 | `sql/cashflow_tarjetas_prov_proyecta.sql` | Crea `RO_T_CASHFLOW_TARJETAS_PROV_PROYECTA` (los proveedores que proyectan) y **migra** a ella, con usuario `MIGRACION`, los proveedores de las marcas mensuales vigentes. La tabla de marcas no se toca | **Ningún proveedor proyecta y la fila baja** lo que daban las marcas mensuales ($ 80,5 M al 31/10/2026): las marcas viejas ya no se leen. La sección de Parámetros se dibuja apagada nombrando el script |
 | 8 | `sql/cashflow_tarjetas_socios_banco.sql` | Habilita los **bancos de socios** en el maestro (columnas de usuario `NULL`-ables, el tipo `SOCIOS_BANCO` y su CHECK) y da de **baja** las tarjetas de tipo Socio, con usuario `MIGRACION`. No toca los resúmenes | No se pueden dar de alta bancos de socios y **Socios va en cero**: el código nuevo ya no proyecta las tarjetas con nombre. El aviso de cada banco dice cuánto proyectaban |
@@ -144,7 +144,7 @@ En el formulario, en una tarjeta Supervisora o Corporativa, se eligen **varias t
 | **Pisa la estimación de todas** | En Supervisoras reemplaza la parte tarjeta; en Corporativas cubre las facturas vinculadas, las estimaciones y la cobertura de esas tarjetas en ese mes. Es la misma regla de un resumen de una tarjeta, porque las reglas leen el mismo mapa |
 | **Suma una sola vez** | En la serie de la **titular** (`SUPERVISORAS` o `CORPORATIVAS`). En la otra sub-pestaña se ve **informativo**: `tarjetaDelMes()` devuelve `RESUMEN_COMPARTIDO` sin proyectar y `resumenesAProyectar()` lo lista sin entrar. El invariante del tablero no se toca, y la prueba lo fija con un compartido adentro |
 | **Cómo se ve** | En la fila de cada tarjeta incluida, una marca *"compartido 2026-11"* —*"· no suma acá"* en las que no son titular— con el tooltip *"Resumen compartido con: … Se proyecta una sola vez, en <sub-pestaña de la titular>"* (`TarjetasResumen::notaCompartido()`). En *Cobertura y resúmenes* aparece como *Resumen compartido*, y en el historial de cada tarjeta incluida, con las tarjetas que incluye |
-| **La baja** | Lo saca **de todas a la vez**: el resumen y sus adicionales, en una transacción. Corregirlo puede cambiar la titular y las adicionales; las que salen quedan de baja, con quién y cuándo |
+| **La baja** | Lo saca **de todas a la vez**: el resumen y sus adicionales, en una transacción. Corregirlo puede cambiar la titular y las adicionales; las que salen quedan de baja, con quién y cuándo. **No hay botón de editar**: se corrige volviendo a cargar un resumen del mismo período, y el formulario no viene precargado (trae tildada sólo la tarjeta desde la que se abrió). Las tarjetas que no se tilden salen del resumen sin aviso (`TarjetasResumen::guardar()`) |
 | **La base histórica** | Es de una tarjeta. Una adicional no recibe base propia en un mes que ya cubre un compartido |
 
 ---
@@ -272,7 +272,7 @@ Hoy es el caso de **JULIETA DALMEIDA**: activa, con su último gasto el 11/03/20
 
 ### La tarjeta se asocia por el nombre del usuario
 
-`RO_T_GASTOS_SUPERVISION.SUPERVISORA` guarda el **nombre**, no un ID, así que el cruce es por nombre —igual que hace el dashboard—. La clave la normaliza `GastosSupervision::clave()`: mayúsculas y sin espacios de más, **la misma función en los dos lados del cruce**. Los acentos no se normalizan ahí porque la collation de las dos columnas (`Modern_Spanish_CI_AI`) ya es acento-insensible, y normalizar dos veces y de dos formas distintas es lo que deja de coincidir.
+`RO_T_GASTOS_SUPERVISION.SUPERVISORA` guarda el **nombre**, no un ID, así que el cruce es por nombre —igual que hace el dashboard—. La clave la normaliza `GastosSupervision::clave()`: mayúsculas y `trim()`, sin tocar los espacios del medio, **la misma función en los dos lados del cruce**. Los acentos no se normalizan, y **el cruce se hace en PHP**, no en SQL: la collation acento-insensible de las columnas (`Modern_Spanish_CI_AI`) no interviene, así que *"Pérez"* y *"Perez"* no coinciden, y tampoco dos nombres que difieren en un espacio doble del medio.
 
 **Más de una tarjeta activa a su nombre es ambiguo** y se trata como *sin tarjeta*: elegir la primera pondría el importe en una fecha que puede no ser la correcta y nadie tendría dónde notarlo.
 
@@ -424,7 +424,7 @@ Antes se marcaba **una factura** como mensual y se guardaba una copia; había un
 
 **El riesgo de proyectar dos veces el mismo servicio se avisa y no se calcula.** Si un proveedor que proyecta tiene dos o más facturas pendientes y vinculadas con **la misma leyenda** —contadas por comprobante, sin distinguir mayúsculas ni espacios—, sale un aviso de atención: *"<proveedor>: hay N facturas pendientes de <leyenda>; si son del mismo servicio, se proyectan dos veces"* (`TarjetasCorporativas::avisosLeyendaRepetida()`). Pueden ser dos servicios distintos, y decidirlo es mirar las facturas; si son el mismo, la vieja se paga o se excluye.
 
-**Cada mes estimado se comporta como una factura vinculada**: genera cobertura con el % de su tarjeta (`estimacionesComoFilas()`), queda **cubierto** si la tarjeta tiene resumen ese mes, **no se proyecta** si la fecha es hoy o antes, y **no proyecta y se avisa** si la tarjeta está inactiva o dejó de ser corporativa.
+**Cada mes estimado se comporta como una factura vinculada**: genera cobertura con el % de su tarjeta (`estimacionesComoFilas()`), queda **cubierto** si la tarjeta tiene resumen ese mes, **no se proyecta** si la fecha es hoy o antes, y **no proyecta** si la tarjeta está inactiva o dejó de ser corporativa. Ese caso no llega al aviso de *"estimaciones con tarjeta inactiva"*: `PagosTarjetas` le pasa a `resolver()` sólo las tarjetas corporativas activas, así que una factura vinculada a una tarjeta dada de baja queda como vínculo roto y sale el aviso crítico de *"vinculadas a una tarjeta que ya no existe"*.
 
 **En pantalla**: se fue el ícono de marcar mensual de la fila (queda un ícono informativo cuando el proveedor proyecta). La sección **Estimaciones mensuales** muestra una fila por factura que se repite: proveedor —con quién lo marcó—, factura de origen con su vencimiento de Tango, tarjeta, importe, día, el estado de cada mes y las columnas del eje con su pie. **Se desmarca en Parámetros**, no desde acá. El KPI *Entra al flujo* dice cuánto es estimación.
 
@@ -476,7 +476,7 @@ Proveedor de seguros, número o descripción, tarjeta corporativa activa (de ell
 | | Regla |
 | --- | --- |
 | **Cuota** | Total ÷ (vigencia − gracia). 12 meses con 2 de gracia → total ÷ 10 |
-| **Pagos** | Vigencia − gracia, uno por mes, **consecutivos desde el mes del primer pago**. La gracia son los meses del final |
+| **Pagos** | Vigencia − gracia, uno por mes, **consecutivos desde el mes del primer pago**. La gracia son los meses del ciclo que quedan sin pago: al final si el primer pago es el mes de inicio, al principio si es más adelante (el formulario todavía dice "los meses del final") |
 | **Fecha** | El débito de la tarjeta de la póliza en ese mes: el resumen cargado si lo hay, si no `TarjetasVencimiento::delMes()`. El mes del primer pago sólo fija el mes |
 | **En dólares** | Cada pago con la curva ROFEX del mes de su fecha (`DolarFuturo::resolver()`, con su mes aproximado, que el tooltip dice). Sin curva: `null`, `SIN_COTIZACION` y aviso |
 | **Como una factura vinculada** | Genera cobertura con el % de su tarjeta, lo pisa el resumen cargado de su mes (`CUBIERTA`), no se proyecta si su fecha es hoy o antes (`PASADA`) ni si la tarjeta está inactiva (`SIN_TARJETA`) |
@@ -579,7 +579,7 @@ Dividir por tres con dos resúmenes afirmaría que ese mes no hubo gastos —alg
 
 ### La base histórica se carga en una grilla de tres renglones
 
-Desde `feature/tarjetas-resumenes-seguros` la base es una grilla de **exactamente 3 renglones** —período, $, U$S, vencimiento— y **el servidor exige los tres** (`TarjetasResumen::validarBase()`): con dos la tarjeta estimaría un promedio distinto sin que nadie se entere. Sigue entrando en una sola transacción.
+Desde `feature/tarjetas-resumenes-seguros` la base es una grilla de **exactamente 3 renglones** —período, $, U$S, vencimiento— y **el servidor exige los tres** (`TarjetasResumen::validarBase()`): con dos la tarjeta estimaría un promedio distinto sin que nadie se entere. Sigue entrando en una sola transacción. **No valida que los períodos sean anteriores al mes en curso**: un renglón del mes en curso o futuro queda como resumen pagado de ese mes, que pisa su estimación y no proyecta nada (la base, en cambio, sólo usa los anteriores).
 
 ### La inflación ajusta sólo el componente en pesos
 

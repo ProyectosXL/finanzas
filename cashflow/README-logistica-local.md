@@ -8,7 +8,7 @@ Rama: `feature/logistica-local-parametros-generales`
 
 ## La idea en una línea
 
-**A cuatro fleteros se les paga por hora, con un régimen mensual constante; el valor hora se reajusta cada tres meses por inflación, y el pago sale en partes iguales en los días del cronograma `LOGISTICA` de *Parámetros › Generales* —por defecto el 2do y el 4to viernes, dos cuotas iguales—.**
+**A cuatro fleteros se les paga por hora, con un régimen mensual constante; el valor hora se reajusta cada tres meses por inflación, y el pago sale en partes iguales en los días del cronograma `LOGISTICA` de *Parámetros › Calendario* —por defecto el 2do y el 4to viernes, dos cuotas iguales—.**
 
 ```
 Parámetros › Logística              Parámetros › Generales
@@ -32,7 +32,7 @@ Parámetros › Logística              Parámetros › Generales
    ┌────────────────────────────────────────────────┐
    │  mitad y mitad en los dos pagos del mes        │
    │  2do y 4to viernes, corridos al día hábil      │
-   │  ANTERIOR si no son hábiles                    │  ← Parámetros › Generales
+   │  ANTERIOR si no son hábiles                    │  ← Parámetros › Calendario
    │  (con override manual por mes y nº de pago)    │
    └────────────────────────────────────────────────┘
         │
@@ -56,6 +56,7 @@ Todos contra `central`, en este orden:
 | 1 | `sql/migracion_parametros_modulo.sql` | *(ya existía)* Agrega `MODULO` a `RO_T_CASHFLOW_PARAMETROS` | El script 2 **no migra nada** y lo dice. La sub-pestaña Generales rescata igual los parámetros y avisa |
 | 2 | `sql/cashflow_parametros_generales.sql` | Mueve a `MODULO = 'GENERALES'` los parámetros que hoy figuran como de Ventas, y crea `RO_T_CASHFLOW_INFLACION_MES` y `RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT` | **Ningún cálculo cambia** y nada se rompe. Los cuatro parámetros se siguen viendo y editando en Generales, con un aviso que nombra el script. No se puede cargar inflación —los valores hora se proyectan sin ajuste trimestral— ni mover una fecha del cronograma, y las dos tarjetas lo dicen |
 | 3 | `sql/cashflow_logistica_fleteros.sql` | Crea `RO_T_CASHFLOW_LOGISTICA_FLETEROS`. **No siembra ningún fletero** | La pestaña Logística Local **no falla**: muestra la planilla vacía y avisa. La fila *Logística* del tablero va en **cero**, que es lo que va hoy, y el proveedor lo dice con su propio aviso |
+| — | `sql/cashflow_auditoria_usuario.sql` *(feature/cashflow-auditoria-usuario, va antes del 4)* | Agrega a las tablas del cashflow las columnas de quién dio de alta y quién modificó (`USUARIO_ALTA`, `USUARIO_MODIF`, `FECHA_MODIF`), también a `RO_T_CASHFLOW_LOGISTICA_FLETEROS` | El alta y la lectura de fleteros y de pagos puntuales usan esas columnas. Ver `README-cashflow.md`, *Auditoría y permisos de escritura* |
 | 4 | `sql/cashflow_logistica_no_habituales.sql` *(feature/gastos-locales-fleteros-no-habituales)* | Agrega `HABITUAL` al maestro (**todos los existentes quedan habituales**) y crea `RO_T_CASHFLOW_LOGISTICA_PAGO_PUNTUAL` y `RO_T_CASHFLOW_LOGISTICA_IMPORTE_EDIT` | Logística proyecta como siempre y avisa. No se puede marcar a nadie como no habitual, cargar pagos puntuales ni editar el importe del próximo pago. Ver secciones 14 y 15 |
 
 **Ninguno crea filas del tablero.** La fila `LOGISTICA` ya existe en `RO_T_CASHFLOW_CONF_FILA` —sección *Costos Directos*, apuntada a `LOGISTICA` / `PAGOS`— desde `sql/cashflow_estructura.sql`. Lo único que cambia es que ahora el proveedor existe, así que esa fila deja de rendir cero.
@@ -180,12 +181,12 @@ El 2do y el 4to viernes son una función del calendario, y el corrimiento tambi�
 - **Volver al valor calculado no borra**: marca `VIGENTE = 0`. Con un `DELETE`, *"esta fecha nunca se tocó"* y *"se tocó y se volvió atrás"* son indistinguibles después del hecho.
 - Un override no puede alejarse más de **31 días** de su viernes teórico. No es una regla de negocio: es una red contra el año mal tipeado, que es una fecha perfectamente válida que corre el pago doce meses.
 
-### Se calculan los doce meses, se editan sólo los del tramo diario
+### Se calculan los doce meses, se editan sólo los dos próximos
 
-La pantalla de Generales muestra **dos tablas**:
+El cronograma vive en *Parámetros › Calendario › Cronograma de pagos* (hasta `feature/parametros-calendario`, en Generales), que muestra:
 
-- Arriba, las fechas que caen **dentro del tramo diario** (`horizonte_dias`). Son las únicas donde el día exacto mueve una columna del tablero, y las únicas editables.
-- Abajo, el resto del horizonte: **se calculan y se ven, no se editan.** Fuera del tramo, correr un pago tres días no cambia ningún número, porque la columna del mes es la misma.
+- **Próximos pagos**: los **dos próximos pagos** de cada concepto que se puede mover a mano (Logística, Proveedores Locales y Supervisoras). Son los únicos editables, con motivo obligatorio (`Js/Parametros-Calendario.js`).
+- **Resto del horizonte**: todas las fechas de cada concepto: **se calculan y se ven, no se editan.**
 
 **Pero se calculan todos, y no es de más:** son las que deciden qué mitad de un importe mensual cae dentro del tramo y cuál va a la columna del mes. Ver la sección 6.
 
@@ -380,7 +381,7 @@ Es la que usa **todo el cashflow** —Ventas, Saldos, Exportaciones Tasky, Comex
 - **La planilla**, con una fila por fletero: horas, valor hora base y mes base **editables**, y el eje temporal a la derecha. Las **tres vistas** (Días / Meses / Período completo) las dibuja `Js/eje-vistas.js`, con el payload que arma `EjeVista::armarAgrupado()` — el mismo que usan los Resumen de Cobranzas FR y May, porque es el mismo problema: una fila con importes en varias columnas a la vez.
 - **Arriba de cada mes, su total**, en la fila del encabezado donde estaba el rótulo del período, y arriba de *Total* el total general. Son la misma cuenta del pie, sobre los fleteros que deja ver el buscador, con su mismo formato —un guión donde da cero—. Para que el total general tenga dónde ir, **la columna *Total* bajó a la fila de los meses**. Los pinta `Js/eje-totales.js`; ver `README-cashflow.md`. El encabezado de esta tabla **no queda fijo** al scrollear, porque la tabla no está dentro de `.tabla-temporal`: es así desde antes y no cambió.
 - **El valor hora mes a mes**, con el mes de ajuste marcado y el tooltip que explica la cuenta.
-- **El detalle de un fletero**: sus 24 pagos, con fecha, importe y estado (*columna del día* / *columna del mes* / *no se proyecta*, y si la fecha se corrió o se cargó a mano).
+- **El detalle de un fletero**: todos sus pagos del horizonte (los del cronograma, o los puntuales de un no habitual), con fecha, importe y estado (*columna del día* / *columna del mes* / *no se proyecta*, y si la fecha se corrió o se cargó a mano). La columna *Pago* muestra el número de pago del mes (`1`, `2`…), no su nombre (`2do viernes`): la planilla no lo manda. En un pago puntual va vacía, y su estado dice siempre *columna del mes*, aunque la grilla lo ponga en su día.
 - **Exportar a Excel** en los tres cuadros, con el mecanismo de siempre (`data-exportar`): baja exactamente lo que se está viendo.
 
 ### La tabla se dibuja sobre la planilla, no sobre el eje
@@ -431,7 +432,8 @@ La pestaña pasa por `AuthCashflow::puede('logistica_local')`, que busca la clav
 
 - Se marca desde **las dos pantallas** donde se edita el maestro: el interruptor *Habitual* en la fila de la planilla y la columna *Habitual* de *Parámetros › Logística*. Pasa por el mismo `saveFletero`, que ahora acepta `habitual`; si no viene, queda como estaba.
 - **Pasar a no habitual no borra nada.** Sus horas, su valor hora y su mes base se conservan y se ven atenuados; no se piden ni se avisa que faltan. Si vuelve a habitual, vuelve a proyectar con esos datos.
-- **Volver a habitual** deja sus pagos puntuales guardados pero sin proyectar —se ven en su fila, marcados—, y **la confirmación dice cuántos pagos puntuales futuros dejan de proyectarse y por cuánto** (`PUNTUALES_FUTUROS`, que calcula el backend con `LogisticaPlanilla::puntualesFuturos()`).
+- **Todo fletero nace habitual**: `Logistica::guardarFletero()` da de alta como habitual si no le llega `habitual`, y el formulario de alta de *Parámetros › Logística* no lo manda. Un no habitual se da de alta y después se le apaga el interruptor; mientras tanto figura en *Sin proyectar* y con los avisos de que le faltan datos.
+- **Volver a habitual** deja sus pagos puntuales guardados pero sin proyectar —**no se ven**: la fila *Pagos puntuales:* se dibuja sólo para los no habituales, aunque la confirmación diga que "se ven en su fila"—, y **la confirmación dice cuántos pagos puntuales futuros dejan de proyectarse y por cuánto** (`PUNTUALES_FUTUROS`, que calcula el backend con `LogisticaPlanilla::puntualesFuturos()`).
 - Un no habitual sin pagos puntuales no cuenta en la tarjeta *Sin proyectar*: no le falta nada.
 
 ### Los pagos puntuales

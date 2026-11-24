@@ -70,7 +70,7 @@ WHERE A.T_COMP = 'FAC' AND A.COD_CLIENT IN ('EXTASK') AND A.ESTADO = 'PEN'
 ```
 
 - **Los dólares pendientes son `IMPORTE_EX - IMPUTADO_USD`.** Ese saldo es el que se transporta, se valúa y llega al tablero. `IMPORTE_EX` (lo facturado) e `IMPUTADO_USD` quedan en la fila como `IMPORTE_USD_FACT` e `IMPUTADO_USD`.
-- **`IMPUTADO_USD` sale de las imputaciones (`GVA07.IMP_CAN_UN`), no de `ESTADO`.** `ESTADO` mira los pesos: una factura cobrada completa en dólares a una cotización distinta de la de facturación queda `PEN` por la diferencia de cambio en pesos. Caso real: la `E0011700004149` se facturó a 1.500 y se cobró completa con el `REC 0000300001872` a 1.400. Tiene `ESTADO_UNI = CAN` y sigue con `ESTADO = PEN`. **Una factura sin dólares pendientes no sale** (saldo menor o igual a medio centavo): no es cobranza a proyectar. Los signos son los de Cobranzas May: un `REC` cancela (no está en `GVA15`), un comprobante de tipo `D` suma deuda y las notas de crédito cancelan.
+- **`IMPUTADO_USD` sale de las imputaciones (`GVA07.IMP_CAN_UN`), no de `ESTADO`.** `ESTADO` mira los pesos: una factura cobrada completa en dólares a una cotización distinta de la de facturación queda `PEN` por la diferencia de cambio en pesos. Caso real: la `E0011700004149` se facturó a 1.500 y se cobró completa con el `REC 0000300001872` a 1.400. Tiene `ESTADO_UNI = CAN` y sigue con `ESTADO = PEN`. **Una factura sin dólares pendientes no sale** (saldo menor o igual a medio centavo) **si tiene alguna imputación**: no es cobranza a proyectar. La condición es `IMPUTADO_USD != 0 && saldo <= 0,005` (`proyectarExportaciones()`), así que una factura con `IMPORTE_EX` en cero y sin imputaciones sí aparece, con *Importe USD* en cero. Los signos son los de Cobranzas May: un `REC` cancela (no está en `GVA15`), un comprobante de tipo `D` suma deuda y las notas de crédito cancelan.
 - **`COTIZ` e `IMPORTE` son la cotización y el importe en pesos al momento de facturar.** Van en la pantalla, atenuados, como referencia histórica. **No entran en ningún cálculo**: si se cambian, ninguna otra columna se mueve (está probado).
 - `'EXTASK'` es el único cliente por ahora. Está en `Ingresos::CLIENTES_EXPORTACION` y no repetido dentro del SQL: si mañana aparece otra exportadora, se agrega ahí.
 
@@ -78,7 +78,7 @@ WHERE A.T_COMP = 'FAC' AND A.COD_CLIENT IN ('EXTASK') AND A.ESTADO = 'PEN'
 
 ## Valuación: todas las facturas a dólar de hoy
 
-**Todas las facturas se valúan a la misma cotización, la de hoy.** Es el cierre del mes en curso de `RO_V_DOLAR_OFICIAL_BCRA` —`Cotizacion::delMes(año actual, mes actual)`—, que para el mes en curso es la última cotización disponible. **No se valúa cada factura al tipo de cambio del mes en que se va a cobrar.**
+**Todas las facturas se valúan a la misma cotización, la de hoy.** Es el cierre del mes en curso de `RO_V_DOLAR_OFICIAL_BCRA` —`Cotizacion::delMes(año actual, mes actual)`, punta **compradora**—, que para el mes en curso es la última cotización **cargada en el mes en curso**. Si el mes todavía no tiene ninguna (los primeros días), no se toma la del mes anterior: ver *Si no hay cotización*. **No se valúa cada factura al tipo de cambio del mes en que se va a cobrar.**
 
 Es deliberado: la deuda está fija en dólares y el cobro es futuro. Proyectar una cotización para ese mes sería meter una hipótesis de devaluación en el tablero; valuar a hoy es **no suponerla**, que es el criterio conservador que se pidió.
 
@@ -102,7 +102,9 @@ Los dólares se guardan y se transportan siempre; la conversión la hace el prov
 Fecha de cobro estimada = FECHA_EMIS + exportaciones_tasky_dias_cobro
 ```
 
-El parámetro vive en `RO_T_CASHFLOW_PARAMETROS` (`INT`, default `30`, `MODULO = 'COBRANZAS'`, `GRUPO = 'GENERAL'`) y se edita en **Parámetros → Cobranzas**, en la tarjeta *Plazos de Cobro*, junto al plazo de mayoristas. Si el parámetro no está sembrado, la pestaña usa 30.
+El parámetro vive en `RO_T_CASHFLOW_PARAMETROS` (`INT`, default `30`, `MODULO = 'COBRANZAS'`, `GRUPO = 'GENERAL'`) y se edita en **Parámetros → Cobranzas**, en la tarjeta *Plazos de Cobro*, junto al plazo de mayoristas. La pestaña usa 30 si el parámetro no está sembrado, si lo guardado no es un número mayor que cero o si no hay conexión a `central` (`getDiasCobroExportaciones()`).
+
+Son **días corridos**: la fecha estimada no se corre a un día hábil (igual que Mayoristas). Si cae un sábado, domingo o feriado, queda ahí; el calendario sólo pinta la columna en gris.
 
 ### Las vencidas no se descartan: van a hoy y se avisa
 
@@ -125,6 +127,7 @@ Columnas: `FECHA_EMIS`, `N_COMP`, `COD_CLIENT`, `RAZON_SOCI`, `Importe USD`, `Co
 - Columnas fijas con `Js/columnas-fijas.js`: `N_COMP` y `RAZON_SOCI` por defecto. El rótulo *TOTALES* del pie va en la celda de `N_COMP`, que es la primera fija, así queda a la vista al scrollear. Qué celda del pie lleva cada total se resuelve por el **nombre** de la columna del encabezado, no por índice.
 - **Abre ordenada por *Fecha cobro estimada* ascendente**: lo que primero entra, arriba. Es `porDefecto` en `crearOrdenTabla()`; un orden elegido a mano sigue mandando y el default nunca se escribe en `localStorage`. El `<th>` lleva `data-orden-nombre` **igual a su rótulo**, para que quien ya ordenó por esa columna no pierda su orden. La celda lleva `data-orden` con la fecha cruda: el badge de una vencida dice *"Vencida dd/mm/aaaa"* —se ordena por hoy, donde se dibuja— y una factura sin fecha de emisión, sin cobro estimado, **va al final** en las dos direcciones. Ver *Las que abren ordenadas* en `README-cashflow.md`.
 - Pie de totales: total en dólares, total en pesos de hoy y los totales del eje.
+- **El buscador** esconde las filas que no tienen el texto en ninguna celda (también fechas e importes), pero el pie y los totales de arriba suman sólo las filas cuyo `N_COMP`, `COD_CLIENT` o `RAZON_SOCI` lo tienen (`filasFiltradas()`). Buscando una fecha o un importe, se ven filas que el pie no suma. Y al cambiar de vista o tocar *Actualizar*, `generarTabla()` vuelve a dibujar todas las filas sin reaplicar el filtro, mientras el pie sigue filtrando.
 - Totales arriba de cada fecha: en la fila del encabezado donde estaba la leyenda *Días* / *Meses*, el total de cada columna del eje y, arriba de *Total*, el total general. Son la misma cuenta del pie (`totalesEje()` sobre `filasFiltradas()`) con el mismo formato; los pinta `Js/eje-totales.js`. Los totales en dólares y en pesos de hoy siguen sólo en el pie: no son columnas del eje.
 - Indicadores: *Pendiente en USD* y *Dólar de hoy* no varían con la vista —son un hecho de hoy—; *Vista Días*, *Vista Meses* y *Período Completo* miden exactamente las columnas de cada vista, como en todo el módulo.
 - Avisos, arriba de la tabla y en este orden: falta de cotización, facturas vencidas, y lo que quedó fuera del horizonte o sin fecha. Los dos primeros los genera `Ingresos::avisosExportaciones()` y van **adelante** de los del eje a propósito: sin cotización la grilla queda vacía sin que `EjeVista` tenga nada que descartar, y una grilla vacía sin aviso no diría por qué.
