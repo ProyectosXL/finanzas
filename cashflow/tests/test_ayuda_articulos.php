@@ -29,7 +29,7 @@ require_once __DIR__ . '/../Class/Ayuda.php';
  * decir, en un commit que alguien revisa, que esa pestaña sale sin ayuda.
  */
 const AYUDA_PENDIENTES = [
-    'ventas', 'saldos', 'echeqs', 'cobranzas_fr', 'exportaciones_tasky',
+    'ventas', 'saldos', 'cobranzas_fr', 'exportaciones_tasky',
     'compras_proyectadas',
     'proveedores_locales',
     'alquileres',

@@ -459,7 +459,7 @@ No. En Resumen la fila es un cliente, no una factura. La mano azul al lado del c
 :::
 
 :::pregunta ¿Los cheques de mayoristas se cuentan dos veces, acá y en Echeqs?
-No. Un cheque en cartera entró con un recibo que ya canceló la factura, así que acá esa factura ya no tiene pendiente. El cheque se cuenta en Echeqs.
+No. Un cheque en cartera entró con un recibo que ya canceló la factura, así que acá esa factura ya no tiene pendiente. El cheque se cuenta en [Echeqs](ayuda:echeqs).
 :::
 
 :::pregunta ¿La pestaña y el tablero dicen lo mismo?
