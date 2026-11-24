@@ -102,7 +102,7 @@ Dice qué día se paga cada concepto que no tiene una fecha propia. Se cambia en
 | Concepto | Lo usa | Por defecto | Si el día no es hábil | Se mueve a mano |
 | --- | --- | --- | --- | --- |
 | **Proveedores Locales** | Cuentas a Pagar Locales | El 2do y el 4to miércoles | Se paga el hábil anterior | Sí |
-| **Logística Local** | Logística Local | El 2do y el 4to viernes | Se paga el hábil anterior | Sí |
+| **Logística Local** | [Logística Local](ayuda:logistica_local) | El 2do y el 4to viernes | Se paga el hábil anterior | Sí |
 | **Supervisoras** | La parte en efectivo de Gastos Supervisoras, en Pagos con Tarjetas y Otros | Todos los lunes | Se paga el hábil siguiente | Sí |
 | **Gastos Locales** | Gastos Locales, en las semanas del tramo diario | Todos los lunes | Se paga el hábil siguiente | No |
 
@@ -194,7 +194,7 @@ La grilla llega hasta 11 meses después del actual, que es lo que cubren 12 **Co
 
 Un ajuste pactado se enuncia como una suma, y así se calcula: sin componer.
 
-- **Logística Local**: el ajuste trimestral del valor hora de los fleteros suma la inflación del mes del ajuste y la de los dos anteriores. Ver Logística Local.
+- **Logística Local**: el ajuste trimestral del valor hora de los fleteros suma la inflación del mes del ajuste y la de los dos anteriores. Ver [Logística Local](ayuda:logistica_local).
 - **Alquileres**: el ajuste de cada local suma la inflación de los meses de su frecuencia de ajuste.
 - **Seguros**, en Pagos con Tarjetas y Otros: la continuación de una póliza en pesos suma la inflación de los meses de su vigencia anterior.
 
