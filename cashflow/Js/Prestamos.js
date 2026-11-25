@@ -214,7 +214,8 @@
             + ' · ' + esc(p.sistema) + ', ' + p.cuotas + ' cuotas, ' + esc(p.frecuencias)
             + ' · TEA ' + porc(p.tea) + ' · CFT ' + porc(p.cft)
             + ' · <span class="badge bg-light text-dark border">' + esc(p.nombre_estado) + '</span>'
-            + (p.simulado ? ' <span class="text-info">No suma en el tablero oficial.</span>' : '');
+            + (p.simulado ? ' <span class="text-info">No suma en el tablero oficial.</span>' : '')
+            + infoReferencia(p.datos);
 
         head.innerHTML = '<tr><th>Nº</th><th>Vencimiento</th><th>Fecha de pago</th><th class="text-end">Días</th><th class="text-end">Tasa</th>'
             + '<th class="text-end">Saldo inicial</th><th class="text-end">Capital</th><th class="text-end">Interés</th>'
@@ -276,6 +277,19 @@
             + (p.avisos && p.avisos.length ? '<div class="mt-1 text-warning">' + p.avisos.map(function(a) { return esc(a.texto); }).join('<br>') + '</div>' : '');
 
         dibujarCancelaciones(p, edita);
+    }
+
+    /** "Última TAMAR publicada: XX % (dd/mm) · Promedio últimos N días hábiles: XX %", para un variable. */
+    function infoReferencia(d) {
+        if (!d || d.tipo_tasa !== 'VARIABLE') { return ''; }
+
+        var ref = (datos.tasas || {})[d.referencia];
+
+        if (!ref || !ref.ultimo) { return '<div class="mt-1 text-danger">No hay valores publicados de ' + esc(d.referencia) + '.</div>'; }
+
+        return '<div class="mt-1">Última ' + esc(ref.nombre) + ' publicada: <strong>' + porc(ref.ultimo.valor / 100) + '</strong> ('
+            + fecha(ref.ultimo.fecha).substr(0, 5) + ') · Promedio últimos ' + datos.generales.DIAS_PROMEDIO + ' días hábiles: <strong>'
+            + porc(ref.promedio.valor / 100) + '</strong></div>';
     }
 
     function dibujarCancelaciones(p, edita) {
