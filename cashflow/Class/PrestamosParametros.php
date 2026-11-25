@@ -784,7 +784,7 @@ class PrestamosParametros {
         $com = array_key_exists('cancelacion', $datos) && is_array($datos['cancelacion'])
             ? self::validarComision($datos['cancelacion']) : $actual['prestamo']['cancelacion'];
 
-        $this->enTransaccion(function () use ($id, $v, $costos, $com, $usuario, $datos) {
+        $this->enTransaccion(function () use ($id, $v, $costos, $com, $usuario, $datos, $actual) {
             $stmt = $this->ejecutar("UPDATE dbo." . self::T_PRESTAMO . " SET
                     NOMBRE = ?, CUENTA_CLAVE = ?, CUENTA_NOMBRE = ?, MONEDA = ?, CAPITAL = ?, FECHA_DESEMBOLSO = ?, TIPO_TASA = ?,
                     TNA = ?, REFERENCIA = ?, SPREAD = ?, CRITERIO_TASA = ?, SISTEMA = ?, CUOTAS = ?, FREC_CAPITAL = ?,
@@ -799,8 +799,7 @@ class PrestamosParametros {
             }
 
             if ($costos !== null) {
-                $this->darDeBaja(self::T_COSTO, 'ID_PRESTAMO = ? AND VIGENTE = 1', [$id], $usuario);
-                $this->insertarCostos($id, $costos, $datos['costos'], $usuario);
+                $this->sincronizarCostos($id, $costos, $datos['costos'], $actual['costos'], $usuario);
             }
 
             if (array_key_exists('cancelacion', $datos)) {
@@ -972,6 +971,45 @@ class PrestamosParametros {
                 [(int) $id, $param, $c['nombre'], $c['pct'], $c['base'], $c['momento'], !empty($c['iva']) ? 1 : 0, $usuario, $usuario],
                 'Error al guardar los costos del préstamo');
         }
+    }
+
+    /**
+     * Los costos de un prestamo al editarlo. LOS QUE YA EXISTEN SE ACTUALIZAN
+     * EN SU LUGAR, no se dan de baja y de alta: una correccion de cuota
+     * COSTO:<id> nombra el ID del costo, y con un ID nuevo quedaria apuntando a
+     * uno dado de baja y se ignoraria sin decir nada. Los nuevos se insertan y
+     * los que no vinieron se dan de baja.
+     *
+     * @param array $costos Los validados (validarCosto())
+     * @param array $crudos Lo que llego, con el 'id' de cada uno si ya existia
+     * @param array $vigentes Los costos vigentes del prestamo
+     */
+    private function sincronizarCostos($id, $costos, $crudos, $vigentes, $usuario) {
+        $ids = array_map('intval', array_column($vigentes, 'id'));
+        $quedan = [];
+        $nuevos = [];
+        $crudosNuevos = [];
+
+        foreach ($costos as $i => $c) {
+            $cid = (is_array($crudos) && isset($crudos[$i]['id']) && $crudos[$i]['id'] !== '') ? (int) $crudos[$i]['id'] : null;
+
+            if ($cid !== null && in_array($cid, $ids, true)) {
+                $this->ejecutar("UPDATE dbo." . self::T_COSTO . " SET NOMBRE = ?, PCT = ?, BASE = ?, MOMENTO = ?, LLEVA_IVA = ?, " . Auditoria::SET_MODIF . "
+                                 WHERE ID = ? AND ID_PRESTAMO = ? AND VIGENTE = 1",
+                    [$c['nombre'], $c['pct'], $c['base'], $c['momento'], !empty($c['iva']) ? 1 : 0, $usuario, $cid, (int) $id],
+                    'Error al guardar los costos del préstamo');
+                $quedan[] = $cid;
+            } else {
+                $nuevos[] = $c;
+                $crudosNuevos[] = is_array($crudos) ? ($crudos[$i] ?? []) : [];
+            }
+        }
+
+        foreach (array_diff($ids, $quedan) as $baja) {
+            $this->darDeBaja(self::T_COSTO, 'ID = ? AND ID_PRESTAMO = ? AND VIGENTE = 1', [(int) $baja, (int) $id], $usuario);
+        }
+
+        $this->insertarCostos($id, $nuevos, $crudosNuevos, $usuario);
     }
 
     private function insertarTramos($id, $tramos, $usuario) {

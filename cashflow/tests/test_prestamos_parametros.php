@@ -177,3 +177,11 @@ foreach (PrestamosParametros::GENERALES as $k => $g) {
 chequear('el CHECK de los costos rechaza inicial sobre intereses', true, strpos($sql, "NOT (MOMENTO = 'INICIAL' AND BASE = 'INTERESES')") !== false);
 chequear('el CHECK del prestamo: frances con frecuencias iguales', true, strpos($sql, "SISTEMA <> 'FRANCES' OR FREC_CAPITAL = FREC_INTERESES") !== false);
 chequear('el estado guardado es solo simulado o vigente', true, strpos($sql, "ESTADO IN ('SIMULADO', 'VIGENTE')") !== false);
+
+seccion('editar no le cambia el ID a los costos que ya existen');
+preg_match('/function sincronizarCostos\(.*?\n    \}\n/s', $src, $m2);
+chequear('editarPrestamo sincroniza, no da de baja todos los costos', true,
+    strpos($m[0] ?? '', 'sincronizarCostos(') !== false && strpos($m[0] ?? '', "darDeBaja(self::T_COSTO, 'ID_PRESTAMO = ? AND VIGENTE = 1'") === false);
+chequear('los que vienen con su id se actualizan en su lugar', true, strpos($m2[0] ?? '', 'UPDATE dbo." . self::T_COSTO') !== false);
+chequear('el formulario manda el id de cada costo', true,
+    strpos(file_get_contents(__DIR__ . '/../Js/Prestamos.js'), "var c = { id: tr.getAttribute('data-id') || ''") !== false);

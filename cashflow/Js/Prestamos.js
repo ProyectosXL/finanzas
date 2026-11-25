@@ -491,7 +491,9 @@
     function filaCosto(c) {
         var l = datos.listas;
 
-        return '<tr data-id-param="' + (c.id_param || '') + '">'
+        /* data-id: el costo ya guardado del prestamo. Al editar se actualiza en su
+           lugar, asi las correcciones COSTO:<id> de las cuotas siguen valiendo. */
+        return '<tr data-id="' + (c.id || '') + '" data-id-param="' + (c.id_param || '') + '">'
             + '<td><input type="text" class="form-control form-control-sm pr-fc" data-campo="nombre" value="' + esc(c.nombre || '') + '"></td>'
             + '<td><input type="text" class="form-control form-control-sm pr-fc text-end" data-campo="pct" inputmode="decimal" value="' + (c.pct === undefined ? '' : numeroEditable(c.pct)) + '"></td>'
             + '<td><select class="form-select form-select-sm pr-fc" data-campo="base">' + opciones(l.bases, c.base || 'CAPITAL') + '</select></td>'
@@ -539,7 +541,7 @@
         var costos = [];
 
         document.querySelectorAll('#prFCostos tr').forEach(function(tr) {
-            var c = { id_param: tr.getAttribute('data-id-param') || '' };
+            var c = { id: tr.getAttribute('data-id') || '', id_param: tr.getAttribute('data-id-param') || '' };
 
             tr.querySelectorAll('.pr-fc').forEach(function(el) { c[el.getAttribute('data-campo')] = el.type === 'checkbox' ? (el.checked ? 1 : 0) : el.value; });
             costos.push(c);
