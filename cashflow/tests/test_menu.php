@@ -249,10 +249,12 @@ chequear('y el menu la declara con datos',
    tocaron. Si alguna se marcara con datos de arrastre, el contador de la categoria
    mentiria. */
 chequear('Otros Socios sigue pendiente', Menu::PENDIENTE, $porTab['otros_socios']['estado']);
-chequear('y Prestamos tambien', Menu::PENDIENTE, $porTab['prestamos']['estado']);
+/* PRESTAMOS DEJO DE SER UN PLACEHOLDER (feature/prestamos). */
+chequear('Prestamos ya no es un placeholder', false, Menu::esPlaceholder('prestamos'));
+chequear('y el menu la declara con datos', Menu::DATOS, $porTab['prestamos']['estado']);
 
-chequear('asi que Financiero pasa a 1 de 3 con datos',
-    1, $porCategoria['Financiero']['con_datos']);
+chequear('asi que Financiero pasa a 2 de 3 con datos',
+    2, $porCategoria['Financiero']['con_datos']);
 
 /* LAS CUATRO PESTANAS EN DESUSO NO VUELVEN. Eran placeholders sin datos, sin
    proveedor y sin tabla: se fueron del menu, de TabController y del disco. El

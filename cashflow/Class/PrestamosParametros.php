@@ -856,6 +856,45 @@ class PrestamosParametros {
         return ['cuota' => $n] + $v;
     }
 
+    /**
+     * Varias correcciones de UNA cuota, en una transaccion: lo que el usuario
+     * corrigio en el formulario de la cuota. O se guardan todas o ninguna.
+     *
+     * @param array $lista [['concepto', 'importe']]
+     * @return array Las guardadas
+     */
+    public function guardarAjustes($id, $cuota, $lista, $actual, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTablas();
+
+        if ($actual === null) {
+            throw new InvalidArgumentException('Ese préstamo ya no existe.');
+        }
+
+        $n = self::entero($cuota, 1, 10000, 'La cuota', false);
+        $costos = array_column($actual['costos'], 'id');
+        $vs = [];
+
+        foreach (is_array($lista) ? $lista : [] as $a) {
+            $vs[] = self::validarAjuste($a['concepto'] ?? '', $a['importe'] ?? null, $costos);
+        }
+
+        if (empty($vs)) {
+            throw new InvalidArgumentException('No hay nada que corregir.');
+        }
+
+        $this->enTransaccion(function () use ($id, $n, $vs, $usuario) {
+            foreach ($vs as $v) {
+                $this->darDeBaja(self::T_AJUSTE, 'ID_PRESTAMO = ? AND CUOTA = ? AND CONCEPTO = ? AND VIGENTE = 1', [(int) $id, $n, $v['concepto']], $usuario);
+                $this->ejecutar("INSERT INTO dbo." . self::T_AJUSTE . " (ID_PRESTAMO, CUOTA, CONCEPTO, IMPORTE, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
+                                 VALUES (?, ?, ?, ?, 1, ?, ?)", [(int) $id, $n, $v['concepto'], $v['importe'], $usuario, $usuario],
+                    'Error al guardar la corrección');
+            }
+        });
+
+        return $vs;
+    }
+
     /** Deshacer una correccion: baja logica. Sin concepto, todas las de la cuota. */
     public function deshacerAjuste($id, $cuota, $concepto, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);

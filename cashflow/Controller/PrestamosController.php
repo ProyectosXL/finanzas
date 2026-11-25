@@ -46,7 +46,98 @@ try {
     $pr = new Prestamos();
     $par = $pr->par();
 
+    /* El prestamo como esta guardado, para las escrituras que lo necesitan. */
+    $actual = function ($id) use ($par) {
+        $todos = $par->prestamos();
+
+        return $todos[(int) $id] ?? null;
+    };
+
     switch ($action) {
+        /* ================================================================
+           LA PESTAÑA: lista, cronograma, proyeccion y tarjetas, en un pedido
+           ================================================================ */
+        case 'getPestana':
+            autorizarLectura('prestamos');
+
+            require_once __DIR__ . '/../Class/Parametros.php';
+            require_once __DIR__ . '/../Class/Horizonte.php';
+
+            responder($pr->pestana(Horizonte::desdeParametros(new Parametros())));
+            break;
+
+        case 'altaPrestamo':
+            $data = bodyJson();
+            $r = $par->altaPrestamo($data, $pr->cuentas(), $usuario);
+            responder(['id' => $r['id']], 'Préstamo «' . $r['nombre'] . '» dado de alta como '
+                . strtolower(PrestamosCalculo::NOMBRE_ESTADO[$r['estado']]) . '.'
+                . ($r['estado'] === PrestamosCalculo::SIMULADO ? ' No suma en el tablero oficial.' : ''));
+            break;
+
+        case 'editarPrestamo':
+            $data = bodyJson();
+            $id = (int) ($data['id'] ?? 0);
+            $a = $actual($id);
+            $data['estado'] = $a['prestamo']['estado'] ?? null;
+            $r = $par->editarPrestamo($id, $data, $pr->cuentas(), $a, $usuario);
+            responder(['id' => $r['id']], 'Préstamo «' . $r['nombre'] . '» guardado.');
+            break;
+
+        case 'pasarAVigente':
+            $data = bodyJson();
+            $id = (int) ($data['id'] ?? 0);
+            $a = $actual($id);
+
+            if ($a === null || $a['prestamo']['estado'] !== PrestamosCalculo::SIMULADO) {
+                throw new InvalidArgumentException('Solo un préstamo simulado pasa a vigente.');
+            }
+
+            $data['estado'] = PrestamosCalculo::VIGENTE;
+            $r = $par->editarPrestamo($id, $data, $pr->cuentas(), $a, $usuario);
+            responder(['id' => $r['id']], '«' . $r['nombre'] . '» pasó a vigente: desde ahora suma en el tablero.');
+            break;
+
+        case 'eliminarSimulado':
+            $data = bodyJson();
+            $id = (int) ($data['id'] ?? 0);
+            $habia = $par->eliminarSimulado($id, $actual($id), $usuario);
+            responder(['habia' => $habia], $habia ? 'Préstamo simulado eliminado. Queda en el historial.' : 'Ese préstamo ya no estaba.');
+            break;
+
+        case 'guardarAjuste':
+            $data = bodyJson();
+            $id = (int) ($data['id'] ?? 0);
+            $r = $par->guardarAjustes($id, $data['cuota'] ?? null, $data['ajustes'] ?? [], $actual($id), $usuario);
+            responder($r, 'Cuota ' . (int) $data['cuota'] . ' corregida (' . count($r) . ' dato' . (count($r) === 1 ? '' : 's')
+                . '). Pisa lo calculado; se puede deshacer.');
+            break;
+
+        case 'deshacerAjuste':
+            $data = bodyJson();
+            $n = $par->deshacerAjuste((int) ($data['id'] ?? 0), $data['cuota'] ?? null, $data['concepto'] ?? '', $usuario);
+            responder(['n' => $n], $n > 0 ? 'Corrección deshecha: vuelve lo calculado. Queda en el historial.' : 'No había corrección vigente.');
+            break;
+
+        case 'simularCancelacion':
+            $data = bodyJson();
+            responder($pr->simularCancelacion((int) ($data['id'] ?? 0), $data));
+            break;
+
+        case 'registrarCancelacion':
+            $data = bodyJson();
+            $id = (int) ($data['id'] ?? 0);
+            $s = $pr->simularCancelacion($id, $data);
+            $par->registrarCancelacion($id, $s['validada'], $usuario);
+            responder($s, 'Cancelación ' . strtolower(PrestamosCalculo::nombreCancel($s['validada']['tipo'])) . ' registrada para el '
+                . PrestamosCalculo::corta($s['validada']['fecha']) . '.');
+            break;
+
+        case 'deshacerCancelacion':
+            $data = bodyJson();
+            $habia = $par->deshacerCancelacion($data['id_cancelacion'] ?? 0, $pr->hoy(), $usuario);
+            responder(['habia' => $habia], $habia ? 'Cancelación deshecha: vuelven las cuotas. Queda en el historial.' : 'Esa cancelación ya no estaba vigente.');
+            break;
+
         /* ================================================================
            PARAMETROS -> PRESTAMOS
            ================================================================ */

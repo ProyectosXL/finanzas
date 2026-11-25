@@ -88,7 +88,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRESTAMOS');
             </div>
             <?php endif; ?>
             <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
+                <table id="tablaPprTasas" class="table table-sm align-middle mb-0">
                     <thead><tr><th>Tasa</th><th>Mes</th><th class="text-end">Valor</th><th>Cargado</th><th></th></tr></thead>
                     <tbody id="pprTasasManual"></tbody>
                 </table>
@@ -111,7 +111,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRESTAMOS');
         </div>
         <div class="card-body">
             <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
+                <table id="tablaPprCostos" class="table table-sm align-middle mb-0">
                     <thead>
                         <tr><th>Costo</th><th class="text-end">%</th><th>Base</th><th>Momento</th><th class="text-center">IVA</th>
                             <th class="text-center">Activo</th><th></th></tr>
@@ -165,7 +165,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRESTAMOS');
             <div id="pprTramosBloque" class="mt-3">
                 <h6 class="mb-1">Tramos (para la escalonada)</h6>
                 <small class="text-muted d-block mb-2">Desde qué % del plazo transcurrido rige cada %. El primero empieza en 0.</small>
-                <table class="table table-sm align-middle mb-2" style="max-width: 640px">
+                <table id="tablaPprTramos" class="table table-sm align-middle mb-2" style="max-width: 640px">
                     <thead><tr><th>Desde (% del plazo)</th><th>% total</th><th>% parcial</th><th></th></tr></thead>
                     <tbody id="pprTramos"></tbody>
                 </table>

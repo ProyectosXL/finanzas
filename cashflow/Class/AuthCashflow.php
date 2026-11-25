@@ -294,6 +294,15 @@ class AuthCashflow {
            con el de su sub-pestaña. Simular una cancelacion pide edicion como los
            demas preview: es el primer paso de registrarla. */
         'Prestamos' => [
+            'altaPrestamo' => [['prestamos', null]],
+            'editarPrestamo' => [['prestamos', null]],
+            'pasarAVigente' => [['prestamos', null]],
+            'eliminarSimulado' => [['prestamos', null]],
+            'guardarAjuste' => [['prestamos', null]],
+            'deshacerAjuste' => [['prestamos', null]],
+            'simularCancelacion' => [['prestamos', null]],
+            'registrarCancelacion' => [['prestamos', null]],
+            'deshacerCancelacion' => [['prestamos', null]],
             'guardarGeneral' => [['parametros', 'PRESTAMOS']],
             'guardarCosto' => [['parametros', 'PRESTAMOS']],
             'guardarTramos' => [['parametros', 'PRESTAMOS']],
@@ -366,7 +375,7 @@ class AuthCashflow {
      * esta lista. Hoy no hay ninguna: cashflow.editar.llaves_renov, la ultima,
      * ya la pide "Ya pagada" desde la solapa Contratos de Llaves y Renovaciones.
      */
-    const CLAVES_RESERVADAS = ['cashflow.editar.prestamos'];
+    const CLAVES_RESERVADAS = [];
 
     /**
      * Pestañas que ve CUALQUIER usuario identificado, sin permiso propio.
@@ -400,7 +409,7 @@ class AuthCashflow {
             'getHistorialRubroPct', 'getFeriadosBancarios'],
         /* La necesidad de financiamiento y la comparacion con y sin un
            simulado corren el motor del tablero, pero solo leen. */
-        'Prestamos' => ['getParametros'],
+        'Prestamos' => ['getPestana', 'getParametros'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],

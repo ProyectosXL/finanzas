@@ -50,15 +50,15 @@ chequear('ningun bloque de tarjetas sin data-kpis', [], $sinComponente);
 chequear('cada bloque con su propia clave (Proveedores Exterior y Crono comparten id)', [],
     array_values(array_unique(array_diff_assoc($claves, array_unique($claves)))));
 
-/* Las diecisiete pestanas con tarjetas (Llaves y Renovaciones desde feature/llaves-renovaciones): si una deja de tenerlas, o aparece otra,
+/* Las dieciocho pestanas con tarjetas (Prestamos desde feature/prestamos; Llaves y Renovaciones desde feature/llaves-renovaciones): si una deja de tenerlas, o aparece otra,
    esta lista tiene que cambiar a proposito. */
 $esperadas = ['alquileres.php', 'cashflow.php', 'cob_electronicos.php', 'cobranzas_fr.php', 'cobranzas_may.php',
     'compras_proyectadas.php', 'crono_nacionalizacion.php', 'echeqs.php', 'exportaciones_tasky.php',
-    'gastos_locales.php', 'llaves_renov.php', 'logistica_local.php', 'pagos_tarjetas.php', 'proveedores_exterior.php', 'proveedores_locales.php',
+    'gastos_locales.php', 'llaves_renov.php', 'logistica_local.php', 'pagos_tarjetas.php', 'prestamos.php', 'proveedores_exterior.php', 'proveedores_locales.php',
     'saldos.php', 'ventas.php'];
 $conKpi = array_keys($tabsConKpi);
 sort($conKpi);
-chequear('son las diecisiete pestanas con tarjetas', $esperadas, $conKpi);
+chequear('son las dieciocho pestanas con tarjetas', $esperadas, $conKpi);
 
 $saldosHtml = file_get_contents(__DIR__ . '/../Tabs/saldos.php');
 chequear('las tarjetas que dibuja el JS (Fondos) tambien', true,
