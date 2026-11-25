@@ -279,6 +279,19 @@ class Parametros {
             'secciones' => [],
             'endpoint' => 'Controller/LlavesController.php'
         ],
+        /* PRESTAMOS: los valores generales que cada prestamo nuevo copia al
+           darse de alta. El codigo es el de la pestaña para que el permiso sea
+           cashflow.editar.parametros.prestamos. */
+        'PRESTAMOS' => [
+            'nombre' => 'Préstamos',
+            'icono' => 'fa-money-bill-trend-up',
+            'descripcion' => 'Los valores generales de los préstamos: los costos asociados, la comisión de cancelación '
+                . 'anticipada, las tasas de referencia (TAMAR y BADLAR) y su proyección, las condiciones por defecto '
+                . 'del simulador y el margen de seguridad. Cada préstamo nuevo los copia al darse de alta; un cambio acá '
+                . 'no toca a los préstamos que ya existen. Alimentan la pestaña Financiero › Préstamos',
+            'secciones' => [],
+            'endpoint' => 'Controller/PrestamosController.php'
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',

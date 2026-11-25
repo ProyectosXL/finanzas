@@ -586,6 +586,7 @@ $contenedores = [
     'avisosParamPplo' => 'Parametros-Prov_locales.js', 'ptarAvisos' => 'Parametros-Tarjetas.js',
     'palqAvisos' => 'Parametros-Alquileres.js',
     'pllAvisos' => 'Parametros-Llaves.js',
+    'pprAvisos' => 'Parametros-Prestamos.js',
     'pcprAvisos' => 'Parametros-Compras_proy.js', 'cfeAvisos' => 'Parametros-Estructura.js'
 ];
 

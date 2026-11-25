@@ -289,6 +289,16 @@ class AuthCashflow {
             'incluirClienteCobranza' => [['parametros', 'COBRANZAS']],
             'saveEscalaDescuento' => [['parametros', 'COBRANZAS']]
         ],
+        /* PRESTAMOS: la pestaña (alta, edicion, cronograma, cambio de estado,
+           cancelaciones y simulaciones) con su permiso, y Parametros › Prestamos
+           con el de su sub-pestaña. Simular una cancelacion pide edicion como los
+           demas preview: es el primer paso de registrarla. */
+        'Prestamos' => [
+            'guardarGeneral' => [['parametros', 'PRESTAMOS']],
+            'guardarCosto' => [['parametros', 'PRESTAMOS']],
+            'guardarTramos' => [['parametros', 'PRESTAMOS']],
+            'guardarTasaManual' => [['parametros', 'PRESTAMOS']]
+        ],
         'Proveedores' => [
             'savePago' => [['proveedores_locales', null]],
             'saveFechaMasiva' => [['proveedores_locales', null]],
@@ -356,7 +366,7 @@ class AuthCashflow {
      * esta lista. Hoy no hay ninguna: cashflow.editar.llaves_renov, la ultima,
      * ya la pide "Ya pagada" desde la solapa Contratos de Llaves y Renovaciones.
      */
-    const CLAVES_RESERVADAS = [];
+    const CLAVES_RESERVADAS = ['cashflow.editar.prestamos'];
 
     /**
      * Pestañas que ve CUALQUIER usuario identificado, sin permiso propio.
@@ -388,6 +398,9 @@ class AuthCashflow {
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento',
             'getHistorialRubroPct', 'getFeriadosBancarios'],
+        /* La necesidad de financiamiento y la comparacion con y sin un
+           simulado corren el motor del tablero, pero solo leen. */
+        'Prestamos' => ['getParametros'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],
