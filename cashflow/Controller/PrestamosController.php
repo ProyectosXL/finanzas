@@ -139,6 +139,37 @@ try {
             break;
 
         /* ================================================================
+           SIMULADOR. Corren el tablero entero (una o dos veces): se piden a
+           mano, y liberan la sesion apenas autorizan para no frenar el resto
+           de la pantalla (AuthCashflow::liberarSesion()).
+           ================================================================ */
+        case 'calcularNecesidad':
+            autorizarLectura('prestamos');
+            AuthCashflow::liberarSesion();
+            responder($pr->necesidad());
+            break;
+
+        case 'compararSimulado':
+            autorizarLectura('prestamos');
+            AuthCashflow::liberarSesion();
+            $id = (int) ($_GET['id'] ?? 0);
+            $a = $actual($id);
+
+            if ($a === null || $a['prestamo']['estado'] !== PrestamosCalculo::SIMULADO) {
+                throw new InvalidArgumentException('Elegí un préstamo simulado para comparar.');
+            }
+
+            responder($pr->comparar($id));
+            break;
+
+        case 'simularPrestamo':
+            $data = bodyJson();
+            $r = $pr->simularPrestamo($data, $pr->cuentas(), $usuario);
+            responder(['id' => $r['id']], 'Préstamo simulado «' . $r['nombre'] . '» armado con ' . PrestamosCalculo::plata($r['capital'])
+                . '. Está en la lista para ajustarlo; no suma en el tablero oficial.');
+            break;
+
+        /* ================================================================
            PARAMETROS -> PRESTAMOS
            ================================================================ */
         case 'getParametros':

@@ -303,6 +303,7 @@ class AuthCashflow {
             'simularCancelacion' => [['prestamos', null]],
             'registrarCancelacion' => [['prestamos', null]],
             'deshacerCancelacion' => [['prestamos', null]],
+            'simularPrestamo' => [['prestamos', null]],
             'guardarGeneral' => [['parametros', 'PRESTAMOS']],
             'guardarCosto' => [['parametros', 'PRESTAMOS']],
             'guardarTramos' => [['parametros', 'PRESTAMOS']],
@@ -409,7 +410,7 @@ class AuthCashflow {
             'getHistorialRubroPct', 'getFeriadosBancarios'],
         /* La necesidad de financiamiento y la comparacion con y sin un
            simulado corren el motor del tablero, pero solo leen. */
-        'Prestamos' => ['getPestana', 'getParametros'],
+        'Prestamos' => ['getPestana', 'getParametros', 'calcularNecesidad', 'compararSimulado'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],

@@ -704,6 +704,127 @@ class Prestamos {
                 'comparacion' => self::compararCancelacion($r['sin'], $r['con'], $v['fecha'])];
     }
 
+    /* ====================================================================
+       SIMULADOR
+       ==================================================================== */
+
+    /**
+     * El tablero oficial o con algunos simulados. Costura para probar: las
+     * pruebas la reemplazan por un tablero armado a mano (el motor de verdad
+     * contra la base no corre en ninguna prueba).
+     *
+     * @param bool|array $sim
+     * @return array ['tablero', 'secuencia']
+     */
+    protected function tablero($sim) {
+        require_once __DIR__ . '/Cashflow.php';
+        require_once __DIR__ . '/Parametros.php';
+
+        $h = Horizonte::desdeParametros(new Parametros());
+
+        return ['tablero' => (new Cashflow(null, null, $h, ['simulaciones' => $sim]))->proyectar(), 'secuencia' => $h->secuencia()];
+    }
+
+    /**
+     * Cuanto haria falta pedir y para cuando: corre el tablero oficial (sin
+     * simulaciones) y mira el saldo acumulado con cobertura.
+     *
+     * @return array
+     */
+    public function necesidad() {
+        require_once __DIR__ . '/PrestamosSimulador.php';
+        require_once __DIR__ . '/EjeVista.php';
+
+        $t = $this->tablero(false);
+        $saldo = PrestamosSimulador::saldoDelTablero($t['tablero']);
+
+        if ($saldo === null) {
+            throw new InvalidArgumentException('El tablero no tiene ninguna fila de saldo acumulado: no se puede calcular la necesidad.');
+        }
+
+        $a = PrestamosSimulador::analizar($t['secuencia'], $saldo);
+        $out = ['hay_faltante' => $a['hay_faltante'], 'minimo' => $a['minimo'],
+                'minimo_rotulo' => $a['minimo_col'] ? EjeVista::rotulo($a['minimo_col']) : null];
+
+        if (!$a['hay_faltante']) {
+            return $out;
+        }
+
+        $avisos = [];
+        $gen = $this->par->generales();
+        $iva = 0.21;
+
+        try {
+            require_once __DIR__ . '/Parametros.php';
+            $iva = Parametros::num((new Parametros())->getParametrosMap(), 'alicuota_iva');
+        } catch (Throwable $e) {
+            /* Sin la alicuota, la del 21 %: solo afecta a un costo inicial con IVA. */
+        }
+
+        $pct = PrestamosSimulador::pctIniciales($this->par->costosParam(), $iva);
+        $necesidad = abs($a['minimo']);
+        $col = $a['primer'];
+        $habiles = $this->habiles(date('Y-m-d', strtotime($this->hoy . ' -10 days')),
+            date('Y-m-d', strtotime($this->hoy . ' +14 months')), $avisos);
+        $f = PrestamosSimulador::fechaDesembolso($col, $habiles, $this->hoy);
+
+        return $out + [
+            'primer_negativo' => (strpos($col, 'MES|') === 0) ? $f['fecha'] : substr($col, 4),
+            'aproximada' => $f['aproximada'],
+            'desembolso' => $f['fecha'],
+            'necesidad' => round($necesidad, 2),
+            'margen' => (float) $gen['MARGEN'],
+            'pct_iniciales' => $pct,
+            'sugerido' => PrestamosSimulador::montoSugerido($necesidad, (float) $gen['MARGEN'], $pct)
+        ];
+    }
+
+    /**
+     * Arma un prestamo SIMULADO con el monto sugerido, el desembolso y las
+     * condiciones por defecto de Parametros. Queda en la lista para ajustarlo.
+     */
+    public function simularPrestamo($datos, $cuentas, $usuario) {
+        $gen = $this->par->generales();
+        $fecha = PrestamosParametros::fecha($datos['fecha'] ?? '', 'la fecha del desembolso');
+
+        return $this->par->altaPrestamo([
+            'nombre' => 'Simulado ' . PrestamosCalculo::corta($fecha) . ' (simulador)',
+            'cuenta_clave' => $datos['cuenta_clave'] ?? '',
+            'moneda' => 'ARS',
+            'capital' => $datos['monto'] ?? null,
+            'fecha_desembolso' => $fecha,
+            'tipo_tasa' => PrestamosCalculo::FIJA,
+            'tna' => $gen['SIM_TNA'],
+            'sistema' => $gen['SIM_SISTEMA'],
+            'cuotas' => $gen['SIM_CUOTAS'],
+            'frec_capital' => $gen['SIM_FRECUENCIA'],
+            'frec_intereses' => $gen['SIM_FRECUENCIA'],
+            'gracia' => 0,
+            'estado' => PrestamosCalculo::SIMULADO,
+            'observacion' => 'Armado desde el simulador: monto sugerido para cubrir el faltante del tablero oficial.'
+        ], $cuentas, $usuario);
+    }
+
+    /**
+     * El saldo del cashflow con y sin UN prestamo simulado, al cierre de cada
+     * mes: el tablero oficial contra el tablero con ese simulado adentro.
+     */
+    public function comparar($id) {
+        require_once __DIR__ . '/PrestamosSimulador.php';
+
+        $sin = $this->tablero(false);
+        $con = $this->tablero([(int) $id]);
+        $mSin = PrestamosSimulador::porMes($sin['secuencia'], PrestamosSimulador::saldoDelTablero($sin['tablero']) ?: []);
+        $mCon = PrestamosSimulador::porMes($con['secuencia'], PrestamosSimulador::saldoDelTablero($con['tablero']) ?: []);
+        $out = [];
+
+        foreach ($mSin as $mes => $v) {
+            $out[] = ['mes' => $mes, 'rotulo' => DolarFuturo::mesCorto($mes), 'sin' => $v, 'con' => $mCon[$mes] ?? null];
+        }
+
+        return ['meses' => $out];
+    }
+
     /** El saldo de capital de un cronograma a una fecha: lo amortizado hasta ese dia inclusive. */
     public static function saldoA($cuotas, $capital, $fecha) {
         $s = $capital;
