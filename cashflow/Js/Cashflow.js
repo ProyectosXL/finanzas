@@ -73,6 +73,15 @@
             alCambiar: cambiarVista
         });
 
+        /* Prender o apagar las simulaciones recalcula el tablero entero en el
+           servidor: cambian los KPIs, el saldo final y la cobertura automatica,
+           y rehacer eso aca seria reimplementar el motor. */
+        var chkSim = document.getElementById('cfSimulaciones');
+
+        if (chkSim) {
+            chkSim.addEventListener('change', cargar);
+        }
+
         /* EL TABLERO SE ORDENA, PERO SÓLO POR DENTRO DE CADA SECCIÓN.
            Sus filas derivadas no significan lo que significan por su contenido
            sino POR DÓNDE ESTÁN: un SUBTOTAL cierra su sección y un FLUJO_NETO
@@ -134,7 +143,11 @@
         mostrar('cfWrapper', false);
         mostrar('cfKpis', false);
 
-        pedirJson('Controller/CashflowController.php?action=getTablero')
+        /* EL INTERRUPTOR "INCLUIR SIMULACIONES" viaja en cada pedido y no se
+           recuerda: apagado por defecto. Con el prendido, el motor le pasa la
+           opcion a los proveedores y los KPIs, el saldo final, las columnas en
+           rojo y la cobertura automatica se recalculan con lo que se ve. */
+        pedirJson('Controller/CashflowController.php?action=getTablero' + (conSimulaciones() ? '&simulaciones=1' : ''))
             .then(function(data) {
                 datos = data;
 
@@ -143,6 +156,7 @@
                 pintarAvisos();
                 pintarKpis();
                 pintarGrilla();
+                mostrar('cfAvisoSimulaciones', conSimulaciones());
 
                 Cargando.ocultar('cfLoading');
                 mostrar('cfWrapper', true);
@@ -271,6 +285,7 @@
 
         kpi('cfKpiApertura', k.saldo_apertura);
         kpi('cfKpiIngresos', k.ingresos);
+        aclararDesembolsos();
         kpi('cfKpiEgresos', k.egresos);
         kpi('cfKpiFlujo', k.flujo);
         kpi('cfKpiCierre', k.saldo_cierre);
@@ -715,6 +730,7 @@
     function etiquetaNaturaleza(f) {
         if (f.naturaleza === 'REAL') { return 'Real'; }
         if (f.naturaleza === 'PROYECTADO') { return 'Proyectado'; }
+        if (f.naturaleza === 'SIMULADO') { return 'Simulado'; }
 
         return null;
     }
@@ -1098,7 +1114,48 @@
      * no en la configuración.
      */
     function filaDibujable(f) {
+        /* LA PARTE SIMULADA (prestamos simulados) se dibuja solo con el
+           interruptor prendido. Apagado, su proveedor ya la rinde en cero, asi
+           que esconderla no cambia ningun numero: es presentacion. */
+        if (f.naturaleza === 'SIMULADO' && !conSimulaciones()) {
+            return false;
+        }
+
         return f.tipo !== 'STOCK_COBERTURA';
+    }
+
+    /** Si el interruptor "Incluir simulaciones" esta prendido. No se recuerda. */
+    function conSimulaciones() {
+        var c = document.getElementById('cfSimulaciones');
+
+        return !!(c && c.checked);
+    }
+
+    /**
+     * Los desembolsos de prestamos cuentan como Ingresos (son filas INGRESO), y
+     * el tooltip de la tarjeta lo dice cuando el periodo tiene alguno. Suma los
+     * totales de la vista activa que el motor ya resolvio para esas filas; no
+     * calcula nada nuevo.
+     */
+    function aclararDesembolsos() {
+        var el = document.getElementById('cfKpiIngresos');
+
+        if (!el || !datos || !datos.filas) {
+            return;
+        }
+
+        var total = 0;
+
+        datos.filas.forEach(function(f) {
+            if (f.computa && f.tipo === 'INGRESO' && f.origen && f.origen.indexOf('FINANCIERO|DESEMBOLSO') === 0
+                && filaDibujable(f)) {
+                total += Number(totalDeVista(f)) || 0;
+            }
+        });
+
+        if (Math.abs(total) >= 0.5) {
+            el.setAttribute('title', el.getAttribute('title') + ' · Incluye ' + plata(total) + ' de desembolsos de préstamos');
+        }
     }
 
     /**
@@ -1117,6 +1174,7 @@
             clases.push('cf-parte');
 
             if (f.naturaleza === 'PROYECTADO') { clases.push('cf-parte-proyectada'); }
+            if (f.naturaleza === 'SIMULADO') { clases.push('cf-parte-simulada'); }
             if (!parte.abierto) { clases.push('cf-oculta'); }
         }
 

@@ -312,6 +312,19 @@
     border-color: #d9d2ec;
 }
 
+/* La parte SIMULADA (préstamos simulados): itálica y atenuada como lo
+   estimado, un poco más tenue que lo proyectado. Sólo se ve con el
+   interruptor "Incluir simulaciones". */
+.tab-cashflow .cf-parte-simulada td {
+    font-style: italic;
+    color: #9aa3ad;
+}
+
+.tab-cashflow .cf-parte-simulada .cf-naturaleza {
+    color: #b8860b;
+    border-color: #f0e2b6;
+}
+
 /* ============================================================================
    SECCIÓN COBERTURA
 

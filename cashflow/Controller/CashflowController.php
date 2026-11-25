@@ -34,7 +34,10 @@ try {
     require_once __DIR__ . '/autorizacion.php';
     $usuario = autorizar('Cashflow', $action);
 
-    $cashflow = new Cashflow();
+    /* EL INTERRUPTOR "INCLUIR SIMULACIONES" del tablero (Prestamos): apagado
+       por defecto, viaja en cada pedido y no se guarda. El motor se lo pasa a
+       los proveedores (CashflowProvider::conOpciones()); el resto lo ignora. */
+    $cashflow = new Cashflow(null, null, null, ['simulaciones' => !empty($_GET['simulaciones'])]);
 
     switch ($action) {
 

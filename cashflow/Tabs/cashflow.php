@@ -106,6 +106,12 @@
          errores de configuración. -->
     <div id="cfAvisos"></div>
 
+    <!-- Con el interruptor "Incluir simulaciones" prendido, esto se ve siempre:
+         lo que hay abajo deja de ser el cashflow oficial. -->
+    <div class="alert alert-warning py-2 small fw-semibold" id="cfAvisoSimulaciones" style="display: none;">
+        <i class="fas fa-flask me-1"></i> Incluye préstamos simulados: no es el cashflow oficial.
+    </div>
+
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
@@ -118,6 +124,11 @@
                      pestaña que explica una de sus filas no pueden ofrecer
                      vistas distintas ni medir períodos distintos. -->
                 <div id="cfVistas"></div>
+                <!-- Prestamos simulados: apagado por defecto y no se recuerda. -->
+                <div class="form-check form-switch mb-0 d-flex align-items-center">
+                    <input class="form-check-input" type="checkbox" id="cfSimulaciones">
+                    <label class="form-check-label small ms-1" for="cfSimulaciones">Incluir simulaciones</label>
+                </div>
                 <!-- Abre o cierra TODOS los conceptos con parte real y
                      proyectada. Arranca escondido y lo muestra Js/Cashflow.js
                      sólo si hay alguno dibujado: un botón que no hace nada se

@@ -56,7 +56,9 @@ require_once __DIR__ . '/Auditoria.php';
  *
  *   GRUPO        -> filas CONSECUTIVAS de la misma seccion, del mismo TIPO y
  *                   con el mismo GRUPO forman un grupo
- *   NATURALEZA   -> 'REAL' o 'PROYECTADO': que parte es cada fila. Se puede
+ *   NATURALEZA   -> 'REAL', 'PROYECTADO' o 'SIMULADO': que parte es cada
+ *                   fila (SIMULADO: los prestamos simulados, que el tablero
+ *                   muestra solo con el interruptor). Se puede
  *                   declarar sin GRUPO -una fila sola que sea toda proyectada-
  *   GRUPO_NOMBRE -> como se llama el grupo en pantalla. Lo declara cualquiera
  *                   de sus filas y gana la primera no vacia
@@ -137,8 +139,14 @@ class CashflowEstructura {
      * NULL es un valor legitimo y el mas comun: un subtotal no es ni real ni
      * proyectado, y una fila de un concepto que no se parte tampoco necesita
      * declararlo.
+     *
+     * SIMULADO (feature/prestamos): la parte de un concepto que sale de
+     * prestamos simulados. El tablero la esconde salvo con el interruptor
+     * "Incluir simulaciones", y su proveedor la rinde en cero mientras tanto.
+     * Un grupo sin parte simulada es lo normal y no se avisa. El CHECK lo
+     * amplia sql/cashflow_prestamos_fila.sql.
      */
-    const NATURALEZAS = ['REAL', 'PROYECTADO'];
+    const NATURALEZAS = ['REAL', 'PROYECTADO', 'SIMULADO'];
 
     /**
      * Tipos que NO pueden llevar GRUPO.
@@ -601,7 +609,7 @@ class CashflowEstructura {
      *     'codigo', 'nombre', 'consecutivo' => bool,
      *     'corridas' => [[fila, ...], ...], 'filas' => [fila, ...],
      *     'secciones' => [...], 'tipos' => [...],
-     *     'naturalezas' => ['REAL' => n, 'PROYECTADO' => n, '' => n],
+     *     'naturalezas' => ['REAL' => n, 'PROYECTADO' => n, 'SIMULADO' => n, '' => n],
      *     'nombres' => [los GRUPO_NOMBRE distintos que declararon sus filas]
      * ]
      */
@@ -639,7 +647,7 @@ class CashflowEstructura {
                     'filas' => [],
                     'secciones' => [],
                     'tipos' => [],
-                    'naturalezas' => ['REAL' => 0, 'PROYECTADO' => 0, '' => 0],
+                    'naturalezas' => ['REAL' => 0, 'PROYECTADO' => 0, 'SIMULADO' => 0, '' => 0],
                     'nombres' => []
                 ];
             }
@@ -1027,7 +1035,7 @@ class CashflowEstructura {
 
         if ($nat !== '' && !in_array($nat, self::NATURALEZAS, true)) {
             self::errorFila($r, $id, 'La fila "' . $f['NOMBRE'] . '" tiene una naturaleza '
-                . 'desconocida: "' . $nat . '". Sólo vale REAL o PROYECTADO.');
+                . 'desconocida: "' . $nat . '". Sólo vale REAL, PROYECTADO o SIMULADO.');
         }
 
         // Se informa, no se bloquea: es el mismo criterio que el origen de

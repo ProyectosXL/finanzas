@@ -173,10 +173,10 @@ foreach ($tableroPes['avisos'] as $g) {
    ================================================================ */
 seccion('las pestanas con avisos del tablero son las del registro');
 
-chequear('son las dieciseis (Llaves y Renovaciones, desde que entra al tablero)', ['ventas', 'cobranzas_fr', 'proveedores_exterior',
+chequear('son las diecisiete (Prestamos, desde que entra al tablero)', ['ventas', 'cobranzas_fr', 'proveedores_exterior',
     'crono_nacionalizacion', 'compras_proyectadas', 'logistica_local', 'gastos_locales', 'saldos',
     'cob_electronicos', 'echeqs', 'cobranzas_may', 'proveedores_locales', 'alquileres', 'llaves_renov', 'pagos_tarjetas',
-    'exportaciones_tasky'], CashflowRegistry::tabsConProveedor());
+    'prestamos', 'exportaciones_tasky'], CashflowRegistry::tabsConProveedor());
 
 seccion('cada pestana recibe exactamente su grupo del tablero');
 
@@ -406,10 +406,11 @@ $jsDePestana = [
     'alquileres' => 'Alquileres.js',
     'llaves_renov' => 'Llaves.js',
     'pagos_tarjetas' => 'Financiero-Pagos_tarjetas.js',
+    'prestamos' => 'Prestamos.js',
     'exportaciones_tasky' => 'Ingresos-Exportaciones_tasky.js'
 ];
 
-chequear('el mapa cubre las dieciseis pestanas del registro', CashflowRegistry::tabsConProveedor(),
+chequear('el mapa cubre las diecisiete pestanas del registro', CashflowRegistry::tabsConProveedor(),
     array_values(array_intersect(CashflowRegistry::tabsConProveedor(), array_keys($jsDePestana))));
 
 foreach ($jsDePestana as $tabJs => $archivoJs) {
