@@ -63,11 +63,10 @@ class PestAppDoble extends AlquileresApp {
     }
     public function porcentajes() { return [3 => [6 => 7.0, 9 => 15.0], 2 => [7 => 8.0, 9 => 10.0]]; }
     public function detalleAbiertos($meses, $cerrados) { return []; }
-    public function ventasNetas($desde) {
+    public function ventasNetas($desde, $hasta) {
         return [3 => ventana12(600), 2 => ventana12(300), 10 => ventana12(100), 40 => ventana12(1000)]
             + [];
     }
-    public function ventasBrutas($desde) { return []; }
 }
 
 class PestParDoble extends AlquileresParametros {
@@ -212,7 +211,7 @@ class PestAppSJ extends PestAppDoble {
         return $d;
     }
     public function porcentajes() { return parent::porcentajes() + [80 => [6 => 6.5, 9 => 12.0]]; }
-    public function ventasNetas($desde) { return parent::ventasNetas($desde) + [80 => ventana12(200)]; }
+    public function ventasNetas($desde, $hasta) { return parent::ventasNetas($desde, $hasta) + [80 => ventana12(200)]; }
 }
 
 class PestParSJ extends PestParDoble {

@@ -109,11 +109,14 @@ if (!Pruebas::hayBase()) {
     /* Con el mes cerrado, 6 = max(0, bruta x %6 - c8) y 7 = max(0, neta x %7
        - c8): la resta ya esta hecha. Se mide en todo local que tenga el
        porcentaje y la venta, con un peso de tolerancia porque la app trunca a
-       pesos enteros. */
+       pesos enteros. La venta es la EN VIVO, y la bruta la neta x 1,21: si la
+       app usara otra venta, esto lo dice. */
     $mes = end($cerrados);
     $pct = $app->porcentajes();
-    $netas = $app->ventasNetas($mes);
-    $brutas = $app->ventasBrutas($mes);
+    $netas = $app->ventasNetas($mes, Inflacion::mesMas($mes, 1) . '-01');
+    $brutas = array_map(function ($ms) {
+        return array_map(function ($v) { return round($v * 1.21, 2); }, $ms);
+    }, $netas);
     $medidos = 0;
     $distintos = [];
 
@@ -140,6 +143,43 @@ if (!Pruebas::hayBase()) {
 
     chequear('en el ultimo cerrado se pudo medir el 6 o el 7 en algun local', true, $medidos > 0);
     chequear('en el ultimo cerrado el 6 y el 7 ya tienen restado el VMA', [], $distintos);
+}
+
+seccion('AlquileresApp: la venta de los locales, en vivo');
+
+$fuenteSinComentarios = preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', $fuente);
+chequear('no lee la venta congelada de la app (RO_T_RENTABILIDAD_BRUTA / RO_V_VENTAS_BRUTAS_IE)', 0,
+    preg_match_all('/RO_T_RENTABILIDAD_BRUTA|RO_V_VENTAS_BRUTAS_IE/', $fuenteSinComentarios));
+
+if (!Pruebas::hayBase()) {
+    Pruebas::saltear('sin conexion a la base');
+} else {
+    /* LA SUMA DE LOS LOCALES ES EL CANAL LOCALES DEL HISTORICO DIARIO DE
+       VENTAS, que lee los mismos comprobantes. Del 1 del mes en curso a ayer
+       (el dia 1, el mes pasado). El 25/11/2026 dio igual al centavo. */
+    $hoy = date('Y-m-d');
+    $desde = (date('j') === '1') ? date('Y-m-01', strtotime('-1 day')) : date('Y-m-01');
+    $vivo = (new AlquileresApp())->ventasNetas(substr($desde, 0, 7), $hoy);
+    $suma = 0.0;
+
+    foreach ($vivo as $nro => $ms) {
+        $suma += $ms[substr($desde, 0, 7)] ?? 0.0;
+    }
+
+    require_once __DIR__ . '/../../class/conexion.php';
+    $cid = (new Conexion())->conectar('central');
+    $st = sqlsrv_query($cid, "SELECT SUM(IMPORTE_NETO) AS NETO, MAX(FECHA) AS ULTIMA FROM RO_T_CASHFLOW_VENTAS_HIST_DIA
+                              WHERE TIPO_COMPROBANTE = 'FACTURA' AND CANAL = 'LOCALES' AND FECHA >= ? AND FECHA < ?",
+                        [$desde, $hoy]);
+    $h = $st ? sqlsrv_fetch_array($st, SQLSRV_FETCH_ASSOC) : null;
+    $ultima = ($h && $h['ULTIMA'] instanceof DateTime) ? $h['ULTIMA']->format('Y-m-d') : null;
+
+    if ($ultima !== date('Y-m-d', strtotime('-1 day'))) {
+        Pruebas::saltear('el historico diario no llega a ayer (' . ($ultima ?? 'vacio') . '): no se puede comparar');
+    } else {
+        chequear('la venta de los locales hasta ayer = el canal LOCALES del historico diario (a $ 1)', true,
+            abs($suma - (float) $h['NETO']) < 1.0);
+    }
 }
 
 seccion('AlquileresApp: los contratos con sus importes (Llaves y Renovaciones)');

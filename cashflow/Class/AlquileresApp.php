@@ -4,26 +4,22 @@
  * AlquileresApp
  * La lectura de la app de alquileres de administracion
  * (administracion/impuestos/alquileres): locales, periodos cerrados, importes
- * por concepto, porcentajes de cada local y su venta.
+ * por concepto y porcentajes de cada local. Y la venta de cada local, que no
+ * sale de la app sino de los comprobantes de los locales (ver ventasNetas()).
  *
  * SOLO LEE. Las tablas son de la app y el cashflow no escribe nada en ellas:
  * ningun metodo de esta clase arma un INSERT, un UPDATE ni un DELETE, y lo fija
- * una prueba. Viven en 'central', la misma conexion que el resto del cashflow.
+ * una prueba. Las de la app viven en 'central', la misma conexion que el resto
+ * del cashflow; la venta, en 'locales'.
  *
  * SOLO ARGENTINA. La app tiene un entorno Uruguay (la base 'uy', elegido por
  * sesion); el cashflow no lo mira.
  *
- * LOS DOS FORMATOS DE PERIODO DE LA APP
- * -------------------------------------
- *   RO_T_DETALLE_ALQUILERES.PERIODO, RO_T_DETALLE_ALQUILERES_ESTADO.periodo y
- *   RO_V_VENTAS_BRUTAS_IE.PERIODO  -> 'M-YYYY', sin cero a la izquierda ('9-2026')
- *   RO_T_RENTABILIDAD_BRUTA.FECHA  -> DATE, el ultimo dia del mes
+ * EL FORMATO DE PERIODO DE LA APP
+ * -------------------------------
+ *   RO_T_DETALLE_ALQUILERES.PERIODO y RO_T_DETALLE_ALQUILERES_ESTADO.periodo
+ *   -> 'M-YYYY', sin cero a la izquierda ('9-2026')
  * Aca todo se pasa a 'Y-m', el formato del resto del cashflow, con mesDePeriodo().
- *
- * LA APP FILTRA LA VENTA CON LIKE '%M-YYYY%', y en enero y febrero eso levanta
- * tambien noviembre y diciembre ('%1-2026%' encuentra '11-2026'). Aca se
- * compara exacto, en PHP, despues de convertir. Ver "Pendientes conocidos" en
- * README-alquileres.md.
  *
  * UN PERIODO ABIERTO SE LEE SOLO PARA LOS FIJOS. Cerrado es cuando el periodo
  * tiene fila en RO_T_DETALLE_ALQUILERES_ESTADO; la app lo reabre borrando esa
@@ -52,8 +48,6 @@ class AlquileresApp {
         'RO_T_DETALLE_ALQUILERES',
         'RO_T_DETALLE_ALQUILERES_ESTADO',
         'RO_T_PORC_CONCEPTOS_ALQUILERES',
-        'RO_T_RENTABILIDAD_BRUTA',
-        'RO_V_VENTAS_BRUTAS_IE',
         'RO_V_SUCURSALES_ALQUILERES'
     ];
 
@@ -62,6 +56,12 @@ class AlquileresApp {
 
     /** @var resource|null */
     private $cid = null;
+
+    /** @var resource|null Conexion a 'locales', para la venta */
+    private $cidLocales = null;
+
+    /** @var array|null La ultima venta leida: ['desde', 'hasta', 'ventas'] (ver ventasNetas()) */
+    private $ventasLeidas = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -462,61 +462,89 @@ class AlquileresApp {
     }
 
     /**
-     * La venta NETA (sin IVA) por local y mes, de RO_T_RENTABILIDAD_BRUTA: la
-     * misma que usa la app para los conceptos 7 y 17.
+     * La venta NETA (sin IVA) por local y mes, EN VIVO, de los comprobantes de
+     * los locales (CTA02 + CTA03 en LOCALES_LAKERS), desde el 1 de $desde hasta
+     * el dia ANTERIOR a $hasta.
      *
-     * SE SUMA POR LOCAL Y MES: hay meses con dos filas para el mismo local.
-     * Las filas sin local (ajustes del canal) y las de los canales que no son
-     * locales (100 franquicias, 101 mayoristas, 30x ecommerce) no son de
-     * ningun local de la app y se descartan solas, porque no estan en el
-     * universo; aca solo se sacan las sin local.
+     * POR QUE NO DE LA APP. La app usa RO_T_RENTABILIDAD_BRUTA, que carga el
+     * Paso 1 del informe economico de Contabilidad (RO_SP_VENTAS_BRUTAS) una
+     * sola vez por mes: el SP no vuelve a correr si el mes ya tiene filas. Si
+     * el paso se corre a mitad de mes, la venta del mes en curso queda
+     * congelada en ese dia (el 25/11/2026 noviembre llegaba al 12/11), y la
+     * pestaña la tomaba como "lo vendido hasta ayer": la proyeccion de los
+     * dias que faltan no cubria el hueco y la venta del mes salia a la mitad.
+     *
+     * ES LA MISMA FORMULA QUE ESE SP (su universo 3, locales propios), asi que
+     * en los meses cerrados da lo mismo que la app: medido el 25/11/2026, 288 de
+     * 291 celdas local-mes de 09/2025 a 10/2026 iguales al centavo y las otras
+     * 3 a menos de 0,23 % (comprobantes tocados despues del cierre). La suma de
+     * noviembre hasta ayer da la venta del canal LOCALES del historico diario
+     * de Ventas (RO_T_CASHFLOW_VENTAS_HIST_DIA) al centavo. Las NC restan, en
+     * moneda extranjera se convierte con la cotizacion, los anulados no
+     * cuentan y la sucursal 1 no es un local.
+     *
+     * HASTA AYER: el dia de hoy esta a medio vender, y AlquileresVenta proyecta
+     * el mes en curso desde hoy inclusive.
+     *
+     * SE LEE UNA VEZ POR PEDIDO. Tarda alrededor de 1 s y la pestaña la pide dos
+     * veces con el mismo $hasta (leerBase() y la proyeccion, desde meses
+     * distintos): si ya se leyo desde antes, se recorta lo leido.
      *
      * @param string $desde 'Y-m'
+     * @param string $hasta 'Y-m-d', exclusivo: normalmente hoy
      * @return array NRO_SUCURS => 'Y-m' => float
      */
-    public function ventasNetas($desde) {
-        $sql = "SELECT NRO_SUCURS, YEAR(FECHA) AS ANIO, MONTH(FECHA) AS MES, SUM(VENTA) AS VENTA
-                FROM dbo.RO_T_RENTABILIDAD_BRUTA
-                WHERE NRO_SUCURS IS NOT NULL
-                  AND FECHA >= ?
-                GROUP BY NRO_SUCURS, YEAR(FECHA), MONTH(FECHA)";
+    public function ventasNetas($desde, $hasta) {
+        $hasta = substr((string) $hasta, 0, 10);
+        $l = $this->ventasLeidas;
+
+        if ($l !== null && $l['hasta'] === $hasta && $l['desde'] <= $desde) {
+            $out = [];
+
+            foreach ($l['ventas'] as $nro => $ms) {
+                foreach ($ms as $m => $v) {
+                    if ($m >= $desde) {
+                        $out[$nro][$m] = $v;
+                    }
+                }
+            }
+
+            return $out;
+        }
+
+        $p = method_exists($this->conn, 'prefijoLocales') ? $this->conn->prefijoLocales() : '';
+        $sql = "SELECT A.NRO_SUCURS, YEAR(A.FECHA_EMIS) AS ANIO, MONTH(A.FECHA_EMIS) AS MES,
+                       SUM(CAST(CASE WHEN A.MON_CTE = 0
+                                     THEN (CASE WHEN B.T_COMP LIKE 'NC%' THEN B.IMP_NETO_P * -1 ELSE B.IMP_NETO_P END) * A.COTIZ
+                                     ELSE (CASE WHEN B.T_COMP LIKE 'NC%' THEN B.IMP_NETO_P * -1 ELSE B.IMP_NETO_P END)
+                                END AS DECIMAL(18,2))) AS VENTA
+                FROM {$p}CTA02 A
+                INNER JOIN {$p}CTA03 B
+                    ON  A.FECHA_EMIS = B.FECHA_MOV
+                    AND A.N_COMP     = B.N_COMP
+                    AND A.T_COMP     = B.T_COMP
+                    AND A.NRO_SUCURS = B.NRO_SUCURS
+                WHERE A.ESTADO <> 'ANU'
+                  AND A.FECHA_EMIS >= ?
+                  AND A.FECHA_EMIS < ?
+                  AND A.NRO_SUCURS <> 1
+                GROUP BY A.NRO_SUCURS, YEAR(A.FECHA_EMIS), MONTH(A.FECHA_EMIS)";
+
+        $stmt = sqlsrv_query($this->conectarLocales(), $sql, [$desde . '-01', $hasta], ['QueryTimeout' => 120]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer la venta de los locales'));
+        }
 
         $ventas = [];
 
-        foreach ($this->filas($sql, [$desde . '-01'], 'Error al leer la venta neta de los locales') as $r) {
+        while ($r = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $mes = $r['ANIO'] . '-' . str_pad((string) $r['MES'], 2, '0', STR_PAD_LEFT);
             $ventas[(int) $r['NRO_SUCURS']][$mes] = (float) $r['VENTA'];
         }
 
-        return $ventas;
-    }
-
-    /**
-     * La venta BRUTA (con IVA) por local y mes, de RO_V_VENTAS_BRUTAS_IE: la
-     * misma que usa la app para los conceptos 6 y 16. El periodo se compara
-     * exacto en PHP (ver el encabezado sobre el LIKE de la app).
-     *
-     * @param string $desde 'Y-m'
-     * @return array NRO_SUCURS => 'Y-m' => float
-     */
-    public function ventasBrutas($desde) {
-        $sql = "SELECT PERIODO, NRO_SUCURSAL, SUM(IMPORTE) AS IMPORTE
-                FROM dbo.RO_V_VENTAS_BRUTAS_IE
-                WHERE NRO_SUCURSAL IS NOT NULL
-                GROUP BY PERIODO, NRO_SUCURSAL";
-
-        $ventas = [];
-
-        foreach ($this->filas($sql, [], 'Error al leer la venta bruta de los locales') as $r) {
-            $mes = self::mesDePeriodo($r['PERIODO']);
-
-            if ($mes === null || $mes < $desde) {
-                continue;
-            }
-
-            $nro = (int) $r['NRO_SUCURSAL'];
-            $ventas[$nro][$mes] = ($ventas[$nro][$mes] ?? 0.0) + (float) $r['IMPORTE'];
-        }
+        sqlsrv_free_stmt($stmt);
+        $this->ventasLeidas = ['desde' => $desde, 'hasta' => $hasta, 'ventas' => $ventas];
 
         return $ventas;
     }
@@ -561,6 +589,21 @@ class AlquileresApp {
         }
 
         return $this->cid;
+    }
+
+    /** @return resource Conexion a 'locales', la base de los comprobantes de los locales */
+    private function conectarLocales() {
+        if ($this->cidLocales === null) {
+            $cid = $this->conn->conectar('locales');
+
+            if (!$cid) {
+                throw new Exception('No se pudo conectar a la base de los locales');
+            }
+
+            $this->cidLocales = $cid;
+        }
+
+        return $this->cidLocales;
     }
 
     /** Arma el mensaje de error a partir de sqlsrv_errors() */

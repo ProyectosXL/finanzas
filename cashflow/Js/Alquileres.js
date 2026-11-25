@@ -547,10 +547,6 @@
         var t = rotuloMes(mes) + ' · ' + (datos.ventas.origenes[c.origen] || c.origen)
             + '\nNeta ' + importeTexto(c.neta) + '\nBruta ' + importeTexto(c.bruta);
 
-        if (c.derivada) {
-            t += '\nLa app tiene una sola de las dos: la otra sale con el IVA general.';
-        }
-
         if (c.origen === 'ESTIMADA') {
             t += '\nParticipación ' + numero(c.participacion * 100, 2) + ' % de la venta del canal Locales ('
                 + importeTexto(c.canal) + ')';

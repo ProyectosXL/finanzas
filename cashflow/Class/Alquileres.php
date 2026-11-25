@@ -748,8 +748,7 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
                 function ($m) use ($ultimoGlobal) { return $m > $ultimoGlobal; })), $base['cerrados']);
             $pct = $this->app->porcentajes();
             $desdeVenta = min($base['ventana'][0] ?? $mesesConcepto[0], $mesesConcepto[0]);
-            $netas = $this->app->ventasNetas($desdeVenta);
-            $brutas = $this->app->ventasBrutas($desdeVenta);
+            $netas = $this->app->ventasNetas($desdeVenta, $hoy);
         } catch (Throwable $e) {
             $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer la app de alquileres: ' . $e->getMessage());
             $out['avisos'] = $avisos;
@@ -787,7 +786,7 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
         $avisos = array_merge($avisos, self::avisoContratos($base['locales'], $hoy, end($mesesPago)));
 
         $ventas = ($ins['iva'] === null) ? null : AlquileresVenta::calcular([
-            'meses' => $mesesConcepto, 'locales' => $entradaVenta, 'netas' => $netas, 'brutas' => $brutas,
+            'meses' => $mesesConcepto, 'locales' => $entradaVenta, 'netas' => $netas,
             'ventana' => $base['ventana'], 'canal' => $ins['canal'], 'iva' => $ins['iva'], 'hoy' => $hoy
         ]);
         $out['ventas'] = $ventas;
@@ -1486,7 +1485,7 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
             $localesApp = $this->app->locales();
             $out['cerrados'] = $this->app->mesesCerrados();
             $out['ventana'] = AlquileresVenta::ventana($out['cerrados']);
-            $out['netas'] = empty($out['ventana']) ? [] : $this->app->ventasNetas($out['ventana'][0]);
+            $out['netas'] = empty($out['ventana']) ? [] : $this->app->ventasNetas($out['ventana'][0], $this->hoy);
         } catch (Throwable $e) {
             $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer la app de alquileres: ' . $e->getMessage());
             return $out;
