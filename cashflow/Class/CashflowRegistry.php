@@ -670,13 +670,61 @@ class CashflowRegistry {
             ]
         ],
 
+        /* ---- Prestamos (feature/prestamos) ------------------------------------
+           SE REUSA LA ENTRADA 'FINANCIERO', que nacio como el lugar reservado
+           para esta pestaña ('tab' => 'prestamos'). El codigo no cambia; el
+           nombre pasa a "Prestamos". La serie vieja MOVIMIENTOS queda declarada
+           EN DESUSO y rinde cero: su fila de Ajustes (inactiva, EGRESO) la
+           sigue nombrando, y el validador revisa tambien las filas inactivas,
+           asi que sacarla bloquearia el guardado de Parametros -> Cashflow.
+
+           TRES CONCEPTOS, CADA UNO EN TRES PARTES, de UNA lista de pagos
+           (Prestamos::pagosTablero(), la misma que agrupa la pestaña):
+             REAL       lo que se paga hoy (lo anterior ya esta en el Saldo
+                        Inicial y no va)
+             PROY       lo que viene, de los prestamos vigentes
+             SIM        lo de los simulados: en cero salvo con el interruptor
+                        "Incluir simulaciones" del tablero
+           Y el total de cada concepto, para quien quiera una fila sin abrir.
+           'componentes' impide que el total conviva con sus partes.
+
+           LA SECCION FINANCIAMIENTO la crea sql/cashflow_prestamos_fila.sql:
+           tres filas agrupadas (Desembolsos, Amortizacion de capital, Intereses
+           y gastos), cada una con su parte Real, Proyectado y Simulado. */
         'FINANCIERO' => [
-            'nombre' => 'Financiero',
-            'descripcion' => 'Prestamos y movimientos financieros',
+            'nombre' => 'Préstamos',
+            'descripcion' => 'Prestamos bancarios en pesos y en dolares: desembolsos, amortizacion de capital e '
+                . 'intereses y gastos (costos iniciales y por cuota, comisiones de cancelacion), por dia de pago. '
+                . 'Lo de hoy es real; lo que viene, proyectado; los prestamos simulados, aparte',
+            'archivo' => 'Providers/PrestamosProvider.php',
+            'clase' => 'PrestamosProvider',
             'moneda' => 'ARS',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'prestamos',
-            'series' => ['MOVIMIENTOS' => 'Movimientos financieros']
+            'series' => [
+                'DESEMBOLSO' => 'Desembolsos, real + proyectado + simulado (sin abrir)',
+                'DESEMBOLSO_REAL' => 'Desembolsos de hoy',
+                'DESEMBOLSO_PROY' => 'Desembolsos que vienen, de los prestamos vigentes',
+                'DESEMBOLSO_SIM' => 'Desembolsos de los prestamos simulados (solo con el interruptor)',
+                'CAPITAL' => 'Amortizacion de capital, real + proyectado + simulado (sin abrir)',
+                'CAPITAL_REAL' => 'Amortizacion de capital de hoy',
+                'CAPITAL_PROY' => 'Amortizacion de capital que viene, de los vigentes',
+                'CAPITAL_SIM' => 'Amortizacion de capital de los simulados (solo con el interruptor)',
+                'INTERESES' => 'Intereses y gastos, real + proyectado + simulado (sin abrir)',
+                'INTERESES_REAL' => 'Intereses y gastos de hoy',
+                'INTERESES_PROY' => 'Intereses y gastos que vienen, de los vigentes',
+                'INTERESES_SIM' => 'Intereses y gastos de los simulados (solo con el interruptor)',
+                /* EN DESUSO, Y TIENE QUE SEGUIR DECLARADA: la fila vieja de la
+                   seccion Ajustes (inactiva) apunta aca, y el validador de la
+                   estructura revisa tambien las filas inactivas. Sin la serie,
+                   Parametros -> Cashflow no dejaria guardar nada. Rinde cero. */
+                'MOVIMIENTOS' => 'En desuso: la fila vieja de Ajustes. No usar: los prestamos van en Financiamiento'
+            ],
+            'componentes' => [
+                'DESEMBOLSO' => ['DESEMBOLSO_REAL', 'DESEMBOLSO_PROY', 'DESEMBOLSO_SIM'],
+                'CAPITAL' => ['CAPITAL_REAL', 'CAPITAL_PROY', 'CAPITAL_SIM'],
+                'INTERESES' => ['INTERESES_REAL', 'INTERESES_PROY', 'INTERESES_SIM']
+            ]
         ],
 
         'OTROS' => [

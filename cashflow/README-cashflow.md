@@ -30,7 +30,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ## Para pasar a producción: los scripts, en orden
 
-**Todos van contra `central`, salvo los de permisos**, que van contra `apps`: el de la sección que sigue, el 52, de Alquileres, y el 67, de Llaves y Renovaciones. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. **La única excepción es el 60**, de Alquileres, que borra las imputaciones del modelo de renglones y sus tablas (ver *Alquileres: la imputación por razón social*, más abajo). Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
+**Todos van contra `central`, salvo los de permisos**, que van contra `apps`: el de la sección que sigue, el 52, de Alquileres, el 67, de Llaves y Renovaciones, y el 71, de Préstamos. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. **La única excepción es el 60**, de Alquileres, que borra las imputaciones del modelo de renglones y sus tablas (ver *Alquileres: la imputación por razón social*, más abajo). Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
 
 ### Primero que nada: auditoría y permisos de escritura (`feature/cashflow-auditoria-usuario`)
 
@@ -515,6 +515,19 @@ Pestaña *RRHH y Operativos › Llaves y Renov. Contratos* —de `PENDIENTE` a `
 
 **Qué se mueve.** Lo mueve el código, no los scripts: `LLAVES_RENOV` pasa a disponible y la fila 17, activa y en cero hasta hoy, empieza a sumar. **Apenas corridos los scripts suma cero**: sin el % de impuestos de cada operador la llave no se proyecta, y la pestaña lo avisa. Con los sugeridos cargados (IRSA, Cencosud, DOT, Paseo del Siglo, Caballito), medido el 23/11/2026, la fila suma **$ 358,8 M** en el horizonte; marcando «Ya pagada» lo que ya salió de caja en agosto (Arcos, Abasto, DOT #91, Alto Palermo #90), **$ 143,5 M**. El detalle por mes está en `README-llaves-renovaciones.md`, parte 6.
 
+### Préstamos (`feature/prestamos`)
+
+Pestaña *Financiero › Préstamos* —de `PENDIENTE` a `DATOS`— con los préstamos bancarios en pesos o en dólares, vigentes y simulados: su cronograma cuota por cuota (TNA por días exactos / 365, fija o TAMAR / BADLAR + spread; francés, alemán o bullet, con gracia, costos, correcciones por cuota y cancelaciones anticipadas), su proyección y un simulador de cuánto haría falta pedir. La sub-pestaña *Parámetros › Préstamos* con los valores generales que cada préstamo copia al darse de alta. **Entra al tablero en una sección nueva, Financiamiento**, entre Egresos y Resultados: tres filas agrupadas en real, proyectado y **simulado**, y un interruptor **Incluir simulaciones** en el tablero. Ver `README-prestamos.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 70 | `sql/cashflow_prestamos.sql` | Las nueve tablas de Préstamos (parámetros, costos, tramos, tasa manual, préstamo, costos y tramos copiados, correcciones y cancelaciones) con auditoría e historial. Siembra los 11 generales y los 5 costos (3 activos) | La pestaña y Parámetros cargan y avisan en crítico; no se carga nada y el tablero suma cero. El resto del cashflow, como hoy |
+| 71 | `sql/cashflow_prestamos_permisos.sql` (**`apps`**) | `cashflow.tab.prestamos`, `cashflow.editar.prestamos` y `cashflow.editar.parametros.prestamos`, si no existen. **No asigna ningún rol** | Sólo el administrador ve la pestaña y edita su Parámetros |
+| 72 | `sql/cashflow_prestamos_fila.sql` | El CHECK de `NATURALEZA` con `SIMULADO`; la sección `FINANCIAMIENTO` (ORDEN 85) con nueve filas en tres grupos y el subtotal, en una transacción, con el control de doble conteo al pie | No hay sección Financiamiento: los préstamos no entran al tablero. La pestaña funciona igual |
+
+**Orden: 70 → 71 → 72.** El 70 y el 72 contra `central`, el 72 después de `sql/cashflow_estructura_grupos.sql` (22); el 71 contra `apps`, en cualquier momento.
+
+**Qué se mueve.** Con el código, la entrada `FINANCIERO` del registro pasa a disponible (sus filas están en la sección Ajustes, inactiva: no suman); con el 72, la sección nueva. **Sin préstamos vigentes cargados suma cero**: hoy la empresa no tiene préstamos. El código toca el motor en un solo lugar: `Cashflow` acepta las opciones del pedido y se las pasa a cada proveedor (`CashflowProvider::conOpciones()`), para el interruptor de simulaciones.
 ### Sin scripts, pero con `.htaccess`: `feature/cashflow-centro-ayuda`
 
 No agrega ni modifica ningún script: la ayuda son archivos de `Ayuda/` (ver *La ayuda funcional*). El Centro de ayuda **no pide ningún permiso nuevo**: lo ve cualquier usuario identificado.
@@ -592,7 +605,11 @@ En este orden, contra `central`:
 -- 66. sql/cashflow_llaves.sql                     (Llaves y Renovaciones: parametros)
 -- 68. sql/cashflow_llaves_facturas.sql            (Llaves y Renovaciones: facturas de alquiler marcadas como llave)
 -- 69. sql/cashflow_llaves_fila.sql                (la fila Llaves y Renovaciones, real y proyectado)
+-- 70. sql/cashflow_prestamos.sql                  (Prestamos: parametros, prestamos, correcciones y cancelaciones)
+-- 72. sql/cashflow_prestamos_fila.sql             (la seccion Financiamiento, real, proyectado y simulado)
 ```
+
+**El 70 es independiente; el 72 va después del 22 (grupos)**, y el **71, `sql/cashflow_prestamos_permisos.sql`, va contra `apps`**, en cualquier momento. Ver *Préstamos*, más arriba.
 
 **El 63 va después del 35**, al que le agrega una columna. Corrido antes, lo dice y no hace nada.
 
@@ -1321,13 +1338,15 @@ El ícono de la fila mide **sólo las columnas de la vista activa**, igual que l
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales veintidós: **Alquileres**, **Llaves y Renovaciones**, **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Logística**, **Gastos Locales**, **Pagos con Tarjetas y Otros** (código interno `TARJETAS`), **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
+Hoy tienen datos reales veintitrés: **Préstamos** (código interno `FINANCIERO`), **Alquileres**, **Llaves y Renovaciones**, **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Logística**, **Gastos Locales**, **Pagos con Tarjetas y Otros** (código interno `TARJETAS`), **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
 
 > **Logística** y **Pagos con Tarjetas y Otros** son los dos últimos en sumarse, y los dos únicos del grupo de egresos pendientes que ya tienen proveedor.
 >
 > Logística no necesitó ningún script de estructura: su fila ya existía apuntada a `LOGISTICA/PAGOS`, así que alcanzó con escribir el proveedor y dar vuelta el flag, que es exactamente lo que este diseño promete. Ver `README-logistica-local.md`.
 >
 > Tarjetas sí necesitó uno, y por un motivo que conviene tener presente: **no existía ninguna fila para esa plata**. El Excel original no la tenía, así que la semilla de `cashflow_estructura.sql` no la sembró. Lo que el diseño sigue cumpliendo es lo otro: el motor no se tocó, y la fila se crea con un `INSERT` de tres líneas. **`FINANCIERO` no se tocó** —es otro circuito, préstamos y movimientos financieros, y su fila vive en la sección *Ajustes*, hoy inhabilitada—: meter las tarjetas ahí adentro habría mezclado dos cosas que se cargan y se miran por separado. Ver `README-pagos-tarjetas.md`.
+
+> **Préstamos reusó la entrada `FINANCIERO`**, que estaba reservada para su pestaña (`'tab' => 'prestamos'`) y que la nota de arriba deja intacta. Necesitó una sección nueva, *Financiamiento*, que entra al Flujo Neto por su posición sin tocar el motor, y una tercera `NATURALEZA`, `SIMULADO`. La serie vieja `MOVIMIENTOS` queda declarada en desuso y en cero, **porque el validador revisa también las filas inactivas** y la fila de Ajustes la sigue nombrando: sacarla bloquearía el guardado de Parámetros → Cashflow. Ver `README-prestamos.md`.
 
 > **Llaves y Renovaciones** tampoco necesitó crear su fila: la semilla ya la tenía, activa y apuntada a `LLAVES_RENOV/PAGOS`, rindiendo cero con un aviso. Alcanzó con escribir el proveedor y dar vuelta el flag; `sql/cashflow_llaves_fila.sql` la parte en real y proyectado, como la de Alquileres. Ver `README-llaves-renovaciones.md`.
 
@@ -1392,6 +1411,7 @@ ORDEN  SECCIÓN              ID_PADRE     qué contiene
  60    Costos Directos      EGRESOS
  70    Costos Indirectos    EGRESOS
  75    Egresos              —            Total Egresos
+ 85    Financiamiento       —            préstamos: desembolsos, capital, intereses y gastos / Total
  90    Resultados           —            Flujo Neto (sin cobertura)
  95    Cobertura            —            Stock y uso de cada fondo (inversiones, comitente) /
                                          Flujo Neto (con cobertura) / Saldo Final
@@ -1456,6 +1476,7 @@ Hay conceptos del tablero que son **dos cosas a la vez**: una parte ya compromet
 | --- | --- |
 | En el proveedor | **Dos series**, una por parte. Nunca una sola serie que las mezcle |
 | En la estructura | **Dos filas consecutivas** con el mismo `GRUPO`, cada una con su `NATURALEZA` (`REAL` / `PROYECTADO`) |
+| Una tercera parte, `SIMULADO` | Sólo Financiamiento (préstamos simulados). La fila se dibuja sólo con el interruptor **Incluir simulaciones** del tablero (`filaDibujable()`), y su proveedor la rinde en cero mientras tanto. Un grupo sin parte simulada no se avisa |
 | En el tablero | **Un renglón** con la suma, que se abre y muestra las dos partes |
 
 Las tres columnas —`GRUPO`, `NATURALEZA` y `GRUPO_NOMBRE`— las agrega `sql/cashflow_estructura_grupos.sql`, y se asignan desde *Parámetros → Cashflow*. Si el script no se corrió, el tablero funciona como antes, con una fila por parte, y lo avisa.
@@ -2505,7 +2526,7 @@ Los permisos siguen viniendo de `FP_ROL_PERMISO` / `FP_PERMISOS` (módulo 7), co
 
 - `cashflow.tab.<pestaña>` deja **ver** la pestaña. No cambió.
 - `cashflow.editar.<pestaña>` deja **escribir** en ella. Existe sólo para las 13 pestañas que tienen alguna escritura; las de sólo lectura —Dashboard, Exportaciones Tasky y las que todavía están en construcción— no llevan clave.
-- En Parámetros la lectura sigue siendo una sola, `cashflow.tab.parametros`, y la escritura va **por sub-pestaña**: `cashflow.editar.parametros.<código en minúscula>`, una por cada una de las **14 sub-pestañas** de `Parametros::$modulos`: `generales`, `calendario`, `ventas`, `saldos`, `cob_electronicos`, `prechequeado`, `cobranzas`, `compras_proy`, `logistica`, `prov_locales`, `tarjetas`, `alquileres`, `llaves_renov` y `cashflow`. Las once primeras las dio de alta `sql/cashflow_permisos_edicion.sql`; `calendario`, `alquileres` y `llaves_renov` vinieron después, con el script de su rama (57, 52 y 67). Quien carga las cuentas de Saldos no necesariamente es quien toca el horizonte de todo el módulo.
+- En Parámetros la lectura sigue siendo una sola, `cashflow.tab.parametros`, y la escritura va **por sub-pestaña**: `cashflow.editar.parametros.<código en minúscula>`, una por cada una de las **15 sub-pestañas** de `Parametros::$modulos`: `generales`, `calendario`, `ventas`, `saldos`, `cob_electronicos`, `prechequeado`, `cobranzas`, `compras_proy`, `logistica`, `prov_locales`, `tarjetas`, `alquileres`, `llaves_renov`, `prestamos` y `cashflow`. Las once primeras las dio de alta `sql/cashflow_permisos_edicion.sql`; `calendario`, `alquileres`, `llaves_renov` y `prestamos` vinieron después, con el script de su rama (57, 52, 67 y 71). Quien carga las cuentas de Saldos no necesariamente es quien toca el horizonte de todo el módulo.
 - **Escribir implica leer**: una clave de edición sin la de la pestaña no habilita nada. Y el administrador (sector Proyectos con `es_admin` o `CONTROLTOTAL`) puede todo, como antes.
 
 **La seguridad es el servidor.** Cada controller llama una vez, antes de su `switch`, a `autorizar('<Controller>', $action)` (`Controller/autorizacion.php`), que pregunta al mapa de `AuthCashflow`: sin usuario corta con **401**, sin permiso con **403**, los dos con el `{success: false, message}` de siempre. Una acción que no está en el mapa **se rechaza**: un `case` nuevo no puede quedar abierto por olvido.
@@ -2821,6 +2842,8 @@ De la rama `feature/cashflow-auditoria-usuario`: `sql/cashflow_permisos_edicion.
 De la rama `feature/cronogramas-tarjetas-corporativas`: `sql/cashflow_cronograma_conceptos.sql`, `sql/cashflow_tarjetas_vto_mensual.sql`, `Class/TarjetasFacturaVto.php` y `Class/TarjetasMensual.php` (nuevos) · `Class/CronogramaPagos.php` (día y frecuencia por parámetro; `parte()`, `proximoPago()`, `requiereBaja()`) · `Class/CronogramaDatos.php` (todo por concepto; `guardarConfig()` con la baja de overrides) · `Class/Parametros.php`, `Controller/ParametrosController.php`, `Tabs/parametros_generales.php`, `Js/Parametros-Generales.js` (la card del cronograma por concepto) · `Class/Logistica.php`, `Class/LogisticaPlanilla.php`, `Js/Logistica-Local.js`, `Tabs/logistica_local.php` (el reparto y los textos salen de la configuración) · `Class/Proveedores.php`, `Controller/ProveedoresController.php`, `Providers/ProveedoresProvider.php`, `Js/Proveedores-Proveedores_locales.js`, `Tabs/proveedores_locales.php` y su CSS (los días de pago del cronograma; el aviso de `TARJETA CORP` partido) · `Class/TarjetasCorporativas.php`, `Class/PagosTarjetas.php`, `Class/TarjetasSupervisoras.php`, `Providers/TarjetasProvider.php`, `Controller/TarjetasController.php`, `Tabs/pagos_tarjetas.php`, `Js/Financiero-Pagos_tarjetas.js` y su CSS (sin vincular fuera del flujo, vencimiento corregido, estimaciones mensuales, lunes de supervisoras) · `Class/AuthCashflow.php` (seis acciones nuevas) · los tests de cronograma, logística, proveedores, providers y tarjetas, y `test_otros_ingresos.php` (se saltea sin conexión en vez de cortar la suite).
 
 De la rama `feature/cashflow-centro-ayuda`: `Ayuda/*.md` (siete artículos), `Ayuda/img/`, `Class/AyudaArticulo.php`, `Class/AyudaRender.php`, `Class/AyudaBusqueda.php`, `Class/Ayuda.php`, `Controller/AyudaController.php`, `Tabs/ayuda.php`, `Components/ayuda_panel.php`, `Js/ayuda.js`, `Css/ayuda.css`, `.htaccess` y seis archivos de pruebas (nuevos) · `Class/Menu.php` (el Centro de ayuda al pie) · `Class/AuthCashflow.php` (`PARA_TODOS`, `esParaTodos()`, las lecturas de `Ayuda`) · `Class/ProveedoresOpciones.php` (`claveOrden()` pasa a pública) · `Controller/TabController.php` · `Components/header.php` (el botón **Ayuda**) · `index.php` (`?ayuda=` como pestaña inicial, `data-tab` en el `<body>`, el panel, el JS y el CSS) · `Js/main.js` (`data-tab` y la dirección) · `Css/avisos-panel.css` (sus colores también para `.ayuda-avisos`) · `Tabs/proveedores_exterior.php`, `Tabs/crono_nacionalizacion.php`, `Css/Comex-Crono_nacionalizacion.css` (sin el modal) · **eliminado** `Components/help_modal_comex.php` · `tests/test_menu.php`, `tests/test_auth_cashflow.php`, `tests/test_cargando.php`, `tests/test_comex_dolar_divisa.php`, `tests/test_comex_nac_parcial.php`.
+
+De la rama `feature/prestamos`: `Class/PrestamosCalculo.php`, `Class/PrestamosTasas.php`, `Class/PrestamosParametros.php`, `Class/PrestamosSimulador.php`, `Class/Prestamos.php`, `Class/Providers/PrestamosProvider.php`, `Controller/PrestamosController.php`, `Tabs/parametros_prestamos.php`, `Js/Prestamos.js`, `Js/Parametros-Prestamos.js`, `Css/Prestamos.css`, `Ayuda/prestamos.md`, `README-prestamos.md`, los scripts 70 a 72 y seis archivos de pruebas `test_prestamos_*.php` (nuevos) · `Tabs/prestamos.php` (deja de ser un placeholder) · `Class/Cashflow.php` y `Class/CashflowProvider.php` (las opciones del pedido) · `Class/CashflowRegistry.php` (`FINANCIERO` es Préstamos) · `Class/CashflowEstructura.php` y `Js/Parametros-Estructura.js` (`NATURALEZA = 'SIMULADO'`) · `Controller/CashflowController.php`, `Js/Cashflow.js`, `Tabs/cashflow.php`, `Css/Cashflow.css` (el interruptor **Incluir simulaciones** y el tooltip de desembolsos) · `Class/AuthCashflow.php`, `Class/Menu.php`, `Class/Parametros.php`, `Tabs/parametros.php` · `Ayuda/general_tablero.md` · el cableado en las pruebas de auth, avisos, avisos por pestaña, cargando, KPIs plegables, carga de Parámetros, providers, grupos, menú y ayuda.
 
 Eliminado: `Tabs/resumen.php`.
 

@@ -280,6 +280,14 @@
             <?php include __DIR__ . '/parametros_llaves.php'; ?>
         </div>
 
+        <!-- Parámetros de Préstamos: tasas de referencia, costos asociados,
+             comisión de cancelación, simulador y margen. Los valores generales
+             que cada préstamo nuevo copia. Mismo criterio que los anteriores:
+             archivo y JS propios, y clases con prefijo ppr-. -->
+        <div class="tab-pane fade" id="paneParamPrestamos" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'PRESTAMOS'); ?>>
+            <?php include __DIR__ . '/parametros_prestamos.php'; ?>
+        </div>
+
         <!-- Parámetros del módulo Compras Exterior (código COMPRAS_PROY): cuántos meses, cuánta
              historia para la cuota y los tres días de la cadena de fechas.
              Mismo criterio que los anteriores: archivo y JS propios, y clases

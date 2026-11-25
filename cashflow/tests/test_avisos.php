@@ -572,7 +572,7 @@ $contenedores = [
     'avisosCobMay' => 'Ingresos-Cobranzas_may.js', 'avisosComprasProy' => 'Compras-Proyectadas.js',
     'avisosCronoNac' => 'Comex-Crono_nacionalizacion.js', 'avisosEcheqs' => 'Ingresos-Echeqs.js',
     'avisosExpTasky' => 'Ingresos-Exportaciones_tasky.js', 'avisosLogistica' => 'Logistica-Local.js',
-    'avisosGastosLocales' => 'Gastos-Locales.js', 'avisosAlquileres' => 'Alquileres.js', 'avisosLlaves' => 'Llaves.js',
+    'avisosGastosLocales' => 'Gastos-Locales.js', 'avisosAlquileres' => 'Alquileres.js', 'avisosLlaves' => 'Llaves.js', 'avisosPrestamos' => 'Prestamos.js',
     'avisosTarj' => 'Financiero-Pagos_tarjetas.js', 'avisosProvExt' => 'Comex-Proveedores_exterior.js',
     'avisosSaldos' => 'Saldos.js', 'avisosParametros' => 'parametros-carga.js',
     // Un panel por sub-pestana, desde feature/cashflow-avisos-kpis-comex-nac-parcial
@@ -586,6 +586,7 @@ $contenedores = [
     'avisosParamPplo' => 'Parametros-Prov_locales.js', 'ptarAvisos' => 'Parametros-Tarjetas.js',
     'palqAvisos' => 'Parametros-Alquileres.js',
     'pllAvisos' => 'Parametros-Llaves.js',
+    'pprAvisos' => 'Parametros-Prestamos.js',
     'pcprAvisos' => 'Parametros-Compras_proy.js', 'cfeAvisos' => 'Parametros-Estructura.js'
 ];
 

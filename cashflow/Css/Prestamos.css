@@ -1,0 +1,16 @@
+/* Financiero › Préstamos. Prefijo pr-. */
+
+/* Lo simulado se ve distinto: itálica y atenuado, como lo estimado en Llaves. */
+.tab-prestamos tr.pr-simulado td { font-style: italic; color: #6c757d; }
+
+/* Proyección: préstamo -> concepto */
+#tablaPrProy tr.pr-n0 td:first-child { font-weight: 600; }
+#tablaPrProy tr.pr-n1 td:first-child { padding-left: 1.5rem; }
+#tablaPrProy .pr-toggle { cursor: pointer; display: inline-block; width: 1rem; }
+
+/* Cronograma */
+#tablaPrCrono tr.pr-fila-desembolso td { background: #f3f8ff; }
+#tablaPrCrono tr.pr-fila-cancelacion td { background: #fff5f0; font-weight: 600; }
+#tablaPrCrono tr.pr-real td { color: #495057; }
+.pr-corregido { text-decoration: underline dotted #b35c00; text-underline-offset: 3px; color: #b35c00; }
+.pr-origen { font-size: .7rem; color: #6c757d; border: 1px solid #dee2e6; border-radius: .25rem; padding: 0 .25rem; }

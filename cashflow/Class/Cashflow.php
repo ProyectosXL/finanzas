@@ -91,10 +91,25 @@ class Cashflow {
      * @param Horizonte|null $horizonte Eje a usar. null lo arma desde los
      *        parametros, que es el uso normal.
      */
-    function __construct($estructura = null, $parametros = null, $horizonte = null) {
+    function __construct($estructura = null, $parametros = null, $horizonte = null, $opciones = []) {
         $this->parametros = ($parametros === null) ? new Parametros() : $parametros;
         $this->estructura = ($estructura === null) ? new CashflowEstructura() : $estructura;
         $this->horizonte = ($horizonte instanceof Horizonte) ? $horizonte : null;
+        $this->opciones = is_array($opciones) ? $opciones : [];
+    }
+
+    /**
+     * Las opciones del pedido que se le pasan a cada proveedor. Hoy una sola:
+     * 'simulaciones', el interruptor del tablero (false por defecto). EL MOTOR
+     * NO LA MIRA: solo la reparte. Ver CashflowProvider::conOpciones().
+     *
+     * @var array
+     */
+    private $opciones = [];
+
+    /** @return array */
+    public function opciones() {
+        return $this->opciones;
     }
 
     /**
@@ -413,6 +428,11 @@ class Cashflow {
             // series() ya garantiza no lanzar; el try es defensa en profundidad
             // por si una subclase futura rompe el contrato de otra forma.
             try {
+                // Las opciones del pedido, antes de las series (quedan en cache).
+                if (method_exists($prov, 'conOpciones')) {
+                    $prov->conOpciones($this->opciones);
+                }
+
                 $series[$codigo] = $prov->series($h);
 
                 $this->avisarDeProveedor($prov->avisos(), $codigo);

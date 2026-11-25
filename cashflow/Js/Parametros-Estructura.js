@@ -351,7 +351,7 @@
     }
 
     function rotuloNaturaleza(n) {
-        return n === 'REAL' ? 'Real' : (n === 'PROYECTADO' ? 'Proyectado' : n);
+        return n === 'REAL' ? 'Real' : (n === 'PROYECTADO' ? 'Proyectado' : (n === 'SIMULADO' ? 'Simulado' : n));
     }
 
     /**

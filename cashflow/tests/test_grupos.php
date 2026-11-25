@@ -347,7 +347,7 @@ $filas = [gFil(1, 'A', 'DISP', 10, ['NATURALEZA' => 'ESTIMADO', 'ORIGEN_SERIE' =
 $r = CashflowEstructura::validar($secs3, $filas, $GPROVS);
 
 chequear('lo rechaza', false, $r['valido']);
-chequear('nombra los dos valores', true, gError($r, 'Sólo vale REAL o PROYECTADO'));
+chequear('nombra los valores validos', true, gError($r, 'Sólo vale REAL, PROYECTADO o SIMULADO'));
 
 seccion('la naturaleza de una fila derivada se ignora, y se avisa');
 

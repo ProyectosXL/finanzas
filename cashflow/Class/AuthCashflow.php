@@ -289,6 +289,26 @@ class AuthCashflow {
             'incluirClienteCobranza' => [['parametros', 'COBRANZAS']],
             'saveEscalaDescuento' => [['parametros', 'COBRANZAS']]
         ],
+        /* PRESTAMOS: la pestaña (alta, edicion, cronograma, cambio de estado,
+           cancelaciones y simulaciones) con su permiso, y Parametros › Prestamos
+           con el de su sub-pestaña. Simular una cancelacion pide edicion como los
+           demas preview: es el primer paso de registrarla. */
+        'Prestamos' => [
+            'altaPrestamo' => [['prestamos', null]],
+            'editarPrestamo' => [['prestamos', null]],
+            'pasarAVigente' => [['prestamos', null]],
+            'eliminarSimulado' => [['prestamos', null]],
+            'guardarAjuste' => [['prestamos', null]],
+            'deshacerAjuste' => [['prestamos', null]],
+            'simularCancelacion' => [['prestamos', null]],
+            'registrarCancelacion' => [['prestamos', null]],
+            'deshacerCancelacion' => [['prestamos', null]],
+            'simularPrestamo' => [['prestamos', null]],
+            'guardarGeneral' => [['parametros', 'PRESTAMOS']],
+            'guardarCosto' => [['parametros', 'PRESTAMOS']],
+            'guardarTramos' => [['parametros', 'PRESTAMOS']],
+            'guardarTasaManual' => [['parametros', 'PRESTAMOS']]
+        ],
         'Proveedores' => [
             'savePago' => [['proveedores_locales', null]],
             'saveFechaMasiva' => [['proveedores_locales', null]],
@@ -388,6 +408,9 @@ class AuthCashflow {
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento',
             'getHistorialRubroPct', 'getFeriadosBancarios'],
+        /* La necesidad de financiamiento y la comparacion con y sin un
+           simulado corren el motor del tablero, pero solo leen. */
+        'Prestamos' => ['getPestana', 'getParametros', 'calcularNecesidad', 'compararSimulado'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getUltimosMovLocales', 'getFondos', 'getMovimientosFondo'],

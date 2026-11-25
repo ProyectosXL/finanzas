@@ -39,9 +39,9 @@ $disponibles = array_values(array_filter($todos, function ($p) { return $p['disp
 // Compras Proyectadas, Saldos, Caja Locales, Cuentas de inversion, Cuentas
 // comitente, Cobranzas Electronicas, Echeqs, Dolares Cuenta Comitente,
 // Exportaciones Tasky, Saldo de Inversiones, Cobertura, Proveedores Locales,
-// Logistica, Pagos con Tarjetas y Otros, Alquileres y Llaves y Renovaciones. Los dos de Otros Ingresos estan
+// Logistica, Pagos con Tarjetas y Otros, Alquileres, Llaves y Renovaciones y Prestamos (FINANCIERO). Los dos de Otros Ingresos estan
 // retirados pero siguen disponibles: sirven lo que tienen cargado.
-chequear('hay 22 modulos con datos reales', 22, count($disponibles));
+chequear('hay 23 modulos con datos reales', 23, count($disponibles));
 
 /* TARJETAS es el ultimo en sumarse, y LOGISTICA el anterior: son los dos unicos
    del grupo de egresos pendientes que ya tienen proveedor. Los demas -Haberes,
@@ -51,12 +51,11 @@ chequear('Logistica ya tiene proveedor', true, CashflowRegistry::disponible('LOG
 chequear('y Tarjetas tambien', true, CashflowRegistry::disponible('TARJETAS'));
 chequear('Haberes todavia no', false, CashflowRegistry::disponible('HABERES'));
 
-/* FINANCIERO NO SE TOCO, y no es un olvido: es otro circuito -prestamos y
-   movimientos financieros-, sigue apuntando a la pestana prestamos y su fila del
-   tablero vive en la seccion AJUSTES, hoy inhabilitada. Las tarjetas entraron por
-   un proveedor propio en vez de adentro de el, porque son dos cosas que se cargan
-   y se miran por separado. */
-chequear('Financiero sigue sin proveedor', false, CashflowRegistry::disponible('FINANCIERO'));
+/* FINANCIERO ES PRESTAMOS desde feature/prestamos: la entrada reservada para la
+   pestana prestamos se reuso, con las series de la seccion Financiamiento. Las
+   tarjetas siguen en su proveedor propio: son dos cosas que se cargan y se miran
+   por separado. */
+chequear('Financiero es Prestamos y tiene proveedor', true, CashflowRegistry::disponible('FINANCIERO'));
 chequear('y sigue apuntando a prestamos', 'prestamos',
     CashflowRegistry::meta('FINANCIERO')['tab']);
 chequear('Tarjetas apunta a su propia pestana', 'pagos_tarjetas',

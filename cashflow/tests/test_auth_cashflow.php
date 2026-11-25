@@ -199,7 +199,7 @@ foreach (glob(__DIR__ . '/../Controller/*Controller.php') as $archivo) {
     }
 }
 
-chequear('se leyeron los dieciocho controllers', 18, count($controllers));
+chequear('se leyeron los diecinueve controllers', 19, count($controllers));
 chequear('ninguna accion sin declarar como lectura o escritura', [], $sinMapear);
 chequear('ninguna accion declarada que ya no exista', [], $sobrantes);
 
@@ -282,7 +282,8 @@ $enEdicion = $claves('cashflow_permisos_edicion.sql');
 $enAlquileres = $claves('cashflow_alquileres_permisos.sql');
 $enCalendario = $claves('cashflow_calendario_permisos.sql');
 $enLlaves = $claves('cashflow_llaves_permisos.sql');
-$enScript = array_values(array_unique(array_merge($enEdicion, $enAlquileres, $enCalendario, $enLlaves)));
+$enPrestamos = $claves('cashflow_prestamos_permisos.sql');
+$enScript = array_values(array_unique(array_merge($enEdicion, $enAlquileres, $enCalendario, $enLlaves, $enPrestamos)));
 sort($enScript);
 
 chequear('las mismas claves en los scripts y en el codigo', $esperadas, $enScript);
@@ -296,6 +297,15 @@ chequear('el de Llaves y Renovaciones trae sus dos claves de edicion',
 $scriptLl = file_get_contents(__DIR__ . '/../sql/cashflow_llaves_permisos.sql');
 chequear('y la de lectura de la pestaña', true, strpos($scriptLl, "('cashflow.tab.llaves_renov'") !== false);
 chequear('y no asigna ningun rol', false, (bool) preg_match('/INSERT\s+INTO\s+dbo\.FP_ROL_PERMISO/i', $scriptLl));
+
+sort($enPrestamos);
+chequear('el de Prestamos trae sus dos claves de edicion',
+    ['cashflow.editar.parametros.prestamos', 'cashflow.editar.prestamos'], $enPrestamos);
+chequear('ninguna clave de Prestamos en otro script', [],
+    array_values(array_intersect($enPrestamos, array_merge($enEdicion, $enAlquileres, $enCalendario, $enLlaves))));
+$scriptPr = file_get_contents(__DIR__ . '/../sql/cashflow_prestamos_permisos.sql');
+chequear('Prestamos: y la de lectura de la pestaña', true, strpos($scriptPr, "('cashflow.tab.prestamos'") !== false);
+chequear('Prestamos: y no asigna ningun rol', false, (bool) preg_match('/INSERT\s+INTO\s+dbo\.FP_ROL_PERMISO/i', $scriptPr));
 
 /* CALENDARIO VA EN SU SCRIPT, que la asigna a quien hoy edita Generales: el
    cronograma, el horizonte y los feriados de comercio se editaban con ese
@@ -488,9 +498,9 @@ foreach (array_keys($tabsConEscritura) as $tab) {
     }
 }
 
-/* Quince desde Llaves y Renovaciones ("Ya pagada" en su solapa Contratos). Catorce desde que Alquileres tiene escrituras propias: la columna de su
+/* Dieciseis desde Prestamos. Quince desde Llaves y Renovaciones ("Ya pagada" en su solapa Contratos). Catorce desde que Alquileres tiene escrituras propias: la columna de su
    exclusion en el Maestro y, despues, sus facturas. */
-chequear('las quince pestañas', 15, count($tabsConEscritura));
+chequear('las dieciseis pestañas', 16, count($tabsConEscritura));
 chequear('todas con data-puede-editar', [], $sinAtributo);
 
 $param = file_get_contents(__DIR__ . '/../Tabs/parametros.php');

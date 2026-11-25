@@ -3,7 +3,7 @@ titulo: Cómo leer el tablero
 pestana:
 categoria: General
 estado: completa
-actualizado: 2026-11-23
+actualizado: 2026-11-25
 usuarios: Tesorería, Administración, Dirección
 bajada: Qué mide cada número de la pestaña Cashflow, cómo se arrastra el saldo y qué hacer cuando algo no cierra.
 ---
@@ -12,7 +12,7 @@ bajada: Qué mide cada número de la pestaña Cashflow, cómo se arrastra el sal
 
 La pestaña **Cashflow** junta en un solo cuadro lo que entra y lo que sale de todos los módulos: ventas, cobranzas, cheques, proveedores, comercio exterior, tarjetas y el resto. Cada fila trae sus números de su pestaña; el tablero no se carga a mano.
 
-El cuadro se lee de arriba hacia abajo: primero los ingresos con su total, después los egresos con el suyo, el flujo neto y, al final, la sección **Cobertura**. Qué filas y secciones hay se define en **Parámetros › Cashflow**.
+El cuadro se lee de arriba hacia abajo: primero los ingresos con su total, después los egresos con el suyo, la sección **Financiamiento** (los préstamos), el flujo neto y, al final, la sección **Cobertura**. Qué filas y secciones hay se define en **Parámetros › Cashflow**.
 
 Arriba del cuadro están las tarjetas, la barra que dice qué período miden y el panel **Sobre estos números**, con los avisos. Los avisos se explican en [Los avisos](ayuda:general_avisos).
 
@@ -70,7 +70,7 @@ Es la única fila que se puede tocar desde el tablero, y sólo si tenés permiso
 | Tarjeta | Qué dice |
 | --- | --- |
 | **Disponible Inicial** | Con cuánto se arranca hoy. Es la única que no cambia con la vista, y por eso va marcada aparte. |
-| **Ingresos** | Lo que entra en las columnas que estás mirando, incluido el saldo que muestre la fila **Saldo Inicial** en esas columnas. |
+| **Ingresos** | Lo que entra en las columnas que estás mirando, incluido el saldo que muestre la fila **Saldo Inicial** en esas columnas y los desembolsos de préstamos. Si hay desembolsos, el tooltip dice cuánto. |
 | **Egresos** | Lo que sale en las columnas que estás mirando. |
 | **Flujo Neto** | Ingresos menos egresos. No incluye la cobertura: si hubo, el pie lo dice aparte. |
 | **Saldo Final** | El saldo acumulado al cierre de la última columna que estás mirando, ya con la cobertura. |
@@ -102,7 +102,15 @@ Cuántos días y cuántos meses tiene el horizonte se configura en **Parámetros
 
 Algunos conceptos tienen una parte real y una parte estimada: por ejemplo, la cobranza de franquicias. En el tablero se ven como **un renglón con un chevron**, que muestra la suma. Tocá el chevron para ver las dos partes por separado.
 
+Los renglones de **Financiamiento** (desembolsos, amortización de capital e intereses y gastos) tienen además una parte **Simulado**, con los préstamos simulados: sólo se ve con el interruptor de abajo.
+
 Abrir o cerrar un renglón no cambia ningún total. El botón **Expandir todo** abre todos; cuando están todos abiertos dice **Agrupar todo**. El detalle está en [Real y proyectado](ayuda:general_real_proyectado#filas-con-parte-real-y-parte-proyectada).
+
+## Incluir simulaciones
+
+El interruptor **Incluir simulaciones**, al lado de las vistas, suma al tablero los préstamos simulados de la pestaña [Préstamos](ayuda:prestamos). Arranca **apagado** cada vez que entrás: el tablero oficial no los incluye.
+
+Prendido, cada renglón de Financiamiento suma su parte **Simulado**, en itálica y atenuada, y arriba del cuadro aparece **Incluye préstamos simulados: no es el cashflow oficial**. Las tarjetas, el saldo, las columnas en rojo y la cobertura se recalculan con lo que se ve.
 
 ## Ir a la pestaña de una fila
 

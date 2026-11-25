@@ -170,6 +170,16 @@ abstract class CashflowProvider {
     private $codigo;
 
     /**
+     * Las opciones del pedido que el motor le pasa a todos los proveedores,
+     * antes de pedir las series. Hoy una sola: 'simulaciones' (false, true o
+     * una lista de ids), el interruptor "Incluir simulaciones" del tablero, que
+     * solo lee el proveedor de Prestamos. Un proveedor que no la usa la ignora.
+     *
+     * @var array
+     */
+    protected $opciones = [];
+
+    /**
      * El codigo lo inyecta CashflowRegistry::instanciar(). Una misma clase
      * puede estar registrada bajo varios codigos y servir series distintas
      * segun cual sea: es el caso de Comex, que atiende Proveedores Exterior y
@@ -189,6 +199,30 @@ abstract class CashflowProvider {
      */
     final public function codigo() {
         return $this->codigo;
+    }
+
+    /**
+     * Las opciones del pedido (ver $opciones). Se llama ANTES de series(): las
+     * series se calculan una vez y quedan en cache.
+     *
+     * @param array $opciones
+     * @return $this
+     */
+    final public function conOpciones($opciones) {
+        $this->opciones = is_array($opciones) ? $opciones : [];
+
+        return $this;
+    }
+
+    /**
+     * Una opcion del pedido, o el defecto si no vino.
+     *
+     * @param string $clave
+     * @param mixed $defecto
+     * @return mixed
+     */
+    final protected function opcion($clave, $defecto = null) {
+        return array_key_exists($clave, $this->opciones) ? $this->opciones[$clave] : $defecto;
     }
 
     /**
