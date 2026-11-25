@@ -32,8 +32,7 @@ const AYUDA_PENDIENTES = [
     'ventas', 'saldos', 'cobranzas_fr',
     'compras_proyectadas',
     'proveedores_locales',
-    'alquileres',
-    'prestamos'
+    'alquileres'
 ];
 
 $menu = Menu::estructuraCompleta();
