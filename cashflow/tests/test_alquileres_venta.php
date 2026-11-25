@@ -64,17 +64,15 @@ $base = [
         3 => ['activo' => true, 'activo_hasta' => null, 'manual' => null]
     ],
     'netas' => [1 => doceMeses($ventana, 100), 2 => doceMeses($ventana, 200), 3 => doceMeses($ventana, 700)],
-    'brutas' => [],
     'ventana' => $ventana,
     'canal' => ['2026-10' => 999.0, '2026-11' => 1000000.0, '2026-12' => 1234567.89],
     'iva' => 0.21
 ];
 $base['netas'][1]['2026-10'] = 50000.0;
-$base['brutas'][1]['2026-10'] = 60500.0;
 
 $r = AlquileresVenta::calcular($base);
 chequear('participaciones sobre la neta de la ventana', [1 => 0.1, 2 => 0.2, 3 => 0.7], $r['participacion']);
-chequear('la real gana sobre la estimada', ['REAL', 50000.0, 60500.0],
+chequear('la real gana sobre la estimada; su bruta es la neta x 1,21', ['REAL', 50000.0, 60500.0],
     [$r['ventas'][1]['2026-10']['origen'], $r['ventas'][1]['2026-10']['neta'], $r['ventas'][1]['2026-10']['bruta']]);
 chequear('nov: el local 3 estima 70 % del canal', 700000.0, $r['ventas'][3]['2026-11']['bruta']);
 chequear('nov: su neta es la bruta / 1,21', 700000.0 / 1.21, $r['ventas'][3]['2026-11']['neta']);
@@ -93,7 +91,6 @@ seccion('AlquileresVenta: el mes en curso es la real + lo que falta vender');
    neto (363000 bruto) hasta ayer y estima 700000 bruto el mes completo. */
 $enCurso = $base + ['hoy' => '2026-11-21'];
 $enCurso['netas'][3]['2026-11'] = 300000.0;
-$enCurso['brutas'][3]['2026-11'] = 363000.0;
 $ec = AlquileresVenta::calcular($enCurso)['ventas'][3]['2026-11'];
 chequear('origen Real + proyectada', AlquileresVenta::REAL_PROYECTADA, $ec['origen']);
 chequear('bruta: la real + la estimada del mes x 10/30', round(363000.0 + 700000.0 * 10 / 30, 2), $ec['bruta']);
@@ -142,7 +139,6 @@ seccion('AlquileresVenta: un mes sin venta proyectada del canal');
 $sinCanal = $base;
 unset($sinCanal['canal']['2026-10']);
 $sinCanal['netas'][2]['2026-10'] = 100000.0;
-$sinCanal['brutas'][2]['2026-10'] = 121000.0;
 $sc = AlquileresVenta::calcular($sinCanal)['ventas'];
 chequear('el que no tiene real se estima con el canal de los reales', [AlquileresVenta::ESTIMADA, 423500.0, true],
     [$sc[3]['2026-10']['origen'], round($sc[3]['2026-10']['bruta'], 2), $sc[3]['2026-10']['canal_de_reales']]);
@@ -187,14 +183,6 @@ chequear('con fecha de fin en nov: en nov todavia reparte', 700000.0, $f['ventas
 chequear('en dic ya no', null, $f['ventas'][3]['2026-12']);
 $sumaDicFin = $f['ventas'][1]['2026-12']['bruta'] + $f['ventas'][2]['2026-12']['bruta'];
 chequear('y dic sigue cerrando contra el canal entre los que quedan', 1234567.89, round($sumaDicFin, 2));
-
-seccion('AlquileresVenta: una sola de las dos ventas reales');
-
-$unaSola = $base;
-$unaSola['netas'][2]['2026-10'] = 100000.0;
-$u = AlquileresVenta::calcular($unaSola);
-chequear('falta la bruta: se deriva x 1,21 y se marca', [121000.0, true],
-    [$u['ventas'][2]['2026-10']['bruta'], $u['ventas'][2]['2026-10']['derivada']]);
 
 seccion('AlquileresVenta: repartir');
 

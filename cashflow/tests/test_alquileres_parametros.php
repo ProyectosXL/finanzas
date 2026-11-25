@@ -245,7 +245,7 @@ class AlqAppDoble extends AlquileresApp {
                 40 => ['nro' => 40, 'nombre' => 'FLORES 1', 'habilitado' => false]];
     }
     public function mesesCerrados() { return ['2026-09']; }
-    public function ventasNetas($desde) { return []; }
+    public function ventasNetas($desde, $hasta) { return []; }
 }
 
 class AlquileresSinBase extends Alquileres {
