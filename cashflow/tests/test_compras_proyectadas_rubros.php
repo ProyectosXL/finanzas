@@ -412,6 +412,85 @@ chequear('sin la tabla del %, se dice que script correr', true, strpos(Aviso::te
     ComprasProyectadasDatos::avisosRubrosDe($sinTabla, [], []))[0], 'cashflow_compras_proy_rubro_pct.sql') !== false);
 
 /* ========================================================================
+   9. LA REFERENCIA DE LAS OC DEL ANIO ANTERIOR
+   ======================================================================== */
+
+seccion('Cada temporada se compara con la misma del anio anterior');
+
+chequear('INV 27 -> INV 26, 6W', ['temporada' => 'INV 26', 'codigo' => '6W'],
+    ComprasProyectadasRubros::temporadaAnterior('INV 27'));
+chequear('VER 27-28 -> VER 26-27, 6S', ['temporada' => 'VER 26-27', 'codigo' => '6S'],
+    ComprasProyectadasRubros::temporadaAnterior('VER 27-28'));
+chequear('el digito es el del anio en que ARRANCA: VER 30-31 -> VER 29-30, 9S',
+    ['temporada' => 'VER 29-30', 'codigo' => '9S'], ComprasProyectadasRubros::temporadaAnterior('VER 30-31'));
+chequear('cruza la decena: INV 30 -> INV 29, 9W', ['temporada' => 'INV 29', 'codigo' => '9W'],
+    ComprasProyectadasRubros::temporadaAnterior('INV 30'));
+chequear('INV 31 -> 0W', '0W', ComprasProyectadasRubros::temporadaAnterior('INV 31')['codigo']);
+chequear('algo que no es temporada no tiene anterior', null,
+    ComprasProyectadasRubros::temporadaAnterior('ATEMPORAL'));
+
+$presRef = [
+    ['temporada' => 'VER 27-28', 'rubro' => 'A', 'fob_presupuesto' => 1.0],
+    ['temporada' => 'INV 27', 'rubro' => 'A', 'fob_presupuesto' => 1.0],
+    ['temporada' => 'VER 27-28', 'rubro' => 'B', 'fob_presupuesto' => 1.0]
+];
+$tempRef = ComprasProyectadasRubros::temporadasReferencia($presRef);
+
+chequear('una por temporada del presupuesto, sin repetir, en orden cronologico', ['6W', '6S'],
+    array_column($tempRef, 'codigo'));
+chequear('y dice a que temporada proyectada responde', ['INV 27', 'VER 27-28'],
+    array_column($tempRef, 'proyectada'));
+
+seccion('El % del exterior sale de las unidades de las OC');
+
+/* Los numeros de carteras de cuero de INV 26 y VER 26-27, del 26/11/2026. */
+$lineasRef = [
+    ['codigo' => '6W', 'rubro' => 'CARTERAS DE CUERO', 'ext' => 6420, 'nac' => 8953],
+    ['codigo' => '6S', 'rubro' => 'Carteras de cuero ', 'ext' => 4980, 'nac' => 13179],
+    ['codigo' => '6S', 'rubro' => 'BILLETERAS DE CUERO', 'ext' => 0, 'nac' => 8061],
+    ['codigo' => '6S', 'rubro' => 'LENTES', 'ext' => 0, 'nac' => 0]
+];
+$ref = ComprasProyectadasRubros::referenciaOc($lineasRef, $tempRef);
+
+chequear('cada temporada con su %', [41.8, 27.4],
+    array_column($ref['CARTERAS DE CUERO']['temporadas'], 'pct'));
+chequear('el total es el de las unidades sumadas, no el promedio de los %', 34.0,
+    $ref['CARTERAS DE CUERO']['pct']);
+chequear('el rubro se normaliza antes de juntar', 11400.0, $ref['CARTERAS DE CUERO']['ext']);
+chequear('todo nacional es 0 %', 0.0, $ref['BILLETERAS DE CUERO']['temporadas'][1]['pct']);
+chequear('una temporada sin OC es null, no 0', null, $ref['BILLETERAS DE CUERO']['temporadas'][0]['pct']);
+chequear('y el total sale de la que tiene', 0.0, $ref['BILLETERAS DE CUERO']['pct']);
+chequear('un rubro sin unidades es null', null, $ref['LENTES']['pct']);
+
+seccion('Calzados no tiene referencia, y un rubro sin OC dice que no tiene');
+
+$filasRef = ComprasProyectadasRubros::conReferencia([
+    ['rubro' => 'CARTERAS DE CUERO'], ['rubro' => 'CALZADOS'], ['rubro' => 'TOALLAS']
+], $ref + ['CALZADOS' => ['pct' => 10.6]], $tempRef);
+
+chequear('carteras trae su referencia', 34.0, $filasRef[0]['referencia_oc']['pct']);
+chequear('calzados no, aunque tenga OC: trae el motivo', true,
+    isset($filasRef[1]['referencia_oc']['motivo']) && !isset($filasRef[1]['referencia_oc']['pct']));
+chequear('el motivo habla del armado', true,
+    strpos($filasRef[1]['referencia_oc']['motivo'], 'armado') !== false);
+chequear('un rubro sin OC: pct null', null, $filasRef[2]['referencia_oc']['pct']);
+chequear('con sus temporadas en cero, para el tooltip', ['6W', '6S'],
+    array_column($filasRef[2]['referencia_oc']['temporadas'], 'codigo'));
+
+seccion('La lectura de las OC usa el criterio de la app de compras');
+
+$ocSrc = codigoSinComentariosRUB(__DIR__ . '/../Class/ComprasProyectadasDatos.php');
+
+chequear('exterior es el proveedor Z', true, strpos($ocSrc, "A.COD_PROVEE LIKE 'Z%'") !== false);
+chequear('la temporada es el tercer y cuarto caracter', true,
+    strpos($ocSrc, 'SUBSTRING(B.COD_ARTICU, 3, 2)') !== false);
+chequear('lo comprado es recibido + pendiente', true,
+    strpos($ocSrc, 'B.CAN_RECIBI + B.CAN_PENDIE') !== false);
+chequear('sin las anuladas ni desautorizadas', [4, 5, 6, 7], ComprasProyectadasDatos::ESTADOS_OC_ANULADA);
+chequear('un codigo que no es de temporada no llega a la consulta', [],
+    (new ComprasProyectadasDatos)->ocPorTemporadaRubro(["6W' OR 1=1 --", 'XX']));
+
+/* ========================================================================
    CONTRA LA BASE, SOLO LECTURA
    ======================================================================== */
 
@@ -437,6 +516,21 @@ if (!Pruebas::hayBase()) {
         $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
 
         chequear('hay un solo % vigente por rubro', 0, intval($row['N']));
+
+        $oc = $d->ocPorTemporadaRubro(['6W', '6S']);
+
+        chequear('las OC de 6W y 6S se leen', true, is_array($oc) && count($oc) > 0);
+
+        if (is_array($oc)) {
+            $refBase = ComprasProyectadasRubros::referenciaOc($oc, [
+                ['temporada' => 'INV 26', 'codigo' => '6W'], ['temporada' => 'VER 26-27', 'codigo' => '6S']]);
+
+            /* Medido el 26/11/2026: 41,8 % y 27,4 %. La base es viva, asi que
+               solo se fija lo que no puede cambiar: que hay de los dos. */
+            chequear('carteras de cuero tiene OC del exterior y del pais', true,
+                isset($refBase['CARTERAS DE CUERO']) && $refBase['CARTERAS DE CUERO']['pct'] > 0
+                && $refBase['CARTERAS DE CUERO']['pct'] < 100);
+        }
 
         $vig = $d->pctVigentes();
 

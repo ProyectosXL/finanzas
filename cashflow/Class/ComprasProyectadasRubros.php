@@ -48,6 +48,20 @@ class ComprasProyectadasRubros {
     /** El % de un rubro que no esta en la tabla */
     const PCT_SIN_CONFIGURAR = 100.0;
 
+    /**
+     * Rubros a los que NO se les muestra la referencia de las OC, con el motivo.
+     *
+     * CALZADOS: se importan las partes y se arman en el pais. El armador
+     * factura el servicio y tiene OC de proveedor nacional por el calzado
+     * terminado, asi que las OC dirian "produccion nacional" de algo que se
+     * importa: en VER 26-27 eran 97.158 unidades nacionales contra 11.550 del
+     * exterior. El servicio se paga por Proveedores Locales.
+     */
+    const SIN_REFERENCIA_OC = [
+        'CALZADOS' => 'Se importan las partes y se arman en el país: las OC nacionales son el '
+            . 'servicio de armado, que se paga por Proveedores Locales. Las OC no sirven de referencia.'
+    ];
+
     /** @var Conexion */
     private $conn;
 
@@ -270,6 +284,167 @@ class ComprasProyectadasRubros {
         });
 
         return $out;
+    }
+
+    /* ====================================================================
+       REFERENCIA: LO QUE SE COMPRO EN EL EXTERIOR EL ANIO ANTERIOR
+       ==================================================================== */
+
+    /**
+     * La misma temporada del anio anterior, con su codigo en el articulo.
+     *
+     *   INV 27     -> INV 26,    '6W'   (XV6WKR02C0501)
+     *   VER 27-28  -> VER 26-27, '6S'   (XT6SRZ03C0814)
+     *
+     * El codigo es el tercer y cuarto caracter del articulo: el ultimo digito
+     * del anio en que ARRANCA la temporada y W/S. Se compara invierno con
+     * invierno porque la mezcla cambia con la temporada: billeteras de cuero
+     * tuvo 19,8 % del exterior en INV 26 y 0 % en VER 26-27.
+     *
+     * @param string $temporada 'INV AA' o 'VER AA-AA'
+     * @return array|null ['temporada','codigo'] o null si no es una temporada
+     */
+    public static function temporadaAnterior($temporada) {
+        $t = trim((string) $temporada);
+
+        if (preg_match('/^INV (\d{2})$/', $t, $m)) {
+            $a = (intval($m[1]) + 99) % 100;
+
+            return ['temporada' => sprintf('INV %02d', $a), 'codigo' => ($a % 10) . 'W'];
+        }
+
+        if (preg_match('/^VER (\d{2})-(\d{2})$/', $t, $m)) {
+            $a = (intval($m[1]) + 99) % 100;
+
+            return ['temporada' => sprintf('VER %02d-%02d', $a, ($a + 1) % 100),
+                    'codigo' => ($a % 10) . 'S'];
+        }
+
+        return null;
+    }
+
+    /**
+     * Las temporadas de referencia de un presupuesto: la del anio anterior de
+     * cada temporada que trae, sin repetir y en orden cronologico.
+     *
+     * @param array $presupuesto ComprasProyectadasDatos::presupuestoPorRubro()
+     * @return array Lista de ['proyectada','temporada','codigo']
+     */
+    public static function temporadasReferencia($presupuesto) {
+        $out = [];
+
+        foreach ($presupuesto as $r) {
+            $t = trim((string) $r['temporada']);
+            $ant = self::temporadaAnterior($t);
+
+            if ($ant !== null && !isset($out[$t])) {
+                $out[$t] = ['proyectada' => $t] + $ant;
+            }
+        }
+
+        /* Cronologico: INV AA arranca en febrero, VER AA-AA en agosto. */
+        uasort($out, function ($a, $b) {
+            return self::ordenTemporada($a['temporada']) - self::ordenTemporada($b['temporada']);
+        });
+
+        return array_values($out);
+    }
+
+    private static function ordenTemporada($t) {
+        return intval(substr($t, 4, 2)) * 2 + (strpos($t, 'VER') === 0 ? 1 : 0);
+    }
+
+    /**
+     * El % del exterior de cada rubro segun las OC de las temporadas de
+     * referencia, en UNIDADES. PURA.
+     *
+     * EN UNIDADES Y NO EN IMPORTE: las OC nacionales estan en pesos, con una
+     * cotizacion cargada a mano y muchos renglones a precio 0. Y el % se le
+     * aplica a un FOB que es unidades por costo de importacion, asi que lo que
+     * hay que estimar es que parte de las unidades viene de afuera.
+     *
+     * Un rubro sin OC en una temporada tiene pct null, no 0: "no se compro"
+     * no es "se compro todo en el pais".
+     *
+     * @param array $lineas ComprasProyectadasDatos::ocPorTemporadaRubro():
+     *                      cada una con 'codigo', 'rubro', 'ext', 'nac'
+     * @param array $temporadas temporadasReferencia()
+     * @return array rubro normalizado => ['temporadas' => [...], 'ext', 'nac', 'pct']
+     */
+    public static function referenciaOc($lineas, $temporadas) {
+        $suma = [];
+
+        foreach ($lineas as $l) {
+            $k = self::normalizar($l['rubro']);
+            $c = (string) $l['codigo'];
+
+            if (!isset($suma[$k][$c])) {
+                $suma[$k][$c] = ['ext' => 0.0, 'nac' => 0.0];
+            }
+
+            $suma[$k][$c]['ext'] += floatval($l['ext']);
+            $suma[$k][$c]['nac'] += floatval($l['nac']);
+        }
+
+        $out = [];
+
+        foreach ($suma as $k => $porCodigo) {
+            $out[$k] = self::armarReferencia($porCodigo, $temporadas);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Le agrega a cada fila de tablaParametros() su referencia de las OC.
+     *
+     *   referencia_oc  ['temporadas','ext','nac','pct'], con pct null si el
+     *                  rubro no tuvo OC; o ['motivo'] si el rubro esta en
+     *                  SIN_REFERENCIA_OC.
+     *
+     * @param array $filas tablaParametros()
+     * @param array $referencia referenciaOc()
+     * @param array $temporadas temporadasReferencia()
+     * @return array
+     */
+    public static function conReferencia($filas, $referencia, $temporadas) {
+        foreach ($filas as $i => $f) {
+            $k = self::normalizar($f['rubro']);
+
+            if (isset(self::SIN_REFERENCIA_OC[$k])) {
+                $filas[$i]['referencia_oc'] = ['motivo' => self::SIN_REFERENCIA_OC[$k]];
+            } else {
+                $filas[$i]['referencia_oc'] = isset($referencia[$k])
+                    ? $referencia[$k]
+                    : self::armarReferencia([], $temporadas);
+            }
+        }
+
+        return $filas;
+    }
+
+    private static function armarReferencia($porCodigo, $temporadas) {
+        $r = ['temporadas' => [], 'ext' => 0.0, 'nac' => 0.0, 'pct' => null];
+
+        foreach ($temporadas as $t) {
+            $u = isset($porCodigo[$t['codigo']]) ? $porCodigo[$t['codigo']] : ['ext' => 0.0, 'nac' => 0.0];
+
+            $r['temporadas'][] = ['temporada' => $t['temporada'], 'codigo' => $t['codigo'],
+                                  'ext' => $u['ext'], 'nac' => $u['nac'],
+                                  'pct' => self::pctExterior($u['ext'], $u['nac'])];
+            $r['ext'] += $u['ext'];
+            $r['nac'] += $u['nac'];
+        }
+
+        $r['pct'] = self::pctExterior($r['ext'], $r['nac']);
+
+        return $r;
+    }
+
+    private static function pctExterior($ext, $nac) {
+        $total = $ext + $nac;
+
+        return ($total > 0) ? round($ext / $total * 100.0, 1) : null;
     }
 
     /* ====================================================================

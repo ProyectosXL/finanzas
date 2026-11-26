@@ -34,6 +34,10 @@ require_once __DIR__ . '/ComprasProyectadasRubros.php';
  *      RO_T_IMPORTACIONES_ENCABEZADO, el MISMO padron que arma la pestana
  *      Proveedores Exterior, con el mismo pendiente. Ver cargado().
  *
+ * Y UNA REFERENCIA QUE NO ENTRA EN NINGUNA CUENTA: las OC de Tango del anio
+ * anterior por rubro y origen, que Parametros muestra al lado del % importado.
+ * Ver ocPorTemporadaRubro().
+ *
  * POR QUE DOS DE LAS TRES VIENEN DE UN JOB. La historia tardaba entre 38 y 57
  * segundos por pedido, y era el 95 % de lo que tardaban la pestana y la fila
  * del tablero. Es historia de anios cerrados, y el presupuesto cambia cuando
@@ -64,6 +68,12 @@ class ComprasProyectadasDatos {
 
     /** El maestro de Comercio Exterior */
     const TABLA_MAESTRO = 'RO_T_IMPORTACIONES_ENCABEZADO';
+
+    /**
+     * Estados de una OC de Tango (ESTADO_ORDEN_COMPRA) que no compraron nada:
+     * desautorizada, e ingresada, autorizada o emitida y anulada.
+     */
+    const ESTADOS_OC_ANULADA = [4, 5, 6, 7];
 
     /**
      * Los ajustes manuales por mes, del lado del cashflow.
@@ -525,6 +535,76 @@ class ComprasProyectadasDatos {
         sqlsrv_free_stmt($stmt);
 
         return $this->porRubro[$pais];
+    }
+
+    /**
+     * Las unidades compradas por rubro, del exterior y del pais, en las OC de
+     * Tango de las temporadas pedidas. Es la referencia del % importado en
+     * Parametros: ver ComprasProyectadasRubros::referenciaOc().
+     *
+     * EL MISMO CRITERIO QUE LA APP DE COMPRAS (RO_V_COMPRAS_PEND_PRESUPUESTO_COMPRAS):
+     *   - exterior = proveedor 'Z%'
+     *   - temporada = tercer y cuarto caracter del articulo ('6W', '6S')
+     *   - rubro = SOF_T_MAESTRO_ARTICULOS_RUBRO_CATEGORIA
+     *
+     * LO COMPRADO ES RECIBIDO + PENDIENTE, sin las OC anuladas ni
+     * desautorizadas. En una OC cerrada el pendiente es 0, asi que el saldo que
+     * nunca llego no cuenta: se pidio, pero no se compro.
+     *
+     * EN VIVO: tarda menos de medio segundo (0,42 s para las dos temporadas,
+     * el 26/11/2026) y solo la pide Parametros.
+     *
+     * @param array $codigos Codigos de temporada del articulo: ['6W', '6S']
+     * @return array|null Lista de ['codigo','rubro','ext','nac'], o null si
+     *                    no se pudo leer
+     */
+    public function ocPorTemporadaRubro($codigos) {
+        $codigos = array_values(array_filter(array_map('strval', (array) $codigos), function ($c) {
+            return preg_match('/^\d[WS]$/', $c) === 1;
+        }));
+
+        if (!$codigos) {
+            return [];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return null;
+        }
+
+        $marcas = implode(', ', array_fill(0, count($codigos), '?'));
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT SUBSTRING(B.COD_ARTICU, 3, 2) AS CODIGO, R.RUBRO,
+                    SUM(CASE WHEN A.COD_PROVEE LIKE 'Z%' THEN B.CAN_RECIBI + B.CAN_PENDIE ELSE 0 END) AS EXT,
+                    SUM(CASE WHEN A.COD_PROVEE LIKE 'Z%' THEN 0 ELSE B.CAN_RECIBI + B.CAN_PENDIE END) AS NAC
+             FROM CPA35 A
+             INNER JOIN CPA36 B ON A.N_ORDEN_CO = B.N_ORDEN_CO
+             INNER JOIN SOF_T_MAESTRO_ARTICULOS_RUBRO_CATEGORIA R ON R.COD_ARTICU = B.COD_ARTICU
+             WHERE SUBSTRING(B.COD_ARTICU, 3, 2) IN ($marcas)
+               AND A.ESTADO NOT IN (" . implode(', ', self::ESTADOS_OC_ANULADA) . ")
+             GROUP BY SUBSTRING(B.COD_ARTICU, 3, 2), R.RUBRO",
+            $codigos, ['QueryTimeout' => 30]);
+
+        if ($stmt === false) {
+            return null;
+        }
+
+        $out = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $out[] = [
+                'codigo' => trim((string) $row['CODIGO']),
+                'rubro' => (string) $row['RUBRO'],
+                'ext' => floatval($row['EXT']),
+                'nac' => floatval($row['NAC'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $out;
     }
 
     /**
