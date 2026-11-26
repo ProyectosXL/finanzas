@@ -61,8 +61,8 @@ DECLARE @PERMISOS TABLE (clave VARCHAR(100) PRIMARY KEY, nombre VARCHAR(100),
                          descripcion VARCHAR(255), origen VARCHAR(100));
 
 INSERT INTO @PERMISOS (clave, nombre, descripcion, origen) VALUES
-('cashflow.editar.parametros.calendario', 'Editar Parámetros > Calendario',
- '[Edición] Parámetros > Calendario: horizonte de proyección, feriados bancarios y de comercio, y cronograma de pagos',
+('cashflow.editar.parametros.calendario', 'Editar: Parám. Calendario',
+ '[Configuración y Parámetros] Horizonte de proyección, feriados bancarios y de comercio, y cronograma de pagos',
  'cashflow.editar.parametros.generales');
 
 /* ---- 1. La clave ---- */

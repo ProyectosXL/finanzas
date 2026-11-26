@@ -57,8 +57,8 @@ DECLARE @PERMISOS TABLE (clave VARCHAR(100) PRIMARY KEY, nombre VARCHAR(100), de
 
 INSERT INTO @PERMISOS (clave, nombre, descripcion) VALUES
 ('cashflow.tab.alquileres',               'Ver: Alquileres',                     '[RRHH y Operativos] Alquileres de los locales: proyección por local y venta por local'),
-('cashflow.editar.alquileres',            'Editar Alquileres',                   '[Edición] Alquileres: imputación de facturas (todavía sin escrituras)'),
-('cashflow.editar.parametros.alquileres', 'Editar Parámetros > Alquileres',      '[Edición] Parámetros > Alquileres: vencimientos, alta y baja de razones sociales, datos de los locales y pagos extraordinarios');
+('cashflow.editar.alquileres',            'Editar: Alquileres',                   '[RRHH y Operativos] Imputación de facturas de alquileres (todavía sin escrituras)'),
+('cashflow.editar.parametros.alquileres', 'Editar: Parám. Alquileres',      '[Configuración y Parámetros] Vencimientos, alta y baja de razones sociales, datos de los locales y pagos extraordinarios');
 
 INSERT INTO dbo.FP_PERMISOS (modulo_id, clave, nombre, descripcion)
 SELECT @MODULO, P.clave, P.nombre, P.descripcion
