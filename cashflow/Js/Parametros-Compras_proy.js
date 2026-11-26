@@ -461,6 +461,9 @@
         var filas = rubros.filas || [];
         var totalPres = 0;
         var totalProy = 0;
+        var refTemporadas = rubros.referencia_temporadas || [];
+        var conReferencia = refTemporadas.length > 0;
+        var columnas = conReferencia ? 7 : 6;
 
         var cuerpo = filas.map(function(f) {
             totalPres += Number(f.fob_presupuesto || 0);
@@ -495,7 +498,8 @@
                         '<span class="input-group-text">%</span>' +
                     '</div>' +
                 '</td>' +
-                '<td class="small">' + quien + '</td>' +
+                (conReferencia ? referenciaCelda(f.referencia_oc) : '') +
+                '<td class="small' + (conReferencia ? ' ps-3' : '') + '">' + quien + '</td>' +
                 '<td class="text-end text-muted" title="' + esc(desglose(f, 'fob_presupuesto')) + '">' +
                     usd(f.fob_presupuesto) + '</td>' +
                 '<td class="text-end fw-bold" title="' + esc(desglose(f, 'fob_proyectado')) + '">' +
@@ -510,7 +514,7 @@
         }).join('');
 
         if (!filas.length) {
-            cuerpo = '<tr><td colspan="6" class="text-center text-muted py-3">Todavía no hay ' +
+            cuerpo = '<tr><td colspan="' + columnas + '" class="text-center text-muted py-3">Todavía no hay ' +
                 'rubros: el presupuesto por rubro se llena con la próxima corrida del job.</td></tr>';
         }
 
@@ -523,7 +527,12 @@
                         'compra en el exterior. 100%: entra completo; 0%: no se proyecta. Un ' +
                         'cambio se ve en la proyección después de recalcularla.' +
                         (rubros.presupuesto_al ? ' FOB del presupuesto al ' +
-                            esc(rubros.presupuesto_al) + '.' : '') + '</small>' +
+                            esc(rubros.presupuesto_al) + '.' : '') +
+                        (conReferencia ? ' <b>Según OC</b> es lo que se compró en el exterior ' +
+                            'la misma temporada del año anterior (' + esc(refTemporadas.map(function(t) {
+                                return t.temporada + ' = ' + t.codigo;
+                            }).join(', ')) + '), en unidades: una referencia para revisar el %, ' +
+                            'que no lo cambia.' : '') + '</small>' +
                     '</div>' +
                     '<button id="pcprBtnRecalcular" class="btn btn-sm btn-outline-primary text-nowrap" ' +
                         'title="Corre el job del presupuesto con los % de esta tabla. Tarda unos segundos.">' +
@@ -536,7 +545,13 @@
                             '<thead><tr>' +
                                 '<th>Rubro</th>' +
                                 '<th>% importado</th>' +
-                                '<th>Cambiado por</th>' +
+                                (conReferencia
+                                    ? '<th class="text-end" title="Unidades de las OC de Tango a ' +
+                                        'proveedores del exterior (código Z) sobre el total ' +
+                                        'comprado, la misma temporada del año anterior. Recibido + ' +
+                                        'pendiente, sin anuladas.">Según OC</th>'
+                                    : '') +
+                                '<th' + (conReferencia ? ' class="ps-3"' : '') + '>Cambiado por</th>' +
                                 '<th class="text-end" title="Lo que dice el presupuesto de la ' +
                                     'app de compras, sin el %">FOB del presupuesto</th>' +
                                 '<th class="text-end" title="FOB del presupuesto × % importado">' +
@@ -546,7 +561,8 @@
                             '<tbody>' + cuerpo + '</tbody>' +
                             (filas.length
                                 ? '<tfoot><tr class="fw-bold">' +
-                                    '<td colspan="3">Total de las temporadas con versión oficial</td>' +
+                                    '<td colspan="' + (columnas - 3) + '">Total de las temporadas ' +
+                                        'con versión oficial</td>' +
                                     '<td class="text-end text-muted">' + usd(totalPres) + '</td>' +
                                     '<td class="text-end">' + usd(totalProy) + '</td>' +
                                     '<td></td>' +
@@ -576,6 +592,43 @@
             btn.addEventListener('click', function() { recalcular(btn); });
             pintarBotonRecalcular(btn);
         }
+    }
+
+    /**
+     * La celda "Según OC": el % del exterior de las dos temporadas juntas y,
+     * debajo, el de cada una. El tooltip trae las unidades.
+     *
+     * Un rubro sin OC dice "sin OC", no 0 %: no comprar no es comprar en el
+     * país. Calzados no tiene referencia y dice por qué.
+     */
+    function referenciaCelda(ref) {
+        if (!ref) {
+            return '<td></td>';
+        }
+
+        if (ref.motivo) {
+            return '<td class="text-end small text-muted" title="' + esc(ref.motivo) + '">' +
+                'no aplica <i class="fas fa-circle-info"></i></td>';
+        }
+
+        if (ref.pct === null || ref.pct === undefined) {
+            return '<td class="text-end small text-muted" title="Sin OC de este rubro en ' +
+                esc((ref.temporadas || []).map(function(t) { return t.codigo; }).join(' ni ')) +
+                '">sin OC</td>';
+        }
+
+        var detalle = (ref.temporadas || []).map(function(t) {
+            return t.codigo + ' ' + (t.pct === null ? '—' : pctTexto(t.pct));
+        }).join(' · ');
+
+        var tooltip = (ref.temporadas || []).map(function(t) {
+            return t.temporada + ' (' + t.codigo + '): ' + unidades(t.ext) + ' del exterior, ' +
+                unidades(t.nac) + ' del país';
+        }).join('\n');
+
+        return '<td class="text-end text-nowrap" title="' + esc(tooltip) + '">' +
+            '<span class="fw-medium">' + pctTexto(ref.pct) + '</span>' +
+            '<div class="small text-muted">' + esc(detalle) + '</div></td>';
     }
 
     /** "VER 27-28: U$S 1.234,00 · INV 27: U$S 567,00" */
@@ -710,6 +763,10 @@
                 Cargando.ocultar('pcprHistSpinner');
                 Notificacion.error('No se pudo leer el historial: ' + e.message);
             });
+    }
+
+    function unidades(n) {
+        return Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
     }
 
     function pctTexto(n) {

@@ -422,6 +422,31 @@ Con los valores iniciales y el presupuesto del 25/10/2026:
 
 > **Hasta que se corran los scripts, producción está proyectando el cuero.** El job de las 06:30 del 25/10/2026 ya leyó la vista sin filtro: el resumen tiene los U$S 6.965.385,74 completos, cosmética, lentes y relojes incluidos.
 
+### La referencia de las OC del año anterior
+
+Rama: `feature/compras-proy-pct-referencia-oc`.
+
+La tabla de Parámetros tiene una columna **Según OC**: qué parte de cada rubro se compró en el exterior **la misma temporada del año anterior**, según las órdenes de compra de Tango. **No cambia ningún %**: el % lo sigue decidiendo una persona, y la columna está para que lo revise con datos al lado. No hay un botón de "usar el sugerido" ni aviso cuando el % se aparta, a propósito: los dos empujan a aceptar el número sin mirarlo.
+
+- **Se compara invierno con invierno.** Cada temporada del presupuesto busca la del año anterior: INV 27 → INV 26 (`6W`), VER 27-28 → VER 26-27 (`6S`). El código es el tercer y cuarto carácter del artículo (`XV6WKR02C0501`). La mezcla cambia con la temporada: billeteras de cuero fue 19,8 % del exterior en INV 26 y 0 % en VER 26-27. La referencia avanza sola cuando cambia la versión oficial.
+- **El mismo criterio que la app de compras** (`RO_V_COMPRAS_PEND_PRESUPUESTO_COMPRAS`): exterior es el proveedor `Z%`, el rubro sale de `SOF_T_MAESTRO_ARTICULOS_RUBRO_CATEGORIA`.
+- **Lo comprado es recibido + pendiente**, sin las OC anuladas ni desautorizadas (estados 4 a 7). En una OC cerrada el pendiente es 0: el saldo que nunca llegó no cuenta.
+- **En unidades, no en importe.** Las OC nacionales están en pesos con una cotización cargada a mano y muchos renglones a precio 0: pasadas a dólares dan disparates (carteras de cuero de VER 25-26 daba U$S 23 M). Y el % se aplica a un FOB que es unidades × costo de importación.
+- **El total es el de las unidades sumadas**, no el promedio de los dos %. Debajo va el de cada temporada, y el tooltip trae las unidades.
+- **Sin OC no es 0 %.** Un rubro que no se compró en esas temporadas (cosmética, relojes, bijou: se compran con artículos atemporales o no se compraron) dice *sin OC*.
+- **Calzados no tiene referencia.** Se importan las partes y se arman en el país; el armador factura el servicio y tiene OC de proveedor nacional por el calzado terminado, que se paga por Proveedores Locales. Sus OC dirían "producción nacional" de algo que se importa: en VER 26-27, 97.158 unidades nacionales contra 11.550 del exterior. La lista vive en `ComprasProyectadasRubros::SIN_REFERENCIA_OC`.
+- **Se lee en vivo**, al abrir la sección: 0,42 s para las dos temporadas (26/11/2026). Si no se puede leer, la tabla se muestra sin la columna y un aviso lo dice.
+
+Lo que mostraba el 26/11/2026, con el que se fijaron los % del cuero:
+
+| Rubro | INV 26 (6W) ext / país | VER 26-27 (6S) ext / país | Según OC | % cargado |
+| --- | ---: | ---: | ---: | ---: |
+| Carteras de cuero | 6.420 / 8.953 (41,8 %) | 4.980 / 13.179 (27,4 %) | 34,0 % | 35 |
+| Billeteras de cuero | 1.700 / 6.872 (19,8 %) | 0 / 8.061 (0 %) | 10,2 % | 10 |
+| Cintos de cuero | 9.113 / 6.941 (56,8 %) | 9.048 / 5.008 (64,4 %) | 60,3 % | 60 |
+
+En INV 25 y VER 25-26 carteras y billeteras de cuero eran 100 % nacionales; cintos ya era 61-63 % importado. Con esos tres %, entran a la proyección unos U$S 523.500 de FOB que antes quedaban en 0 (presupuesto del 26/11/2026).
+
 ### El control de la vista se queda, como control
 
 `RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE` **se reutiliza tal cual**. Ya no explica un filtro deliberado: controla que no aparezca uno nuevo. La vista y la consulta del contraste usan el mismo criterio —`es_oficial = 1 AND eliminada = 0` y los mismos tres JOIN—, así que sin filtro tienen que dar lo mismo, y dan: **144 filas y U$S 6.965.385,74** de los dos lados, el 25/10/2026.

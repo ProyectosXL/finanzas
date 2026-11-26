@@ -1253,10 +1253,27 @@ class Parametros {
             $avisos[] = $control;
         }
 
+        $presupuesto = $datos->presupuestoPorRubro($pais);
+        $filas = ComprasProyectadasRubros::tablaParametros($presupuesto, $datos->pctVigentes());
+
+        /* LA REFERENCIA DE LAS OC: lo que se compro en el exterior la misma
+           temporada del anio anterior. Es informativa -no cambia ningun %- y
+           si no se puede leer, la tabla se muestra igual, sin la columna. */
+        $temporadas = ComprasProyectadasRubros::temporadasReferencia($presupuesto);
+        $lineas = $datos->ocPorTemporadaRubro(array_column($temporadas, 'codigo'));
+
+        if ($lineas === null) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer las OC de Tango: la referencia del '
+                . 'año anterior no se muestra. Los % importados no cambian.');
+        } else {
+            $filas = ComprasProyectadasRubros::conReferencia($filas,
+                ComprasProyectadasRubros::referenciaOc($lineas, $temporadas), $temporadas);
+        }
+
         return [
             'disponible' => !empty($e['rubro_pct']['tabla']),
-            'filas' => ComprasProyectadasRubros::tablaParametros(
-                $datos->presupuestoPorRubro($pais), $datos->pctVigentes()),
+            'filas' => $filas,
+            'referencia_temporadas' => ($lineas === null) ? [] : $temporadas,
             /* De cuándo es el presupuesto por rubro: "antes" sale de ahí. */
             'presupuesto_al' => ($e['presupuesto']['ok'] === null)
                 ? null : ComprasProyectadasDatos::fechaCorta($e['presupuesto']['ok']['fin']),

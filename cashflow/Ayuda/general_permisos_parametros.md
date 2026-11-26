@@ -3,7 +3,7 @@ titulo: Permisos y parámetros
 pestana:
 categoria: General
 estado: completa
-actualizado: 2026-11-23
+actualizado: 2026-11-26
 usuarios: Tesorería, Administración, Dirección
 bajada: Quién puede ver y quién puede editar cada pestaña, dónde queda registrado quién cambió qué, y qué se configura en Parámetros.
 ---
@@ -87,6 +87,25 @@ Desde acá se crean filas y secciones, se renombran, se mueven con las flechas y
 - Antes de guardar se revisa la estructura entera. Lo que dejaría un número mal —una fila activa sin origen de datos, dos filas leyendo lo mismo, que contarían dos veces el importe— no se guarda, y el mensaje dice qué pasaría.
 - Mover una fila con las flechas puede separar un concepto con parte real y proyectada: se avisa antes de guardar.
 - **No inhabilites las filas de stock de la cobertura**, **Inversiones disponibles** y **Dólares en cuenta comitente**. En el tablero no se ven, pero le dicen al motor cuánto hay en cada fondo: sin ellas, la cobertura rescata sin tope.
+
+### Parámetros › Compras Exterior: el % importado por rubro
+
+El presupuesto de la app de compras dice cuánto se va a comprar de cada rubro, pero no si se compra afuera o en el país. El **% importado** es la parte de cada rubro que se compra en el exterior, y es lo único de ese rubro que entra en la proyección de pagos al exterior y de nacionalizaciones:
+
+- **100 %**: el rubro entra completo.
+- **0 %**: no se proyecta; se compra o se fabrica en el país.
+- **Un valor intermedio**, por ejemplo 35 %: se proyecta esa parte de su FOB.
+
+Un rubro nuevo que todavía no tiene % entra al 100 % y se avisa hasta que alguien le asigna uno. Cada cambio queda en el historial del rubro, con quién y cuándo. El cambio se ve en la proyección después de **Recalcular la proyección**, o en la próxima corrida automática.
+
+**La columna Según OC** muestra qué parte del rubro se compró en el exterior **la misma temporada del año anterior**, según las órdenes de compra de Tango: para el invierno, el invierno anterior; para el verano, el verano anterior. Está para revisar el % con datos al lado, y **no lo cambia**: el % lo decidís vos.
+
+- Arriba va el % de las dos temporadas juntas, y abajo el de cada una con el código del artículo (`6W` es el invierno 2026, `6S` el verano 2026-27). Pasando el mouse se ven las unidades.
+- Se cuenta en **unidades**, lo recibido más lo pendiente de cada OC, sin las anuladas. Una OC a un proveedor del exterior (código que empieza con Z) cuenta como importada; el resto, como del país.
+- **sin OC**: el rubro no tuvo órdenes de compra en esas temporadas. No quiere decir 0 %.
+- **no aplica**: en Calzados las OC no sirven de referencia. Se importan las partes y se arman en el país, y el armador factura el servicio con una OC de proveedor nacional.
+
+Si el % de un rubro está lejos de lo que dicen las OC, puede haber un motivo: un rubro que recién empieza a importarse o una temporada atípica. La referencia muestra lo que pasó; lo que se va a comprar lo sabe Compras.
 
 ## Cómo carga Parámetros
 
