@@ -56,8 +56,8 @@ DECLARE @PERMISOS TABLE (clave VARCHAR(100) PRIMARY KEY, nombre VARCHAR(100), de
 
 INSERT INTO @PERMISOS (clave, nombre, descripcion) VALUES
 ('cashflow.tab.llaves_renov',               'Ver: Llaves y Renov. Contratos',            '[RRHH y Operativos] Llaves y renovaciones de contratos de locales, obras de imagen y aperturas'),
-('cashflow.editar.llaves_renov',            'Editar Llaves y Renov. Contratos',          '[Edición] Llaves y Renovaciones: acciones de la pestaña'),
-('cashflow.editar.parametros.llaves_renov', 'Editar Parámetros > Llaves y Renovaciones', '[Edición] Parámetros > Llaves y Renovaciones: generales, operadores, locales, ya pagadas, obras, aperturas y compromisos');
+('cashflow.editar.llaves_renov',            'Editar: Llaves y Renovaciones',          '[RRHH y Operativos] Acciones de la pestaña Llaves y Renovaciones'),
+('cashflow.editar.parametros.llaves_renov', 'Editar: Parám. Llaves y Renov.', '[Configuración y Parámetros] Generales, operadores, locales, ya pagadas, obras, aperturas y compromisos');
 
 INSERT INTO dbo.FP_PERMISOS (modulo_id, clave, nombre, descripcion)
 SELECT @MODULO, P.clave, P.nombre, P.descripcion

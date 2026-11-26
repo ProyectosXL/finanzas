@@ -27,7 +27,8 @@
    tests/test_auth_cashflow.php verifica que las claves de este script sean
    las que pide el codigo.
 
-   Reejecutable: va con NOT EXISTS. No borra ni modifica nada existente.
+   Reejecutable: da de alta con NOT EXISTS y deja el nombre y la descripcion
+   de las tres claves como estan abajo. No toca modulo ni roles, y no borra nada.
    ========================================================================== */
 
 SET NOCOUNT ON;
@@ -50,10 +51,16 @@ IF @MODULO <> 7
 
 DECLARE @PERMISOS TABLE (clave VARCHAR(100) PRIMARY KEY, nombre VARCHAR(100), descripcion VARCHAR(255));
 
+/* EL HUB AGRUPA POR LO QUE VA ENTRE CORCHETES al principio de la
+   descripcion: la categoria del menu de la solapa ([Financiero]) o
+   [Configuracion y Parametros] para la sub-pestaña de Parametros, igual que el
+   resto de los cashflow.tab.% y cashflow.editar.%. El nombre, "Ver: ..." o
+   "Editar: ...". Una primera version de este script uso [Edicion] y quedaron
+   en una seccion aparte del hub: por eso el UPDATE de abajo. */
 INSERT INTO @PERMISOS (clave, nombre, descripcion) VALUES
-('cashflow.tab.prestamos',               'Ver: Préstamos',                 '[Financiero] Préstamos bancarios: cronograma, proyección y simulador'),
-('cashflow.editar.prestamos',            'Editar Préstamos',               '[Edición] Préstamos: alta, edición, cronograma, cambio de estado, cancelaciones y simulaciones'),
-('cashflow.editar.parametros.prestamos', 'Editar Parámetros > Préstamos',  '[Edición] Parámetros > Préstamos: costos, comisión de cancelación, tasas y simulador');
+('cashflow.tab.prestamos',               'Ver: Préstamos',           '[Financiero] Préstamos bancarios: cronograma, proyección y simulador'),
+('cashflow.editar.prestamos',            'Editar: Préstamos',        '[Financiero] Alta, edición, cronograma, cambio de estado, cancelaciones y simulaciones de préstamos'),
+('cashflow.editar.parametros.prestamos', 'Editar: Parám. Préstamos', '[Configuración y Parámetros] Costos asociados, comisión de cancelación, tasas de referencia y simulador');
 
 INSERT INTO dbo.FP_PERMISOS (modulo_id, clave, nombre, descripcion)
 SELECT @MODULO, P.clave, P.nombre, P.descripcion
@@ -62,7 +69,17 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.FP_PERMISOS X WHERE X.clave = P.clave);
 
 PRINT CONCAT('Permisos de Prestamos: ', @@ROWCOUNT, ' nuevos de 3. No se asigno ningun rol.');
 
-/* ---- Control: no inserta ni modifica nada mas ---- */
+/* Las que ya existian, con el nombre y la descripcion de arriba (sin tocar
+   modulo ni roles). Solo cambia lo que es distinto. */
+UPDATE X
+SET X.nombre = P.nombre, X.descripcion = P.descripcion
+FROM dbo.FP_PERMISOS X
+JOIN @PERMISOS P ON P.clave = X.clave
+WHERE ISNULL(X.nombre, '') <> P.nombre OR ISNULL(X.descripcion, '') <> P.descripcion;
+
+PRINT CONCAT('Permisos de Prestamos con nombre o descripcion corregidos: ', @@ROWCOUNT, '.');
+
+/* ---- Control: como quedaron (no asigna ni quita roles) ---- */
 SELECT X.id, X.modulo_id, X.clave, X.nombre, X.descripcion
 FROM dbo.FP_PERMISOS X
 JOIN @PERMISOS P ON P.clave = X.clave
