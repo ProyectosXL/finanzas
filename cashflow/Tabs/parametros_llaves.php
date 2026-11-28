@@ -130,7 +130,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                             <th>Operador</th>
                             <th>Locales</th>
                             <th style="width: 110px;">% de llave</th>
-                            <th style="width: 110px;" title="(Comisiones + FPC) / llave">% otros gastos</th>
+                            <th style="width: 110px;" title="Comisiones / llave estimada. Se pagan en las mismas cuotas que la llave">% comisiones</th>
+                            <th style="width: 110px;" title="FPC / llave estimada. Se paga en la firma">% FPC</th>
                             <th style="width: 140px;" title="Un importe en $ por renovación, sin impuestos">Escribano y otros</th>
                             <th style="width: 110px;" title="Lo que factura de más sobre la llave y los otros gastos">% impuestos</th>
                             <th style="width: 90px;">Cuotas</th>

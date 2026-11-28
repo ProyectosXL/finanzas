@@ -333,6 +333,11 @@ class Llaves {
 
         if (!$tablas) {
             $avisos[] = Aviso::nuevo(Aviso::DANGER, $this->par->avisoSinTabla());
+        } elseif (!$this->par->ajustes()['todo']) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta correr ' . LlavesParametros::SCRIPT_AJUSTES . ' contra la base '
+                . 'central: hasta entonces no se pueden cargar el % de comisiones ni el de FPC (las comisiones y el FPC '
+                . 'estimados no se proyectan), «Ya pagada» pide monto y las facturas no se marcan como Comisiones o FPC.',
+                'Por operador');
         }
 
         $gen = $par['generales'];
@@ -429,6 +434,10 @@ class Llaves {
             'segmentos' => LlavesParametros::SEGMENTOS,
             'formas' => LlavesParametros::FORMAS,
             'conceptos_pagada' => LlavesParametros::CONCEPTOS_PAGADA,
+            /* Que partes del script 73 ya se corrieron: sin ellas, sus campos se ven deshabilitados. */
+            'ajustes' => $tablas ? $this->par->ajustes() : ['pagada_sin_monto' => false, 'pct_separados' => false,
+                                                           'conceptos_factura' => false, 'todo' => false],
+            'script_ajustes' => LlavesParametros::SCRIPT_AJUSTES,
             'avisos' => $avisos
         ];
     }

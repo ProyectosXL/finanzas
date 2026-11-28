@@ -500,7 +500,7 @@ $r = LlavesCalculo::proyectar($e);
 chequear('un contrato viejo con llave no genera avisos de impuestos ni de cuotas pasadas', [false, false, []],
     [strpos(llTextos($r), 'Cuotas de contratos firmados') !== false, strpos(llTextos($r), 'impuestos') !== false, $r['pagos']]);
 
-seccion('LlavesSugeridos: el % de llave y de otros gastos por operador, con las renovaciones de la app');
+seccion('LlavesSugeridos: el % de llave, de comisiones y de FPC por operador, con las renovaciones de la app');
 
 require_once __DIR__ . '/../Class/LlavesSugeridos.php';
 
@@ -515,7 +515,16 @@ $contr = [
 $sug = LlavesSugeridos::porOperador([6 => 'SAPALA', 29 => 'SAROSA', 60 => 'SAUNIC'], $contr, [6 => ['2026-01' => 7491362.0]],
     [6 => 'AVELLANEDA']);
 chequear('Avellaneda: 75 M / (7.491.362 × 36) = 27,81 %', 27.81, $sug['SAPALA']['pct_llave'] ?? null);
-chequear('otros gastos: (29,45 M + 7,5 M) / 75 M = 49,27 %', 49.27, $sug['SAPALA']['pct_otros'] ?? null);
+chequear('comisiones y FPC, cada uno por separado: 29,45 M / 75 M = 39,27 % y 7,5 M / 75 M = 10 %', [39.27, 10.0, false],
+    [$sug['SAPALA']['pct_comisiones'] ?? null, $sug['SAPALA']['pct_fpc'] ?? null, isset($sug['SAPALA']['pct_otros'])]);
+chequear('con el detalle de cada renovación, para el tooltip', [29452304.0, 39.27, 7500000.0, 10.0],
+    array_map(function ($k) use ($sug) { return $sug['SAPALA']['renovaciones'][0][$k] ?? null; },
+        ['comisiones', 'pct_comisiones', 'fpc', 'pct_fpc']));
+/* Ponderado por la llave: una renovación grande pesa más que una chica. */
+$contrP = [6 => array_merge($contr[6], [llContrato(99, '2029-01-15', '2030-01-14', 25000000.0, 0.0, 5000000.0)])];
+$sugP = LlavesSugeridos::porOperador([6 => 'SAPALA'], $contrP, [], []);
+chequear('ponderado por la llave: (29,45 M + 0) / 100 M y (7,5 M + 5 M) / 100 M', [29.45, 12.5],
+    [$sugP['SAPALA']['pct_comisiones'] ?? null, $sugP['SAPALA']['pct_fpc'] ?? null]);
 chequear('183 días de hueco no es una renovación', false, isset($sug['SAROSA']));
 chequear('la llave = 1 no mide', false, isset($sug['SAUNIC']));
 

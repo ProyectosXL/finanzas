@@ -31,9 +31,12 @@ chequearLanza('una clave que no existe', function () { LlavesParametros::validar
 
 seccion('LlavesParametros: por operador, vacío no es 0');
 
-$v = LlavesParametros::validarOperador(['pct_llave' => '', 'pct_otros' => '43,8', 'escribano' => '0',
-                                        'pct_impuestos' => '', 'cuotas' => '', 'corrimiento' => '-3']);
-chequear('vacío es null', [null, null, null], [$v['pct_llave'], $v['pct_impuestos'], $v['cuotas']]);
+$v = LlavesParametros::validarOperador(['pct_llave' => '', 'pct_comisiones' => '33,8', 'pct_fpc' => '', 'escribano' => '0',
+                                        'pct_impuestos' => '', 'cuotas' => '', 'corrimiento' => '-3', 'pct_otros' => '43,8']);
+chequear('vacío es null', [null, null, null, null], [$v['pct_llave'], $v['pct_fpc'], $v['pct_impuestos'], $v['cuotas']]);
+chequear('el % de comisiones con coma decimal', 33.8, $v['pct_comisiones']);
+chequear('el % de otros gastos ya no se valida ni se guarda', false, array_key_exists('pct_otros', $v));
+chequearLanza('el % de FPC es un número >= 0', function () { LlavesParametros::validarOperador(['pct_fpc' => '-1']); });
 chequear('0 en el escribano es 0', 0.0, $v['escribano']);
 chequear('el corrimiento puede ser negativo', -3, $v['corrimiento']);
 chequearLanza('el corrimiento tiene tope', function () { LlavesParametros::validarOperador(['corrimiento' => '30']); });
@@ -240,3 +243,23 @@ foreach (['Class/LlavesCalculo.php', 'Class/Llaves.php', 'Class/LlavesSugeridos.
 }
 
 chequear('ningun texto de la pantalla de Llaves dice "1 + 2 + 8"', [], $sinNumeros);
+
+seccion('El script 73 (sql/cashflow_llaves_ajustes.sql)');
+
+$s73 = (string) file_get_contents(__DIR__ . '/../' . LlavesParametros::SCRIPT_AJUSTES);
+chequear('MONTO de «Ya pagada» acepta vacío, con su CHECK rehecho', [true, true], [
+    strpos($s73, 'ALTER COLUMN MONTO DECIMAL(18,2) NULL') !== false,
+    strpos($s73, 'CHECK (MONTO IS NULL OR MONTO > 0)') !== false]);
+chequear('agrega PCT_COMISIONES y PCT_FPC por operador, vacíos, y no toca PCT_OTROS', [true, true, false], [
+    strpos($s73, 'ADD PCT_COMISIONES DECIMAL(7,2) NULL') !== false, strpos($s73, 'ADD PCT_FPC DECIMAL(7,2) NULL') !== false,
+    (bool) preg_match('/(UPDATE|ALTER)[^;]*PCT_OTROS/', $s73)]);
+chequear('las facturas admiten COMISIONES y FPC, y siguen admitiendo OTROS', true,
+    strpos($s73, "CHECK (CONCEPTO IN ('LLAVE', 'OTROS', 'COMISIONES', 'FPC', 'OBRA'))") !== false);
+chequear('reejecutable: cada parte pregunta antes', true, strpos($s73, "COLUMNPROPERTY(OBJECT_ID('dbo.RO_T_CASHFLOW_LLAVES_PAGADA'), 'MONTO', 'AllowsNull') = 1") !== false
+    && strpos($s73, "COL_LENGTH('dbo.RO_T_CASHFLOW_LLAVES_OPERADOR', 'PCT_COMISIONES') IS NULL") !== false
+    && strpos($s73, "definition LIKE '%COMISIONES%'") !== false);
+chequear('no borra datos', 0, preg_match('/\b(DELETE|TRUNCATE|DROP TABLE)\b/i', $s73));
+chequear('informa las marcas OTROS vigentes y los operadores con % de otros gastos', true,
+    strpos($s73, "WHERE VIGENTE = 1 AND CONCEPTO = 'OTROS'") !== false && strpos($s73, 'WHERE VIGENTE = 1 AND PCT_OTROS IS NOT NULL') !== false);
+chequear('guardarOperador no escribe PCT_OTROS', false,
+    strpos(file_get_contents(__DIR__ . '/../Class/LlavesParametros.php'), 'PCT_OTROS, ESCRIBANO') !== false);

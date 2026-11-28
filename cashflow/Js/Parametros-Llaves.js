@@ -144,12 +144,16 @@
         var ops = datos.operadores || [];
 
         if (!ops.length) {
-            cuerpo.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">No hay razones sociales dadas de alta '
+            cuerpo.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No hay razones sociales dadas de alta '
                 + 'en Parámetros › Alquileres.</td></tr>';
             return;
         }
 
         var g = datos.generales || {};
+        /* Sin el script 73 el % de comisiones y el de FPC no tienen donde
+           guardarse: se ven deshabilitados y nombran el script. */
+        var separados = !!(datos.ajustes && datos.ajustes.pct_separados);
+        var SIN_73 = 'Falta correr ' + (datos.script_ajustes || 'el script de ajustes') + ' contra la base central.';
 
         cuerpo.innerHTML = ops.map(function(o) {
             var v = o.valores || {};
@@ -161,8 +165,10 @@
                 + '<td><small>' + esc(o.locales.join(', ') || '—') + '</small></td>'
                 + '<td>' + campo('pct_llave', v.pct_llave, sug.pct_llave !== undefined && sug.pct_llave !== null
                     ? numero(sug.pct_llave) : numero(g.PCT_LLAVE), tipRenovaciones(sug, 'pct')) + '</td>'
-                + '<td>' + campo('pct_otros', v.pct_otros, sug.pct_otros !== undefined && sug.pct_otros !== null
-                    ? numero(sug.pct_otros) : 'sin dato', tipRenovaciones(sug, 'pct_otros')) + '</td>'
+                + '<td>' + campo('pct_comisiones', v.pct_comisiones, sug.pct_comisiones !== undefined && sug.pct_comisiones !== null
+                    ? numero(sug.pct_comisiones) : 'sin dato', separados ? tipRenovaciones(sug, 'comisiones') : SIN_73, !separados) + '</td>'
+                + '<td>' + campo('pct_fpc', v.pct_fpc, sug.pct_fpc !== undefined && sug.pct_fpc !== null
+                    ? numero(sug.pct_fpc) : 'sin dato', separados ? tipRenovaciones(sug, 'fpc') : SIN_73, !separados) + '</td>'
                 + '<td>' + campo('escribano', v.escribano, 'sin dato', 'Vacío = sin dato (avisa). Cargá 0 si no hay.') + '</td>'
                 + '<td>' + campo('pct_impuestos', v.pct_impuestos, imp.pct !== undefined && imp.pct !== null ? numero(imp.pct) : 'sin dato',
                     tipImpuestos(imp)) + '</td>'
@@ -186,7 +192,8 @@
             return r.local + ' #' + r.id + ' (' + fecha(r.desde) + ', ' + r.meses + ' meses): '
                 + (campo === 'pct'
                     ? (r.pct === null ? 'sin alquiler del primer mes' : 'llave ' + plata(r.llave) + ' / (' + plata(r.alquiler) + ' × ' + r.meses + ') = ' + numero(r.pct) + '%')
-                    : '(comisiones + FPC) ' + plata(r.otros) + ' / llave ' + plata(r.llave) + ' = ' + numero(r.pct_otros) + '%');
+                    : (campo === 'comisiones' ? 'comisiones ' : 'FPC ') + plata(r[campo]) + ' / llave ' + plata(r.llave) + ' = '
+                      + numero(r['pct_' + campo]) + '%');
         }).join('; ') + '.';
     }
 
