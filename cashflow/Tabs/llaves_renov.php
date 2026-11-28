@@ -106,7 +106,7 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
                     <div>
                         <h5 class="mb-0">Proyección por operador</h5>
                         <small class="text-muted">
-                            Cada operador se abre en sus locales y cada local en llave, otros gastos y obra. Lo
+                            Cada operador se abre en sus locales y cada local en llave, comisiones, FPC, escribano y otros y obra. Lo
                             <em class="ll-estimado-muestra">estimado</em> va en itálica y atenuado. Pasá el mouse por
                             un importe para ver de dónde sale y la cuenta.
                         </small>

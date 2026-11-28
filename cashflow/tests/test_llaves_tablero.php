@@ -43,7 +43,7 @@ $entrada = [
     'par' => ['tablas_ok' => true,
               'generales' => ['PCT_LLAVE' => 25.0, 'CUOTAS' => 4.0, 'DIA_PAGO' => 15.0, 'CORTE_CHICO' => 84.0, 'CORTE_MEDIANO' => 110.0,
                               'USD_OBRA_GRANDE' => 10000.0],
-              'operadores' => ['SAARCO' => ['pct_impuestos' => 21.0, 'pct_otros' => 40.0, 'escribano' => 300000.0],
+              'operadores' => ['SAARCO' => ['pct_impuestos' => 21.0, 'pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 300000.0],
                                'SAPAMA' => ['pct_impuestos' => 24.5], 'SAPALA' => ['pct_impuestos' => 31.0]],
               'locales' => [], 'pagadas' => [],
               'obras' => [['id' => 1, 'nro' => 78, 'mes' => '2027-03', 'segmento' => null, 'costo_usd' => null, 'observacion' => null]],
@@ -56,7 +56,15 @@ $entrada = [
     'curva' => ['2027-03' => ['clave' => '2027-03', 'simbolo' => 'DLR032027', 'cotizacion' => 1500.0]],
     'facturas' => [['id' => 3, 'nro' => 7, 'concepto' => 'LLAVE', 'ant' => 34, 'contrato' => null, 'mes' => '2027-07',
                     'pagada' => false, 'cod_provee' => 'SAPALA', 'comprobante' => 'FAC A0003000013817', 'texto' => '',
-                    'pagos' => [['fecha' => '2026-11-27', 'importe' => 46375000.0], ['fecha' => '2027-01-27', 'importe' => 46375000.0]]]],
+                    'pagos' => [['fecha' => '2026-11-27', 'importe' => 46375000.0], ['fecha' => '2027-01-27', 'importe' => 46375000.0]]],
+                   /* Las comisiones de DOT, facturadas: reemplazan sólo sus comisiones (el FPC del #91 sigue). */
+                   ['id' => 4, 'nro' => 66, 'concepto' => 'COMISIONES', 'ant' => 32, 'contrato' => 91, 'mes' => '2026-10',
+                    'pagada' => false, 'cod_provee' => 'SAPAMA', 'comprobante' => 'FAC A0002000000100', 'texto' => '',
+                    'pagos' => [['fecha' => '2026-12-10', 'importe' => 20000000.0], ['fecha' => '2027-01-11', 'importe' => 8687000.0]]],
+                   /* El FPC de la renovación estimada de Arcos, facturado. */
+                   ['id' => 5, 'nro' => 78, 'concepto' => 'FPC', 'ant' => 22, 'contrato' => null, 'mes' => '2027-01',
+                    'pagada' => false, 'cod_provee' => 'SAARCO', 'comprobante' => 'FAC A0001400000600', 'texto' => '',
+                    'pagos' => [['fecha' => '2027-01-15', 'importe' => 3000000.0]]]],
     'operadores' => [], 'locales_nombres' => [78 => 'DISTRITO ARCOS', 66 => 'DOT', 7 => 'ABASTO', 79 => 'PARQUE BROWN']
 ];
 
@@ -68,6 +76,14 @@ sort($origenes);
 seccion('El escenario tiene todos los orígenes');
 
 chequear('contrato, estimado, factura y manual', ['CONTRATO', 'ESTIMADO', 'FACTURA', 'MANUAL'], $origenes);
+chequear('y los conceptos nuevos: comisiones estimadas en 4 cuotas y el escribano en la firma (Arcos)', [4, 1], [
+    count(array_filter($c['pagos'], function ($p) { return $p['concepto'] === 'COMISIONES' && $p['origen'] === 'ESTIMADO'; })),
+    count(array_filter($c['pagos'], function ($p) { return $p['concepto'] === 'ESCRIBANO'; }))]);
+chequear('las facturas de comisiones y de FPC reemplazan sólo su concepto', [0, 0, 2, 1], [
+    count(array_filter($c['pagos'], function ($p) { return $p['nro'] === 66 && $p['concepto'] === 'COMISIONES' && $p['origen'] !== 'FACTURA'; })),
+    count(array_filter($c['pagos'], function ($p) { return $p['nro'] === 78 && $p['concepto'] === 'FPC' && $p['origen'] !== 'FACTURA'; })),
+    count(array_filter($c['pagos'], function ($p) { return $p['concepto'] === 'COMISIONES' && $p['origen'] === 'FACTURA'; })),
+    count(array_filter($c['pagos'], function ($p) { return $p['concepto'] === 'FPC' && $p['origen'] === 'FACTURA'; }))]);
 chequear('y una obra en U$S', true, count(array_filter($c['pagos'], function ($p) { return $p['concepto'] === 'OBRA'; })) === 1);
 chequear('la factura de Abasto reemplazó su llave estimada', [], array_values(array_filter($c['pagos'], function ($p) {
     return $p['nro'] === 7 && $p['concepto'] === 'LLAVE' && $p['origen'] === 'ESTIMADO'; })));
@@ -102,10 +118,20 @@ foreach (['dias', 'meses'] as $rama) {
 }
 
 chequear('REAL + PROYECTADO = PAGOS en cada columna', [], $partes);
-chequear('REAL son sólo las facturas', 92750000.0, $sumaSerie($series['REAL']));
+chequear('REAL son sólo las facturas (llave de Abasto, comisiones de DOT, FPC de Arcos)', 92750000.0 + 28687000.0 + 3000000.0, $sumaSerie($series['REAL']));
 chequear('lo estimado se anota en su celda, sin sumar', true, !empty($series['PROYECTADO']['detalle'])
     && $sumaSerie($series['PROYECTADO']) === round(array_sum(array_column(array_filter($c['pagos'], function ($x) {
         return $x['origen'] !== 'FACTURA'; }), 'importe')), 2));
+
+$notas = implode(' | ', array_column($series['PROYECTADO']['detalle'], 'nota'));
+chequear('el tooltip de lo estimado nombra el concepto (Comisiones), no «Otros gastos»', [true, false],
+    [strpos($notas, 'DISTRITO ARCOS Comisiones') !== false, strpos($notas, 'Otros gastos') !== false]);
+$idsP = array_column($p['filas'], 'id');
+chequear('la pestaña abre el local en Llave, Comisiones, Escribano y otros y Obra (los que tienen pagos)', [true, true, true, true],
+    array_map(function ($c) use ($idsP) { return in_array('C|ARCOS DEL GOURMET|78|' . $c, $idsP, true); },
+        ['LLAVE', 'COMISIONES', 'ESCRIBANO', 'OBRA']));
+chequear('y el FPC facturado de Arcos va bajo FPC; sin marca vieja no hay fila de «Otros gastos»', [true, false],
+    [in_array('C|ARCOS DEL GOURMET|78|FPC', $idsP, true), in_array('C|ARCOS DEL GOURMET|78|OTROS', $idsP, true)]);
 
 seccion('El tablero: el módulo y la fila agrupada');
 

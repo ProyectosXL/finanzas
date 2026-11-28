@@ -611,7 +611,7 @@ class Llaves {
         $meses = $h->mesesSet();
 
         foreach ($c['pagos'] as $p) {
-            $agrupa = in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS, LlavesCalculo::OBRA], true)
+            $agrupa = in_array($p['concepto'], array_merge(LlavesCalculo::DE_RENOVACION, [LlavesCalculo::OBRA]), true)
                 && $p['nro'] !== null;
 
             if ($agrupa) {
@@ -695,9 +695,13 @@ class Llaves {
                 $l = $locales[$nro] ?? ['nombre' => $ins['nombres'][$nro] ?? ('Local ' . $nro), 'estado' => null];
                 $agregar('L|' . $op . '|' . $nro, 1, 'O|' . $op, $l['nombre'], (string) $nro, 'LOCAL');
 
-                foreach ([LlavesCalculo::LLAVE, LlavesCalculo::OTROS, LlavesCalculo::OBRA] as $con) {
+                /* Llave, Comisiones, FPC, Escribano y otros y Obra de imagen. "Otros
+                   gastos (marca anterior)" solo aparece con una factura marcada con
+                   el concepto viejo: $agregar() saltea una fila sin pagos. */
+                foreach (array_merge(LlavesCalculo::DE_RENOVACION, [LlavesCalculo::OBRA]) as $con) {
                     $agregar('C|' . $op . '|' . $nro . '|' . $con, 2, 'L|' . $op . '|' . $nro,
-                        LlavesCalculo::NOMBRE_CONCEPTO[$con], '', 'CONCEPTO');
+                        ($con === LlavesCalculo::OTROS) ? 'Otros gastos (marca anterior)' : LlavesCalculo::NOMBRE_CONCEPTO[$con],
+                        '', 'CONCEPTO');
                 }
             }
         }
@@ -737,7 +741,7 @@ class Llaves {
         foreach ($c['pagos'] as $p) {
             $clave = $p['clave_renovacion'] ?? $p['clave'] ?? null;
 
-            if (in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true) && !empty($clave)) {
+            if (in_array($p['concepto'], LlavesCalculo::DE_RENOVACION, true) && !empty($clave)) {
                 $renovaciones[$clave] = true;
             }
         }
@@ -752,7 +756,7 @@ class Llaves {
                 'total' => $sum(function () { return true; }),
                 'renovaciones_n' => count($renovaciones),
                 'renovaciones_importe' => $sum(function ($p) {
-                    return in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true);
+                    return in_array($p['concepto'], LlavesCalculo::DE_RENOVACION, true);
                 }),
                 'estimado' => $sum(function ($p) { return $p['origen'] === LlavesCalculo::ESTIMADO; }),
                 'firme' => $sum(function ($p) { return in_array($p['origen'], [LlavesCalculo::CONTRATO, LlavesCalculo::FACTURA], true); }),
@@ -788,7 +792,8 @@ class Llaves {
                 }, $rens ?: [['notas' => []]])),
                 'renovaciones' => array_map(function ($r) {
                     return ['tipo' => $r['tipo'], 'ant' => $r['ant'], 'contrato' => $r['contrato'], 'inicio' => $r['inicio'],
-                            'mes1' => $r['mes1'], 'cuotas' => $r['cuotas'], 'llave' => $r['llave'], 'otros' => $r['otros']];
+                            'mes1' => $r['mes1'], 'cuotas' => $r['cuotas'], 'llave' => $r['llave'], 'comisiones' => $r['comisiones'] ?? null,
+                            'fpc' => $r['fpc'] ?? null, 'escribano' => $r['escribano'] ?? null];
                 }, $rens),
                 'pagadas' => array_merge(...array_values($l['pagadas'] ?: [[]])),
                 'cantidad_contratos' => count($l['contratos'])

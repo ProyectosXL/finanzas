@@ -123,6 +123,8 @@ $llOt = array_filter($cF['pagos'], function ($x) {
     return in_array($x['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true);
 });
 chequear('la factura no suma una renovacion de mas', 2, $pF['kpis']['renovaciones_n']);
+$filaVieja = array_values(array_filter($pF['filas'], function ($f) { return $f['id'] === 'C|PANAMERICAN MALL|66|OTROS'; }));
+chequear('una marca vieja de «Otros gastos» tiene su propia fila', 'Otros gastos (marca anterior)', $filaVieja[0]['nombre'] ?? null);
 chequear('y su importe esta en la suma, con lo proyectado', round(array_sum(array_column($llOt, 'importe')), 2),
     $pF['kpis']['renovaciones_importe']);
 chequear('que incluye la factura', true, $pF['kpis']['renovaciones_importe'] - $p['kpis']['renovaciones_importe'] >= 500000.0 - 0.01);

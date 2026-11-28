@@ -56,7 +56,7 @@
 
         texto('llKpiTotal', plata(k.total));
         texto('llKpiRen', String(k.renovaciones_n));
-        texto('llKpiRenPie', plata(k.renovaciones_importe) + ' de llave y otros gastos');
+        texto('llKpiRenPie', plata(k.renovaciones_importe) + ' de llave, comisiones, FPC y otros gastos');
         texto('llKpiEst', plata(k.estimado));
         texto('llKpiEstPie', 'contra ' + plata(k.firme) + ' en un contrato o una factura y ' + plata(k.manual) + ' cargado a mano');
         texto('llKpiSinDato', String(k.sin_dato_n));
