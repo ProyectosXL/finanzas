@@ -37,8 +37,11 @@ chequear('el tope de verdad esta en el codigo, no en el CHECK', [50, false],
     [Proveedores::MAX_PARTES, strpos($sqlN, 'ORDEN <= ') !== false]);
 chequear('la clase lo nombra', 'sql/cashflow_prov_locales_pago_n_medios.sql', Proveedores::SCRIPT_N_MEDIOS);
 
+/* Sin CRLF: el fin del metodo se busca como "\n    }\n", que en una copia de
+   trabajo con CRLF no aparece. strpos() da false y el cuerpo sale vacio, asi
+   que el chequeo falla aunque el codigo este bien. */
 $cuerpoN = function ($metodo) {
-    $src = file_get_contents(__DIR__ . '/../Class/Proveedores.php');
+    $src = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Proveedores.php'));
     $ini = strpos($src, 'function ' . $metodo . '(');
 
     return substr($src, $ini, strpos($src, "\n    }\n", $ini) - $ini);

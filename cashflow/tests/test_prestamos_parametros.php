@@ -124,7 +124,10 @@ chequear('con el id del parametro de donde salieron', 1, $copia['costos'][0]['id
 chequear('y la comision', [3.0, 2.0, true], [$copia['cancelacion']['pct_total'], $copia['cancelacion']['pct_parcial'], $copia['cancelacion']['iva']]);
 $costosParam[0]['pct'] = 2.5;
 chequear('cambiar Parametros despues no toca la copia', 1.2, $copia['costos'][0]['pct']);
-$src = file_get_contents(__DIR__ . '/../Class/PrestamosParametros.php');
+/* Sin CRLF: con core.autocrlf la copia de trabajo los tiene, y las regex de
+   abajo terminan en "\n    }\n". Sin normalizar no encuentran la funcion y
+   fallan aunque el codigo este bien. */
+$src = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/PrestamosParametros.php'));
 preg_match('/function editarPrestamo\(.*?\n    \}\n/s', $src, $m);
 chequear('editar un prestamo no relee los costos de Parametros', false, strpos($m[0] ?? '', 'costosParam') !== false);
 chequear('el calculo usa los costos del prestamo, no los de Parametros', false,
