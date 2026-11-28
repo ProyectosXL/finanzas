@@ -136,7 +136,10 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
             </div>
             <div class="card-body p-0">
                 <div class="cargando-slot" id="llSpinner" data-cargando="Proyectando llaves y renovaciones…"></div>
-                <div class="table-wrapper table-responsive" id="llWrapper" style="display: none;">
+                <!-- .tabla-temporal: el encabezado y el pie quedan fijos, y la columna
+                     «Operador · local · concepto» (col-fija-1, Js/columnas-fijas.js) queda
+                     fija al scrollear a lo ancho, como en Alquileres. -->
+                <div class="table-wrapper table-responsive tabla-temporal" id="llWrapper" style="display: none;">
                     <!-- data-orden="no": cada fila lleva sus hijas abajo, y ordenar las separaría. -->
                     <table id="tablaLlaves" class="table table-hover table-sm mb-0" data-orden="no">
                         <thead id="llThead"></thead>

@@ -1,5 +1,13 @@
 /* RRHH y Operativos › Llaves y Renov. Contratos */
 
+/* LA COLUMNA FIJA (col-fija-1 en .tabla-temporal, Css/main.css): un poco mas
+   ancha que el default, porque lleva la sangria del nivel y el chevron. El
+   fondo opaco lo pone main.css; en hover se repite el gris de .table-hover
+   para que la fila se lea entera y los importes no se vean por debajo. */
+#llWrapper { --col-texto-ancho: 300px; }
+#tablaLlaves tbody tr:hover td.col-fija-1 { background-color: #f2f2f2; }
+#tablaLlaves tbody td.col-fija-1 { max-width: var(--col-texto-ancho); overflow: hidden; text-overflow: ellipsis; }
+
 /* La jerarquia: operador, local, concepto. */
 #tablaLlaves tr.ll-n0 td:first-child { font-weight: 600; }
 #tablaLlaves tr.ll-n1 td:first-child { padding-left: 1.5rem; }

@@ -148,7 +148,8 @@
         var abierto = !!abiertos[f.id] || !!filtro;
 
         return '<tr class="ll-n' + f.nivel + (f.tipo === 'GRUPO' ? ' ll-grupo' : '') + '" data-id="' + esc(f.id) + '">'
-            + '<td>' + (tieneHijas ? '<span class="ll-toggle text-muted" data-toggle="' + esc(f.id) + '"><i class="fas fa-chevron-'
+            /* La columna fija (col-fija-1): si el nombre no entra, el title lo dice entero. */
+            + '<td title="' + esc(f.nombre + (f.sub ? ' ' + f.sub : '')) + '">' + (tieneHijas ? '<span class="ll-toggle text-muted" data-toggle="' + esc(f.id) + '"><i class="fas fa-chevron-'
                 + (abierto ? 'down' : 'right') + ' small"></i></span> ' : '<span class="ll-toggle"></span> ')
             + esc(f.nombre) + (f.sub ? ' <small class="text-muted">' + esc(f.sub) + '</small>' : '') + '</td>'
             + columnas.map(function(c) {

@@ -98,6 +98,15 @@ $js = file_get_contents(__DIR__ . '/../Js/Llaves.js');
 chequear('el JS usa las tres vistas, columnas fijas y los totales arriba del eje', true,
     strpos($js, 'crearEjeVistas(') !== false && strpos($js, 'crearColumnasFijas(') !== false && strpos($js, 'pintarEjeTotales(') !== false);
 
+seccion('Proyección: la columna de nombres queda fija al scrollear');
+
+chequear('la tabla está dentro de .tabla-temporal (el sticky de col-fija-N es de ese bloque)', 1,
+    preg_match('/<div class="[^"]*\btabla-temporal\b[^"]*" id="llWrapper"[^>]*>\s*(<!--.*?-->\s*)?<table id="tablaLlaves"/s', $tab));
+chequear('la primera columna es descriptiva (rowspan 2): columnas-fijas.js la toma', true,
+    strpos($js, '<th rowspan="2" class="col-texto">Operador · local · concepto</th>') !== false);
+chequear('y arranca fija: col-fija-1 en la columna 0', 1,
+    preg_match("/crearColumnasFijas\(\{ tabla: 'tablaLlaves',[^}]*porDefecto: \[0\] \}\)/", $js));
+
 seccion('Llaves::armarPestana(): la tarjeta Renovaciones cuenta y suma lo mismo, facturas incluidas');
 
 /* DOT renueva con el #91 (la llave del contrato, proyectada) y tiene una
