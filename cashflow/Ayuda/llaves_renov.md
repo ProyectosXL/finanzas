@@ -3,14 +3,14 @@ titulo: Llaves y Renov. Contratos
 pestana: llaves_renov
 categoria: RRHH y Operativos
 estado: completa
-actualizado: 2026-11-23
+actualizado: 2026-11-27
 usuarios: Tesorería, Administración
-bajada: Cuánto se paga de llave y otros gastos en cada renovación de contrato, de obras de imagen, de aperturas y de lo pactado a mano, y en qué fecha.
+bajada: Cuánto se paga de llave, comisiones, FPC y escribano en cada renovación de contrato, de obras de imagen, de aperturas y de lo pactado a mano, y en qué fecha.
 ---
 
 ## Para qué sirve
 
-Muestra cuánto se va a pagar, y cuándo, de la llave y los otros gastos de cada renovación de contrato de alquiler, de las obras de renovación de imagen, de las aperturas de locales nuevos y de los compromisos pactados a mano.
+Muestra cuánto se va a pagar, y cuándo, de cada renovación de contrato de alquiler —la llave, las comisiones, el FPC y el escribano, cada uno por separado—, de las obras de renovación de imagen, de las aperturas de locales nuevos y de los compromisos pactados a mano.
 
 Si el contrato nuevo ya está cargado en la app de alquileres, usa sus importes. Si todavía no está, estima la renovación con un porcentaje del alquiler.
 
@@ -51,7 +51,12 @@ Cada renovación se identifica por el contrato que vence. Por eso lo que se carg
 
 Si el contrato nuevo ya está en la app de alquileres, se usa su llave tal cual. Se paga en cuotas mensuales iguales y seguidas. La primera cuota va el día de inicio del contrato, movida por el corrimiento del operador si tiene uno.
 
-Las comisiones y el FPC del contrato van juntos, en un solo pago, el día de la primera cuota (la firma).
+Cada renovación se paga en cuatro conceptos, cada uno por su lado:
+
+- **Llave**: en las cuotas, como se acaba de explicar.
+- **Comisiones**: las del contrato, **en las mismas cuotas y en las mismas fechas que la llave**, repartidas en partes iguales. Cada cuota lleva impuestos y retención, como la llave. Si la llave no se proyecta porque ya está pagada o la reemplaza una factura, las comisiones igual van en las fechas que tendría la llave.
+- **FPC**: el del contrato, en **un solo pago el día de la primera cuota** (la firma), con impuestos y retención.
+- **Escribano y otros**: sólo en las renovaciones estimadas (ver más abajo).
 
 Vale para cualquier contrato con cuotas por delante, también el vigente si empezó hace poco.
 
@@ -64,7 +69,7 @@ Lo que se cargó para un local en Parámetros vale para su renovación. Cuando a
 - **Deja de valer lo que dice cuánto**: **No renueva**, **Llave a mano ($)**, **% propio** y **Meses**. Manda el importe del contrato.
 - **Sigue valiendo lo que dice cómo se paga**: **Cuotas** y **1.ª cuota**, también sobre el contrato cargado.
 
-En la sección **Por local** la renovación cargada sigue en la tabla, con **renueva con el #…** debajo del contrato. Ahí se pueden cambiar **Cuotas** y **1.ª cuota**; las otras columnas se ven deshabilitadas, y al pasar el mouse dicen que manda el contrato.
+En la sección **Por local** la renovación cargada sigue en la tabla mientras su contrato nuevo esté vigente o por venir y tenga alguna cuota desde el mes pasado en adelante. La columna **Contrato** muestra el contrato nuevo, y debajo, en chico, **renueva al #…**. Ahí se pueden cambiar **Cuotas** y **1.ª cuota**; las otras columnas se ven deshabilitadas, y al pasar el mouse dicen que manda el contrato. Cuando el contrato nuevo termina o todas sus cuotas quedan atrás, la renovación deja de verse en Por local; lo que se había cargado sigue guardado.
 
 ### La renovación estimada
 
@@ -72,7 +77,9 @@ Si el contrato vigente vence dentro del horizonte, o ya venció, y la renovació
 
 :::formula
 llave estimada = % de llave × alquiler del mes de la primera cuota (alquiler + complementario + VMA, como lo proyecta Alquileres) × meses
-otros gastos estimados = % de otros gastos × llave estimada + escribano
+comisiones estimadas = % de comisiones del operador × llave estimada (en las cuotas de la llave)
+FPC estimado = % de FPC del operador × llave estimada (en la firma)
+escribano y otros = el importe del operador por renovación (en la firma)
 a pagar de cada pago = neto + neto × % de impuestos del operador − neto × % de retención del local
 :::
 
@@ -82,25 +89,29 @@ a pagar de cada pago = neto + neto × % de impuestos del operador − neto × % 
 - **La primera cuota** va en el mes del día siguiente al fin del contrato vigente, más el corrimiento del operador, salvo que el local tenga cargado otro mes. Las demás van el mismo día de los meses siguientes.
 - **Si el contrato ya venció** sin renovación cargada, la primera cuota va al primer día hábil después de hoy, y la pantalla lo avisa.
 
-Sólo se estima llave si el contrato de llave tiene llave (cualquier importe mayor que cero, también la marca de 1). Es el mismo criterio que usa Costo de Ocupación. El contrato de llave es el vigente o, si el vigente es un contrato puente, el último anterior que no lo sea. Un contrato largo sin llave corta: ese local no estima llave, aunque sí sus otros gastos.
+Sólo se estima llave si el contrato de llave tiene llave (cualquier importe mayor que cero, también la marca de 1). Es el mismo criterio que usa Costo de Ocupación. El contrato de llave es el vigente o, si el vigente es un contrato puente, el último anterior que no lo sea. Un contrato largo sin llave corta: ese local no estima llave, ni comisiones ni FPC (son un % de la llave); sí el escribano.
 
 Si la pestaña Alquileres no tiene el alquiler de ese mes para el local, esa llave no se estima y se avisa.
 
 Una llave cargada a mano en Parámetros reemplaza la cuenta.
 
-### Los otros gastos
+### Comisiones, FPC y escribano
 
-En una renovación estimada, los otros gastos son el % de otros gastos del operador sobre la llave, más el escribano y otros. En una cargada, son las comisiones más el FPC del contrato.
+Son conceptos separados, cada uno con su fila, su chip de origen y su cuenta en el tooltip.
 
-Van en un solo pago, el día de la primera cuota. El escribano es un importe final: no lleva impuestos ni retención.
+- **Comisiones**: en una renovación cargada, las del contrato; en una estimada, el **% de comisiones** del operador sobre la llave estimada. Se pagan **en las mismas cuotas que la llave**.
+- **FPC**: en una cargada, el del contrato; en una estimada, el **% de FPC** del operador sobre la llave estimada. Un pago, **en la firma** (el día de la primera cuota).
+- **Escribano y otros**: sólo en una estimada; el importe por renovación del operador. Un pago, **en la firma**. Es un importe final: no lleva impuestos ni retención.
+
+Cada operador tiene **dos porcentajes**, uno de comisiones y otro de FPC. Si falta uno, ese concepto no se proyecta y un aviso dice cuál falta. Antes había un solo «% de otros gastos»; ya no se usa.
 
 ### Impuestos y retención
 
-A la llave y a los otros gastos se les suma el % de impuestos del operador (lo que factura de más sobre el contrato) y se les resta el % de retención del local, los dos sobre el neto. Se calcula cuota por cuota, con la misma regla de redondeo a centavos que Alquileres.
+A la llave, a las comisiones y al FPC se les suma el % de impuestos del operador (lo que factura de más sobre el contrato) y se les resta el % de retención del local, los dos sobre el neto. Se calcula cuota por cuota, con la misma regla de redondeo a centavos que Alquileres.
 
 Las cuotas se reparten en partes iguales al centavo: siempre suman exacto el total.
 
-Sin % de impuestos del operador, o sin % de retención del local, la llave y los otros gastos de ese local no se proyectan. Un aviso dice cuánto neto queda afuera. **El escribano sí se proyecta**, porque no lleva impuestos ni retención.
+Sin % de impuestos del operador, o sin % de retención del local, la llave, las comisiones y el FPC de ese local no se proyectan. Un aviso dice cuánto neto queda afuera. **El escribano sí se proyecta**, porque no lleva impuestos ni retención.
 
 :::ejemplo ilustrativo
 Un local cuyo contrato vence el 31 de marzo y no tiene la renovación cargada. La renovación empieza el 1 de abril. El operador no tiene corrimiento.
@@ -108,21 +119,24 @@ Un local cuyo contrato vence el 31 de marzo y no tiene la renovación cargada. L
 - Alquiler de abril (alquiler, complementario y VMA, como lo proyecta Alquileres): **$ 8.000.000**.
 - % de llave: 25 % (el general). Meses del contrato: 6. Cuotas: 4.
 - Llave estimada: 25 % × $ 8.000.000 × 6 = **$ 12.000.000**, en 4 cuotas de $ 3.000.000.
-- % de otros gastos del operador: 40 %. Otros gastos: 40 % × $ 12.000.000 = $ 4.800.000, más $ 300.000 de escribano.
+- % de comisiones del operador: 30 %. Comisiones: 30 % × $ 12.000.000 = $ 3.600.000, en las mismas 4 cuotas: $ 900.000 cada una.
+- % de FPC del operador: 10 %. FPC: 10 % × $ 12.000.000 = $ 1.200.000, en la firma.
+- Escribano y otros del operador: $ 300.000, en la firma.
 - % de impuestos del operador: 20 %. % de retención del local: 2 %.
 
 Cada cuota va el día 1 de su mes. Si ese día no es hábil, pasa al siguiente día hábil.
 
-| Pago | Mes | Neto | Impuestos (20 %) | Retención (2 %) | Escribano | A pagar |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| Llave, cuota 1 de 4 | Abril | $ 3.000.000 | $ 600.000 | $ 60.000 | — | $ 3.540.000 |
-| Llave, cuota 2 de 4 | Mayo | $ 3.000.000 | $ 600.000 | $ 60.000 | — | $ 3.540.000 |
-| Llave, cuota 3 de 4 | Junio | $ 3.000.000 | $ 600.000 | $ 60.000 | — | $ 3.540.000 |
-| Llave, cuota 4 de 4 | Julio | $ 3.000.000 | $ 600.000 | $ 60.000 | — | $ 3.540.000 |
-| Otros gastos, en la firma | Abril | $ 4.800.000 | $ 960.000 | $ 96.000 | $ 300.000 | $ 5.964.000 |
-| **Total** | | $ 16.800.000 | $ 3.360.000 | $ 336.000 | $ 300.000 | **$ 20.124.000** |
+| Pago | Mes | Neto | Impuestos (20 %) | Retención (2 %) | A pagar |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Llave, cuota 1 de 4 | Abril | $ 3.000.000 | $ 600.000 | $ 60.000 | $ 3.540.000 |
+| Comisiones, cuota 1 de 4 | Abril | $ 900.000 | $ 180.000 | $ 18.000 | $ 1.062.000 |
+| FPC, en la firma | Abril | $ 1.200.000 | $ 240.000 | $ 24.000 | $ 1.416.000 |
+| Escribano y otros, en la firma | Abril | $ 300.000 | — | — | $ 300.000 |
+| Llave, cuotas 2, 3 y 4 | Mayo, junio y julio | $ 3.000.000 cada una | $ 600.000 | $ 60.000 | $ 3.540.000 cada una |
+| Comisiones, cuotas 2, 3 y 4 | Mayo, junio y julio | $ 900.000 cada una | $ 180.000 | $ 18.000 | $ 1.062.000 cada una |
+| **Total** | | $ 17.100.000 | $ 3.360.000 | $ 336.000 | **$ 20.124.000** |
 
-En abril salen $ 3.540.000 + $ 5.964.000 = $ 9.504.000. En mayo, junio y julio, $ 3.540.000 cada mes.
+En abril salen $ 3.540.000 + $ 1.062.000 + $ 1.416.000 + $ 300.000 = $ 6.318.000. En mayo, junio y julio, $ 3.540.000 + $ 1.062.000 = $ 4.602.000 cada mes.
 :::
 
 ### Las obras y las aperturas
@@ -141,15 +155,17 @@ Lo pactado que no está en la app (prendas, sellados, servicio comercial, cuotas
 
 ### Las facturas marcadas como llave
 
-Una factura marcada con **Es llave / renovación** en Alquileres › Facturas es lo real. Reemplaza todo lo proyectado de su local y su concepto en esa renovación. Una factura de obra reemplaza la obra de ese local en ese mes.
+Una factura marcada con **Es llave / renovación** en Alquileres › Facturas es lo real. Se marca con uno de cuatro conceptos: **Llave**, **Comisiones**, **FPC** u **Obra**. Reemplaza todo lo proyectado de **su** concepto en esa renovación del local, y nada más: una factura de comisiones reemplaza sólo las comisiones. Una factura de obra reemplaza la obra de ese local en ese mes.
+
+Las facturas marcadas antes con el concepto «Otros gastos» se ven como **Otros gastos (marca anterior)**: siguen reemplazando las comisiones, el FPC y el escribano de esa renovación, y un aviso pide deshacerlas y volver a marcarlas con el concepto que corresponda.
 
 Se paga en los pagos que se le cargaron o, si no tiene, entera en su vencimiento a considerar. Un pago con fecha vencida pasa al siguiente día hábil desde hoy. Si la factura ya está pagada en Tango, no suma, pero sigue cortando lo proyectado.
 
 ### Lo que corta lo proyectado
 
 - **No renueva**: no se estima nada de esa renovación.
-- **Ya pagada**: el concepto marcado (la llave, los otros gastos o los dos) deja de proyectarse en esa renovación, cargada o estimada.
-- **Una factura marcada como llave**: reemplaza lo proyectado de ese concepto en esa renovación.
+- **Ya pagada**: lo marcado deja de proyectarse en esa renovación, cargada o estimada. **Llave** corta la llave; **Otros gastos** corta las comisiones, el FPC y el escribano.
+- **Una factura marcada como llave**: reemplaza lo proyectado de su concepto en esa renovación.
 - **Las fechas de hoy o anteriores**: lo proyectado con fecha de hoy o anterior no se muestra. Si una cuota de un contrato firmado ya pasó, en el mes en curso o el anterior, y no tiene factura ni marca de pagada, la pantalla lo avisa.
 
 ## La pantalla
@@ -168,13 +184,13 @@ La pantalla, de arriba hacia abajo:
 ### Las tarjetas
 
 - **Total del horizonte**: todo lo que se paga en el horizonte (llaves, renovaciones, obras, aperturas y compromisos).
-- **Renovaciones en el horizonte**: cuántas renovaciones tienen pagos de llave u otros gastos en el horizonte, facturas incluidas. Abajo, cuánto suman esos mismos pagos. Una factura cuenta en la renovación a la que se imputó: no suma una renovación aparte.
+- **Renovaciones en el horizonte**: cuántas renovaciones tienen pagos de llave, comisiones, FPC u otros gastos en el horizonte, facturas incluidas. Abajo, cuánto suman esos mismos pagos. Una factura cuenta en la renovación a la que se imputó: no suma una renovación aparte.
 - **Estimado**: cuánto de lo que se paga es estimado. Abajo, contra cuánto está en un contrato o una factura y cuánto se cargó a mano.
 - **Locales sin dato**: cuántos locales no proyectan algo porque falta un dato. Pasá el mouse por el pie para ver cuáles.
 
 ### La solapa Proyección
 
-La grilla se abre por operador; cada operador en sus locales; y cada local en **Llave**, **Otros gastos** y **Obra de imagen**. Aparte van **Aperturas** y **Compromisos a mano**. Tocá la flecha de una fila para abrirla.
+La grilla se abre por operador; cada operador en sus locales; y cada local en **Llave**, **Comisiones**, **FPC**, **Escribano y otros** y **Obra de imagen** (sólo los que tienen algo que pagar). Si el local tiene una factura marcada con el concepto viejo, aparece también **Otros gastos (marca anterior)**. Aparte van **Aperturas** y **Compromisos a mano**. Tocá la flecha de una fila para abrirla.
 
 - **Las tres vistas**: **Días**, **Meses** y **Período completo**. La pestaña abre en Período completo.
 - **Los totales**: el total de cada columna va arriba de su fecha y también al pie, en **TOTALES**.
@@ -184,13 +200,13 @@ La grilla se abre por operador; cada operador en sus locales; y cada local en **
 - **El buscador** filtra por operador o local.
 - **Abrir todo** abre o cierra todas las filas.
 - **Exportar** baja la grilla a Excel con todas las filas abiertas.
-- La primera columna queda fija al moverte a lo ancho.
+- **La columna «Operador · local · concepto» queda fija** al moverte a lo ancho, con los totales alineados. Si un nombre no entra, pasá el mouse para verlo entero.
 
 ### La solapa Contratos
 
 Es lo que era la hoja «Detalles de vencimientos»: una fila por local con el contrato vigente.
 
-Las columnas son **Local**, **Operador**, **Estado**, **Desde**, **Hasta**, **Meses**, **Llave**, **Comisiones**, **FPC**, **Renovación** (si la renovación está cargada en la app y desde cuándo), **m²** y **Segmento**. Debajo del nombre del local van las notas de lo que corta lo proyectado: no renueva, ya pagada, la factura que la reemplaza o que el contrato no tiene llave.
+Las columnas son **Local**, **Operador**, **Estado**, **Desde**, **Hasta**, **Meses**, **Llave**, **Comisiones**, **FPC**, **Renovación** (si la renovación está cargada en la app y desde cuándo), **m²** y **Segmento**. Debajo del nombre del local van las notas de lo que corta lo proyectado: no renueva, ya pagada (por ejemplo, «Ya pagada (llave) el 31/08/2026»; si se cargó un monto en Parámetros, también el importe), la factura que la reemplaza o que el contrato no tiene llave.
 
 Una llave de 1 se ve como «1» con un asterisco: tiene llave, pero el monto no se conoce y se estima.
 
@@ -218,10 +234,10 @@ Las facturas marcadas como llave o renovación en Alquileres › Facturas, con *
 1. Abrí la solapa **Contratos** y buscá el local.
 2. Tocá **Ya pagada** en su fila.
 3. Elegí la **Renovación**.
-4. En **Qué se pagó** vienen tildados **Llave** y **Otros gastos**. Escribí el monto de cada uno, o destildá el que no se pagó.
+4. En **Qué se pagó** vienen tildados **Llave** y **Otros gastos** (comisiones, FPC y escribano). Destildá el que no se pagó. No hace falta cargar importes.
 5. Cargá la **Fecha del pago** (hoy o antes) y, si querés, el **Comprobante** y una observación.
 6. Tocá **Marcar**.
-Resultado: lo marcado deja de proyectarse en esa renovación y aparece como nota en la fila del local. La marca sigue valiendo cuando se cargue el contrato nuevo.
+Resultado: lo marcado deja de proyectarse en esa renovación y aparece como nota en la fila del local, con la fecha. En **Proyección** desaparece lo de esa renovación. La marca sigue valiendo cuando se cargue el contrato nuevo.
 :::
 
 ### Marcar «Ya pagada» una renovación desde Parámetros
@@ -229,7 +245,7 @@ Resultado: lo marcado deja de proyectarse en esa renovación y aparece como nota
 :::pasos
 1. Andá a **Parámetros › Llaves y Renovaciones** (el enlace de arriba de la pestaña te lleva).
 2. En la sección **Ya pagadas**, elegí la **Renovación**.
-3. Cargá la **Fecha del pago** y el monto de **Llave ($)** y de **Otros gastos ($)**, o destildá el concepto que no se pagó.
+3. Cargá la **Fecha del pago** y destildá el concepto que no se pagó. El monto de **Llave ($)** y de **Otros gastos ($)** es opcional: sólo informa, no suma ni resta. Si lo cargás, tiene que ser mayor que cero.
 4. Si querés, cargá el **Comprobante** y una observación.
 5. Tocá **Marcar**.
 Resultado: la marca aparece en la tabla de abajo y ese concepto deja de proyectarse en esa renovación. Para deshacerla, tocá el tacho de su fila: lo proyectado vuelve.
@@ -240,30 +256,30 @@ Resultado: la marca aparece en la tabla de abajo y ese concepto deja de proyecta
 :::pasos
 1. En la pestaña **Alquileres**, abrí la solapa **Facturas**.
 2. Tocá **Es llave** en la fila de la factura, o tildá varias y tocá **Es llave / renovación**.
-3. Elegí el **Local**, el **Concepto** (**Llave**, **Otros gastos** u **Obra**) y el **Mes al que se imputa**.
+3. Elegí el **Local**, el **Concepto** (**Llave**, **Comisiones**, **FPC** u **Obra**) y el **Mes al que se imputa**.
 4. Si es una sola factura pendiente que se paga en partes, tocá **Repartir en las cuotas del operador** o agregá cada pago con **Pago**. Los pagos tienen que sumar el pendiente menos la **Retención**.
 5. Tocá **Previsualizar** y leé qué renovación reemplaza.
 6. Tocá **Marcar**.
-Resultado: la factura sale de Alquileres, aparece en la solapa **Facturas** de esta pestaña y reemplaza lo proyectado de ese local y concepto en esa renovación.
+Resultado: la factura sale de Alquileres, aparece en la solapa **Facturas** de esta pestaña y reemplaza lo proyectado de ese local y **ese concepto** en esa renovación: una factura de comisiones reemplaza sólo las comisiones; una de FPC, sólo el FPC.
 :::
 
-La llave y los otros gastos se imputan a la renovación del local que empieza más cerca del mes elegido. Una factura imputada en Alquileres o excluida no se puede marcar: primero hay que deshacer la imputación o volver a incluirla. Para ver las pagadas de meses anteriores y marcarlas (no suman, sólo cortan lo proyectado), prendé **Ver pagadas de meses anteriores**. Las marcadas se ven con **Ver excluidas**, y se deshacen con **Deshacer**.
+La llave, las comisiones y el FPC se imputan a la renovación del local que empieza más cerca del mes elegido. Una factura imputada en Alquileres o excluida no se puede marcar: primero hay que deshacer la imputación o volver a incluirla. Para ver las pagadas de meses anteriores y marcarlas (no suman, sólo cortan lo proyectado), prendé **Ver pagadas de meses anteriores**. Las marcadas se ven con **Ver excluidas**, y se deshacen con **Deshacer**.
 
-### Cargar el % de impuestos de un operador
+### Cargar el % de impuestos, de comisiones o de FPC de un operador
 
 :::pasos
 1. Andá a **Parámetros › Llaves y Renovaciones**, sección **Por operador**.
-2. Buscá el operador. En gris está el % sugerido; pasá el mouse para ver de qué facturas sale.
-3. Escribí el valor en **% impuestos** (aunque sea el sugerido; si no factura impuestos, escribí `0`).
-4. Salí del campo: se guarda solo.
-Resultado: la llave y los otros gastos de los locales de ese operador se proyectan, y el aviso de ese operador desaparece.
+2. Buscá el operador. Un campo sin dato tiene el borde punteado y dice **sin dato** debajo.
+3. Si al lado hay un chip **Sugerido: …**, pasá el mouse por el chip para ver de dónde sale y tocá **Usar** para grabarlo.
+4. Si no, escribí el valor en el campo (si no factura impuestos, escribí `0`) y salí del campo: se guarda solo.
+Resultado: el valor queda grabado, se ve como un dato normal y **Último cambio** dice tu usuario y la fecha. Con el % de impuestos, la llave, las comisiones y el FPC de sus locales se proyectan; con el % de comisiones y el de FPC, también las comisiones y el FPC de sus renovaciones estimadas. El aviso de ese operador desaparece.
 :::
 
 ### Marcar que un local no renueva
 
 :::pasos
 1. Andá a **Parámetros › Llaves y Renovaciones**, sección **Por local**.
-2. Buscá el local (están los que vencen en el horizonte o ya vencieron; los que ya tienen la renovación cargada tienen esta columna deshabilitada).
+2. Buscá el local (están los que vencen en el horizonte o ya vencieron, y los que tienen una renovación cargada vigente o por venir; en estos últimos esta columna está deshabilitada).
 3. Escribí el motivo en la columna **No renueva** y tildá la casilla.
 4. Salí del campo: se guarda con el motivo.
 Resultado: el local pasa a **No renueva** en la solapa Contratos y no se estima nada de esa renovación.
@@ -276,7 +292,7 @@ Resultado: el local pasa a **No renueva** en la solapa Contratos y no se estima 
 2. Buscá el local.
 3. Escribí el importe neto en **Llave a mano ($)**. Si hace falta, cambiá también **Cuotas** o **1.ª cuota**.
 4. Salí del campo: se guarda solo.
-Resultado: la llave de esa renovación sale de ese importe, con el chip **Manual**, en las cuotas que correspondan. Los otros gastos estimados se calculan sobre ella.
+Resultado: la llave de esa renovación sale de ese importe, con el chip **Manual**, en las cuotas que correspondan. Las comisiones y el FPC estimados se calculan sobre ella.
 :::
 
 ### Cargar un compromiso a mano
@@ -307,19 +323,27 @@ Resultado: la obra aparece en la fila **Obra de imagen** del local, en pesos al 
 
 Se cambian en **Parámetros › Llaves y Renovaciones**. Los datos generales, por operador y por local se guardan al salir del campo. Las ya pagadas, obras, aperturas y compromisos se cargan con su formulario y se dan de baja; no se editan. Todo queda en el historial. Para quién puede editar, mirá [permisos y parámetros](ayuda:general_permisos_parametros).
 
-Un campo vacío no es cero. Vacío en el % de llave o en las cuotas es «el de arriba»; vacío en el escribano o en el % de impuestos es «sin dato» y avisa. Sólo un `0` cargado es cero.
+Un campo vacío no es cero. Sólo un `0` cargado es cero. Para que no se confunda lo que está grabado con lo que no:
+
+- **Lo grabado** se ve como un dato normal, en el campo. La columna **Último cambio** dice quién lo cargó y cuándo.
+- **Un campo vacío que hereda** un valor dice debajo, en chico, qué valor se usa y de dónde: «usa 25 % (general)», «usa 4 (operador)», «usa 36 (contrato #22)», «usa ene-2027». Pasa con el % de llave, las cuotas, el corrimiento, los meses y la 1.ª cuota.
+- **Un campo vacío sin dato** tiene el **borde punteado** y dice **⚠ sin dato** debajo: sin ese valor algo no se proyecta. Pasa con el % de impuestos, el % de comisiones, el % de FPC, el escribano, los cortes de segmento y los costos en U$S.
+- **Un sugerido** va al lado del campo, en un chip **Sugerido: 31 %**. Pasá el mouse por el chip para ver de dónde sale. Un sugerido **no está grabado** y no se usa hasta que tocás **Usar**, que lo graba con tu usuario y la fecha, como cualquier cambio.
+
+Adentro de un campo vacío nunca hay un número.
 
 | Parámetro | Dónde se cambia | Valor por defecto | Qué cambia en la proyección |
 | --- | --- | --- | --- |
 | % de llave sobre el alquiler | Generales | 25 | El % de la llave estimada cuando ni el local ni el operador tienen uno |
 | Cuotas de la llave | Generales | 4 | En cuántas cuotas se paga la llave cuando ni el local ni el operador dicen otra cosa |
 | Día de pago de la obra y la apertura | Generales | 15 | El día del mes estimado en que se pagan, corrido al hábil siguiente |
-| Chico hasta (m²) y Mediano hasta (m²) | Generales | Vacío; se sugieren y se confirman con **Confirmar los sugeridos** | El segmento de cada local por sus m². Sin ellos, las obras sin segmento a mano no se proyectan |
-| Costo en U$S por segmento (obra de imagen y apertura; chico, mediano y grande) | Generales | Vacío | El costo de una obra o apertura sin costo propio. Sin él, no se proyecta |
-| % de llave | Por operador | Vacío = el general (en gris, el sugerido) | El % de la llave estimada de sus locales |
-| % otros gastos | Por operador | Vacío = sin dato (en gris, el sugerido) | Los otros gastos estimados: ese % de la llave |
-| Escribano y otros | Por operador | Vacío = sin dato | Un importe por renovación, sin impuestos, que se suma a los otros gastos |
-| % impuestos | Por operador | Vacío = sin dato (en gris, el sugerido) | Lo que se suma a la llave y los otros gastos. Sin él, no se proyectan |
+| Chico hasta (m²) y Mediano hasta (m²) | Generales | Sin dato; cada uno con su sugerido y **Usar**, o los dos juntos con **Confirmar los sugeridos** | El segmento de cada local por sus m². Sin ellos, las obras sin segmento a mano no se proyectan |
+| Costo en U$S por segmento (obra de imagen y apertura; chico, mediano y grande) | Generales | Sin dato | El costo de una obra o apertura sin costo propio. Sin él, no se proyecta |
+| % de llave | Por operador | Vacío = usa el general (con su sugerido al lado) | El % de la llave estimada de sus locales |
+| % comisiones | Por operador | Sin dato (con su sugerido al lado) | Las comisiones estimadas: ese % de la llave, en las cuotas de la llave. Sin él, no se proyectan |
+| % FPC | Por operador | Sin dato (con su sugerido al lado) | El FPC estimado: ese % de la llave, en la firma. Sin él, no se proyecta |
+| Escribano y otros | Por operador | Sin dato | Un importe por renovación, sin impuestos, en la firma |
+| % impuestos | Por operador | Sin dato (con su sugerido al lado) | Lo que se suma a la llave, las comisiones y el FPC. Sin él, no se proyectan |
 | Cuotas | Por operador | Vacío = las generales | En cuántas cuotas se paga la llave de sus locales |
 | Corrim. | Por operador | Vacío = 0 | Cuántos meses se mueve la primera cuota respecto del inicio del contrato nuevo (negativo = antes) |
 | No renueva (con motivo) | Por local | Sin tildar | No se estima nada de esa renovación. Deja de valer cuando se carga el contrato nuevo |
@@ -328,7 +352,7 @@ Un campo vacío no es cero. Vacío en el % de llave o en las cuotas es «el de a
 | Meses | Por local | Vacío = los del contrato de llave | Los meses de la llave estimada. Deja de valer cuando se carga el contrato nuevo |
 | Cuotas | Por local | Vacío = las del operador o las generales | En cuántas cuotas se paga la llave de ese local. Sigue valiendo con el contrato nuevo cargado |
 | 1.ª cuota | Por local | Vacío = el mes del día siguiente al fin del contrato (el mes en curso, si ya venció) | El mes de la primera cuota. Sigue valiendo con el contrato nuevo cargado |
-| Renovación, fecha, montos de llave y otros gastos, comprobante | Ya pagadas | Los dos conceptos tildados | El concepto marcado deja de proyectarse en esa renovación. No suma |
+| Renovación, fecha, montos de llave y otros gastos (opcionales), comprobante | Ya pagadas | Los dos conceptos tildados, sin monto | Llave corta la llave; Otros gastos corta las comisiones, el FPC y el escribano de esa renovación. No suma |
 | Local, mes estimado, segmento, costo propio | Obras de renovación de imagen | Segmento vacío = por sus m²; costo vacío = el del segmento | Una obra en ese mes, en pesos al dólar futuro. Una por local y mes |
 | Nombre, Nro., mes estimado, segmento, costo propio | Aperturas de locales nuevos | Segmento obligatorio; costo vacío = el del segmento | Una apertura en ese mes, en pesos al dólar futuro |
 | Operador, local, concepto, fecha, monto, cuotas, forma de pago | Compromisos a mano | 1 cuota | Un pago, o una serie mensual, en su fecha y por su monto. La forma de pago es informativa |
@@ -370,32 +394,44 @@ corrige: Revisá el local en Parámetros › Alquileres, o cargá la llave a man
 :::
 
 :::aviso atencion
-texto: Parámetros: El operador N no tiene % de impuestos sobre llave y otros gastos: no se proyectan la llave ni los otros gastos (el % de otros gastos, o las comisiones y el FPC del contrato) de N, por $ X netos sin impuestos. El escribano sí se proyecta: no lleva impuestos. Se carga en Parámetros › Llaves y Renovaciones › Por operador.
+texto: Parámetros: El operador N no tiene % de impuestos sobre la llave, las comisiones y el FPC: no se proyectan la llave, las comisiones ni el FPC de N, por $ X netos sin impuestos. El escribano sí se proyecta: no lleva impuestos. Se carga en Parámetros › Llaves y Renovaciones › Por operador.
 significa: Falta el % de impuestos del operador. Lo que se ve en el aviso es el neto que queda afuera. El escribano se proyecta igual.
 corrige: Parámetros › Llaves y Renovaciones › Por operador, columna **% impuestos**. Si no factura impuestos, cargá `0`.
 :::
 
 :::aviso atencion
-texto: Parámetros: Sin % de retención en Parámetros › Alquileres: N ($ X netos). No se proyectan su llave ni sus otros gastos; el escribano sí, porque no lleva retención.
+texto: Parámetros: Sin % de retención en Parámetros › Alquileres: N ($ X netos). No se proyectan su llave, sus comisiones ni su FPC; el escribano sí, porque no lleva retención.
 significa: Al local le falta el % de retención. El escribano se proyecta igual.
 corrige: Parámetros › Alquileres, en el local.
 :::
 
 :::aviso atencion
-texto: Parámetros: Operador sin % de otros gastos sobre la llave: N. Sus otros gastos estimados no suman ese %: se carga en Parámetros › Llaves y Renovaciones › Por operador.
-significa: En las renovaciones estimadas de ese operador, los otros gastos sólo llevan el escribano (si está cargado).
-corrige: Parámetros › Llaves y Renovaciones › Por operador, columna **% otros gastos**.
+texto: Parámetros: Operador sin % de comisiones sobre la llave: N. Sus comisiones estimadas no se proyectan: se carga en Parámetros › Llaves y Renovaciones › Por operador.
+significa: En las renovaciones estimadas de ese operador no se proyectan las comisiones. La llave, el FPC y el escribano sí.
+corrige: Parámetros › Llaves y Renovaciones › Por operador, columna **% comisiones** (con **Usar**, si hay sugerido).
+:::
+
+:::aviso atencion
+texto: Parámetros: Operador sin % de FPC sobre la llave: N. Su FPC estimado no se proyecta: se carga en Parámetros › Llaves y Renovaciones › Por operador.
+significa: En las renovaciones estimadas de ese operador no se proyecta el FPC. La llave, las comisiones y el escribano sí.
+corrige: Parámetros › Llaves y Renovaciones › Por operador, columna **% FPC** (con **Usar**, si hay sugerido).
+:::
+
+:::aviso atencion
+texto: Facturas: Facturas marcadas como llave con el concepto anterior «Otros gastos»: …. Siguen reemplazando las comisiones, el FPC y el escribano de su renovación. Deshacé la marca en Alquileres › Facturas y volvé a marcarla como Comisiones o FPC.
+significa: Esas facturas se marcaron antes de que las comisiones y el FPC se separaran. Siguen cortando todo lo que no es llave de esa renovación.
+corrige: En Alquileres › Facturas: **Deshacer** y volver a marcarla con el concepto que corresponda.
 :::
 
 :::aviso atencion
 texto: Parámetros: Operador sin escribano y otros por renovación: N. Se proyecta la parte del % y el escribano no se suma; si es 0, cargá 0 en Parámetros › Llaves y Renovaciones › Por operador.
-significa: Falta el importe de escribano del operador. Lo demás de los otros gastos se proyecta igual.
+significa: Falta el importe de escribano del operador. Las comisiones y el FPC se proyectan igual.
 corrige: Parámetros › Llaves y Renovaciones › Por operador, columna **Escribano y otros** (`0` si no hay).
 :::
 
 :::aviso atencion
 texto: Proyección: Cuotas de contratos firmados que ya pasaron sin factura ni marca de pagada: N (contrato #N del dd/mm/aaaa), cuota N del dd/mm/aaaa por $ X. Pueden estar sin pagar o sin factura: si ya se pagó, marcalo «Ya pagada» en Parámetros o imputá la factura como llave en Alquileres › Facturas.
-significa: Una cuota de un contrato cargado tenía fecha en este mes o el anterior, ya pasó y no hay nada que diga que se pagó.
+significa: Una cuota de un contrato cargado (de llave o de comisiones) tenía fecha en este mes o el anterior, ya pasó y no hay nada que diga que se pagó.
 corrige: Si se pagó, marcala **Ya pagada** o marcá la factura con **Es llave / renovación** en Alquileres › Facturas. Si no se pagó, averiguá por qué.
 :::
 
@@ -461,6 +497,12 @@ corrige: Cargá los m² en el gestor de locales, o el segmento a mano en cada ob
 
 Los de instalación y los de lectura: falta una tabla, falta correr un script o no se pudo leer algo. No los corrige quien usa la pantalla: hay que avisar a sistemas, con el texto del aviso.
 
+:::aviso atencion
+texto: Parámetros: Operador sin % de comisiones sobre la llave: N. Sus comisiones estimadas no se proyectan: falta correr sql/cashflow_llaves_ajustes.sql contra la base central para poder cargarlo.
+significa: El % de comisiones y el de FPC todavía no se pueden cargar: falta instalar un ajuste. Lo mismo dice el aviso del % de FPC.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
 :::aviso critico
 texto: Parámetros: Faltan las tablas de Parámetros › Llaves y Renovaciones: hay que correr sql/cashflow_llaves.sql contra la base central. Sin ellas se proyectan sólo las llaves de los contratos cargados en la app si el operador tiene % de impuestos, que tampoco se puede cargar: no se proyecta nada.
 significa: La sección de parámetros todavía no está instalada. La pestaña no proyecta nada.
@@ -523,6 +565,12 @@ significa: La sección no está instalada: no deja guardar nada.
 corrige: Sistemas, instalando la sección de parámetros.
 :::
 
+:::aviso atencion
+texto: Por operador: Falta correr sql/cashflow_llaves_ajustes.sql contra la base central: hasta entonces no se pueden cargar el % de comisiones ni el de FPC (las comisiones y el FPC estimados no se proyectan), «Ya pagada» pide monto y las facturas no se marcan como Comisiones o FPC.
+significa: Falta instalar un ajuste. Esos campos se ven deshabilitados y, al pasar el mouse, nombran el script.
+corrige: Sistemas, corriendo el script que nombra el aviso.
+:::
+
 :::aviso critico
 texto: No se pudieron leer los parámetros de Llaves y Renovaciones: …
 significa: La sección no pudo cargar.
@@ -531,7 +579,7 @@ corrige: Tocá **Actualizar**. Si sigue, avisá a sistemas.
 
 :::aviso atencion
 texto: Por operador: No se pudo medir el % sugerido de cada operador (…).
-significa: No hay sugeridos de % de llave ni de % de otros gastos. Lo cargado se usa igual.
+significa: No hay sugeridos de % de llave, de comisiones ni de FPC. Lo cargado se usa igual.
 corrige: Tocá **Actualizar** más tarde. Si sigue, avisá a sistemas.
 :::
 
@@ -547,6 +595,7 @@ corrige: Tocá **Actualizar** más tarde, o cargá el % a mano. Si sigue, avisá
 Puede ser por alguna de estas razones. Mirá la nota debajo del local en la solapa **Contratos** y los avisos de arriba:
 
 - Su contrato de llave no tiene llave: es el criterio de Costo de Ocupación.
+- Su renovación cargada ya terminó o todas sus cuotas quedaron atrás.
 - Su contrato vence después del horizonte (estado **Vigente**).
 - La renovación ya está cargada en la app: se usa la llave del contrato, no una estimada.
 - Está marcado **No renueva**, es un local temporal o no tiene contrato en la app.
@@ -573,19 +622,35 @@ Si la factura ya está pagada en Tango, no se reparte: se marca igual, no suma y
 :::
 
 :::pregunta ¿Qué pasa si marco «Ya pagada» sólo la llave?
-Los otros gastos de esa renovación siguen proyectados. Por eso el formulario trae los dos conceptos tildados: lo normal es marcar la renovación entera.
+Las comisiones, el FPC y el escribano de esa renovación siguen proyectados. Por eso el formulario trae los dos conceptos tildados: lo normal es marcar la renovación entera.
 
-Si después se pagan los otros gastos, marcá ese concepto: el que ya estaba marcado no se toca. Para corregir un monto, dá de baja la marca en Parámetros y cargala de nuevo.
+Si después se pagan, marcá **Otros gastos**: el que ya estaba marcado no se toca. Para corregir una marca, dala de baja en Parámetros y cargala de nuevo.
+:::
+
+:::pregunta ¿Por qué «Ya pagada» no me pide el importe?
+Porque no hace falta: lo que importa es que eso ya salió de caja, y por eso deja de proyectarse. El importe no suma ni resta nada. Si querés dejarlo anotado, se puede cargar en Parámetros › Llaves y Renovaciones › Ya pagadas; ahí es opcional.
+:::
+
+:::pregunta ¿Por qué las comisiones aparecen en varias cuotas y el FPC en una sola?
+Las comisiones se pagan igual que la llave: en las mismas cuotas y en las mismas fechas. El FPC y el escribano se pagan una sola vez, en la firma, el mismo día que la primera cuota.
 :::
 
 :::pregunta ¿Por qué un operador no proyecta nada?
-Casi siempre es porque le falta el **% impuestos** en Parámetros › Llaves y Renovaciones › Por operador. Vacío es «sin dato», no cero: sin ese %, la llave y los otros gastos de sus locales no se proyectan, y un aviso dice cuánto neto queda afuera.
+Casi siempre es porque le falta el **% impuestos** en Parámetros › Llaves y Renovaciones › Por operador. Vacío es «sin dato», no cero: sin ese %, la llave, las comisiones y el FPC de sus locales no se proyectan, y un aviso dice cuánto neto queda afuera.
 
-El número en gris es sólo una sugerencia y no se guarda. Para usarlo, escribilo en el campo. Si el operador no factura impuestos sobre la llave, cargá `0`.
+Si al lado del campo hay un chip **Sugerido**, ese valor **no está grabado**: tocá **Usar** para grabarlo. Si el operador no factura impuestos sobre la llave, cargá `0`.
+:::
+
+:::pregunta ¿Cómo sé si un valor está grabado o es sólo un sugerido?
+Lo grabado está escrito adentro del campo, como un dato normal, y **Último cambio** dice quién lo cargó y cuándo. Un sugerido va afuera, en un chip **Sugerido: …** al lado del campo, y no se usa hasta que tocás **Usar**. Un campo vacío nunca tiene un número adentro: debajo dice qué valor usa y de dónde («usa 25 % (general)») o **sin dato**, con el borde punteado.
+:::
+
+:::pregunta ¿Por qué ya no veo en Por local un contrato que antes aparecía?
+Por local muestra sólo lo que todavía se puede parametrizar: las renovaciones que vencen en el horizonte o ya vencieron sin renovar, y las cargadas cuyo contrato nuevo sigue vigente o empieza más adelante y tiene alguna cuota desde el mes pasado. Cuando el contrato nuevo termina, o todas sus cuotas quedan atrás, deja de verse. Lo que se había cargado sobre esa renovación no se borra: sigue guardado, con su historial.
 :::
 
 :::pregunta ¿Qué pasa cuando administración carga el contrato nuevo?
-La renovación deja de estimarse y pasa a usar la llave, las comisiones y el FPC del contrato, con el chip **Contrato cargado**. La excepción es una llave de 1 en la app: esa se sigue estimando, con los meses del contrato. El local pasa a **Renovado** en la solapa Contratos.
+La renovación deja de estimarse y pasa a usar la llave, las comisiones (en las cuotas de la llave) y el FPC (en la firma) del contrato, con el chip **Contrato cargado**. La excepción es una llave de 1 en la app: esa se sigue estimando, con los meses del contrato. El local pasa a **Renovado** en la solapa Contratos.
 
 De lo cargado en **Por local**, el **% propio**, los **Meses**, la **Llave a mano** y **No renueva** dejan de valer: manda el contrato. Las **Cuotas** y la **1.ª cuota** siguen valiendo.
 
@@ -622,15 +687,17 @@ Sí: suman los mismos pagos, columna por columna. En el tablero, la fila Llaves 
 | Contrato puente | Un contrato sin llave y de menos de 12 meses, entre el fin de un contrato y la firma del siguiente |
 | Llave | Lo que se paga al operador por renovar el contrato, en cuotas |
 | Operador | La razón social principal del local en Parámetros › Alquileres: el que cobra la llave |
-| Otros gastos | Lo que se paga en la firma además de la llave: comisiones y FPC (cargada), o un % de la llave más el escribano (estimada) |
-| FPC lanzamiento | Fondo de Promoción Colectiva: el aporte al fondo de promoción del shopping que se paga al abrir o renovar el contrato. Va con las comisiones, en los otros gastos. |
+| Comisiones | Lo que se paga al operador por la renovación además de la llave. Se paga en las mismas cuotas que la llave |
+| FPC lanzamiento | Fondo de Promoción Colectiva: el aporte al fondo de promoción del shopping que se paga al abrir o renovar el contrato. Un pago, en la firma |
+| Otros gastos | En «Ya pagada», todo lo que no es llave: las comisiones, el FPC y el escribano |
 | VMA | Valor mínimo mensual: con el alquiler y el complementario, forma el alquiler con el que se estima la llave |
-| Escribano y otros | Un importe fijo por renovación, por operador, que se suma a los otros gastos sin impuestos ni retención |
-| % de impuestos | Lo que el operador factura de más sobre la llave y los otros gastos |
+| Escribano y otros | Un importe fijo por renovación, por operador, en la firma, sin impuestos ni retención |
+| % de impuestos | Lo que el operador factura de más sobre la llave, las comisiones y el FPC |
+| Sugerido | Un valor que la pantalla propone con la historia (la app o Tango). No está grabado hasta que se toca **Usar** |
 | Segmento | Chico, mediano o grande, según los m² totales del local. Define el costo en dólares de una obra o una apertura |
 | Corrimiento | Cuántos meses se mueve la primera cuota respecto del inicio del contrato nuevo (negativo = antes) |
 | Corrido al hábil | Un pago que cae en un día no hábil pasa al siguiente día hábil |
-| Ya pagada | La marca de que la llave o los otros gastos de una renovación ya salieron de caja: ese concepto deja de proyectarse |
+| Ya pagada | La marca de que la llave o los otros gastos (comisiones, FPC y escribano) de una renovación ya salieron de caja: eso deja de proyectarse. No pide importes |
 | No renueva | La marca de que un local no va a renovar: no se estima nada de esa renovación |
 | Origen | De dónde sale un importe: Contrato cargado, Estimado, Manual o Factura (mixto si una celda junta varios) |
 | Compromiso a mano | Un pago pactado que no está en la app, cargado con su fecha y su monto |

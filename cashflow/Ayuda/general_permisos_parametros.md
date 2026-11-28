@@ -3,7 +3,7 @@ titulo: Permisos y parámetros
 pestana:
 categoria: General
 estado: completa
-actualizado: 2026-11-26
+actualizado: 2026-11-27
 usuarios: Tesorería, Administración, Dirección
 bajada: Quién puede ver y quién puede editar cada pestaña, dónde queda registrado quién cambió qué, y qué se configura en Parámetros.
 ---
@@ -75,7 +75,7 @@ Los parámetros están agrupados por la pestaña que afectan. Ninguno está escr
 | **Prov. Locales** | Las retenciones de las facturas que se pagan por orden de pago, el excedente permitido al importar pagos y las listas para clasificar a cada proveedor. |
 | **Tarjetas** | El maestro de tarjetas: tipo, banco, titular, porcentaje de cobertura y día de vencimiento del resumen. |
 | **Alquileres** | Lo que la proyección de alquileres necesita y la app de alquileres no tiene: vencimiento, razones sociales, datos de cada local y pagos extraordinarios. |
-| **Llaves y Renovaciones** | Lo que la proyección de llaves, renovaciones, obras y aperturas necesita y la app de alquileres no tiene. Ver [Llaves y Renov. Contratos](ayuda:llaves_renov). |
+| **Llaves y Renovaciones** | Lo que la proyección de llaves, renovaciones, obras y aperturas necesita y la app de alquileres no tiene: por operador, el % de llave, de comisiones, de FPC y de impuestos, el escribano, las cuotas y el corrimiento. Lo grabado está escrito en el campo; un campo vacío dice debajo qué valor usa o «sin dato», y lo sugerido va en un chip al lado, que se graba con **Usar**. Ver [Llaves y Renov. Contratos](ayuda:llaves_renov). |
 | **Cashflow** | Qué secciones y filas tiene el tablero, en qué orden, y de qué módulo saca sus datos cada fila. |
 
 ### Parámetros › Cashflow

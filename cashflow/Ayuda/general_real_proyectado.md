@@ -3,7 +3,7 @@ titulo: Real y proyectado
 pestana:
 categoria: General
 estado: completa
-actualizado: 2026-11-23
+actualizado: 2026-11-27
 usuarios: Tesorería, Administración, Dirección
 bajada: Qué parte de cada número ya está comprometida, qué parte es una estimación y cómo se distinguen en pantalla.
 ---
@@ -92,7 +92,7 @@ Cuando alguien marca un pago como ya hecho, ese importe **sale de la proyección
 
 En **Proveedores Exterior** y **Crono Nacionalización** el panel de avisos dice cuánto salió por eso, y lo marcado se esconde detrás del interruptor **Ver pagados** (en Crono Nacionalización, **Ver pagadas**), que dice al lado cuántos esconde. Prendelo para verlos y destildar el que se haya marcado por error. Además, **Proveedores Exterior** proyecta sólo lo que falta pagar: un pago cargado en Comercio Exterior ya baja el importe, sin que nadie marque nada.
 
-En **Llaves y Renov. Contratos**, una renovación se marca con **Ya pagada** desde la solapa **Contratos**. Ver [Llaves y Renov. Contratos](ayuda:llaves_renov).
+En **Llaves y Renov. Contratos**, una renovación se marca con **Ya pagada** desde la solapa **Contratos**: se tilda qué se pagó —la **llave**, los **otros gastos** (comisiones, FPC y escribano) o los dos—, con la fecha y el comprobante, **sin importes**. Lo marcado deja de proyectarse en esa renovación. Ver [Llaves y Renov. Contratos](ayuda:llaves_renov).
 
 ## Pestañas que todavía no muestran datos reales
 
