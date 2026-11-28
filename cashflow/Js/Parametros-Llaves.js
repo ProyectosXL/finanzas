@@ -371,7 +371,7 @@
             return '<tr data-id="' + p.id + '"><td>' + esc(nombres[p.nro] || p.nro) + '</td>'
                 + '<td><small>contrato #' + p.id_contrato_ant + '</small></td>'
                 + '<td>' + esc(datos.conceptos_pagada[p.concepto] || p.concepto) + '</td>'
-                + '<td>' + fecha(p.fecha) + '</td><td class="text-end">' + plata(p.monto) + '</td>'
+                + '<td>' + fecha(p.fecha) + '</td><td class="text-end">' + (p.monto === null || p.monto === undefined ? '—' : plata(p.monto)) + '</td>'
                 + '<td><small>' + esc(p.comprobante || '') + (p.observacion ? ' — ' + esc(p.observacion) : '') + '</small></td>'
                 + '<td><small class="text-muted">' + esc(Auditoria.linea('alta', p.usuario, p.fecha_alta)) + '</small></td>'
                 + '<td>' + baja('bajaPagada', p.id, 'la marca de pagada', 'Lo proyectado de ese concepto vuelve.') + '</td></tr>';

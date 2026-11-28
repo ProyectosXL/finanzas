@@ -228,18 +228,17 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
                             <select id="llPagRen" class="form-select form-select-sm"></select></div>
                         <!-- Los dos conceptos tildados por defecto: lo normal es marcar la
                              renovación entera, y marcar sólo la llave deja los otros
-                             gastos proyectados sin que nadie lo note. -->
+                             gastos proyectados sin que nadie lo note. SIN IMPORTES: el
+                             monto no suma ni resta nada (si se quiere, se carga en
+                             Parámetros › Ya pagadas). -->
                         <div class="col-12"><span class="form-label small mb-0 d-block">Qué se pagó</span>
-                            <div class="row g-2 align-items-center">
-                                <div class="col-5"><div class="form-check mb-0">
-                                    <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagLlave" value="LLAVE" checked>
-                                    <label class="form-check-label small" for="llPagLlave">Llave</label></div></div>
-                                <div class="col-7"><input type="text" id="llPagMontoLLAVE" class="form-control form-control-sm" inputmode="decimal" placeholder="Monto ($)"></div>
-                                <div class="col-5"><div class="form-check mb-0">
-                                    <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagOtros" value="OTROS" checked>
-                                    <label class="form-check-label small" for="llPagOtros">Otros gastos</label></div></div>
-                                <div class="col-7"><input type="text" id="llPagMontoOTROS" class="form-control form-control-sm" inputmode="decimal" placeholder="Monto ($)"></div>
-                            </div></div>
+                            <div class="form-check mb-0">
+                                <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagLlave" value="LLAVE" checked>
+                                <label class="form-check-label small" for="llPagLlave">Llave</label></div>
+                            <div class="form-check mb-0">
+                                <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagOtros" value="OTROS" checked>
+                                <label class="form-check-label small" for="llPagOtros">Otros gastos <span class="text-muted">(comisiones, FPC y escribano)</span></label></div>
+                            </div>
                         <div class="col-md-6"><label class="form-label small mb-0" for="llPagFecha">Fecha del pago</label>
                             <input type="date" id="llPagFecha" class="form-control form-control-sm"></div>
                         <div class="col-md-6"><label class="form-label small mb-0" for="llPagComp">Comprobante</label>

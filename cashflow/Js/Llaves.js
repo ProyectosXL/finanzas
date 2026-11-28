@@ -220,7 +220,9 @@
             var badge = { VENCIDO: 'bg-warning text-dark', VENCE: 'bg-info text-dark', RENOVADO: 'bg-success',
                           NO_RENUEVA: 'bg-secondary', SIN_CONTRATO: 'bg-warning text-dark' }[c.estado] || 'bg-light text-dark border';
             var notas = (c.notas || []).concat((c.pagadas || []).map(function(p) {
-                return 'Ya pagada (' + (p.concepto === 'LLAVE' ? 'llave' : 'otros gastos') + ') el ' + fecha(p.fecha) + ': ' + plata(p.monto);
+                /* Sin monto, sin la parte del importe: el monto es opcional e informativo. */
+                return 'Ya pagada (' + (p.concepto === 'LLAVE' ? 'llave' : 'otros gastos') + ') el ' + fecha(p.fecha)
+                    + (p.monto === null || p.monto === undefined ? '' : ' por ' + plata(p.monto));
             }));
 
             return '<tr data-nro="' + c.nro + '">'
@@ -237,7 +239,7 @@
                 + '<td class="text-end">' + (c.m2 === null ? '—' : numero(c.m2)) + '</td>'
                 + '<td>' + esc(c.segmento ? c.segmento.charAt(0) + c.segmento.slice(1).toLowerCase() : '—') + '</td>'
                 + '<td data-exportar-omitir>' + (edita && c.renovaciones.some(function(r) { return r.ant; })
-                    ? '<button type="button" class="btn btn-link btn-sm p-0 ll-pagada" title="La llave o los otros gastos de una renovación ya salieron de caja">Ya pagada</button>' : '')
+                    ? '<button type="button" class="btn btn-link btn-sm p-0 ll-pagada" title="La llave o los otros gastos (comisiones, FPC y escribano) de una renovación ya salieron de caja">Ya pagada</button>' : '')
                 + '</td></tr>';
         }).join('') : '<tr><td colspan="13" class="text-center text-muted py-3">Ningún local con ese estado.</td></tr>';
 
@@ -266,18 +268,16 @@
             return '<option value="' + r.ant + '">' + esc(r.tipo === 'ESTIMADA' ? 'Renovación estimada desde ' + fecha(r.inicio)
                 : 'Contrato #' + r.contrato + ' desde ' + fecha(r.inicio)) + '</option>';
         }).join('');
-        ['llPagFecha', 'llPagMontoLLAVE', 'llPagMontoOTROS', 'llPagComp', 'llPagObs'].forEach(function(id) { document.getElementById(id).value = ''; });
+        ['llPagFecha', 'llPagComp', 'llPagObs'].forEach(function(id) { document.getElementById(id).value = ''; });
         /* Los dos conceptos tildados: lo normal es marcar la renovacion entera. */
-        document.querySelectorAll('.ll-pag-concepto').forEach(function(c) {
-            c.checked = true;
-            document.getElementById('llPagMonto' + c.value).disabled = false;
-        });
+        document.querySelectorAll('.ll-pag-concepto').forEach(function(c) { c.checked = true; });
         bootstrap.Modal.getOrCreateInstance(document.getElementById('modalLlPagada')).show();
     }
 
     function guardarPagada() {
         var conceptos = Array.prototype.filter.call(document.querySelectorAll('.ll-pag-concepto'), function(c) { return c.checked; })
-            .map(function(c) { return { concepto: c.value, monto: document.getElementById('llPagMonto' + c.value).value }; });
+            /* Sin monto: lo que se marca es que salio de caja, no cuanto. */
+            .map(function(c) { return { concepto: c.value, monto: null }; });
 
         if (!conceptos.length) { Notificacion.advertencia('Tildá qué se pagó: la llave, los otros gastos o los dos.'); return; }
 
@@ -364,11 +364,6 @@
         enganchar('btnExpandirLl', 'click', function() { abrirTodo(!Object.keys(abiertos).length); });
         enganchar('llContEstado', 'change', dibujarContratos);
         enganchar('btnLlPagGuardar', 'click', guardarPagada);
-
-        /* Un concepto sin tildar no pide monto. */
-        document.querySelectorAll('.ll-pag-concepto').forEach(function(c) {
-            c.addEventListener('change', function() { document.getElementById('llPagMonto' + c.value).disabled = !c.checked; });
-        });
 
         var buscar = document.getElementById('busquedaLl');
 

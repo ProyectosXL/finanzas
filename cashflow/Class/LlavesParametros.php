@@ -289,6 +289,10 @@ class LlavesParametros {
      * que ya salieron de caja. La fecha no puede ser futura: lo que todavia no
      * se pago no esta pagado.
      *
+     * EL MONTO ES OPCIONAL (script 73): es solo informativo, no suma ni resta
+     * nada. Desde la solapa Contratos no se pide; en Parametros, si se carga,
+     * tiene que ser mayor que 0. Vacio es null, no 0.
+     *
      * @param array $d
      * @param string $hoy 'Y-m-d'
      * @return array
@@ -307,10 +311,10 @@ class LlavesParametros {
                 . 'se pagó sigue proyectado.');
         }
 
-        $monto = self::numero($d['monto'] ?? null, 'El monto pagado', false);
+        $monto = self::numero($d['monto'] ?? null, 'El monto pagado');
 
-        if ($monto <= 0) {
-            throw new InvalidArgumentException('El monto pagado tiene que ser mayor que 0.');
+        if ($monto !== null && $monto <= 0) {
+            throw new InvalidArgumentException('El monto pagado tiene que ser mayor que 0, o quedar vacío.');
         }
 
         return [
@@ -324,8 +328,8 @@ class LlavesParametros {
 
     /**
      * "Ya pagada" de UNO O VARIOS conceptos de la misma renovacion: la fecha,
-     * el comprobante y la observacion son comunes, y cada concepto lleva su
-     * monto. Lo normal es marcar la renovacion entera (la llave y los otros
+     * el comprobante y la observacion son comunes, y cada concepto puede
+     * llevar su monto (opcional). Lo normal es marcar la renovacion entera (la llave y los otros
      * gastos): marcar solo la llave deja los otros gastos proyectados sin que
      * nadie lo note (Abasto, 23/11/2026). Por eso la pantalla ofrece los dos
      * tildados, y aca se validan juntos.
@@ -656,7 +660,7 @@ class LlavesParametros {
     public function pagadas() {
         return array_map(function ($r) {
             return ['id' => (int) $r['ID'], 'nro' => (int) $r['NRO_SUCURS'], 'id_contrato_ant' => (int) $r['ID_CONTRATO_ANT'],
-                    'concepto' => trim($r['CONCEPTO']), 'fecha' => self::dia($r['FECHA']), 'monto' => (float) $r['MONTO'],
+                    'concepto' => trim($r['CONCEPTO']), 'fecha' => self::dia($r['FECHA']), 'monto' => self::num($r['MONTO']),
                     'comprobante' => $r['COMPROBANTE'], 'observacion' => $r['OBSERVACION'],
                     'usuario' => $r['USUARIO_ALTA'], 'fecha_alta' => self::momento($r['FECHA_ALTA'])];
         }, $this->filas("SELECT * FROM dbo." . self::T_PAGADA . " WHERE VIGENTE = 1 ORDER BY NRO_SUCURS, FECHA", [],
@@ -691,7 +695,7 @@ class LlavesParametros {
         return array_map(function ($r) {
             return ['id' => (int) $r['ID'], 'tipo' => trim($r['TIPO_OPERADOR']), 'cod_provee' => Planilla::codigo($r['COD_PROVEE']),
                     'nro' => ($r['NRO_SUCURS'] === null) ? null : (int) $r['NRO_SUCURS'], 'concepto' => $r['CONCEPTO'],
-                    'fecha' => self::dia($r['FECHA']), 'monto' => (float) $r['MONTO'],
+                    'fecha' => self::dia($r['FECHA']), 'monto' => self::num($r['MONTO']),
                     'forma' => ($r['FORMA_PAGO'] === null) ? null : trim($r['FORMA_PAGO']),
                     'observacion' => $r['OBSERVACION'],
                     'id_serie' => ($r['ID_SERIE'] === null) ? null : (int) $r['ID_SERIE'],
@@ -847,6 +851,14 @@ class LlavesParametros {
         }
 
         $v = self::validarPagadas($datos, $hoy);
+
+        /* SIN EL SCRIPT 73 MONTO NO ACEPTA VACIO: se dice, en vez del error de la base. */
+        if (in_array(null, array_column($v['conceptos'], 'monto'), true) && !$this->ajustes()['pagada_sin_monto']) {
+            throw new InvalidArgumentException('Todavía no se puede marcar «Ya pagada» sin monto: falta correr '
+                . self::SCRIPT_AJUSTES . ' contra la base central. Hasta entonces, cargá el monto en Parámetros › '
+                . 'Llaves y Renovaciones › Ya pagadas.');
+        }
+
         $ids = [];
         $marcados = [];
         $ya = [];

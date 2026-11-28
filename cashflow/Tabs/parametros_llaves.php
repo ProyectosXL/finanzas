@@ -190,10 +190,11 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
         <div class="card-header">
             <h5 class="mb-0">Ya pagadas</h5>
             <small class="text-muted">
-                La llave o los otros gastos de una renovación que <strong>ya salieron de caja</strong> (por ejemplo,
+                La llave o los otros gastos (comisiones, FPC y escribano) de una renovación que <strong>ya salieron de
+                caja</strong> (por ejemplo,
                 una renovación pagada antes de que administración cargue el contrato nuevo). Ese concepto deja de
                 proyectarse en esa renovación, cargada o estimada, y la marca sigue valiendo cuando se carga el
-                contrato. No suma en el horizonte.
+                contrato. No suma en el horizonte. El monto es opcional: sólo informa.
             </small>
         </div>
         <?php if ($edita): ?>
@@ -209,20 +210,21 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                 </div>
                 <!-- Los dos conceptos tildados por defecto: lo normal es marcar la
                      renovación entera; marcar sólo la llave deja los otros gastos
-                     proyectados sin que nadie lo note. Cada uno con su monto. -->
+                     proyectados sin que nadie lo note. El monto de cada uno es
+                     opcional: es informativo, no suma ni resta. -->
                 <div class="col-md-2">
                     <div class="form-check mb-1">
                         <input class="form-check-input pll-pag-concepto" type="checkbox" id="pllPagadaLlave" value="LLAVE" checked>
                         <label class="form-check-label small" for="pllPagadaLlave">Llave ($)</label>
                     </div>
-                    <input type="text" id="pllPagadaMontoLLAVE" class="form-control form-control-sm" inputmode="decimal">
+                    <input type="text" id="pllPagadaMontoLLAVE" class="form-control form-control-sm" inputmode="decimal" placeholder="opcional">
                 </div>
                 <div class="col-md-2">
                     <div class="form-check mb-1">
                         <input class="form-check-input pll-pag-concepto" type="checkbox" id="pllPagadaOtros" value="OTROS" checked>
-                        <label class="form-check-label small" for="pllPagadaOtros">Otros gastos ($)</label>
+                        <label class="form-check-label small" for="pllPagadaOtros" title="Comisiones, FPC y escribano">Otros gastos ($)</label>
                     </div>
-                    <input type="text" id="pllPagadaMontoOTROS" class="form-control form-control-sm" inputmode="decimal">
+                    <input type="text" id="pllPagadaMontoOTROS" class="form-control form-control-sm" inputmode="decimal" placeholder="opcional">
                 </div>
                 <div class="col-md-2">
                     <label class="form-label form-label-sm" for="pllPagadaComp">Comprobante</label>

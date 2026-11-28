@@ -56,9 +56,11 @@ chequear('llave pagada el 31/08', ['LLAVE', '2026-08-31', 180525000.0], [$v['con
 chequearLanza('una fecha futura no está pagada', function () {
     LlavesParametros::validarPagada(['concepto' => 'LLAVE', 'fecha' => '2026-12-01', 'monto' => '1'], '2026-11-23');
 });
-chequearLanza('el monto es obligatorio y mayor que 0', function () {
+chequearLanza('con monto, tiene que ser mayor que 0', function () {
     LlavesParametros::validarPagada(['concepto' => 'OTROS', 'fecha' => '2026-08-31', 'monto' => '0'], '2026-11-23');
-});
+}, 'El monto pagado tiene que ser mayor que 0, o quedar vacío.');
+$v = LlavesParametros::validarPagada(['concepto' => 'OTROS', 'fecha' => '2026-08-31', 'monto' => ''], '2026-11-23');
+chequear('sin monto se graba: el monto es null, no 0', ['OTROS', null], [$v['concepto'], $v['monto']]);
 
 seccion('LlavesParametros: obras, aperturas y compromisos');
 
@@ -137,8 +139,12 @@ chequear('el formato de un solo concepto sigue sirviendo', [['concepto' => 'LLAV
 chequearLanza('sin ningún concepto tildado', function () {
     LlavesParametros::validarPagadas(['conceptos' => [], 'fecha' => '2026-08-31'], '2026-11-23');
 });
-chequearLanza('un concepto sin monto', function () {
-    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => '1'], ['concepto' => 'OTROS', 'monto' => '']],
+chequear('la renovación entera sin montos (como la marca la solapa Contratos)',
+    [['concepto' => 'LLAVE', 'monto' => null], ['concepto' => 'OTROS', 'monto' => null]],
+    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => null], ['concepto' => 'OTROS', 'monto' => null]],
+        'fecha' => '2026-08-31'], '2026-11-23')['conceptos']);
+chequearLanza('un monto negativo o en 0, aunque el otro venga bien', function () {
+    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => '1'], ['concepto' => 'OTROS', 'monto' => '0']],
         'fecha' => '2026-08-31'], '2026-11-23');
 });
 chequearLanza('el mismo concepto dos veces', function () {
@@ -150,6 +156,18 @@ foreach (['Tabs/llaves_renov.php' => 'll-pag-concepto', 'Tabs/parametros_llaves.
     chequear($archivo . ': los dos conceptos, tildados por defecto', 2,
         preg_match_all('/class="form-check-input ' . $clase . '" type="checkbox" id="\w+" value="(LLAVE|OTROS)" checked>/', $html));
 }
+$tabLl = file_get_contents(__DIR__ . '/../Tabs/llaves_renov.php');
+$jsLl = file_get_contents(__DIR__ . '/../Js/Llaves.js');
+chequear('Contratos: el modal «Ya pagada» no pide importes', [0, true],
+    [preg_match('/id="llPagMonto/', $tabLl), strpos($jsLl, "return { concepto: c.value, monto: null };") !== false]);
+chequear('y la nota sin monto omite la parte del importe', true,
+    strpos($jsLl, "(p.monto === null || p.monto === undefined ? '' : ' por ' + plata(p.monto))") !== false);
+chequear('Parámetros: el monto de cada concepto es opcional, y sin monto la tabla muestra «—»', [2, true],
+    [substr_count(file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php'), 'inputmode="decimal" placeholder="opcional"'),
+     strpos(file_get_contents(__DIR__ . '/../Js/Parametros-Llaves.js'), "(p.monto === null || p.monto === undefined ? '—' : plata(p.monto))") !== false]);
+chequear('sin el script 73, marcar sin monto dice que falta', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/LlavesParametros.php'),
+        "Todavía no se puede marcar «Ya pagada» sin monto: falta correr '") !== false);
 
 seccion('Por local: tambien las renovaciones cargadas, con cuotas y 1.a cuota editables');
 
