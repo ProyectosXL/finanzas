@@ -8,14 +8,14 @@ Rama: `feature/llaves-renovaciones`. Reemplaza las hojas *LLves y Renov Contrato
 
 ## La idea en una línea
 
-**La llave de cada renovación de contrato sale del contrato nuevo cargado en la app de alquileres; si todavía no está, se estima con el criterio de Costo de Ocupación —% × (1 + 2 + 8 del mes, como lo proyecta Alquileres) × meses— y se paga en cuotas. Los otros gastos van en la firma, las obras y aperturas en dólares, lo pactado tal cual, y una factura marcada como llave reemplaza todo lo proyectado de su local, concepto y renovación.**
+**La llave de cada renovación de contrato sale del contrato nuevo cargado en la app de alquileres; si todavía no está, se estima con el criterio de Costo de Ocupación —% × (1 + 2 + 8 del mes, como lo proyecta Alquileres) × meses— y se paga en cuotas. Las comisiones van en las mismas cuotas que la llave; el FPC y el escribano, en la firma; las obras y aperturas en dólares, lo pactado tal cual, y una factura marcada como llave reemplaza todo lo proyectado de su local, concepto y renovación.**
 
 ```
 App de alquileres (central, SÓLO SE LEE)      Alquileres (cashflow)            Parámetros › Llaves (cashflow)
   RO_T_CONTRATOS_ALQUILERES                     alquilerMensual(): 1+2+8 neto    generales (25 %, 4 cuotas, día 15,
     vigencia, llave (4), comisiones (5),        operador = razón principal         cortes por m², U$S por segmento)
-    FPC (18)                                    % retención del local            por operador (% llave, % otros,
-Gestor de locales (XL-APPS, SÓLO SE LEE)        Facturas: «Es llave»               escribano, % impuestos, cuotas,
+    FPC (18)                                    % retención del local            por operador (% llave, % comisiones,
+Gestor de locales (XL-APPS, SÓLO SE LEE)        Facturas: «Es llave»               % FPC, escribano, % impuestos, cuotas,
   FP_T_SUCURSALES_MEDIDAS (m²)                    (LlavesFacturas, script 68)       corrimiento)
 Tango (CPA04, SÓLO SE LEE)                                                       por local (por el contrato que vence)
   facturas de llave: % de impuestos sugerido                                     ya pagadas, obras, aperturas,
@@ -43,15 +43,17 @@ DolarFuturo (curva ROFEX)                                                       
 | 67 | `sql/cashflow_llaves_permisos.sql` | `apps` | Crea, si no existen, `cashflow.tab.llaves_renov`, `cashflow.editar.llaves_renov` y `cashflow.editar.parametros.llaves_renov`, colgadas del mismo módulo que el resto de `cashflow.tab.%`. **No asigna ningún rol** | Sólo el administrador ve la pestaña y edita Parámetros › Llaves y Renovaciones |
 | 68 | `sql/cashflow_llaves_facturas.sql` | `central` | La marca «es llave» de una cuota de alquiler y sus N pagos (`RO_T_CASHFLOW_LLAVES_FACTURA` y `..._PAGO`), con índice único filtrado por cuota vigente | El botón *Es llave / renovación* no se dibuja; las facturas siguen como hoy (sin imputar o excluidas en Alquileres) |
 | 69 | `sql/cashflow_llaves_fila.sql` | `central` | Reemplaza la fila *Llaves y Renovaciones* (`LLAVES_RENOV/PAGOS`, ID 17, activa) por dos filas agrupadas, `REAL` y `PROYECTADO`, en una transacción, con el control de doble conteo al pie | La fila de antes sigue activa y muestra el total, sin abrir |
+| 73 | `sql/cashflow_llaves_ajustes.sql` | `central` | Los ajustes del testeo: `MONTO` de «Ya pagada» opcional (`CHECK (MONTO IS NULL OR MONTO > 0)`); `PCT_COMISIONES` y `PCT_FPC` por operador, vacíos (**no migra `PCT_OTROS`**: queda sin usarse); el `CHECK` de `CONCEPTO` de las facturas con `COMISIONES` y `FPC` (sigue admitiendo `OTROS`). Al pie lista las marcas `OTROS` vigentes y los operadores con `PCT_OTROS` cargado. No borra nada; reejecutable | Los % de comisiones y de FPC se ven deshabilitados y nombran el script, y las comisiones y el FPC estimados no se proyectan (avisa); «Ya pagada» desde Contratos da un error que nombra el script (en Parámetros se puede marcar con monto); Comisiones y FPC no aparecen al marcar una factura. Lo demás anda |
 
-El 66 y el 68 van después de los de Alquileres (51 y 53); el 69, después de `sql/cashflow_estructura_grupos.sql`. El 67 es independiente. **Orden recomendado: 66 → 67 → 68 → 69.**
+El 66 y el 68 van después de los de Alquileres (51 y 53); el 69, después de `sql/cashflow_estructura_grupos.sql`. El 67 es independiente. El 73, después del 66 y el 68 (si falta una de sus tablas, saltea esa parte y lo dice). **Orden recomendado: 66 → 67 → 68 → 69 → 73.**
 
 **El tablero se mueve con el código, no con los scripts**: `LLAVES_RENOV` pasa a disponible y la fila 17 (activa, en cero hasta hoy) empieza a sumar. Sin el 66 suma cero; con el 66 y sin % de impuestos cargado por operador, la llave tampoco se proyecta (ver *El tablero*, abajo).
 
 ### Después de correrlos
 
 1. Dar `cashflow.tab.llaves_renov` y, a quien corresponda, `cashflow.editar.parametros.llaves_renov` (Parámetros) y `cashflow.editar.llaves_renov` («Ya pagada» desde la solapa Contratos) desde Gestión de Usuarios. Marcar una factura como llave pide `cashflow.editar.alquileres`, como excluirla.
-2. En *Parámetros › Llaves y Renovaciones*: confirmar los **cortes de segmento** sugeridos, cargar los **costos en U$S**, y por operador el **% de impuestos** (el sugerido está en gris), el **% de otros gastos** y el **escribano** (0 si no hay).
+2. En *Parámetros › Llaves y Renovaciones*: confirmar los **cortes de segmento** sugeridos, cargar los **costos en U$S**, y por operador el **% de impuestos**, el **% de comisiones** y el **% de FPC** (con «Usar» al lado de cada sugerido) y el **escribano** (0 si no hay).
+4. Después del **73**: volver a cargar, separados, el % de comisiones y el de FPC de los operadores que tenían **% de otros gastos** (al 27/11/2026: Emprendimientos Terminal 2 %, BA Mall 8 %, Condominio Rubinstein 0 %, Los Gallegos 6,72 %, Fortín Maure 8 %, IRSA 43,09 %, Paseo del Siglo 4,15 %, Urbana Centros Comerciales 8,36 %, Cencosud 39,48 %). Mientras no se carguen, sus comisiones y su FPC estimados no se proyectan. No había facturas marcadas con «Otros gastos».
 3. Marcar **«Ya pagada»** las renovaciones que ya salieron de caja y no están en la app: al 23/11/2026, **Distrito Arcos** (cuota inicial L78 $ 180,5 M, pagada el 31/08/2026) y **Abasto** (cuota inicial L7 $ 92,75 M, 31/08/2026). Y, si corresponde, las de contratos ya cargados que se pagaron antes de su inicio: **DOT #91** ($ 99,6 M, 31/08/2026) y **Alto Palermo #90** ($ 44,5 M, 31/08/2026). Administración resuelve Arcos y Abasto cargando el contrato nuevo en la app; la marca sigue valiendo.
 
 ---
@@ -104,26 +106,35 @@ Estados de la solapa Contratos: *Vigente*, *Vence en el horizonte*, *Vencido sin
 
 Los operadores son las razones sociales dadas de alta en Alquileres.
 
-| Campo | Vacío | Sugerido (en gris, con su tooltip) |
+| Campo | Vacío | Sugerido (chip con «Usar») |
 | --- | --- | --- |
-| % de llave | El general | Las renovaciones de la app de ese operador (`LlavesSugeridos::porOperador()`) |
-| % de otros gastos | Sin dato: avisa | Ídem, (comisiones + FPC) ÷ llave |
-| Escribano y otros ($ por renovación) | Sin dato: avisa; se proyecta la parte del % | — |
-| **% de impuestos** sobre llave y otros gastos | **Sin dato: avisa y la llave de ese operador no se proyecta** | La relación factura / contrato de Tango (`LlavesSugeridos::impuestos()`): IRSA 31 %, DOT 24,5 %, Paseo del Siglo y Caballito 21 %, Cencosud 0 % (la factura «LLAVE L2» es llave + comisiones, sin impuestos) |
-| Cuotas | Las generales | — |
-| Corrimiento (meses respecto del inicio; negativo = antes) | 0 | — |
+| % de llave | Hereda: «usa 25 % (general)» | Las renovaciones de la app de ese operador (`LlavesSugeridos::porOperador()`) |
+| % de comisiones | Sin dato: avisa y las comisiones estimadas no se proyectan | Ídem, comisiones ÷ llave, ponderado por la llave |
+| % de FPC | Sin dato: avisa y el FPC estimado no se proyecta | Ídem, FPC ÷ llave, ponderado por la llave |
+| Escribano y otros ($ por renovación) | Sin dato: avisa; no se suma | — |
+| **% de impuestos** sobre llave, comisiones y FPC | **Sin dato: avisa y la llave, las comisiones y el FPC de ese operador no se proyectan** | La relación factura / contrato de Tango (`LlavesSugeridos::impuestos()`): IRSA 31 %, DOT 24,5 %, Paseo del Siglo y Caballito 21 %, Cencosud 0 % (la factura «LLAVE L2» es llave + comisiones, sin impuestos) |
+| Cuotas | Hereda: «usa 4 (general)» | — |
+| Corrimiento (meses respecto del inicio; negativo = antes) | Hereda: «usa 0 (por defecto)» | — |
+
+**Lo sugerido no se confunde con lo grabado.** Ningún número va adentro de un campo vacío (un placeholder en gris parecía un dato cargado: un operador quedó sin % de impuestos creyendo que lo tenía). Lo grabado se ve como dato normal, con quién y cuándo en *Último cambio*. Un campo vacío dice debajo qué pasa: lo que **hereda** y de dónde (`LlavesCalculo::queSeUsa()`, la misma regla que usa el cálculo) o **«sin dato»** con el borde punteado, si frena o recorta la proyección. El **sugerido** va al lado, en un chip con su tooltip y el botón **«Usar»**, que lo graba con auditoría como cualquier cambio. Vale también en Generales (los cortes, con sugerido; los costos en U$S vacíos, sin dato) y en Por local.
+
+**El % de otros gastos ya no se usa** (script 73): `PCT_OTROS` queda en la base y el código no lo lee ni lo escribe; al guardar un operador, la fila nueva lo deja vacío y el valor anterior queda en el historial.
 
 **Las facturas de Tango dicen cuánto se facturó, no cómo se paga.** IRSA factura la «cuota inicial» una vez y la paga en cuotas con echeqs (Avellaneda L6 $ 98,25 M: 19,65 + 19,65 + 9,825 M). Por eso de Tango sólo sale el % de impuestos sugerido; las facturas se ven como referencia en el tooltip y nunca se sugieren cuotas con ellas.
 
 ### 2.c Por local
 
-Sólo los que tienen un contrato que vence dentro del horizonte o ya vencido, sin renovación cargada. Cuelga del **contrato que vence** (`ID_CONTRATO`), así que sigue ahí cuando administración carga el contrato nuevo. **Lo que define cuánto** —**No renueva**, **llave a mano**, **% propio** y **meses**— deja de aplicarse en ese momento: manda el importe real del contrato (con la marca de llave 1, sus meses y el % del operador o el general). **Lo que define cómo se paga** —**cuotas** y **mes de la primera cuota**— sigue valiendo, también sobre el contrato cargado: es una forma de pago acordada, no una estimación. **La tabla muestra también las renovaciones cargadas** (con pagos por delante): las dos columnas de cómo se paga se editan, y las cuatro de cuánto se ven deshabilitadas, con el tooltip *manda el contrato*.
+Sólo los que tienen un contrato que vence dentro del horizonte o ya vencido, sin renovación cargada. Cuelga del **contrato que vence** (`ID_CONTRATO`), así que sigue ahí cuando administración carga el contrato nuevo. **Lo que define cuánto** —**No renueva**, **llave a mano**, **% propio** y **meses**— deja de aplicarse en ese momento: manda el importe real del contrato (con la marca de llave 1, sus meses y el % del operador o el general). **Lo que define cómo se paga** —**cuotas** y **mes de la primera cuota**— sigue valiendo, también sobre el contrato cargado: es una forma de pago acordada, no una estimación. **La tabla muestra también las renovaciones cargadas** que siguen vigentes o son futuras y tienen al menos una cuota desde el mes pasado: las dos columnas de cómo se paga se editan, y las cuatro de cuánto se ven deshabilitadas, con el tooltip *manda el contrato*.
+
+**Sólo lo vigente.** Una cargada cuyo contrato nuevo ya terminó, o con todas sus cuotas antes del mes pasado, no se muestra (Alto Palermo #85, que renovó al #3 y terminó el 15/10/2026). El criterio de «vieja» es el de la proyección: `LlavesCalculo::fechasCuotas()` y `esVieja()`, escritos una sola vez. Sus parámetros siguen en la base, con su historial. **Parámetros no lee el calendario**: ahí el corrimiento al hábil es de lunes a viernes, y sólo cambiaría algo si un feriado cae en el borde del mes de la última cuota.
+
+La columna **Contrato** muestra el que rige: en una cargada, el contrato nuevo (#, desde, hasta, llave) y debajo, en chico, «renueva al #N»; en una estimada, el vigente. Un campo vacío dice debajo qué usa: «usa 25 % (operador)», «usa 36 (contrato #22)», «usa 4 (general)», «usa ene-2027».
 
 **No renueva** (con motivo obligatorio), **llave a mano** (reemplaza el cálculo; origen *Manual*), **% propio**, **meses del contrato nuevo** (por defecto, los del último contrato con llave), **cuotas** y **mes de la primera cuota**.
 
 ### 2.d Ya pagadas
 
-La llave, los otros gastos **o los dos** de una renovación que **ya salieron de caja**: fecha y comprobante en común, y un monto por concepto. **El formulario trae los dos conceptos tildados**: lo normal es marcar la renovación entera, y marcar sólo la llave deja los otros gastos proyectados sin que nadie lo note (Abasto: la cuota inicial y la publicidad de lanzamiento se facturaron juntas en agosto). Un concepto que ya estaba marcado no se toca y se informa. Corta cada concepto marcado en esa renovación, cargada o estimada, y **sigue valiendo cuando se carga el contrato nuevo**. No suma. Se marca desde Parámetros o desde la solapa *Contratos* (con el permiso de la pestaña).
+La llave, los otros gastos (comisiones, FPC y escribano) **o los dos** de una renovación que **ya salieron de caja**: fecha, comprobante y observación en común, y **un monto opcional** por concepto (script 73: es informativo, no suma ni resta; si se carga, mayor que 0). Desde la solapa *Contratos* no se piden importes. Sin monto, las notas y la tabla lo omiten: «Ya pagada (llave) el 31/08/2026». **El formulario trae los dos conceptos tildados**: lo normal es marcar la renovación entera, y marcar sólo la llave deja los otros gastos proyectados sin que nadie lo note (Abasto: la cuota inicial y la publicidad de lanzamiento se facturaron juntas en agosto). Un concepto que ya estaba marcado no se toca y se informa. Corta cada concepto marcado en esa renovación, cargada o estimada, y **sigue valiendo cuando se carga el contrato nuevo**. No suma. Se marca desde Parámetros o desde la solapa *Contratos* (con el permiso de la pestaña).
 
 ### 2.e Obras, aperturas y compromisos
 
@@ -140,7 +151,8 @@ La llave, los otros gastos **o los dos** de una renovación que **ya salieron de
 ### 3.a Renovación cargada en la app
 
 - **Llave**: su importe en N cuotas mensuales iguales y consecutivas (local > operador > general), la primera el día de inicio del contrato (+ corrimiento del operador), cada una corrida al hábil siguiente.
-- **Comisiones + FPC**: un pago, el día de la primera cuota (la firma).
+- **Comisiones**: en **las mismas N cuotas y fechas que la llave**, repartidas con `cuotas()` (al centavo) y cada cuota con impuestos y retención (`importes()`). Si la llave no se proyecta porque la cortó una «Ya pagada» o una factura, las comisiones igual van en las N fechas que tendría. Tooltip: *«Comisiones $ 20.000.000 del contrato #95, cuota 2 de 4. Neto … + impuestos … − retención … = a pagar …»*.
+- **FPC**: un pago, el día de la primera cuota (la firma), con impuestos y retención.
 - Vale para **cualquier contrato con cuotas por delante**, también el vigente si empezó hace poco (DOT #91).
 - **Llave = 1**: se estima (3.b) con los meses de ese contrato y el % del operador o el general —no el % propio del local, que es de la estimación—; nunca se pagan $ 1.
 - **De los parámetros por local valen las cuotas y el mes de la primera cuota**, también sobre el contrato cargado; el % propio, los meses y la llave a mano, no (ver 2.c).
@@ -156,13 +168,17 @@ llave estimada = % × (1 + 2 + 8 del mes de la primera cuota, como lo proyecta A
 - Meses: los del local; si no, los del **contrato de llave** (el vigente, o el anterior al puente). **Un contrato corto con llave no se avisa**: es normal (Alto Palermo renueva cada 5 o 6 meses). El aviso de "menos de 12 meses" que hubo se borró.
 - Primera cuota: el mes del día siguiente al fin del vigente + corrimiento, o el del local. **Vencido sin renovar**: la primera cuota va al primer hábil después de hoy, con aviso de atención.
 
-### 3.c Otros gastos estimados
+### 3.c Comisiones, FPC y escribano estimados
 
-`% de otros gastos del operador × llave estimada + escribano`, un pago el día de la primera cuota. El escribano es un importe final: sin impuestos ni retención.
+- **Comisiones** = `% de comisiones del operador × llave estimada`, en las cuotas de la llave.
+- **FPC** = `% de FPC del operador × llave estimada`, un pago en la firma.
+- **Escribano y otros**: el importe del operador por renovación, un pago en la firma; es un importe final, sin impuestos ni retención.
+
+Cada uno es un concepto aparte, con su chip y su tooltip. Sin uno de los %, ese concepto no se proyecta y el aviso lo nombra. Hasta el script 73 había un solo % de otros gastos; ya no se usa.
 
 ### 3.d Impuestos y retención
 
-`neto × (1 + % de impuestos del operador) − neto × % de retención del local`, con `AlquileresPago::importes()` —la misma regla de redondeo que Alquileres— pasándole el % de impuestos como la única alícuota. Por qué no un helper propio: así la suma, la retención sobre el neto y el redondeo a centavos están escritos una sola vez, sin agregarle a `importes()` un caso que Alquileres no tiene. Sin % de impuestos o sin % de retención, la llave y los otros gastos de ese local —el % de otros gastos, o las comisiones y el FPC del contrato— **no se proyectan**, y el aviso dice el neto que falta. **El escribano sí se proyecta**: es un importe final, sin impuestos ni retención, así que no le falta nada. Los dos avisos lo dicen.
+`neto × (1 + % de impuestos del operador) − neto × % de retención del local`, con `AlquileresPago::importes()` —la misma regla de redondeo que Alquileres— pasándole el % de impuestos como la única alícuota. Por qué no un helper propio: así la suma, la retención sobre el neto y el redondeo a centavos están escritos una sola vez, sin agregarle a `importes()` un caso que Alquileres no tiene. Sin % de impuestos o sin % de retención, la llave, las comisiones y el FPC de ese local **no se proyectan**, y el aviso dice el neto que falta. **El escribano sí se proyecta**: es un importe final, sin impuestos ni retención, así que no le falta nada. Los dos avisos lo dicen.
 
 ### 3.e Obras y aperturas
 
@@ -175,8 +191,8 @@ Su fecha y su monto, tal cual (origen *Manual*).
 ### 3.g Lo que corta
 
 - **No renueva**: nada de esa renovación.
-- **Ya pagada**: ese concepto.
-- **Una factura marcada como llave**: todo lo proyectado de ese concepto en esa renovación (parte 4).
+- **Ya pagada**: la de la llave, la llave; la de otros gastos, las comisiones, el FPC y el escribano.
+- **Una factura marcada como llave**: todo lo proyectado de su concepto en esa renovación (parte 4). Una marcada con el concepto viejo «Otros gastos» corta comisiones, FPC y escribano, y avisa para que se rehaga.
 - **Los pagos de hoy o anteriores no se proyectan.** Una cuota de un contrato firmado que ya pasó, del mes en curso o el anterior, sin factura ni marca, se avisa.
 
 Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factura*) y la cuenta en el tooltip: *«25% (general) × $ 18.927.137 (alquiler + complementario + VMA de enero de 2027…) × 41 meses = $ 194.003.154, cuota 2 de 4. Neto … + 21% de impuestos … − 1% de retención … = a pagar …»*.
@@ -187,7 +203,7 @@ Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factur
 
 `Class/LlavesFacturas.php` (script 68), en *Alquileres › Facturas*, junto a *Excluir*, por cuota o las tildadas.
 
-- Pide el **local**, el **concepto** (Llave / Otros gastos / Obra) y el **mes**. La llave y los otros gastos se imputan a **la renovación que empieza más cerca de ese mes** (`renovacionDeMes()`): la factura de agosto de Arcos es de la renovación de enero, no del contrato de 2023. La obra, al local y mes.
+- Pide el **local**, el **concepto** (Llave / Comisiones / FPC / Obra) y el **mes**. Sin el script 73, sólo Llave y Obra. **Las marcas viejas con «Otros gastos» no se migran**: se ven como «Otros gastos (marca anterior)», siguen reemplazando comisiones, FPC y escribano de su renovación, y un aviso pide deshacerlas y volver a marcarlas. La llave, las comisiones y el FPC se imputan a **la renovación que empieza más cerca de ese mes** (`renovacionDeMes()`): la factura de agosto de Arcos es de la renovación de enero, no del contrato de 2023. La obra, al local y mes.
 - **La factura no es el pago**: de a una factura pendiente se reparte en **N pagos con fecha e importe** (por defecto, las cuotas del operador desde su vencimiento a considerar), que suman el pendiente menos la retención; sin pagos, va entera en su vencimiento a considerar. Con varias tildadas, cada una va entera.
 - **`AlquileresFacturas::destino()` devuelve `A_LLAVES`**: la cuota sale de Alquileres y **no vuelve a Proveedores Locales**. La misma regla para todos (Alquileres, Proveedores Locales, Llaves y el tablero), y lo fija una prueba. Con la condición de seguridad de Alquileres sin cumplir, todo queda en Proveedores Locales, como siempre.
 - En Llaves, **reemplaza todo lo proyectado de ese local y concepto en esa renovación** —manda lo real, como la imputación de Alquileres (parte 13)— y suma como **real** en sus pagos (un pago vencido, al siguiente hábil desde hoy).
@@ -202,10 +218,10 @@ Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factur
 
 `Class/Llaves.php` (arma, sin reglas propias; nunca lanza), `Controller/LlavesController.php`, `Tabs/llaves_renov.php`, `Js/Llaves.js`, `Css/Llaves.css`. Un pedido (`getProyeccion`) para las tres sub-pestañas.
 
-- **Proyección**: operador → local → *Llave*, *Otros gastos*, *Obra de imagen*; aparte *Aperturas* y *Compromisos a mano*. Las tres vistas, columnas fijas, totales arriba del eje, buscador, abrir todo y exportar con todo abierto. **Lo estimado va en itálica y atenuado**, con el chip del origen (*mixto* si una celda junta varios) y la cuenta en el tooltip. `Llaves::armarPestana()` sólo agrupa la lista de pagos con `EjeVista`.
+- **Proyección**: operador → local → *Llave*, *Comisiones*, *FPC*, *Escribano y otros*, *Obra de imagen* (y *Otros gastos (marca anterior)* sólo con una factura vieja); aparte *Aperturas* y *Compromisos a mano*. Las tres vistas, la columna «Operador · local · concepto» **fija** al scrollear a lo ancho (`.tabla-temporal` + `col-fija-1`, como Alquileres), totales arriba del eje, buscador, abrir todo y exportar con todo abierto. **Lo estimado va en itálica y atenuado**, con el chip del origen (*mixto* si una celda junta varios) y la cuenta en el tooltip. `Llaves::armarPestana()` sólo agrupa la lista de pagos con `EjeVista`.
 - **Contratos**: lo que era la hoja *Detalles de vencimientos* — vigente (desde, hasta, meses, llave, comisiones, FPC), renovación cargada, estado, operador, m² y segmento, con las notas de lo que corta y el botón **Ya pagada**.
 - **Facturas**: las marcadas como llave, pendientes o pagadas, con sus pagos.
-- **Tarjetas**: total del horizonte, renovaciones con pagos en el horizonte (cantidad e importe, **los dos sobre el mismo universo**: los pagos de llave y otros gastos de cualquier origen, facturas incluidas; una factura cuenta en la renovación a la que se imputó, así que no suma una renovación aparte), estimado frente a lo que está en un contrato o una factura (y lo manual), locales sin dato.
+- **Tarjetas**: total del horizonte, renovaciones con pagos en el horizonte (cantidad e importe, **los dos sobre el mismo universo**: los pagos de llave, comisiones, FPC y escribano de cualquier origen, facturas incluidas; una factura cuenta en la renovación a la que se imputó, así que no suma una renovación aparte), estimado frente a lo que está en un contrato o una factura (y lo manual), locales sin dato.
 
 ---
 
@@ -219,7 +235,9 @@ Cada pago lleva su **origen** (*Contrato cargado*, *Estimado*, *Manual*, *Factur
 | `PROYECTADO` | Contratos de la app, lo estimado y los compromisos a mano que ninguna factura reemplazó |
 | `PAGOS` | Las dos juntas: la fila de antes del split. `componentes` impide que conviva con las partes |
 
-Lo estimado se anota en cada celda con `detalle` (no suma). **La pestaña y el tablero suman lo mismo, columna por columna**, y lo fija una prueba con todos los orígenes adentro. Los avisos de la pestaña llegan al tablero.
+Lo estimado se anota en cada celda con `detalle` (no suma), nombrando local y concepto (*Comisiones*, *FPC*, *Escribano y otros*). **La pestaña y el tablero suman lo mismo, columna por columna**, y lo fija una prueba con todos los orígenes y los conceptos nuevos adentro (comisiones en cuotas, FPC, facturas de comisiones y de FPC). La estructura no cambió con el script 73: la fila sigue abriéndose en *Real* y *Proyectado*.
+
+**Con el script 73 sin correr y el código de `feature/llaves-ajustes-testeo`** (al 27/11/2026), la fila baja **$ 181,2 M** en el horizonte: las comisiones y el FPC estimados no se proyectan hasta cargar los dos % nuevos, y las comisiones de los contratos cargados pasan de la firma a las cuotas. Por mes: nov-26 −1,68 M · dic-26 −2,96 M · ene-27 −6,69 M · feb-27 +0,99 M · mar-27 −162,51 M · jul-27 −8,34 M; el resto, igual.
 
 **La fila nueva, por mes** (al 23/11/2026, con el código de la rama; el Flujo Neto baja lo mismo en cada mes):
 
@@ -245,7 +263,7 @@ Lo estimado se anota en cada celda con `detalle` (no suma). **La pestaña y el t
 
 ## 7. Avisos
 
-Cada hecho, un aviso aparte: contrato vencido sin renovación cargada (atención); contratos que vencen en el horizonte (informativo); local sin contrato en la app; local sin razón social en Alquileres; mes sin alquiler proyectado en Alquileres; operador sin % de impuestos (no se proyectan la llave ni los otros gastos; el escribano, sí), sin % de otros gastos o sin escribano; local sin % de retención (ídem); local sin m² ni segmento; cortes sin confirmar; segmento sin costo en U$S; mes sin dólar futuro; cuota de contrato firmado ya pasada sin factura (mes en curso y anterior); facturas excluidas como pago de contrato; facturas con leyenda de llave en Proveedores Locales; facturas marcadas que ya no están en Tango o cuyo pendiente cambió; falta correr un script.
+Cada hecho, un aviso aparte: contrato vencido sin renovación cargada (atención); contratos que vencen en el horizonte (informativo); local sin contrato en la app; local sin razón social en Alquileres; mes sin alquiler proyectado en Alquileres; operador sin % de impuestos (no se proyectan la llave, las comisiones ni el FPC; el escribano, sí), sin % de comisiones, sin % de FPC (cada uno aparte, y sin el 73 lo nombra) o sin escribano; local sin % de retención (ídem); facturas marcadas con el concepto viejo «Otros gastos»; cuota de contrato firmado ya pasada sin factura, mes en curso y anterior (también las de comisiones); local sin m² ni segmento; cortes sin confirmar; segmento sin costo en U$S; mes sin dólar futuro; facturas excluidas como pago de contrato; facturas con leyenda de llave en Proveedores Locales; facturas marcadas que ya no están en Tango o cuyo pendiente cambió; falta correr un script.
 
 ---
 
@@ -269,7 +287,7 @@ php tests/run.php llaves
 ```
 
 - `test_llaves_lectura.php` — los m² (null sin medidas, no 0) y que `LocalesMedidas` no escribe. Los importes de los contratos están en `test_alquileres_app.php`.
-- `test_llaves_parametros.php` — los validadores (vacío no es 0, no renueva con motivo, ya pagada no futura, series), el script 66 (siembra sólo los defaults, sin bajas físicas) y el cableado de la sub-pestaña.
+- `test_llaves_parametros.php` — los validadores (vacío no es 0, no renueva con motivo, ya pagada no futura y sin monto, series, % de comisiones y de FPC), los scripts 66 y 73, el cableado de la sub-pestaña, Por local sólo con lo vigente, lo que se hereda (`queSeUsa()`) y que ningún campo lleve un número como placeholder ni «Usar» deje de grabar.
 - `test_llaves_calculo.php` — la estimación con el % general, del operador y del local, meses y cuotas, corrida al hábil; corrimiento; llave a mano; impuestos y retención; la renovación cargada reemplaza; llave = 1; qué locales estiman; vencido al mes en curso; no renueva; sin alquiler o sin razón social, null con aviso; otros gastos con y sin escribano o %; el segmento en los bordes; obra y apertura con curva, aproximada y sin curva; compromisos sueltos y en serie; ya pagada y facturas cortan; pagos de hoy o anteriores; los sugeridos.
 - `test_llaves_facturas.php` — `destino()` igual para todos (no está en Alquileres, no vuelve a Proveedores Locales), deshacer la devuelve, la grilla de Alquileres, la renovación por mes, la validación y los pagos, `paraCalculo()` y que reemplace lo proyectado de su local, concepto y renovación.
 - `test_llaves_pestana.php` — la grilla (cada pago una vez en el pie), el origen y el tooltip, las tarjetas, los contratos, el menú, los permisos y el endpoint.
@@ -296,6 +314,7 @@ php tests/run.php llaves
 | `Tabs/llaves_renov.php`, `Js/Llaves.js`, `Css/Llaves.css` | La pestaña |
 | `Tabs/parametros_llaves.php`, `Js/Parametros-Llaves.js` | La sub-pestaña de Parámetros |
 | `sql/cashflow_llaves.sql`, `sql/cashflow_llaves_permisos.sql`, `sql/cashflow_llaves_facturas.sql`, `sql/cashflow_llaves_fila.sql` | Los scripts 66 a 69 |
+| `sql/cashflow_llaves_ajustes.sql` | El script 73: «Ya pagada» sin monto, % de comisiones y de FPC, facturas de comisiones y FPC |
 
 ---
 
