@@ -6,8 +6,8 @@ require_once __DIR__ . '/LlavesCalculo.php';
 /**
  * LlavesSugeridos
  * Lo que Parametros -> Llaves y Renovaciones SUGIERE por operador, medido con
- * la historia: el % de llave y el % de otros gastos de sus ultimas
- * renovaciones en la app, y el % de impuestos con la relacion factura /
+ * la historia: el % de llave, el % de comisiones y el % de FPC de sus
+ * ultimas renovaciones en la app, y el % de impuestos con la relacion factura /
  * contrato de Tango. Una sugerencia no proyecta nada: el valor lo confirma una
  * persona, y hasta entonces manda el general (o falta, y se avisa).
  *
@@ -23,10 +23,13 @@ require_once __DIR__ . '/LlavesCalculo.php';
  *
  *   % de llave        = llave / (1 + 2 + 8 del primer mes x meses), ponderado
  *                       por la base: los contratos grandes pesan mas.
- *   % de otros gastos = (comisiones + FPC) / llave, ponderado por la llave.
+ *   % de comisiones   = comisiones / llave, ponderado por la llave.
+ *   % de FPC          = FPC / llave, ponderado por la llave.
  *
- * Es la medicion del plan (23/11/2026): IRSA 27,9 % y 43,8 %, DOT 26,3 % y
- * 40,1 %, Cencosud 16,7 % y 39,5 %, San Justo 24,5 % y 8,4 %.
+ * Es la medicion del plan (23/11/2026): % de llave IRSA 27,9 %, DOT 26,3 %,
+ * Cencosud 16,7 %, San Justo 24,5 %. Comisiones + FPC sumaban IRSA 43,8 %,
+ * DOT 40,1 %, Cencosud 39,5 %, San Justo 8,4 %; desde el script 73 se
+ * sugieren por separado.
  *
  * LAS FACTURAS DICEN CUANTO SE FACTURA, NO COMO SE PAGA: IRSA factura la
  * "cuota inicial" una vez y la paga en cuotas con echeqs. Por eso de Tango
@@ -49,8 +52,9 @@ class LlavesSugeridos {
      * @param array $contratos NRO => contratos de la app
      * @param array $alquilerApp NRO => 'Y-m' => 1 + 2 + 8 de la app (cerrado o fijo abierto)
      * @param array $nombres NRO => nombre del local
-     * @return array COD => ['pct_llave' => float|null, 'pct_otros' => float|null,
-     *                       'renovaciones' => [['local', 'id', 'desde', 'meses', 'llave', 'base', 'pct', 'otros', 'pct_otros']]]
+     * @return array COD => ['pct_llave' => float|null, 'pct_comisiones' => float|null, 'pct_fpc' => float|null,
+     *                       'renovaciones' => [['local', 'id', 'desde', 'meses', 'llave', 'base', 'pct', 'comisiones',
+     *                                         'pct_comisiones', 'fpc', 'pct_fpc']]]
      */
     public static function porOperador($operadorDe, $contratos, $alquilerApp, $nombres = []) {
         $out = [];
@@ -80,13 +84,15 @@ class LlavesSugeridos {
                 $meses = LlavesCalculo::meses($c['desde'], $c['hasta']);
                 $alq = $alquilerApp[$nro][substr($c['desde'], 0, 7)] ?? null;
                 $base = ($alq !== null && $alq > 0) ? round($alq * $meses, 2) : null;
-                $otros = (float) $c['comisiones'] + (float) $c['fpc'];
+                $comis = (float) $c['comisiones'];
+                $fpc = (float) $c['fpc'];
 
                 $out[$cod]['renovaciones'][] = [
                     'local' => $nombres[$nro] ?? ('Local ' . $nro), 'nro' => $nro, 'id' => $c['id'], 'desde' => $c['desde'],
                     'meses' => $meses, 'llave' => $c['llave'], 'alquiler' => $alq, 'base' => $base,
                     'pct' => ($base === null) ? null : round($c['llave'] / $base * 100, 2),
-                    'otros' => $otros, 'pct_otros' => round($otros / $c['llave'] * 100, 2)
+                    'comisiones' => $comis, 'pct_comisiones' => round($comis / $c['llave'] * 100, 2),
+                    'fpc' => $fpc, 'pct_fpc' => round($fpc / $c['llave'] * 100, 2)
                 ];
             }
         }
@@ -97,8 +103,11 @@ class LlavesSugeridos {
             $sumLlave = array_sum(array_column($o['renovaciones'], 'llave'));
 
             $out[$cod]['pct_llave'] = ($sumBase > 0) ? round(array_sum(array_column($conBase, 'llave')) / $sumBase * 100, 2) : null;
-            $out[$cod]['pct_otros'] = ($sumLlave > 0)
-                ? round(array_sum(array_column($o['renovaciones'], 'otros')) / $sumLlave * 100, 2) : null;
+            /* Cada uno sobre la llave, por separado: comisiones / llave y FPC / llave. */
+            foreach (['comisiones', 'fpc'] as $k) {
+                $out[$cod]['pct_' . $k] = ($sumLlave > 0)
+                    ? round(array_sum(array_column($o['renovaciones'], $k)) / $sumLlave * 100, 2) : null;
+            }
         }
 
         return $out;

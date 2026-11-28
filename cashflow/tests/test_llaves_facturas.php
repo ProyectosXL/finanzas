@@ -201,3 +201,25 @@ foreach (['previsualizarLlave', 'marcarLlave', 'deshacerLlave', 'getPagadasLlave
         isset(AuthCashflow::ESCRITURAS['Alquileres'][$acc]) || in_array($acc, AuthCashflow::LECTURAS['Alquileres'], true)]);
 }
 chequear('marcar pide editar Alquileres, como excluir', [['alquileres', null]], AuthCashflow::ESCRITURAS['Alquileres']['marcarLlave']);
+
+seccion('LlavesFacturas: los conceptos Comisiones y FPC (script 73)');
+
+chequear('se marca como Llave, Comisiones, FPC u Obra; «Otros gastos» ya no se ofrece',
+    ['LLAVE' => 'Llave', 'COMISIONES' => 'Comisiones', 'FPC' => 'FPC', 'OBRA' => 'Obra'], LlavesFacturas::CONCEPTOS);
+chequear('sin el script 73, Comisiones y FPC quedan fuera del desplegable', ['LLAVE' => 'Llave', 'OBRA' => 'Obra'],
+    LlavesFacturas::conceptos(false));
+chequear('una marca vieja se nombra como tal', 'Otros gastos (marca anterior)', LlavesFacturas::NOMBRES['OTROS']);
+$vC = LlavesFacturas::validar(['concepto' => 'COMISIONES'] + $d, $e);
+chequear('una factura de comisiones se valida e imputa a la renovación del mes', [true, 'COMISIONES', 22],
+    [$vC['ok'], $vC['concepto'], $vC['ant']]);
+$vC = LlavesFacturas::validar(['concepto' => 'FPC'] + $d, ['conceptos' => LlavesFacturas::conceptos(false)] + $e);
+chequear('sin el 73, una de FPC no se marca y el error nombra el script', [false, true],
+    [$vC['ok'], strpos(implode(' ', $vC['errores']), 'falta correr sql/cashflow_llaves_ajustes.sql') !== false]);
+$vC = LlavesFacturas::validar(['concepto' => 'OTROS'] + $d, $e);
+chequear('ya no se marca una nueva como «Otros gastos»', [false, 'Elegí el concepto: llave, comisiones, FPC u obra.'],
+    [$vC['ok'], $vC['errores'][0] ?? null]);
+$alqTab = file_get_contents(__DIR__ . '/../Tabs/alquileres.php');
+chequear('el modal de Alquileres explica que cada concepto reemplaza sólo lo suyo', true,
+    strpos($alqTab, 'La llave, las comisiones y el FPC reemplazan lo proyectado de ese concepto') !== false);
+chequear('el tooltip de una marca usa el nombre de cada concepto, también la vieja', true,
+    substr_count($jsAf, 'datos.nombres_llave') === 2);

@@ -31,9 +31,12 @@ chequearLanza('una clave que no existe', function () { LlavesParametros::validar
 
 seccion('LlavesParametros: por operador, vacío no es 0');
 
-$v = LlavesParametros::validarOperador(['pct_llave' => '', 'pct_otros' => '43,8', 'escribano' => '0',
-                                        'pct_impuestos' => '', 'cuotas' => '', 'corrimiento' => '-3']);
-chequear('vacío es null', [null, null, null], [$v['pct_llave'], $v['pct_impuestos'], $v['cuotas']]);
+$v = LlavesParametros::validarOperador(['pct_llave' => '', 'pct_comisiones' => '33,8', 'pct_fpc' => '', 'escribano' => '0',
+                                        'pct_impuestos' => '', 'cuotas' => '', 'corrimiento' => '-3', 'pct_otros' => '43,8']);
+chequear('vacío es null', [null, null, null, null], [$v['pct_llave'], $v['pct_fpc'], $v['pct_impuestos'], $v['cuotas']]);
+chequear('el % de comisiones con coma decimal', 33.8, $v['pct_comisiones']);
+chequear('el % de otros gastos ya no se valida ni se guarda', false, array_key_exists('pct_otros', $v));
+chequearLanza('el % de FPC es un número >= 0', function () { LlavesParametros::validarOperador(['pct_fpc' => '-1']); });
 chequear('0 en el escribano es 0', 0.0, $v['escribano']);
 chequear('el corrimiento puede ser negativo', -3, $v['corrimiento']);
 chequearLanza('el corrimiento tiene tope', function () { LlavesParametros::validarOperador(['corrimiento' => '30']); });
@@ -53,9 +56,11 @@ chequear('llave pagada el 31/08', ['LLAVE', '2026-08-31', 180525000.0], [$v['con
 chequearLanza('una fecha futura no está pagada', function () {
     LlavesParametros::validarPagada(['concepto' => 'LLAVE', 'fecha' => '2026-12-01', 'monto' => '1'], '2026-11-23');
 });
-chequearLanza('el monto es obligatorio y mayor que 0', function () {
+chequearLanza('con monto, tiene que ser mayor que 0', function () {
     LlavesParametros::validarPagada(['concepto' => 'OTROS', 'fecha' => '2026-08-31', 'monto' => '0'], '2026-11-23');
-});
+}, 'El monto pagado tiene que ser mayor que 0, o quedar vacío.');
+$v = LlavesParametros::validarPagada(['concepto' => 'OTROS', 'fecha' => '2026-08-31', 'monto' => ''], '2026-11-23');
+chequear('sin monto se graba: el monto es null, no 0', ['OTROS', null], [$v['concepto'], $v['monto']]);
 
 seccion('LlavesParametros: obras, aperturas y compromisos');
 
@@ -134,8 +139,12 @@ chequear('el formato de un solo concepto sigue sirviendo', [['concepto' => 'LLAV
 chequearLanza('sin ningún concepto tildado', function () {
     LlavesParametros::validarPagadas(['conceptos' => [], 'fecha' => '2026-08-31'], '2026-11-23');
 });
-chequearLanza('un concepto sin monto', function () {
-    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => '1'], ['concepto' => 'OTROS', 'monto' => '']],
+chequear('la renovación entera sin montos (como la marca la solapa Contratos)',
+    [['concepto' => 'LLAVE', 'monto' => null], ['concepto' => 'OTROS', 'monto' => null]],
+    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => null], ['concepto' => 'OTROS', 'monto' => null]],
+        'fecha' => '2026-08-31'], '2026-11-23')['conceptos']);
+chequearLanza('un monto negativo o en 0, aunque el otro venga bien', function () {
+    LlavesParametros::validarPagadas(['conceptos' => [['concepto' => 'LLAVE', 'monto' => '1'], ['concepto' => 'OTROS', 'monto' => '0']],
         'fecha' => '2026-08-31'], '2026-11-23');
 });
 chequearLanza('el mismo concepto dos veces', function () {
@@ -147,6 +156,18 @@ foreach (['Tabs/llaves_renov.php' => 'll-pag-concepto', 'Tabs/parametros_llaves.
     chequear($archivo . ': los dos conceptos, tildados por defecto', 2,
         preg_match_all('/class="form-check-input ' . $clase . '" type="checkbox" id="\w+" value="(LLAVE|OTROS)" checked>/', $html));
 }
+$tabLl = file_get_contents(__DIR__ . '/../Tabs/llaves_renov.php');
+$jsLl = file_get_contents(__DIR__ . '/../Js/Llaves.js');
+chequear('Contratos: el modal «Ya pagada» no pide importes', [0, true],
+    [preg_match('/id="llPagMonto/', $tabLl), strpos($jsLl, "return { concepto: c.value, monto: null };") !== false]);
+chequear('y la nota sin monto omite la parte del importe', true,
+    strpos($jsLl, "(p.monto === null || p.monto === undefined ? '' : ' por ' + plata(p.monto))") !== false);
+chequear('Parámetros: el monto de cada concepto es opcional, y sin monto la tabla muestra «—»', [2, true],
+    [substr_count(file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php'), 'inputmode="decimal" placeholder="opcional"'),
+     strpos(file_get_contents(__DIR__ . '/../Js/Parametros-Llaves.js'), "(p.monto === null || p.monto === undefined ? '—' : plata(p.monto))") !== false]);
+chequear('sin el script 73, marcar sin monto dice que falta', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/LlavesParametros.php'),
+        "Todavía no se puede marcar «Ya pagada» sin monto: falta correr '") !== false);
 
 seccion('Por local: tambien las renovaciones cargadas, con cuotas y 1.a cuota editables');
 
@@ -161,13 +182,70 @@ chequear('en una cargada, no renueva y su motivo deshabilitados con el tooltip',
     substr_count($pllJs, "+ dis + '"));
 foreach (['llave_manual', 'pct_llave', 'meses'] as $campoCuanto) {
     chequear($campoCuanto . ' deshabilitado en una cargada', true,
-        (bool) preg_match("/campo\('" . $campoCuanto . "',[^\n]*cargada \? MANDA_EL_CONTRATO[^\n]*, cargada\)/", $pllJs));
+        (bool) preg_match("/campo\('" . $campoCuanto . "', p\." . $campoCuanto
+            . ", cargada \? \{ titulo: MANDA_EL_CONTRATO, deshabilitado: true \}/", $pllJs));
 }
-chequear('cuotas sigue editable', true, strpos($pllJs, "campo('cuotas', p.cuotas, '', 'Vacío = las del operador o las generales')") !== false);
+chequear('cuotas sigue editable', true,
+    strpos($pllJs, "campo('cuotas', p.cuotas, { titulo: 'Vacío = las del operador o las generales', hereda: heredado(usa.cuotas, '') })") !== false);
 chequear('y la 1.a cuota tambien', false,
     (bool) preg_match('/data-campo="mes_primera_cuota"[^\n]*dis/', $pllJs));
 chequear('el tooltip dice que manda el contrato', true,
     strpos($pllJs, "var MANDA_EL_CONTRATO = 'El contrato nuevo ya está cargado en la app: manda el contrato.") !== false);
+
+seccion('Por local: sólo las renovaciones cargadas vigentes o futuras, con cuotas por delante');
+
+require_once __DIR__ . '/../Class/Llaves.php';
+
+/* Un doble de Llaves que expone renovacionesEnCurso() sin leer nada: la app,
+   los parametros y Alquileres no se construyen (van objetos vacios). */
+class LlavesPorLocalDoble extends Llaves {
+    public function enCurso($base, $par) { return $this->renovacionesEnCurso($base, $par); }
+}
+
+$plK = function ($id, $desde, $hasta, $llave) {
+    return ['id' => $id, 'desde' => $desde, 'hasta' => $hasta, 'llave' => $llave, 'comisiones' => 0.0, 'fpc' => 0.0];
+};
+$plBase = ['locales' => [
+    /* Alto Palermo: el #85 (renovó al #3) ya terminó; el #90 (renueva al #85) está vigente con cuotas por delante. */
+    7 => ['nro' => 7, 'nombre' => 'ALTO PALERMO', 'operador' => 'IRSA', 'cod_provee' => 'SAIRSA', 'vigencia' => false,
+          'contratos' => [$plK(3, '2022-04-16', '2026-04-15', 17578666.0), $plK(85, '2026-04-16', '2026-10-15', 9000000.0),
+                          $plK(90, '2026-10-16', '2027-12-31', 44500000.0)]],
+    /* Un vigente cargado hace dos años: sus cuotas son de 2024, ya no muestra nada. */
+    9 => ['nro' => 9, 'nombre' => 'CABALLITO', 'operador' => 'OTRO', 'cod_provee' => 'SAOTRO', 'vigencia' => false,
+          'contratos' => [$plK(10, '2020-01-01', '2023-12-31', 1000000.0), $plK(11, '2024-01-01', '2027-12-31', 2000000.0)]]
+]];
+$plPar = ['generales' => ['CUOTAS' => 4.0], 'operadores' => [], 'locales' => []];
+$plDoble = new LlavesPorLocalDoble('2026-11-23', new stdClass(), new stdClass(), new stdClass());
+$plRens = $plDoble->enCurso($plBase, $plPar);
+$plCargadas = array_map(function ($r) { return $r['nro'] . '|#' . $r['contrato']['id'] . '|renueva al #' . $r['ant']; },
+    array_values(array_filter($plRens, function ($r) { return $r['tipo'] === LlavesCalculo::CARGADA; })));
+
+chequear('el #85 de Alto Palermo (terminado) no aparece; el #90, vigente y con cuotas por delante, sí',
+    ['7|#90|renueva al #85'], $plCargadas);
+chequear('una cargada vigente con todas sus cuotas atrás tampoco (Caballito #11, cuotas de 2024)', 0,
+    count(array_filter($plRens, function ($r) { return $r['nro'] === 9; })));
+
+/* Con 36 cuotas desde enero de 2024, la última del #11 de Caballito es de diciembre de 2026: no es vieja. */
+$plPar36 = $plPar;
+$plPar36['locales']['9|10'] = ['cuotas' => 36];
+chequear('las cuotas del local cuentan: con 36 cuotas, Caballito #11 tiene pagos por delante y aparece', ['9|#11'],
+    array_map(function ($r) { return $r['nro'] . '|#' . $r['contrato']['id']; },
+        array_values(array_filter($plDoble->enCurso($plBase, $plPar36), function ($r) { return $r['nro'] === 9; }))));
+
+/* Una renovacion futura (cargada, empieza el año que viene) se muestra. */
+$plFut = $plBase;
+$plFut['locales'][7]['contratos'][] = $plK(95, '2028-01-01', '2030-12-31', 60000000.0);
+chequear('una cargada futura también aparece', true,
+    in_array('7|#95', array_map(function ($r) { return $r['nro'] . '|#' . ($r['contrato']['id'] ?? ''); },
+        $plDoble->enCurso($plFut, $plPar)), true));
+
+chequear('el criterio de «vieja» es el de la proyección (un solo lugar)', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/Llaves.php'), 'LlavesCalculo::esVieja(') !== false
+    && strpos(file_get_contents(__DIR__ . '/../Class/LlavesCalculo.php'), 'self::esVieja($fechas, $hoy)') !== false);
+chequear('la columna se llama «Contrato» y muestra el contrato nuevo de una cargada', true,
+    strpos(file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php'), '>Contrato</th>') !== false
+    && strpos($pllJs, "var c = r.tipo === 'CARGADA' ? r.contrato : r.vigente;") !== false
+    && strpos($pllJs, "renueva al #' + r.vigente.id") !== false);
 
 seccion('la pantalla nombra los conceptos del alquiler, no sus numeros');
 
@@ -185,3 +263,78 @@ foreach (['Class/LlavesCalculo.php', 'Class/Llaves.php', 'Class/LlavesSugeridos.
 }
 
 chequear('ningun texto de la pantalla de Llaves dice "1 + 2 + 8"', [], $sinNumeros);
+
+seccion('El script 73 (sql/cashflow_llaves_ajustes.sql)');
+
+$s73 = (string) file_get_contents(__DIR__ . '/../' . LlavesParametros::SCRIPT_AJUSTES);
+chequear('MONTO de «Ya pagada» acepta vacío, con su CHECK rehecho', [true, true], [
+    strpos($s73, 'ALTER COLUMN MONTO DECIMAL(18,2) NULL') !== false,
+    strpos($s73, 'CHECK (MONTO IS NULL OR MONTO > 0)') !== false]);
+chequear('agrega PCT_COMISIONES y PCT_FPC por operador, vacíos, y no toca PCT_OTROS', [true, true, false], [
+    strpos($s73, 'ADD PCT_COMISIONES DECIMAL(7,2) NULL') !== false, strpos($s73, 'ADD PCT_FPC DECIMAL(7,2) NULL') !== false,
+    (bool) preg_match('/(UPDATE|ALTER)[^;]*PCT_OTROS/', $s73)]);
+chequear('las facturas admiten COMISIONES y FPC, y siguen admitiendo OTROS', true,
+    strpos($s73, "CHECK (CONCEPTO IN ('LLAVE', 'OTROS', 'COMISIONES', 'FPC', 'OBRA'))") !== false);
+chequear('reejecutable: cada parte pregunta antes', true, strpos($s73, "COLUMNPROPERTY(OBJECT_ID('dbo.RO_T_CASHFLOW_LLAVES_PAGADA'), 'MONTO', 'AllowsNull') = 1") !== false
+    && strpos($s73, "COL_LENGTH('dbo.RO_T_CASHFLOW_LLAVES_OPERADOR', 'PCT_COMISIONES') IS NULL") !== false
+    && strpos($s73, "definition LIKE '%COMISIONES%'") !== false);
+chequear('no borra datos', 0, preg_match('/\b(DELETE|TRUNCATE|DROP TABLE)\b/i', $s73));
+chequear('informa las marcas OTROS vigentes y los operadores con % de otros gastos', true,
+    strpos($s73, "WHERE VIGENTE = 1 AND CONCEPTO = 'OTROS'") !== false && strpos($s73, 'WHERE VIGENTE = 1 AND PCT_OTROS IS NOT NULL') !== false);
+chequear('guardarOperador no escribe PCT_OTROS', false,
+    strpos(file_get_contents(__DIR__ . '/../Class/LlavesParametros.php'), 'PCT_OTROS, ESCRIBANO') !== false);
+
+seccion('Parámetros: lo sugerido no se confunde con lo grabado');
+
+$p6Js = file_get_contents(__DIR__ . '/../Js/Parametros-Llaves.js');
+$p6Tab = file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php');
+/* Ningun placeholder numerico: ni literal en el HTML, ni armado con numero(), ni con un valor. */
+$p6Num = [];
+preg_match_all('/placeholder="([^"]*)"/', $p6Tab . $p6Js, $m);
+foreach ($m[1] as $ph) {
+    if (preg_match('/\d/', $ph)) { $p6Num[] = $ph; }
+}
+chequear('ningún input lleva un número como placeholder', [], $p6Num);
+chequear('ni se le asigna uno desde el JS', 0, preg_match('/\.placeholder\s*=\s*+(?!\'\')/', $p6Js));
+chequear('el campo vacío no lleva placeholder', true, strpos($p6Js, "'\" placeholder=\"\" '") !== false
+    || strpos($p6Js, '\'" placeholder="" \'') !== false);
+chequear('vacío que hereda: «usa X (de dónde)» debajo', true,
+    strpos($p6Js, "return 'usa ' + numero(u.valor) + unidad + (u.de ? ' (' + u.de + ')' : '');") !== false);
+chequear('vacío sin dato: borde punteado y «sin dato» en negrita', [true, true, true], [
+    strpos($p6Js, "' pll-sin-dato'") !== false,
+    strpos($p6Js, '<i class="fas fa-triangle-exclamation"></i> sin dato') !== false,
+    (bool) preg_match('/\.pll-sin-dato \{ border: 1px dashed #000; \}/', file_get_contents(__DIR__ . '/../Css/Parametros.css'))]);
+foreach (['pct_comisiones', 'pct_fpc', 'escribano', 'pct_impuestos'] as $p6c) {
+    chequear($p6c . ': sin dato', 1, preg_match("/campo\('" . $p6c . "'[^;]*sinDato: true/s", $p6Js));
+}
+foreach (['pct_llave', 'cuotas', 'corrimiento'] as $p6c) {
+    chequear($p6c . ' (operador): hereda', 1, preg_match("/campo\('" . $p6c . "', v\." . $p6c . ", \{[^}]*hereda: heredado\(usa\./", $p6Js));
+}
+chequear('el sugerido va en un chip con «Usar» y su tooltip', true,
+    strpos($p6Js, '<span class="pll-sugerido" title="') !== false && strpos($p6Js, 'pll-usar') !== false);
+chequear('«Usar» graba: la fila del operador o la clave de Generales, como cualquier cambio', [true, true], [
+    strpos($p6Js, "guardarFila('guardarOperador', fila, { cod_provee: fila.getAttribute('data-cod') });\n    }") !== false
+        || strpos(str_replace("\r\n", "\n", $p6Js), "el.value = valor;\n        guardarFila('guardarOperador', fila, { cod_provee: fila.getAttribute('data-cod') });") !== false,
+    strpos($p6Js, "escribir('guardarGeneral', { clave: clave, valor: valor });") !== false]);
+chequear('y guardarOperador pasa por usuarioDeEscritura (auditoría)', 1,
+    preg_match('/function guardarOperador\(\$cod, \$datos, \$razones, \$usuario\) \{\s+\$usuario = AuthCashflow::usuarioDeEscritura\(\$usuario\);/',
+        file_get_contents(__DIR__ . '/../Class/LlavesParametros.php')));
+
+seccion('LlavesCalculo::queSeUsa(): lo que se hereda, en un solo lugar');
+
+$gen6 = ['PCT_LLAVE' => 25.0, 'CUOTAS' => 4.0];
+chequear('el operador vacío usa el general', ['valor' => 25.0, 'de' => 'general'],
+    LlavesCalculo::queSeUsa(null, null, $gen6)['pct_llave']);
+chequear('el local vacío usa las cuotas del operador', ['valor' => 2, 'de' => 'operador'],
+    LlavesCalculo::queSeUsa(null, ['cuotas' => 2], $gen6)['cuotas']);
+chequear('el corrimiento vacío es 0 por defecto', ['valor' => 0, 'de' => 'por defecto'],
+    LlavesCalculo::queSeUsa(null, [], $gen6)['corrimiento']);
+chequear('lo del local manda', ['valor' => 30.0, 'de' => 'local'],
+    LlavesCalculo::queSeUsa(['pct_llave' => 30.0], ['pct_llave' => 28.0], $gen6)['pct_llave']);
+
+$plPar6 = ['generales' => ['CUOTAS' => 4.0, 'PCT_LLAVE' => 25.0], 'locales' => [],
+           'operadores' => ['SAIRSA' => ['cuotas' => 3, 'corrimiento' => -1]]];
+$plRen6 = array_values(array_filter($plDoble->enCurso($plBase, $plPar6), function ($r) { return $r['nro'] === 7; }))[0] ?? [];
+chequear('Por local dice lo que usa un campo vacío: cuotas del operador y % general', [['valor' => 3, 'de' => 'operador'],
+    ['valor' => 25.0, 'de' => 'general']], [$plRen6['usa']['cuotas'] ?? null, $plRen6['usa']['pct_llave'] ?? null]);
+chequear('y el mes de la 1.ª cuota con el corrimiento del operador (inicio oct-2026, -1)', '2026-09', $plRen6['mes1_defecto'] ?? null);

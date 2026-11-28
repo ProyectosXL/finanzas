@@ -114,12 +114,14 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
         <div class="card-header">
             <h5 class="mb-0">Por operador</h5>
             <small class="text-muted">
-                Los operadores son las razones sociales dadas de alta en Parámetros › Alquileres. Vacío en el
-                <strong>% de llave</strong> o en las <strong>cuotas</strong> es el general; vacío en el
-                <strong>escribano</strong> o en el <strong>% de impuestos</strong> es «sin dato» y avisa (sin %
-                de impuestos la llave no se proyecta): sólo 0 cargado es 0. El <strong>corrimiento</strong> mueve
-                la primera cuota respecto del inicio del contrato nuevo (negativo = antes). En gris, lo sugerido
-                por la historia: el tooltip dice de dónde sale.
+                Los operadores son las razones sociales dadas de alta en Parámetros › Alquileres. Lo que está
+                escrito en un campo es lo grabado. Un campo vacío dice debajo qué pasa: <strong>«usa …»</strong>
+                si toma el valor de arriba (% de llave, cuotas, corrimiento), o <strong>«sin dato»</strong>, con
+                el borde punteado, si sin él algo no se proyecta (% de comisiones, % de FPC, escribano, % de
+                impuestos: sin este último no se proyectan la llave, las comisiones ni el FPC). Sólo 0 cargado es
+                0. El <strong>corrimiento</strong> mueve la primera cuota respecto del inicio del contrato nuevo
+                (negativo = antes). Al lado, el <strong>sugerido</strong> por la historia (el tooltip dice de
+                dónde sale): «Usar» lo graba.
             </small>
         </div>
         <div class="card-body p-0">
@@ -130,7 +132,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                             <th>Operador</th>
                             <th>Locales</th>
                             <th style="width: 110px;">% de llave</th>
-                            <th style="width: 110px;" title="(Comisiones + FPC) / llave">% otros gastos</th>
+                            <th style="width: 110px;" title="Comisiones / llave estimada. Se pagan en las mismas cuotas que la llave">% comisiones</th>
+                            <th style="width: 110px;" title="FPC / llave estimada. Se paga en la firma">% FPC</th>
                             <th style="width: 140px;" title="Un importe en $ por renovación, sin impuestos">Escribano y otros</th>
                             <th style="width: 110px;" title="Lo que factura de más sobre la llave y los otros gastos">% impuestos</th>
                             <th style="width: 90px;">Cuotas</th>
@@ -156,7 +159,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                 <strong>esa</strong> renovación. Cuando administración carga el contrato nuevo, lo que dice
                 <strong>cuánto</strong> (no renueva, llave a mano, % propio, meses) deja de aplicarse, porque manda
                 el importe del contrato, y esas columnas quedan deshabilitadas; lo que dice <strong>cómo se
-                paga</strong> (cuotas y 1.ª cuota) sigue valiendo y se puede cambiar. Vacío = el valor de arriba.
+                paga</strong> (cuotas y 1.ª cuota) sigue valiendo y se puede cambiar. Un campo vacío dice debajo
+                qué valor usa y de dónde.
             </small>
         </div>
         <div class="card-body p-0">
@@ -165,7 +169,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                     <thead>
                         <tr>
                             <th>Local</th>
-                            <th>Contrato vigente</th>
+                            <th title="El contrato que rige: el nuevo, si la renovación está cargada; si no, el vigente">Contrato</th>
                             <th>Estado</th>
                             <th style="min-width: 220px;">No renueva</th>
                             <th style="width: 140px;" title="Reemplaza el cálculo">Llave a mano ($)</th>
@@ -189,10 +193,11 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
         <div class="card-header">
             <h5 class="mb-0">Ya pagadas</h5>
             <small class="text-muted">
-                La llave o los otros gastos de una renovación que <strong>ya salieron de caja</strong> (por ejemplo,
+                La llave o los otros gastos (comisiones, FPC y escribano) de una renovación que <strong>ya salieron de
+                caja</strong> (por ejemplo,
                 una renovación pagada antes de que administración cargue el contrato nuevo). Ese concepto deja de
                 proyectarse en esa renovación, cargada o estimada, y la marca sigue valiendo cuando se carga el
-                contrato. No suma en el horizonte.
+                contrato. No suma en el horizonte. El monto es opcional: sólo informa.
             </small>
         </div>
         <?php if ($edita): ?>
@@ -208,20 +213,21 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                 </div>
                 <!-- Los dos conceptos tildados por defecto: lo normal es marcar la
                      renovación entera; marcar sólo la llave deja los otros gastos
-                     proyectados sin que nadie lo note. Cada uno con su monto. -->
+                     proyectados sin que nadie lo note. El monto de cada uno es
+                     opcional: es informativo, no suma ni resta. -->
                 <div class="col-md-2">
                     <div class="form-check mb-1">
                         <input class="form-check-input pll-pag-concepto" type="checkbox" id="pllPagadaLlave" value="LLAVE" checked>
                         <label class="form-check-label small" for="pllPagadaLlave">Llave ($)</label>
                     </div>
-                    <input type="text" id="pllPagadaMontoLLAVE" class="form-control form-control-sm" inputmode="decimal">
+                    <input type="text" id="pllPagadaMontoLLAVE" class="form-control form-control-sm" inputmode="decimal" placeholder="opcional">
                 </div>
                 <div class="col-md-2">
                     <div class="form-check mb-1">
                         <input class="form-check-input pll-pag-concepto" type="checkbox" id="pllPagadaOtros" value="OTROS" checked>
-                        <label class="form-check-label small" for="pllPagadaOtros">Otros gastos ($)</label>
+                        <label class="form-check-label small" for="pllPagadaOtros" title="Comisiones, FPC y escribano">Otros gastos ($)</label>
                     </div>
-                    <input type="text" id="pllPagadaMontoOTROS" class="form-control form-control-sm" inputmode="decimal">
+                    <input type="text" id="pllPagadaMontoOTROS" class="form-control form-control-sm" inputmode="decimal" placeholder="opcional">
                 </div>
                 <div class="col-md-2">
                     <label class="form-label form-label-sm" for="pllPagadaComp">Comprobante</label>

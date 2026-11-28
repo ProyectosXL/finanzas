@@ -337,7 +337,7 @@
                 + Auditoria.texto({ alta: { usuario: f.excluida.usuario, fecha: f.excluida.fecha } });
         }
         if (f.estado === 'LLAVE' && f.llave) {
-            tip += 'Marcada como ' + ((datos.conceptos_llave || {})[f.llave.concepto] || f.llave.concepto).toLowerCase()
+            tip += 'Marcada como ' + ((datos.nombres_llave || {})[f.llave.concepto] || f.llave.concepto).toLowerCase()
                 + ' de ' + f.llave.local + ', ' + rotuloMes(f.llave.mes) + (f.llave.pagos ? ', en ' + f.llave.pagos + ' pago(s)' : '')
                 + ': la cuenta Llaves y Renovaciones, no suma acá.\n'
                 + Auditoria.texto({ alta: { usuario: f.llave.usuario, fecha: f.llave.fecha } });
@@ -658,7 +658,7 @@
                 document.getElementById('btnAlqLlaveGuardar').disabled = !v.ok;
                 html('alqLlaveResultado', v.ok
                     ? '<div class="alert alert-success small py-2 mb-0">' + esc(marcando.length + ' factura(s) por ' + importeTexto(v.total)
-                        + ' como ' + (datos.conceptos_llave[v.concepto] || v.concepto).toLowerCase() + ' de ' + v.local
+                        + ' como ' + ((datos.nombres_llave || {})[v.concepto] || v.concepto).toLowerCase() + ' de ' + v.local
                         + (v.renovacion ? ': reemplaza lo proyectado de la ' + v.renovacion : ', obra de ' + v.mes)
                         + '. ' + (v.pagada ? 'Ya pagada: no suma, sólo corta lo proyectado.'
                             : (v.pagos.length ? 'Se paga en ' + v.pagos.length + ' pago(s).' : 'Va entera en su vencimiento a considerar.'))) + '</div>'

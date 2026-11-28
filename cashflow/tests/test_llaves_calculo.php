@@ -159,10 +159,58 @@ chequear('no queda nada estimado', [], llPagos($r, null, LlavesCalculo::ESTIMADO
 chequear('la llave del contrato en 4 cuotas de 20 M + 31 % - 1 %', [26000000.0, 26000000.0, 26000000.0, 26000000.0],
     array_column($ll, 'importe'));
 chequear('con origen Contrato cargado', LlavesCalculo::CONTRATO, $ll[0]['origen']);
-$ot = llPagos($r, LlavesCalculo::OTROS);
-chequear('comisiones + FPC: un pago, el día de la primera cuota (la firma)', [1, '2027-01-04', 32500000.0],
-    [count($ot), $ot[0]['fecha'] ?? null, $ot[0]['importe'] ?? null]);
+$com = llPagos($r, LlavesCalculo::COMISIONES);
+chequear('comisiones: en las mismas cuotas y fechas que la llave', array_column($ll, 'fecha'), array_column($com, 'fecha'));
+chequear('cada cuota de comisiones con impuestos y retención: 5 M + 31 % - 1 %',
+    [6500000.0, 6500000.0, 6500000.0, 6500000.0], array_column($com, 'importe'));
+chequear('el tooltip de una cuota de comisiones dice la cuenta', true,
+    strpos($com[1]['detalle'] ?? '', 'Comisiones $ 20.000.000 del contrato #95, cuota 2 de 4. Neto $ 5.000.000 + 31% de impuestos') === 0
+    && strpos($com[1]['detalle'], '= a pagar $ 6.500.000') !== false);
+chequear('las comisiones del contrato van con origen Contrato cargado', LlavesCalculo::CONTRATO, $com[0]['origen'] ?? null);
+$fpc = llPagos($r, LlavesCalculo::FPC);
+chequear('FPC: un pago, el día de la primera cuota (la firma), con impuestos y retención', [1, '2027-01-04', 6500000.0],
+    [count($fpc), $fpc[0]['fecha'] ?? null, $fpc[0]['importe'] ?? null]);
+chequear('una cargada no tiene escribano (no está en el contrato)', [], llPagos($r, LlavesCalculo::ESCRIBANO));
+chequear('ya no hay «Otros gastos» proyectados', [], llPagos($r, LlavesCalculo::OTROS));
 chequear('la renovación cargada se identifica por el contrato que renueva', '78|22', $ll[0]['clave']);
+
+/* Un reparto que no da justo: 10 M en 3 cuotas, al centavo, como la llave. */
+$e3 = $e;
+$e3['par']['operadores']['SAARCO']['cuotas'] = 3;
+$e3['locales'][78]['contratos'][1]['comisiones'] = 10000000.0;
+$com3 = llPagos(LlavesCalculo::proyectar($e3), LlavesCalculo::COMISIONES);
+chequear('las comisiones se reparten con cuotas(): suman exacto', [3, LlavesCalculo::cuotas(10000000.0, 3)],
+    [count($com3), array_column($com3, 'neto')]);
+
+seccion('LlavesCalculo: las comisiones siguen en N cuotas aunque la llave se corte');
+
+$eY = $e;
+$eY['par']['pagadas'] = [['id' => 1, 'nro' => 78, 'id_contrato_ant' => 22, 'concepto' => 'LLAVE', 'fecha' => '2026-08-31', 'monto' => null]];
+$rY = LlavesCalculo::proyectar($eY);
+chequear('con la llave «Ya pagada» (sin monto): la llave no se proyecta', [], llPagos($rY, LlavesCalculo::LLAVE));
+chequear('las comisiones, en las 4 fechas que tendría la llave', ['2027-01-04', '2027-02-01', '2027-03-01', '2027-04-01'],
+    array_column(llPagos($rY, LlavesCalculo::COMISIONES), 'fecha'));
+chequear('y el FPC en la firma', ['2027-01-04'], array_column(llPagos($rY, LlavesCalculo::FPC), 'fecha'));
+chequear('la nota dice «ya pagada (llave) el 31/08/2026», sin importe', true,
+    in_array('Llave: ya pagada (llave) el 31/08/2026; no se proyecta.', $rY['locales'][78]['renovaciones'][1]['notas'], true));
+
+$eF = $e;
+$eF['facturas'] = [['id' => 5, 'nro' => 78, 'concepto' => 'LLAVE', 'mes' => '2027-01', 'ant' => 22, 'contrato' => 95,
+                    'cod_provee' => 'SAARCO', 'comprobante' => 'A 1', 'pagada' => true, 'pagos' => [], 'texto' => '']];
+$rF = LlavesCalculo::proyectar($eF);
+chequear('con la llave reemplazada por una factura: las comisiones siguen en 4 cuotas', [0, 4],
+    [count(llPagos($rF, LlavesCalculo::LLAVE)), count(llPagos($rF, LlavesCalculo::COMISIONES))]);
+
+seccion('LlavesCalculo: una cuota de comisiones ya pasada sin factura se avisa');
+
+$eP = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_impuestos' => 0.0]]])]);
+$eP['locales'][78]['contratos'][] = llContrato(97, '2027-01-01', '2029-12-31', 0.0, 8000000.0);
+$eP['locales'][78]['contratos'][1]['desde'] = '2026-10-10';
+$eP['locales'][78]['contratos'][0]['hasta'] = '2026-10-09';
+$rP = LlavesCalculo::proyectar($eP);
+chequear('la cuota de comisiones de octubre y la de noviembre (pasadas) entran en el aviso', true,
+    strpos(llTextos($rP), 'DISTRITO ARCOS (contrato #97 del 10/10/2026), comisiones, cuota 1 del 12/10/2026') !== false
+    && strpos(llTextos($rP), 'comisiones, cuota 2 del 10/11/2026') !== false);
 
 seccion('LlavesCalculo: llave = 1 es "tiene llave, monto desconocido"');
 
@@ -183,11 +231,12 @@ seccion('LlavesCalculo: qué locales estiman');
 
 $e = llEntrada();
 $e['locales'][78]['contratos'] = [llContrato(78, '2025-09-05', '2026-12-31', 0.0, 147979.0)];
-$e['par'] = llPar(['operadores' => ['SAARCO' => ['pct_otros' => 40.0, 'escribano' => 500000.0]]]);
+$e['par'] = llPar(['operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 500000.0]]]);
 $r = LlavesCalculo::proyectar($e);
 chequear('vigente sin llave: no estima llave (criterio de Costo de Ocupación)', [], llPagos($r, LlavesCalculo::LLAVE));
-chequear('pero sí los otros gastos (el escribano; el % no tiene sobre qué)', [500000.0],
-    array_column(llPagos($r, LlavesCalculo::OTROS, LlavesCalculo::ESTIMADO), 'importe'));
+chequear('pero sí el escribano (los % no tienen sobre qué, y no avisan)', [[500000.0], [], [], false],
+    [array_column(llPagos($r, LlavesCalculo::ESCRIBANO, LlavesCalculo::ESTIMADO), 'importe'),
+     llPagos($r, LlavesCalculo::COMISIONES), llPagos($r, LlavesCalculo::FPC), strpos(llTextos($r), 'Operador sin %') !== false]);
 
 $e = llEntrada();
 $e['locales'][78]['vigencia'] = true;
@@ -237,27 +286,61 @@ $r = LlavesCalculo::proyectar($e);
 chequear('sin razón social no se proyecta nada', [], $r['pagos']);
 chequear('y se avisa con el link a Parámetros › Alquileres', true, strpos(llTextos($r), 'Sin razón social en Parámetros › Alquileres: DISTRITO ARCOS') !== false);
 
-seccion('LlavesCalculo: los otros gastos del operador');
+seccion('LlavesCalculo: comisiones, FPC y escribano estimados, cada uno por su lado');
 
-$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_otros' => 40.0, 'escribano' => 500000.0]]])]);
-$ot = llPagos(LlavesCalculo::proyectar($e), LlavesCalculo::OTROS);
-chequear('% × llave estimada + escribano, un pago en la firma', [round(0.40 * $esperada, 2) + 500000.0, '2027-01-04'],
-    [$ot[0]['importe'] ?? null, $ot[0]['fecha'] ?? null]);
-
-$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['escribano' => 500000.0]]])]);
+$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 500000.0]]])]);
 $r = LlavesCalculo::proyectar($e);
-chequear('sin %: sólo el escribano, y avisa', [[500000.0], true],
-    [array_column(llPagos($r, LlavesCalculo::OTROS), 'importe'), strpos(llTextos($r), 'Operador sin % de otros gastos') !== false]);
+$llE = llPagos($r, LlavesCalculo::LLAVE);
+$comE = llPagos($r, LlavesCalculo::COMISIONES);
+chequear('comisiones = 30 % × llave estimada, en las 4 cuotas y fechas de la llave',
+    [LlavesCalculo::cuotas(round(0.30 * $esperada, 2), 4), array_column($llE, 'fecha')],
+    [array_column($comE, 'importe'), array_column($comE, 'fecha')]);
+chequear('estimadas: itálica en la pestaña (origen Estimado)', LlavesCalculo::ESTIMADO, $comE[0]['origen'] ?? null);
+chequear('el tooltip de las comisiones estimadas dice el % y la cuota', true,
+    strpos($comE[2]['detalle'] ?? '', '30% de comisiones del operador × llave') === 0 && strpos($comE[2]['detalle'], 'cuota 3 de 4') !== false);
+chequear('FPC = 10 % × llave estimada, un pago en la firma', [[round(0.10 * $esperada, 2)], ['2027-01-04']],
+    [array_column(llPagos($r, LlavesCalculo::FPC), 'importe'), array_column(llPagos($r, LlavesCalculo::FPC), 'fecha')]);
+chequear('escribano y otros: su importe, un pago en la firma', [[500000.0], ['2027-01-04']],
+    [array_column(llPagos($r, LlavesCalculo::ESCRIBANO), 'importe'), array_column(llPagos($r, LlavesCalculo::ESCRIBANO), 'fecha')]);
+chequear('no avisa nada de % faltantes', false, strpos(llTextos($r), 'Operador sin %') !== false);
 
-$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_otros' => 40.0]]])]);
+$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_fpc' => 10.0, 'escribano' => 500000.0]]])]);
 $r = LlavesCalculo::proyectar($e);
-chequear('sin escribano: la parte del % se proyecta, el escribano no se suma, y avisa',
-    [[round(0.40 * $esperada, 2)], true],
-    [array_column(llPagos($r, LlavesCalculo::OTROS), 'importe'), strpos(llTextos($r), 'Operador sin escribano') !== false]);
+chequear('sin % de comisiones: las comisiones no se proyectan, el FPC sí, y el aviso nombra las comisiones',
+    [[], 1, true, false],
+    [llPagos($r, LlavesCalculo::COMISIONES), count(llPagos($r, LlavesCalculo::FPC)),
+     strpos(llTextos($r), 'Operador sin % de comisiones sobre la llave: ARCOS DEL GOURMET. Sus comisiones estimadas no se proyectan') !== false,
+     strpos(llTextos($r), 'Operador sin % de FPC') !== false]);
 
-$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_otros' => 40.0, 'escribano' => 0.0]]])]);
+$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'escribano' => 500000.0]]])]);
 $r = LlavesCalculo::proyectar($e);
-chequear('un escribano en 0 cargado es 0, y no avisa', false, strpos(llTextos($r), 'Operador sin escribano') !== false);
+chequear('sin % de FPC: el FPC no se proyecta, las comisiones sí, y el aviso nombra el FPC',
+    [[], 4, true], [llPagos($r, LlavesCalculo::FPC), count(llPagos($r, LlavesCalculo::COMISIONES)),
+     strpos(llTextos($r), 'Operador sin % de FPC sobre la llave: ARCOS DEL GOURMET. Su FPC estimado no se proyecta') !== false]);
+
+$e = llEntrada(['par' => llPar(['ajustes_ok' => false, 'operadores' => ['SAARCO' => ['escribano' => 0.0]]])]);
+$r = LlavesCalculo::proyectar($e);
+chequear('sin el script 73, el aviso dice que falta correrlo', true,
+    strpos(llTextos($r), 'falta correr sql/cashflow_llaves_ajustes.sql') !== false);
+
+$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0]]])]);
+$r = LlavesCalculo::proyectar($e);
+chequear('sin escribano: comisiones y FPC se proyectan, el escribano no, y avisa',
+    [4, 1, [], true], [count(llPagos($r, LlavesCalculo::COMISIONES)), count(llPagos($r, LlavesCalculo::FPC)),
+     llPagos($r, LlavesCalculo::ESCRIBANO), strpos(llTextos($r), 'Operador sin escribano') !== false]);
+
+$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 0.0]]])]);
+$r = LlavesCalculo::proyectar($e);
+chequear('un escribano en 0 cargado es 0, y no avisa', [false, []],
+    [strpos(llTextos($r), 'Operador sin escribano') !== false, llPagos($r, LlavesCalculo::ESCRIBANO)]);
+
+$e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0,
+                                                               'escribano' => 500000.0, 'pct_impuestos' => null]]])]);
+$r = LlavesCalculo::proyectar($e);
+chequear('sin % de impuestos: ni llave, ni comisiones, ni FPC; el escribano sí', [0, 0, 0, 1],
+    [count(llPagos($r, LlavesCalculo::LLAVE)), count(llPagos($r, LlavesCalculo::COMISIONES)),
+     count(llPagos($r, LlavesCalculo::FPC)), count(llPagos($r, LlavesCalculo::ESCRIBANO))]);
+chequear('y el neto que falta suma llave + comisiones + FPC', round($esperada + round(0.30 * $esperada, 2) + round(0.10 * $esperada, 2), 2), $r['no_proyecta'][0]['importe'] ?? null);
 
 seccion('LlavesCalculo: el segmento por m², en los bordes');
 
@@ -335,10 +418,21 @@ seccion('LlavesCalculo: "ya pagada" y las facturas cortan');
 
 $e = llEntrada(['par' => llPar(['pagadas' => [['id' => 1, 'nro' => 78, 'id_contrato_ant' => 22, 'concepto' => 'LLAVE',
                                               'fecha' => '2026-08-31', 'monto' => 180525000.0]],
-                               'operadores' => ['SAARCO' => ['pct_otros' => 40.0, 'escribano' => 0.0]]])]);
+                               'operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 0.0]]])]);
 $r = LlavesCalculo::proyectar($e);
 chequear('ya pagada la llave: no se estima', [], llPagos($r, LlavesCalculo::LLAVE));
-chequear('los otros gastos no se cortan (otro concepto)', 1, count(llPagos($r, LlavesCalculo::OTROS)));
+chequear('las comisiones y el FPC no se cortan (otro concepto)', [4, 1],
+    [count(llPagos($r, LlavesCalculo::COMISIONES)), count(llPagos($r, LlavesCalculo::FPC))]);
+
+$eO = llEntrada(['par' => llPar(['pagadas' => [['id' => 2, 'nro' => 78, 'id_contrato_ant' => 22, 'concepto' => 'OTROS',
+                                               'fecha' => '2026-08-31', 'monto' => null]],
+                                'operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 500000.0]]])]);
+$rO = LlavesCalculo::proyectar($eO);
+chequear('«Ya pagada» de otros gastos corta comisiones, FPC y escribano; la llave sigue', [4, 0, 0, 0],
+    [count(llPagos($rO, LlavesCalculo::LLAVE)), count(llPagos($rO, LlavesCalculo::COMISIONES)),
+     count(llPagos($rO, LlavesCalculo::FPC)), count(llPagos($rO, LlavesCalculo::ESCRIBANO))]);
+chequear('y la nota lo dice sin importe', true, in_array('Comisiones, FPC y escribano: ya pagada (otros gastos) el 31/08/2026; no se proyecta.',
+    array_merge(...array_column($rO['locales'][78]['renovaciones'], 'notas')), true));
 
 $e['locales'][78]['contratos'][] = llContrato(95, '2027-01-01', '2029-12-31', 80000000.0);
 chequear('la marca sigue valiendo cuando se carga el contrato nuevo', [],
@@ -361,6 +455,32 @@ $fact['pagada'] = false;
 $r = LlavesCalculo::proyectar(llEntrada(['facturas' => [$fact]]));
 chequear('una factura de otro concepto no corta la llave', 4, count(llPagos($r, LlavesCalculo::LLAVE, LlavesCalculo::ESTIMADO)));
 
+seccion('LlavesCalculo: las facturas de comisiones y de FPC reemplazan sólo su concepto');
+
+$parSep = llPar(['operadores' => ['SAARCO' => ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 500000.0]]]);
+$cuenta = function ($r) {
+    return array_map(function ($c) use ($r) { return count(llPagos($r, $c, LlavesCalculo::ESTIMADO)); },
+        [LlavesCalculo::LLAVE, LlavesCalculo::COMISIONES, LlavesCalculo::FPC, LlavesCalculo::ESCRIBANO]);
+};
+$fCom = ['id' => 6, 'nro' => 78, 'concepto' => 'COMISIONES', 'ant' => 22, 'contrato' => null, 'mes' => '2027-01', 'pagada' => false,
+         'cod_provee' => 'SAARCO', 'comprobante' => 'FAC A0001400000500', 'texto' => '',
+         'pagos' => [['fecha' => '2027-01-20', 'importe' => 1000000.0]]];
+$r = LlavesCalculo::proyectar(llEntrada(['par' => $parSep, 'facturas' => [$fCom]]));
+chequear('factura de COMISIONES: corta sólo las comisiones estimadas (llave 4, comisiones 0, FPC 1, escribano 1)', [4, 0, 1, 1], $cuenta($r));
+chequear('y suma lo suyo como real, bajo Comisiones', [['2027-01-20', 1000000.0]],
+    array_map(function ($p) { return [$p['fecha'], $p['importe']]; }, llPagos($r, LlavesCalculo::COMISIONES, LlavesCalculo::FACTURA)));
+$fFpc = $fCom;
+$fFpc['concepto'] = 'FPC';
+$r = LlavesCalculo::proyectar(llEntrada(['par' => $parSep, 'facturas' => [$fFpc]]));
+chequear('factura de FPC: corta sólo el FPC (llave 4, comisiones 4, FPC 0, escribano 1)', [4, 4, 0, 1], $cuenta($r));
+$fOt = $fCom;
+$fOt['concepto'] = 'OTROS';
+$r = LlavesCalculo::proyectar(llEntrada(['par' => $parSep, 'facturas' => [$fOt]]));
+chequear('una marca vieja de OTROS: corta comisiones, FPC y escribano (llave 4, el resto 0)', [4, 0, 0, 0], $cuenta($r));
+chequear('y avisa que se rehaga con el concepto nuevo', true,
+    strpos(llTextos($r), 'Facturas marcadas como llave con el concepto anterior «Otros gastos»: FAC A0001400000500') !== false
+    && strpos(llTextos($r), 'volvé a marcarla como Comisiones o FPC') !== false);
+
 seccion('LlavesCalculo: los pagos de hoy o anteriores no se proyectan');
 
 $e = llEntrada(['par' => llPar(['operadores' => ['SAARCO' => ['pct_impuestos' => 0.0]]])]);
@@ -380,7 +500,7 @@ $r = LlavesCalculo::proyectar($e);
 chequear('un contrato viejo con llave no genera avisos de impuestos ni de cuotas pasadas', [false, false, []],
     [strpos(llTextos($r), 'Cuotas de contratos firmados') !== false, strpos(llTextos($r), 'impuestos') !== false, $r['pagos']]);
 
-seccion('LlavesSugeridos: el % de llave y de otros gastos por operador, con las renovaciones de la app');
+seccion('LlavesSugeridos: el % de llave, de comisiones y de FPC por operador, con las renovaciones de la app');
 
 require_once __DIR__ . '/../Class/LlavesSugeridos.php';
 
@@ -395,7 +515,16 @@ $contr = [
 $sug = LlavesSugeridos::porOperador([6 => 'SAPALA', 29 => 'SAROSA', 60 => 'SAUNIC'], $contr, [6 => ['2026-01' => 7491362.0]],
     [6 => 'AVELLANEDA']);
 chequear('Avellaneda: 75 M / (7.491.362 × 36) = 27,81 %', 27.81, $sug['SAPALA']['pct_llave'] ?? null);
-chequear('otros gastos: (29,45 M + 7,5 M) / 75 M = 49,27 %', 49.27, $sug['SAPALA']['pct_otros'] ?? null);
+chequear('comisiones y FPC, cada uno por separado: 29,45 M / 75 M = 39,27 % y 7,5 M / 75 M = 10 %', [39.27, 10.0, false],
+    [$sug['SAPALA']['pct_comisiones'] ?? null, $sug['SAPALA']['pct_fpc'] ?? null, isset($sug['SAPALA']['pct_otros'])]);
+chequear('con el detalle de cada renovación, para el tooltip', [29452304.0, 39.27, 7500000.0, 10.0],
+    array_map(function ($k) use ($sug) { return $sug['SAPALA']['renovaciones'][0][$k] ?? null; },
+        ['comisiones', 'pct_comisiones', 'fpc', 'pct_fpc']));
+/* Ponderado por la llave: una renovación grande pesa más que una chica. */
+$contrP = [6 => array_merge($contr[6], [llContrato(99, '2029-01-15', '2030-01-14', 25000000.0, 0.0, 5000000.0)])];
+$sugP = LlavesSugeridos::porOperador([6 => 'SAPALA'], $contrP, [], []);
+chequear('ponderado por la llave: (29,45 M + 0) / 100 M y (7,5 M + 5 M) / 100 M', [29.45, 12.5],
+    [$sugP['SAPALA']['pct_comisiones'] ?? null, $sugP['SAPALA']['pct_fpc'] ?? null]);
 chequear('183 días de hueco no es una renovación', false, isset($sug['SAROSA']));
 chequear('la llave = 1 no mide', false, isset($sug['SAUNIC']));
 
@@ -466,12 +595,12 @@ chequear('y tambien en las cuotas y el mes del local', [2, '2027-03'], [count($l
 seccion('LlavesCalculo: sin % de impuestos, el escribano se proyecta igual');
 
 $e = llEntrada();
-$e['par']['operadores']['SAARCO'] = ['pct_otros' => 40.0, 'escribano' => 300000.0];
+$e['par']['operadores']['SAARCO'] = ['pct_comisiones' => 30.0, 'pct_fpc' => 10.0, 'escribano' => 300000.0];
 $r = LlavesCalculo::proyectar($e);
 chequear('no hay llave', [], llPagos($r, LlavesCalculo::LLAVE));
-$ot = llPagos($r, LlavesCalculo::OTROS);
-chequear('ni el % de otros gastos: queda solo el escribano', [1, 300000.0],
-    [count($ot), $ot[0]['importe'] ?? null]);
+$ot = llPagos($r, LlavesCalculo::ESCRIBANO);
+chequear('ni las comisiones ni el FPC: queda solo el escribano', [0, 0, 1, 300000.0],
+    [count(llPagos($r, LlavesCalculo::COMISIONES)), count(llPagos($r, LlavesCalculo::FPC)), count($ot), $ot[0]['importe'] ?? null]);
 chequear('y el aviso lo dice', true, strpos(llTextos($r), 'El escribano sí se proyecta: no lleva impuestos.') !== false);
 
 seccion('LlavesCalculo: un contrato corto con llave no se avisa');

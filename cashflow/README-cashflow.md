@@ -528,6 +528,18 @@ Pestaña *Financiero › Préstamos* —de `PENDIENTE` a `DATOS`— con los pré
 **Orden: 70 → 71 → 72.** El 70 y el 72 contra `central`, el 72 después de `sql/cashflow_estructura_grupos.sql` (22); el 71 contra `apps`, en cualquier momento.
 
 **Qué se mueve.** Con el código, la entrada `FINANCIERO` del registro pasa a disponible (sus filas están en la sección Ajustes, inactiva: no suman); con el 72, la sección nueva. **Sin préstamos vigentes cargados suma cero**: hoy la empresa no tiene préstamos. El código toca el motor en un solo lugar: `Cashflow` acepta las opciones del pedido y se las pasa a cada proveedor (`CashflowProvider::conOpciones()`), para el interruptor de simulaciones.
+
+### Llaves y Renovaciones: ajustes del testeo (`feature/llaves-ajustes-testeo`)
+
+Seis ajustes pedidos en el testeo de *Llaves y Renov. Contratos*: la columna de nombres fija en Proyección; *Parámetros › Por local* sólo con lo vigente; las **comisiones en las mismas cuotas que la llave** (el FPC y el escribano, en la firma); «Ya pagada» sin importes; **comisiones, FPC y escribano por separado** (dos % por operador en lugar del % de otros gastos, y facturas de Comisiones y de FPC); y, en Parámetros, lo sugerido separado de lo grabado (chip con «Usar»). **La fila del tablero no cambia de estructura**: sigue abriéndose en real y proyectado; cambia lo que suma. Ver `README-llaves-renovaciones.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 73 | `sql/cashflow_llaves_ajustes.sql` | `MONTO` de «Ya pagada» opcional (`CHECK (MONTO IS NULL OR MONTO > 0)`); `PCT_COMISIONES` y `PCT_FPC` por operador, vacíos (no migra `PCT_OTROS`, que queda sin usarse); `CONCEPTO` de las facturas de llave con `COMISIONES` y `FPC` (sigue admitiendo `OTROS`). Al pie, las marcas `OTROS` vigentes y los operadores con `PCT_OTROS`. No borra nada; reejecutable | Los dos % se ven deshabilitados nombrando el script y las comisiones y el FPC estimados no se proyectan (avisa); «Ya pagada» desde Contratos da un error que nombra el script; Comisiones y FPC no se ofrecen al marcar una factura |
+
+**Orden:** después del 66 y el 68, contra `central`.
+
+**Qué se mueve.** Lo mueve el código: al 27/11/2026, con el 73 sin correr, la fila *Llaves y Renovaciones* baja **$ 181,2 M** en el horizonte (casi todo en marzo de 2027: las comisiones y el FPC estimados de IRSA y Cencosud no se proyectan hasta cargar los dos % nuevos), y las comisiones de los contratos cargados pasan de la firma a las cuotas. El detalle por mes está en `README-llaves-renovaciones.md`, parte 6.
 ### Sin scripts, pero con `.htaccess`: `feature/cashflow-centro-ayuda`
 
 No agrega ni modifica ningún script: la ayuda son archivos de `Ayuda/` (ver *La ayuda funcional*). El Centro de ayuda **no pide ningún permiso nuevo**: lo ve cualquier usuario identificado.

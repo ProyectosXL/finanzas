@@ -6,6 +6,7 @@ require_once __DIR__ . '/AlquileresFacturas.php';
 require_once __DIR__ . '/LlavesParametros.php';
 require_once __DIR__ . '/LlavesCalculo.php';
 require_once __DIR__ . '/LlavesSugeridos.php';
+require_once __DIR__ . '/LlavesFacturas.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Inflacion.php';
 require_once __DIR__ . '/Planilla.php';
@@ -333,6 +334,11 @@ class Llaves {
 
         if (!$tablas) {
             $avisos[] = Aviso::nuevo(Aviso::DANGER, $this->par->avisoSinTabla());
+        } elseif (!$this->par->ajustes()['todo']) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta correr ' . LlavesParametros::SCRIPT_AJUSTES . ' contra la base '
+                . 'central: hasta entonces no se pueden cargar el % de comisiones ni el de FPC (las comisiones y el FPC '
+                . 'estimados no se proyectan), «Ya pagada» pide monto y las facturas no se marcan como Comisiones o FPC.',
+                'Por operador');
         }
 
         $gen = $par['generales'];
@@ -401,7 +407,9 @@ class Llaves {
                 'locales' => array_values(array_map(function ($l) { return $l['nombre']; },
                     array_filter($base['locales'], function ($l) use ($cod) { return $l['cod_provee'] === $cod; }))),
                 'sugerido' => $sugeridos[$cod] ?? null,
-                'impuestos' => $impuestos[$cod] ?? null
+                'impuestos' => $impuestos[$cod] ?? null,
+                /* Lo que se usa con el campo vacio: lo general (LlavesCalculo::queSeUsa()). */
+                'usa' => LlavesCalculo::queSeUsa(null, null, $gen)
             ];
         }
 
@@ -429,6 +437,10 @@ class Llaves {
             'segmentos' => LlavesParametros::SEGMENTOS,
             'formas' => LlavesParametros::FORMAS,
             'conceptos_pagada' => LlavesParametros::CONCEPTOS_PAGADA,
+            /* Que partes del script 73 ya se corrieron: sin ellas, sus campos se ven deshabilitados. */
+            'ajustes' => $tablas ? $this->par->ajustes() : ['pagada_sin_monto' => false, 'pct_separados' => false,
+                                                           'conceptos_factura' => false, 'todo' => false],
+            'script_ajustes' => LlavesParametros::SCRIPT_AJUSTES,
             'avisos' => $avisos
         ];
     }
@@ -436,16 +448,23 @@ class Llaves {
     /**
      * Las renovaciones de cada local que todavia pueden tener algo que
      * parametrizar o marcar como pagado: la del vigente que vence dentro del
-     * horizonte o ya vencio (sin renovacion cargada), y las de los contratos
-     * cargados que empezaron en el ultimo año o empiezan despues (sus cuotas
-     * pueden estar por delante).
+     * horizonte o ya vencio (sin renovacion cargada), y las cargadas que
+     * SIGUEN VIGENTES O SON FUTURAS y tienen alguna cuota desde el mes pasado
+     * (el criterio de "vieja" de LlavesCalculo::esVieja(), con las mismas
+     * fechas que proyecta: LlavesCalculo::fechasCuotas()). Una cargada
+     * terminada o con todos sus pagos atras no se muestra; sus parametros
+     * siguen en la base, con su historial.
+     *
+     * SIN EL CALENDARIO: Parametros no lo lee, asi que el corrimiento al habil
+     * es de lunes a viernes. Solo cambiaria algo si un feriado cae en el borde
+     * del mes de la ultima cuota.
      *
      * @return array
      */
     protected function renovacionesEnCurso($base, $par) {
         $out = [];
         $ultimoMes = Inflacion::mesMas(substr($this->hoy, 0, 7), 11);
-        $haceUnAnio = date('Y-m-d', strtotime($this->hoy . ' -12 month'));
+        $gen = $par['generales'] ?? [];
 
         foreach ($base['locales'] as $nro => $l) {
             if ($l['vigencia'] || empty($l['contratos'])) {
@@ -462,26 +481,37 @@ class Llaves {
 
                 if (in_array($estado, [LlavesCalculo::VENCE, LlavesCalculo::VENCIDO, LlavesCalculo::NO_RENUEVA], true)) {
                     $conLlave = LlavesCalculo::contratoDeLlave($ks, $vig);
-                    $sig = date('Y-m-d', strtotime($vig['hasta'] . ' +1 day'));
+                    $deMeses = LlavesCalculo::ultimoConLlave($ks, $conLlave ?? $vig) ?? ($conLlave ?? $vig);
+                    $r = ['tipo' => LlavesCalculo::ESTIMADA, 'contrato' => null, 'ant_contrato' => $vig];
                     $out[] = ['nro' => $nro, 'local' => $l['nombre'], 'operador' => $l['operador'], 'tipo' => LlavesCalculo::ESTIMADA,
                               'estado' => $estado, 'nombre_estado' => LlavesCalculo::NOMBRE_ESTADO[$estado],
                               'ant' => $vig['id'], 'contrato' => null, 'vigente' => $vig, 'tiene_llave' => $conLlave !== null,
-                              'meses_defecto' => LlavesCalculo::meses(($conLlave ?? $vig)['desde'], ($conLlave ?? $vig)['hasta']),
-                              'mes1_defecto' => ($vig['hasta'] < $this->hoy) ? substr($this->hoy, 0, 7) : substr($sig, 0, 7),
-                              'parametros' => $locP];
+                              'meses_defecto' => LlavesCalculo::meses($deMeses['desde'], $deMeses['hasta']),
+                              'meses_de' => 'contrato #' . $deMeses['id']]
+                        + $this->loQueSeUsa($r, $locP, $l, $par, $gen);
                 }
             }
 
             foreach ($ks as $c) {
                 $ant = LlavesCalculo::anteriorDe($ks, $c);
 
-                if ($ant !== null && $c['desde'] >= $haceUnAnio
-                    && (LlavesCalculo::tieneLlave($c) || ((float) $c['comisiones'] + (float) $c['fpc']) > 0)) {
+                if ($ant === null || $c['hasta'] < $this->hoy
+                    || !(LlavesCalculo::tieneLlave($c) || ((float) $c['comisiones'] + (float) $c['fpc']) > 0)) {
+                    continue;
+                }
+
+                $locP = $par['locales'][$nro . '|' . $ant['id']] ?? null;
+                $opP = ($l['cod_provee'] === null) ? [] : ($par['operadores'][$l['cod_provee']] ?? []);
+                $cal = LlavesCalculo::fechasCuotas(['tipo' => LlavesCalculo::CARGADA, 'contrato' => $c, 'ant_contrato' => $ant],
+                    $locP, $opP, $gen, $this->hoy, []);
+
+                if (!LlavesCalculo::esVieja($cal['fechas'], $this->hoy)) {
                     $out[] = ['nro' => $nro, 'local' => $l['nombre'], 'operador' => $l['operador'], 'tipo' => LlavesCalculo::CARGADA,
                               'estado' => null, 'nombre_estado' => 'Contrato #' . $c['id'] . ' cargado',
                               'ant' => $ant['id'], 'contrato' => $c, 'vigente' => $ant, 'tiene_llave' => LlavesCalculo::tieneLlave($c),
-                              'meses_defecto' => LlavesCalculo::meses($c['desde'], $c['hasta']), 'mes1_defecto' => substr($c['desde'], 0, 7),
-                              'parametros' => $par['locales'][$nro . '|' . $ant['id']] ?? null];
+                              'meses_defecto' => LlavesCalculo::meses($c['desde'], $c['hasta']), 'meses_de' => 'contrato #' . $c['id']]
+                        + $this->loQueSeUsa(['tipo' => LlavesCalculo::CARGADA, 'contrato' => $c, 'ant_contrato' => $ant],
+                            $locP, $l, $par, $gen);
                 }
             }
         }
@@ -489,6 +519,24 @@ class Llaves {
         usort($out, function ($a, $b) { return strcmp($a['local'], $b['local']) ?: strcmp($a['tipo'], $b['tipo']); });
 
         return $out;
+    }
+
+    /**
+     * Lo que usa una renovacion en cada campo del local que quede vacio, para
+     * que Parametros lo diga debajo del campo («usa 4 (operador)»): el % de
+     * llave y las cuotas del operador o las generales (LlavesCalculo::
+     * queSeUsa()) y el mes de la primera cuota que calcula
+     * LlavesCalculo::fechasCuotas() sin el del local. No hay reglas aca.
+     *
+     * @return array ['cod_provee', 'parametros', 'usa', 'mes1_defecto']
+     */
+    private function loQueSeUsa($r, $locP, $l, $par, $gen) {
+        $opP = ($l['cod_provee'] === null) ? [] : ($par['operadores'][$l['cod_provee']] ?? []);
+        $sinMes = $locP;
+        unset($sinMes['mes_primera_cuota']);
+
+        return ['cod_provee' => $l['cod_provee'], 'parametros' => $locP, 'usa' => LlavesCalculo::queSeUsa(null, $opP, $gen),
+                'mes1_defecto' => LlavesCalculo::fechasCuotas($r, $sinMes, $opP, $gen, $this->hoy, [])['mes1']];
     }
 
     /**
@@ -595,7 +643,7 @@ class Llaves {
         $meses = $h->mesesSet();
 
         foreach ($c['pagos'] as $p) {
-            $agrupa = in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS, LlavesCalculo::OBRA], true)
+            $agrupa = in_array($p['concepto'], array_merge(LlavesCalculo::DE_RENOVACION, [LlavesCalculo::OBRA]), true)
                 && $p['nro'] !== null;
 
             if ($agrupa) {
@@ -679,9 +727,13 @@ class Llaves {
                 $l = $locales[$nro] ?? ['nombre' => $ins['nombres'][$nro] ?? ('Local ' . $nro), 'estado' => null];
                 $agregar('L|' . $op . '|' . $nro, 1, 'O|' . $op, $l['nombre'], (string) $nro, 'LOCAL');
 
-                foreach ([LlavesCalculo::LLAVE, LlavesCalculo::OTROS, LlavesCalculo::OBRA] as $con) {
+                /* Llave, Comisiones, FPC, Escribano y otros y Obra de imagen. "Otros
+                   gastos (marca anterior)" solo aparece con una factura marcada con
+                   el concepto viejo: $agregar() saltea una fila sin pagos. */
+                foreach (array_merge(LlavesCalculo::DE_RENOVACION, [LlavesCalculo::OBRA]) as $con) {
                     $agregar('C|' . $op . '|' . $nro . '|' . $con, 2, 'L|' . $op . '|' . $nro,
-                        LlavesCalculo::NOMBRE_CONCEPTO[$con], '', 'CONCEPTO');
+                        ($con === LlavesCalculo::OTROS) ? 'Otros gastos (marca anterior)' : LlavesCalculo::NOMBRE_CONCEPTO[$con],
+                        '', 'CONCEPTO');
                 }
             }
         }
@@ -721,7 +773,7 @@ class Llaves {
         foreach ($c['pagos'] as $p) {
             $clave = $p['clave_renovacion'] ?? $p['clave'] ?? null;
 
-            if (in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true) && !empty($clave)) {
+            if (in_array($p['concepto'], LlavesCalculo::DE_RENOVACION, true) && !empty($clave)) {
                 $renovaciones[$clave] = true;
             }
         }
@@ -736,7 +788,7 @@ class Llaves {
                 'total' => $sum(function () { return true; }),
                 'renovaciones_n' => count($renovaciones),
                 'renovaciones_importe' => $sum(function ($p) {
-                    return in_array($p['concepto'], [LlavesCalculo::LLAVE, LlavesCalculo::OTROS], true);
+                    return in_array($p['concepto'], LlavesCalculo::DE_RENOVACION, true);
                 }),
                 'estimado' => $sum(function ($p) { return $p['origen'] === LlavesCalculo::ESTIMADO; }),
                 'firme' => $sum(function ($p) { return in_array($p['origen'], [LlavesCalculo::CONTRATO, LlavesCalculo::FACTURA], true); }),
@@ -772,7 +824,8 @@ class Llaves {
                 }, $rens ?: [['notas' => []]])),
                 'renovaciones' => array_map(function ($r) {
                     return ['tipo' => $r['tipo'], 'ant' => $r['ant'], 'contrato' => $r['contrato'], 'inicio' => $r['inicio'],
-                            'mes1' => $r['mes1'], 'cuotas' => $r['cuotas'], 'llave' => $r['llave'], 'otros' => $r['otros']];
+                            'mes1' => $r['mes1'], 'cuotas' => $r['cuotas'], 'llave' => $r['llave'], 'comisiones' => $r['comisiones'] ?? null,
+                            'fpc' => $r['fpc'] ?? null, 'escribano' => $r['escribano'] ?? null];
                 }, $rens),
                 'pagadas' => array_merge(...array_values($l['pagadas'] ?: [[]])),
                 'cantidad_contratos' => count($l['contratos'])
@@ -789,7 +842,7 @@ class Llaves {
         return array_map(function ($f) use ($nombres) {
             return ['id' => $f['id'], 'comprobante' => $f['comprobante'], 'cod_provee' => $f['cod_provee'],
                     'nro' => $f['nro'], 'local' => $nombres[$f['nro']] ?? ('Local ' . $f['nro']), 'concepto' => $f['concepto'],
-                    'nombre_concepto' => LlavesCalculo::NOMBRE_CONCEPTO[$f['concepto']] ?? $f['concepto'], 'mes' => $f['mes'],
+                    'nombre_concepto' => LlavesFacturas::NOMBRES[$f['concepto']] ?? $f['concepto'], 'mes' => $f['mes'],
                     'ant' => $f['ant'], 'contrato' => $f['contrato'], 'pagada' => $f['pagada'], 'pagos' => $f['pagos'],
                     'total' => round(array_sum(array_column($f['pagos'], 'importe')), 2), 'texto' => $f['texto']];
         }, is_array($facturas) ? $facturas : []);
@@ -859,7 +912,9 @@ class Llaves {
             'imputables' => $e['pendientes'], 'imputadas' => $imputadas, 'excluidas' => $e['excluidas'],
             'llaves' => $ctx['facturas_llaves'] ?? [], 'locales' => $base['nombres'], 'contratos' => $base['contratos'],
             'hoy' => $h->hoy(), 'vtos' => (new AlquileresFacturaVto())->vigentes(), 'dias' => $e['dias'],
-            'cuotas' => $cuotas, 'cuotas_general' => (int) ($par['generales']['CUOTAS'] ?? 1), 'pagadas_12' => $pagadas12
+            'cuotas' => $cuotas, 'cuotas_general' => (int) ($par['generales']['CUOTAS'] ?? 1), 'pagadas_12' => $pagadas12,
+            /* Sin el script 73, Comisiones y FPC no se ofrecen ni se validan. */
+            'conceptos' => (new LlavesFacturas())->conceptosMarcables()
         ];
     }
 

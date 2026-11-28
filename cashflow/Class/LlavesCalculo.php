@@ -43,19 +43,23 @@ require_once __DIR__ . '/LlavesParametros.php';
  *   CARGADA   un contrato de la app (con su anterior): lo pagado sale de el.
  *             La llave en N cuotas mensuales iguales y consecutivas desde su
  *             inicio (+ el corrimiento del operador), cada una corrida al habil
- *             siguiente; comisiones + FPC en un pago, el dia de la primera
- *             cuota (la firma). Vale para cualquier contrato con cuotas por
- *             delante, tambien el vigente si empezo hace poco.
+ *             siguiente. Las COMISIONES, en las mismas cuotas y fechas que la
+ *             llave; el FPC, en un pago el dia de la primera cuota (la firma).
+ *             Vale para cualquier contrato con cuotas por delante, tambien el
+ *             vigente si empezo hace poco.
  *   ESTIMADA  el vigente vence dentro del horizonte (o ya vencio) y no tiene
  *             renovacion cargada:
  *                 llave = % x (1 + 2 + 8 del mes de la primera cuota) x meses
  *             con el % del local, si no el del operador, si no el general; los
  *             meses del local, si no los del ultimo contrato con llave. Solo
  *             si el vigente TIENE LLAVE (> 0): el criterio de Costo de
- *             Ocupacion (verificarValorLlaveNegocio()). Los otros gastos:
- *                 % de otros gastos del operador x llave + escribano
- *             en un pago, el dia de la primera cuota. Vencido sin renovar: la
- *             primera cuota va al primer habil despues de hoy.
+ *             Ocupacion (verificarValorLlaveNegocio()). Ademas:
+ *                 comisiones = % de comisiones del operador x llave, en las
+ *                              cuotas de la llave
+ *                 FPC        = % de FPC del operador x llave, en la firma
+ *                 escribano y otros = su importe por renovacion, en la firma
+ *             Vencido sin renovar: la primera cuota va al primer habil
+ *             despues de hoy.
  *
  * LLAVE = 1 ES UNA MARCA, NO UN IMPORTE: administracion la carga para que
  * Costo de Ocupacion calcule el devengado ("tiene llave, monto desconocido").
@@ -66,18 +70,21 @@ require_once __DIR__ . '/LlavesParametros.php';
  * de retencion del LOCAL, con AlquileresPago::importes() -la misma regla de
  * redondeo que Alquileres- pasandole el % de impuestos como la unica alicuota
  * (ver importes()). El escribano es un importe final: no lleva ni impuestos ni
- * retencion. Sin % de impuestos o sin % de retencion, la llave y los otros
- * gastos de ese local NO SE PROYECTAN y se avisa con el neto que falta.
+ * retencion. Sin % de impuestos o sin % de retencion, la llave, las comisiones
+ * y el FPC de ese local NO SE PROYECTAN y se avisa con el neto que falta.
  *
  * QUE CORTA LO PROYECTADO
  * -----------------------
  *   - "No renueva" (por local): no se estima nada de esa renovacion.
- *   - "Ya pagada" (por local, renovacion y concepto): ese concepto no se
- *     proyecta; ya salio de caja.
+ *   - "Ya pagada" (por local, renovacion y concepto): la de la llave corta la
+ *     llave; la de otros gastos, las comisiones, el FPC y el escribano. Ya
+ *     salio de caja.
  *   - Una FACTURA imputada a un local y un concepto: reemplaza todo lo
  *     proyectado de ese concepto en esa renovacion -manda lo real, como en
  *     Alquileres (parte 13)- y paga lo suyo; si ya esta pagada en Tango, no
- *     suma y corta igual. Una de obra reemplaza la obra de ese local en ese mes.
+ *     suma y corta igual. Una de obra reemplaza la obra de ese local en ese
+ *     mes. Una marcada con el concepto viejo OTROS (antes del script 73) corta
+ *     comisiones, FPC y escribano, y se avisa para que se rehaga.
  *
  * Los pagos con fecha de hoy o anterior no se proyectan. Una cuota de un
  * contrato firmado que ya paso, del mes en curso o el anterior, sin factura ni
@@ -89,15 +96,28 @@ require_once __DIR__ . '/LlavesParametros.php';
  */
 class LlavesCalculo {
 
-    /** Los conceptos de la pestaña y del tablero */
+    /**
+     * Los conceptos de la pestaña y del tablero. Comisiones, FPC y escribano
+     * van cada uno por su lado (script 73). OTROS queda para "Ya pagada" (corta
+     * comisiones, FPC y escribano) y para las facturas marcadas antes del 73.
+     */
     const LLAVE = 'LLAVE';
+    const COMISIONES = 'COMISIONES';
+    const FPC = 'FPC';
+    const ESCRIBANO = 'ESCRIBANO';
     const OTROS = 'OTROS';
     const OBRA = 'OBRA';
     const APERTURA = 'APERTURA';
     const COMPROMISO = 'COMPROMISO';
 
+    /** Los conceptos de una renovacion (las tarjetas los cuentan juntos) */
+    const DE_RENOVACION = [self::LLAVE, self::COMISIONES, self::FPC, self::ESCRIBANO, self::OTROS];
+
     const NOMBRE_CONCEPTO = [
         self::LLAVE => 'Llave',
+        self::COMISIONES => 'Comisiones',
+        self::FPC => 'FPC',
+        self::ESCRIBANO => 'Escribano y otros',
         self::OTROS => 'Otros gastos',
         self::OBRA => 'Obra de imagen',
         self::APERTURA => 'Apertura',
@@ -479,10 +499,17 @@ class LlavesCalculo {
 
         $s = [
             'pagos' => [], 'locales' => [], 'no_proyecta' => [], 'cortados' => [],
-            'f' => ['vencidos' => [], 'vencen' => [], 'sin_razon' => [], 'sin_alquiler' => [], 'sin_pct_otros' => [],
+            'f' => ['vencidos' => [], 'vencen' => [], 'sin_razon' => [], 'sin_alquiler' => [],
+                    'sin_pct_comisiones' => [], 'sin_pct_fpc' => [],
                     'sin_escribano' => [], 'sin_impuestos' => [], 'sin_retencion' => [], 'pasadas' => [],
                     'sin_contrato' => [], 'sin_segmento' => [], 'sin_cortes' => false,
-                    'sin_costo' => [], 'sin_dolar' => [], 'sin_tablas' => empty($par['tablas_ok'])]
+                    'sin_costo' => [], 'sin_dolar' => [], 'sin_tablas' => empty($par['tablas_ok']),
+                    /* Sin el script 73 no hay % de comisiones ni de FPC que cargar. */
+                    'sin_73' => isset($par['ajustes_ok']) && !$par['ajustes_ok'],
+                    /* Las marcas con el concepto viejo: se avisan para que se rehagan. */
+                    'facturas_otros' => array_column(array_filter(is_array($facturas) ? $facturas : [], function ($f) {
+                        return ($f['concepto'] ?? null) === self::OTROS;
+                    }), 'comprobante')]
         ];
 
         /* Las marcas de "ya pagada" y las facturas, por local y concepto, para
@@ -640,6 +667,104 @@ class LlavesCalculo {
     }
 
     /**
+     * QUE VALOR SE USA Y DE DONDE SALE, para lo que se hereda: el % de llave
+     * (local > operador > general), las cuotas (local > operador > generales)
+     * y el corrimiento (el del operador; vacio, 0). Es la regla de la
+     * estimacion y de las fechas (estimarLlave(), fechasCuotas()), y la que
+     * Parametros muestra debajo de un campo vacio («usa 25 % (general)»), asi
+     * las dos dicen lo mismo. Pura.
+     *
+     * @param array|null $locP Los parametros del local (null: lo que hereda el local)
+     * @param array|null $opP Los del operador (null: lo que hereda el operador)
+     * @param array $gen Los generales
+     * @return array 'pct_llave' | 'cuotas' | 'corrimiento' => ['valor' => float|int|null,
+     *               'de' => 'local' | 'operador' | 'general' | 'por defecto' | null]
+     */
+    public static function queSeUsa($locP, $opP, $gen) {
+        $elegir = function ($campo, $clave) use ($locP, $opP, $gen) {
+            if (($locP[$campo] ?? null) !== null) {
+                return ['valor' => $locP[$campo], 'de' => 'local'];
+            }
+
+            if (($opP[$campo] ?? null) !== null) {
+                return ['valor' => $opP[$campo], 'de' => 'operador'];
+            }
+
+            return (($gen[$clave] ?? null) !== null) ? ['valor' => $gen[$clave], 'de' => 'general'] : ['valor' => null, 'de' => null];
+        };
+
+        return [
+            'pct_llave' => $elegir('pct_llave', 'PCT_LLAVE'),
+            'cuotas' => $elegir('cuotas', 'CUOTAS'),
+            'corrimiento' => (($opP['corrimiento'] ?? null) !== null) ? ['valor' => (int) $opP['corrimiento'], 'de' => 'operador']
+                : ['valor' => 0, 'de' => 'por defecto']
+        ];
+    }
+
+    /**
+     * CUANDO SE PAGA UNA RENOVACION: el inicio, el mes de la primera cuota, la
+     * cantidad de cuotas y la fecha de cada una. Es la misma para la llave y
+     * las comisiones, y la primera es la de la firma (FPC y escribano). Pura.
+     *
+     * El inicio es el del contrato nuevo o el dia siguiente al fin del
+     * vigente. La primera cuota va en su mes + el corrimiento del operador,
+     * salvo que el local diga otro mes; vencido sin renovar, al primer habil
+     * despues de hoy. Las cuotas: las del local, si no las del operador, si no
+     * las generales. Cada fecha, corrida al habil siguiente.
+     *
+     * @param array $r ['tipo', 'contrato', 'ant_contrato'] una renovacion
+     * @param array|null $locP Los parametros del local para esa renovacion
+     * @param array $opP Los del operador
+     * @param array $gen Los generales
+     * @param string $hoy 'Y-m-d'
+     * @param array $habiles 'Y-m-d' => bool. Vacio: de lunes a viernes (DiasHabiles::siguiente())
+     * @return array ['inicio', 'mes1', 'n', 'fechas' => [lo de DiasHabiles::siguiente() + 'pedido']]
+     */
+    public static function fechasCuotas($r, $locP, $opP, $gen, $hoy, $habiles) {
+        $estimada = ($r['tipo'] === self::ESTIMADA);
+        $vig = $r['ant_contrato'];
+        $vencido = $estimada && $vig['hasta'] < $hoy;
+        $usa = self::queSeUsa($locP, $opP, $gen);
+        $corr = (int) $usa['corrimiento']['valor'];
+        $n = (int) ($usa['cuotas']['valor'] ?? 0);
+        $inicio = $estimada ? date('Y-m-d', strtotime($vig['hasta'] . ' +1 day')) : $r['contrato']['desde'];
+        $dia = (int) substr($inicio, 8, 2);
+
+        if (!empty($locP['mes_primera_cuota'])) {
+            $mes1 = $locP['mes_primera_cuota'];
+        } elseif ($vencido) {
+            $mes1 = substr($hoy, 0, 7);
+        } else {
+            $mes1 = Inflacion::mesMas(substr($inicio, 0, 7), $corr);
+        }
+
+        $fechas = [];
+
+        for ($i = 0; $i < max(1, $n); $i++) {
+            if ($vencido && $i === 0 && empty($locP['mes_primera_cuota'])) {
+                $fechas[] = self::despuesDeHoy($hoy, $habiles) + ['pedido' => $hoy];
+            } else {
+                $fechas[] = self::diaDelMes(Inflacion::mesMas($mes1, $i), $dia, $habiles);
+            }
+        }
+
+        return ['inicio' => $inicio, 'mes1' => $mes1, 'n' => $n, 'fechas' => $fechas];
+    }
+
+    /**
+     * Si una renovacion es VIEJA: su ultima cuota es anterior al mes pasado.
+     * No proyecta, no entra en el aviso de cuotas pasadas y no se muestra en
+     * Parametros -> Por local. Pura.
+     *
+     * @param array $fechas Lo de fechasCuotas()['fechas']
+     * @param string $hoy 'Y-m-d'
+     * @return bool
+     */
+    public static function esVieja($fechas, $hoy) {
+        return max(array_column($fechas, 'fecha')) < Inflacion::mesMas(substr($hoy, 0, 7), -1) . '-01';
+    }
+
+    /**
      * Los pagos de llave y otros gastos de una renovacion.
      *
      * @return array Lo que se muestra de la renovacion: tipo, clave, primera cuota y el detalle
@@ -653,46 +778,21 @@ class LlavesCalculo {
         $locP = ($r['ant'] === null) ? null : ($par['locales'][$nro . '|' . $r['ant']] ?? null);
         $c = $r['contrato'];
         $vig = $r['ant_contrato'];
-        $corr = (int) ($opP['corrimiento'] ?? 0);
-        $n = (int) ($locP['cuotas'] ?? $opP['cuotas'] ?? $gen['CUOTAS'] ?? 0);
         $estimada = ($r['tipo'] === self::ESTIMADA);
-        $vencido = $estimada && $vig['hasta'] < $hoy;
-
-        /* EL INICIO: el del contrato nuevo, o el dia siguiente al fin del
-           vigente. La primera cuota va en su mes + el corrimiento del operador,
-           salvo que el local diga otro mes; vencido sin renovar, al mes en curso. */
-        $inicio = $estimada ? date('Y-m-d', strtotime($vig['hasta'] . ' +1 day')) : $c['desde'];
-        $dia = (int) substr($inicio, 8, 2);
-
-        if (!empty($locP['mes_primera_cuota'])) {
-            $mes1 = $locP['mes_primera_cuota'];
-        } elseif ($vencido) {
-            $mes1 = substr($hoy, 0, 7);
-        } else {
-            $mes1 = Inflacion::mesMas(substr($inicio, 0, 7), $corr);
-        }
+        $cal = self::fechasCuotas($r, $locP, $opP, $gen, $hoy, $habiles);
+        $inicio = $cal['inicio'];
+        $mes1 = $cal['mes1'];
+        $n = $cal['n'];
+        $fechas = $cal['fechas'];
 
         $clave = $nro . '|' . ($r['ant'] ?? ('C' . $c['id']));
         $out = ['tipo' => $r['tipo'], 'clave' => $clave, 'ant' => $r['ant'], 'contrato' => ($c === null) ? null : $c['id'],
-                'inicio' => $inicio, 'mes1' => $mes1, 'cuotas' => $n, 'llave' => null, 'otros' => null, 'notas' => []];
-
-        /* Las fechas de las N cuotas. */
-        $fechas = [];
-
-        for ($i = 0; $i < max(1, $n); $i++) {
-            if ($vencido && $i === 0 && empty($locP['mes_primera_cuota'])) {
-                $d = self::despuesDeHoy($hoy, $habiles) + ['pedido' => $hoy];
-            } else {
-                $d = self::diaDelMes(Inflacion::mesMas($mes1, $i), $dia, $habiles);
-            }
-
-            $fechas[] = $d;
-        }
+                'inicio' => $inicio, 'mes1' => $mes1, 'cuotas' => $n, 'llave' => null, 'comisiones' => null, 'fpc' => null, 'escribano' => null, 'notas' => []];
 
         /* UN CONTRATO VIEJO NO DICE NADA: si su ultimo pago es anterior al mes
            pasado, no proyecta ni entra en el aviso de cuotas pasadas, y no tiene
            sentido pedirle impuestos ni operador. */
-        if (!$estimada && max(array_column($fechas, 'fecha')) < Inflacion::mesMas(substr($hoy, 0, 7), -1) . '-01') {
+        if (!$estimada && self::esVieja($fechas, $hoy)) {
             $out['notas'][] = 'Sus pagos son anteriores al mes pasado.';
             $out['vieja'] = true;
 
@@ -754,74 +854,124 @@ class LlavesCalculo {
 
         $out['llave'] = $llave;
 
-        /* ---- LOS OTROS GASTOS ---- */
-        $otros = null;
+        /* ---- COMISIONES, FPC Y ESCRIBANO, cada uno por su lado ----
+           Las COMISIONES se pagan en las mismas cuotas que la llave (mismas
+           fechas, mismo reparto al centavo); el FPC y el escribano, en un pago
+           el dia de la firma (la primera cuota). En una cargada salen del
+           contrato; en una estimada, del % de cada uno del operador sobre la
+           llave estimada, y el escribano es su importe por renovacion. */
+        $op = $l['operador'] ?? $l['cod_provee'];
+        $comis = null;
+        $fpc = null;
         $escribano = null;
-        $cuentaOtros = '';
+        $cuentaCom = '';
+        $cuentaFpc = '';
 
         if ($estimada) {
-            $pctOtros = $opP['pct_otros'] ?? null;
+            $pctCom = $opP['pct_comisiones'] ?? null;
+            $pctFpc = $opP['pct_fpc'] ?? null;
             $escribano = $opP['escribano'] ?? null;
 
-            if ($pctOtros !== null && $llave !== null) {
-                $otros = round($pctOtros / 100 * $llave, 2);
-                $cuentaOtros = self::pct($pctOtros) . ' de otros gastos del operador × llave ' . self::plata($llave)
-                    . ' = ' . self::plata($otros);
-            } elseif ($llave !== null && $llave > 0) {
-                $s['f']['sin_pct_otros'][$l['operador'] ?? $l['cod_provee']] = true;
+            if ($llave !== null) {
+                if ($pctCom !== null) {
+                    $comis = round($pctCom / 100 * $llave, 2);
+                    $cuentaCom = self::pct($pctCom) . ' de comisiones del operador × llave ' . self::plata($llave)
+                        . ' = comisiones ' . self::plata($comis);
+                } elseif ($llave > 0) {
+                    $s['f']['sin_pct_comisiones'][$op] = true;
+                }
+
+                if ($pctFpc !== null) {
+                    $fpc = round($pctFpc / 100 * $llave, 2);
+                    $cuentaFpc = self::pct($pctFpc) . ' de FPC del operador × llave ' . self::plata($llave)
+                        . ' = FPC ' . self::plata($fpc);
+                } elseif ($llave > 0) {
+                    $s['f']['sin_pct_fpc'][$op] = true;
+                }
             }
 
             if ($escribano === null) {
-                $s['f']['sin_escribano'][$l['operador'] ?? $l['cod_provee']] = true;
+                $s['f']['sin_escribano'][$op] = true;
             }
         } else {
-            $suma = (float) $c['comisiones'] + (float) $c['fpc'];
+            if ((float) $c['comisiones'] > 0) {
+                $comis = round((float) $c['comisiones'], 2);
+                $cuentaCom = 'Comisiones ' . self::plata($comis) . ' del contrato #' . $c['id'];
+            }
 
-            if ($suma > 0) {
-                $otros = round($suma, 2);
-                $cuentaOtros = 'Comisiones ' . self::plata((float) $c['comisiones']) . ' + FPC lanzamiento '
-                    . self::plata((float) $c['fpc']) . ' del contrato #' . $c['id'] . ' = ' . self::plata($otros);
+            if ((float) $c['fpc'] > 0) {
+                $fpc = round((float) $c['fpc'], 2);
+                $cuentaFpc = 'FPC lanzamiento ' . self::plata($fpc) . ' del contrato #' . $c['id'];
             }
         }
 
-        $out['otros'] = $otros;
+        $out['comisiones'] = $comis;
+        $out['fpc'] = $fpc;
+        $out['escribano'] = $escribano;
 
-        /* ---- LO QUE CORTA: YA PAGADA Y FACTURAS ---- */
-        foreach ([self::LLAVE, self::OTROS] as $concepto) {
-            $marca = self::marcaDe($pagadas[$concepto] ?? [], $r);
+        /* ---- LO QUE CORTA: YA PAGADA Y FACTURAS ----
+           "Ya pagada" de la llave corta la llave; la de OTROS GASTOS, todo lo
+           que no es llave (comisiones, FPC y escribano). Una factura corta su
+           concepto; una marcada con el concepto viejo OTROS (antes del script
+           73) corta comisiones, FPC y escribano, como la "ya pagada", y avisa. */
+        $corta = [
+            self::LLAVE => [self::LLAVE],
+            self::COMISIONES => [self::COMISIONES],
+            self::FPC => [self::FPC],
+            self::OTROS => [self::COMISIONES, self::FPC, self::ESCRIBANO]
+        ];
+
+        foreach ($corta as $concepto => $cortados) {
+            $marca = isset(LlavesParametros::CONCEPTOS_PAGADA[$concepto]) ? self::marcaDe($pagadas[$concepto] ?? [], $r) : null;
             $fact = self::facturasDe($facturas, $nro, $concepto, $r);
 
-            if ($marca !== null || !empty($fact)) {
-                $out['notas'][] = self::NOMBRE_CONCEPTO[$concepto] . ': ' . ($marca !== null
-                    ? 'ya pagada el ' . self::corta($marca['fecha']) . ' (' . self::plata($marca['monto']) . ')'
-                    : 'la reemplaza la factura ' . implode(', ', array_column($fact, 'comprobante')))
-                    . '; no se proyecta.';
-                $s['cortados'][] = ['nro' => $nro, 'concepto' => $concepto, 'clave' => $clave,
-                                    'por' => ($marca !== null) ? 'PAGADA' : 'FACTURA'];
+            if ($marca === null && empty($fact)) {
+                continue;
+            }
 
-                if ($concepto === self::LLAVE) {
-                    $llave = null;
-                } else {
-                    $otros = null;
-                    $escribano = null;
-                }
+            $out['notas'][] = (($concepto === self::OTROS) ? 'Comisiones, FPC y escribano' : self::NOMBRE_CONCEPTO[$concepto])
+                . ': ' . ($marca !== null
+                    ? 'ya pagada (' . mb_strtolower(LlavesParametros::CONCEPTOS_PAGADA[$concepto], 'UTF-8') . ') el '
+                      . self::corta($marca['fecha']) . (($marca['monto'] ?? null) !== null ? ' por ' . self::plata($marca['monto']) : '')
+                    : 'la reemplaza la factura ' . implode(', ', array_column($fact, 'comprobante'))
+                      . (($concepto === self::OTROS) ? ' (marcada como «Otros gastos»)' : ''))
+                . '; no se proyecta.';
+
+            foreach ($cortados as $x) {
+                $s['cortados'][] = ['nro' => $nro, 'concepto' => $x, 'clave' => $clave,
+                                    'por' => ($marca !== null) ? 'PAGADA' : 'FACTURA'];
+            }
+
+            if (in_array(self::LLAVE, $cortados, true)) {
+                $llave = null;
+            }
+
+            if (in_array(self::COMISIONES, $cortados, true)) {
+                $comis = null;
+            }
+
+            if (in_array(self::FPC, $cortados, true)) {
+                $fpc = null;
+            }
+
+            if (in_array(self::ESCRIBANO, $cortados, true)) {
+                $escribano = null;
             }
         }
 
-        if ($llave === null && $otros === null && $escribano === null) {
+        if ($llave === null && $comis === null && $fpc === null && $escribano === null) {
             return $out;
         }
 
         /* ---- IMPUESTOS Y RETENCION: sin alguno, no se proyecta ----
-           La llave y los otros gastos, que son netos y llevan impuestos y
+           La llave, las comisiones y el FPC, que son netos y llevan impuestos y
            retencion. EL ESCRIBANO SI: es un importe final, sin impuestos ni
            retencion, asi que no le falta nada para proyectarse. Los avisos lo
            dicen asi. */
-        $netoFalta = (float) $llave + (float) $otros;
+        $netoFalta = (float) $llave + (float) $comis + (float) $fpc;
 
-        if (($llave !== null || $otros !== null) && ($pctImp === null || $pctRet === null)) {
+        if (($llave !== null || $comis !== null || $fpc !== null) && ($pctImp === null || $pctRet === null)) {
             if ($pctImp === null) {
-                $op = $l['operador'] ?? $l['cod_provee'];
                 $s['f']['sin_impuestos'][$op]['locales'][] = $nombre;
                 $s['f']['sin_impuestos'][$op]['neto'] = ($s['f']['sin_impuestos'][$op]['neto'] ?? 0.0) + $netoFalta;
             } elseif ($pctRet === null) {
@@ -832,44 +982,59 @@ class LlavesCalculo {
                 'motivo' => ($pctImp === null) ? 'sin % de impuestos del operador' : 'sin % de retención del local',
                 'importe' => $netoFalta > 0 ? round($netoFalta, 2) : null];
             $llave = null;
-            $otros = null;
+            $comis = null;
+            $fpc = null;
         }
 
         $origenRen = $estimada ? self::ESTIMADO : self::CONTRATO;
+        $extra = ['clave' => $clave, 'renovacion' => $r['tipo']];
 
-        if ($llave !== null && $llave > 0 && $n > 0) {
-            $partes = self::cuotas($llave, $n);
+        /* LA LLAVE Y LAS COMISIONES: N cuotas, las mismas fechas. Si la llave
+           no se proyecta (la corto una "ya pagada" o una factura), las
+           comisiones igual van en las N fechas que tendria la llave. */
+        foreach ([[self::LLAVE, $llave, $origenLlave, $cuenta], [self::COMISIONES, $comis, $origenRen, $cuentaCom]] as $x) {
+            list($concepto, $neto, $origen, $texto) = $x;
 
-            foreach ($partes as $i => $neto) {
-                $imp = self::importes($neto, $pctImp, $pctRet);
-                $s['pagos'][] = self::pago(self::LLAVE, $origenLlave, $l, $fechas[$i]['fecha'], $imp['a_pagar'], [
+            if ($neto === null || $neto <= 0 || $n <= 0) {
+                continue;
+            }
+
+            $partes = self::cuotas($neto, $n);
+
+            foreach ($partes as $i => $parte) {
+                $imp = self::importes($parte, $pctImp, $pctRet);
+                $s['pagos'][] = self::pago($concepto, $origen, $l, $fechas[$i]['fecha'], $imp['a_pagar'], $extra + [
                     'neto' => $imp['neto'], 'impuestos' => $imp['impuestos'], 'retencion' => $imp['retencion'],
-                    'cuota' => $i + 1, 'cuotas' => $n, 'clave' => $clave, 'renovacion' => $r['tipo'],
-                    'detalle' => $cuenta . ', cuota ' . ($i + 1) . ' de ' . $n . '. ' . self::lineaImpuestos($imp, $pctImp, $pctRet)
+                    'cuota' => $i + 1, 'cuotas' => $n,
+                    'detalle' => $texto . ', cuota ' . ($i + 1) . ' de ' . $n . '. ' . self::lineaImpuestos($imp, $pctImp, $pctRet)
                         . self::notaFecha($fechas[$i])
                 ]);
             }
 
             if (!$estimada) {
-                self::pasadas($s, $l, $partes, $fechas, $e, $pctImp, $pctRet, $quien);
+                self::pasadas($s, $l, $partes, $fechas, $e, $pctImp, $pctRet, $quien,
+                    ($concepto === self::LLAVE) ? '' : mb_strtolower(self::NOMBRE_CONCEPTO[$concepto], 'UTF-8') . ', ');
             }
         }
 
-        if ($otros !== null || $escribano !== null) {
-            $imp = ($otros !== null && $otros > 0) ? self::importes($otros, $pctImp, $pctRet)
-                : ['neto' => 0.0, 'impuestos' => 0.0, 'retencion' => 0.0, 'a_pagar' => 0.0];
-            $total = round($imp['a_pagar'] + (float) $escribano, 2);
+        /* EL FPC: un pago, en la firma, con impuestos y retencion. */
+        if ($fpc !== null && $fpc > 0) {
+            $imp = self::importes($fpc, $pctImp, $pctRet);
+            $s['pagos'][] = self::pago(self::FPC, $origenRen, $l, $fechas[0]['fecha'], $imp['a_pagar'], $extra + [
+                'neto' => $imp['neto'], 'impuestos' => $imp['impuestos'], 'retencion' => $imp['retencion'],
+                'cuota' => 1, 'cuotas' => 1,
+                'detalle' => $cuentaFpc . '. ' . self::lineaImpuestos($imp, $pctImp, $pctRet) . ' Un pago, en la firma.'
+                    . self::notaFecha($fechas[0])
+            ]);
+        }
 
-            if ($total > 0) {
-                $s['pagos'][] = self::pago(self::OTROS, $origenRen, $l, $fechas[0]['fecha'], $total, [
-                    'neto' => $imp['neto'], 'impuestos' => $imp['impuestos'], 'retencion' => $imp['retencion'],
-                    'escribano' => $escribano, 'cuota' => 1, 'cuotas' => 1, 'clave' => $clave, 'renovacion' => $r['tipo'],
-                    'detalle' => trim(($cuentaOtros !== '' ? $cuentaOtros . '. ' . self::lineaImpuestos($imp, $pctImp, $pctRet) : '')
-                        . ($escribano !== null ? ' + escribano y otros ' . self::plata($escribano) . ' (sin impuestos) = '
-                            . self::plata($total) . '.' : '')
-                        . ' Un pago, en la firma. ' . self::notaFecha($fechas[0]))
-                ]);
-            }
+        /* EL ESCRIBANO Y OTROS: un pago, en la firma, tal cual. */
+        if ($escribano !== null && $escribano > 0) {
+            $s['pagos'][] = self::pago(self::ESCRIBANO, $origenRen, $l, $fechas[0]['fecha'], round($escribano, 2), $extra + [
+                'escribano' => $escribano, 'cuota' => 1, 'cuotas' => 1,
+                'detalle' => 'Escribano y otros del operador por renovación: ' . self::plata($escribano)
+                    . ' (sin impuestos ni retención). Un pago, en la firma.' . self::notaFecha($fechas[0])
+            ]);
         }
 
         return $out;
@@ -885,9 +1050,9 @@ class LlavesCalculo {
      * @return array ['llave' => float|null, 'cuenta' => string]
      */
     private static function estimarLlave($nro, $base, $mes1, $locP, $opP, $gen, $contratos, $e, $nombre, &$s, $propios = false) {
-        $pct = $locP['pct_llave'] ?? $opP['pct_llave'] ?? $gen['PCT_LLAVE'] ?? null;
-        $origenPct = (($locP['pct_llave'] ?? null) !== null) ? 'del local'
-            : ((($opP['pct_llave'] ?? null) !== null) ? 'del operador' : 'general');
+        $usaPct = self::queSeUsa($locP, $opP, $gen)['pct_llave'];
+        $pct = $usaPct['valor'];
+        $origenPct = ['local' => 'del local', 'operador' => 'del operador'][$usaPct['de']] ?? 'general';
 
         if (($locP['meses'] ?? null) !== null) {
             $meses = (int) $locP['meses'];
@@ -958,7 +1123,7 @@ class LlavesCalculo {
      * Las cuotas de un contrato firmado que ya pasaron, del mes en curso o el
      * anterior: puede que esten sin pagar o sin factura.
      */
-    private static function pasadas(&$s, $l, $partes, $fechas, $e, $pctImp, $pctRet, $quien) {
+    private static function pasadas(&$s, $l, $partes, $fechas, $e, $pctImp, $pctRet, $quien, $que = '') {
         $mesActual = substr($e['hoy'], 0, 7);
         $mesAnterior = Inflacion::mesMas($mesActual, -1);
 
@@ -966,7 +1131,7 @@ class LlavesCalculo {
             $f = $fechas[$i]['fecha'];
 
             if ($f <= $e['hoy'] && in_array(substr($f, 0, 7), [$mesActual, $mesAnterior], true)) {
-                $s['f']['pasadas'][] = $quien . ', cuota ' . ($i + 1) . ' del ' . self::corta($f) . ' por '
+                $s['f']['pasadas'][] = $quien . ', ' . $que . 'cuota ' . ($i + 1) . ' del ' . self::corta($f) . ' por '
                     . self::plata(self::importes($neto, $pctImp, $pctRet)['a_pagar']);
             }
         }
@@ -1158,9 +1323,8 @@ class LlavesCalculo {
         }
 
         foreach ($f['sin_impuestos'] as $op => $x) {
-            $out[] = Aviso::nuevo(Aviso::WARNING, 'El operador ' . $op . ' no tiene % de impuestos sobre llave y otros '
-                . 'gastos: no se proyectan la llave ni los otros gastos (el % de otros gastos, o las comisiones y el FPC '
-                . 'del contrato) de ' . $lista(array_unique($x['locales']))
+            $out[] = Aviso::nuevo(Aviso::WARNING, 'El operador ' . $op . ' no tiene % de impuestos sobre la llave, las '
+                . 'comisiones y el FPC: no se proyectan la llave, las comisiones ni el FPC de ' . $lista(array_unique($x['locales']))
                 . ($x['neto'] > 0 ? ', por ' . self::plata($x['neto']) . ' netos sin impuestos' : '') . '. El escribano '
                 . 'sí se proyecta: no lleva impuestos. Se carga en Parámetros › Llaves y Renovaciones › Por operador.',
                 'Parámetros');
@@ -1169,14 +1333,26 @@ class LlavesCalculo {
         if (!empty($f['sin_retencion'])) {
             $out[] = Aviso::nuevo(Aviso::WARNING, 'Sin % de retención en Parámetros › Alquileres: '
                 . $lista(array_map(function ($n, $v) { return $n . ($v > 0 ? ' (' . self::plata($v) . ' netos)' : ''); },
-                    array_keys($f['sin_retencion']), $f['sin_retencion'])) . '. No se proyectan su llave ni sus otros gastos; el '
-                . 'escribano sí, porque no lleva retención.', 'Parámetros');
+                    array_keys($f['sin_retencion']), $f['sin_retencion'])) . '. No se proyectan su llave, sus comisiones ni '
+                . 'su FPC; el escribano sí, porque no lleva retención.', 'Parámetros');
         }
 
-        if (!empty($f['sin_pct_otros'])) {
-            $out[] = Aviso::nuevo(Aviso::WARNING, 'Operador sin % de otros gastos sobre la llave: '
-                . $lista(array_keys($f['sin_pct_otros'])) . '. Sus otros gastos estimados no suman ese %: se carga en '
-                . 'Parámetros › Llaves y Renovaciones › Por operador.', 'Parámetros');
+        /* Un aviso por concepto: cada uno dice cual falta. Sin el script 73 las
+           columnas no existen, y el aviso lo dice. */
+        foreach (['sin_pct_comisiones' => 'comisiones', 'sin_pct_fpc' => 'FPC'] as $k => $que) {
+            if (!empty($f[$k])) {
+                $out[] = Aviso::nuevo(Aviso::WARNING, 'Operador sin % de ' . $que . ' sobre la llave: '
+                    . $lista(array_keys($f[$k])) . '. ' . ($que === 'FPC' ? 'Su FPC estimado no se proyecta' : 'Sus comisiones '
+                    . 'estimadas no se proyectan') . ($f['sin_73']
+                        ? ': falta correr ' . LlavesParametros::SCRIPT_AJUSTES . ' contra la base central para poder cargarlo.'
+                        : ': se carga en Parámetros › Llaves y Renovaciones › Por operador.'), 'Parámetros');
+            }
+        }
+
+        if (!empty($f['facturas_otros'])) {
+            $out[] = Aviso::nuevo(Aviso::WARNING, 'Facturas marcadas como llave con el concepto anterior «Otros gastos»: '
+                . $lista(array_unique($f['facturas_otros'])) . '. Siguen reemplazando las comisiones, el FPC y el escribano de '
+                . 'su renovación. Deshacé la marca en Alquileres › Facturas y volvé a marcarla como Comisiones o FPC.', 'Facturas');
         }
 
         if (!empty($f['sin_escribano'])) {

@@ -30,6 +30,9 @@ class LlavesParametros {
 
     const SCRIPT = 'sql/cashflow_llaves.sql';
 
+    /** Script 73: "Ya pagada" sin monto, % de comisiones y de FPC, facturas de comisiones y FPC */
+    const SCRIPT_AJUSTES = 'sql/cashflow_llaves_ajustes.sql';
+
     const T_GENERAL = 'RO_T_CASHFLOW_LLAVES_GENERAL';
     const T_OPERADOR = 'RO_T_CASHFLOW_LLAVES_OPERADOR';
     const T_LOCAL = 'RO_T_CASHFLOW_LLAVES_LOCAL';
@@ -240,13 +243,17 @@ class LlavesParametros {
     /**
      * Los datos de un operador, normalizados. Vacio = null en todos.
      *
+     * El % de comisiones y el de FPC reemplazan al % de otros gastos (script
+     * 73): PCT_OTROS queda en la base sin usarse y no se vuelve a escribir.
+     *
      * @param array $d
-     * @return array ['pct_llave', 'pct_otros', 'escribano', 'pct_impuestos', 'cuotas', 'corrimiento']
+     * @return array ['pct_llave', 'pct_comisiones', 'pct_fpc', 'escribano', 'pct_impuestos', 'cuotas', 'corrimiento']
      */
     public static function validarOperador($d) {
         return [
             'pct_llave' => self::numero($d['pct_llave'] ?? null, 'El % de llave', true, 1000),
-            'pct_otros' => self::numero($d['pct_otros'] ?? null, 'El % de otros gastos', true, 1000),
+            'pct_comisiones' => self::numero($d['pct_comisiones'] ?? null, 'El % de comisiones', true, 1000),
+            'pct_fpc' => self::numero($d['pct_fpc'] ?? null, 'El % de FPC', true, 1000),
             'escribano' => self::numero($d['escribano'] ?? null, 'El escribano y otros'),
             'pct_impuestos' => self::numero($d['pct_impuestos'] ?? null, 'El % de impuestos', true, 1000),
             'cuotas' => self::entero($d['cuotas'] ?? null, 1, 60, 'Las cuotas'),
@@ -282,6 +289,10 @@ class LlavesParametros {
      * que ya salieron de caja. La fecha no puede ser futura: lo que todavia no
      * se pago no esta pagado.
      *
+     * EL MONTO ES OPCIONAL (script 73): es solo informativo, no suma ni resta
+     * nada. Desde la solapa Contratos no se pide; en Parametros, si se carga,
+     * tiene que ser mayor que 0. Vacio es null, no 0.
+     *
      * @param array $d
      * @param string $hoy 'Y-m-d'
      * @return array
@@ -300,10 +311,10 @@ class LlavesParametros {
                 . 'se pagó sigue proyectado.');
         }
 
-        $monto = self::numero($d['monto'] ?? null, 'El monto pagado', false);
+        $monto = self::numero($d['monto'] ?? null, 'El monto pagado');
 
-        if ($monto <= 0) {
-            throw new InvalidArgumentException('El monto pagado tiene que ser mayor que 0.');
+        if ($monto !== null && $monto <= 0) {
+            throw new InvalidArgumentException('El monto pagado tiene que ser mayor que 0, o quedar vacío.');
         }
 
         return [
@@ -317,8 +328,8 @@ class LlavesParametros {
 
     /**
      * "Ya pagada" de UNO O VARIOS conceptos de la misma renovacion: la fecha,
-     * el comprobante y la observacion son comunes, y cada concepto lleva su
-     * monto. Lo normal es marcar la renovacion entera (la llave y los otros
+     * el comprobante y la observacion son comunes, y cada concepto puede
+     * llevar su monto (opcional). Lo normal es marcar la renovacion entera (la llave y los otros
      * gastos): marcar solo la llave deja los otros gastos proyectados sin que
      * nadie lo note (Abasto, 23/11/2026). Por eso la pantalla ofrece los dos
      * tildados, y aca se validan juntos.
@@ -549,6 +560,37 @@ class LlavesParametros {
         return $this->tablas;
     }
 
+    /** @var array|null */
+    private $ajustes = null;
+
+    /**
+     * Que partes del script 73 (sql/cashflow_llaves_ajustes.sql) ya se
+     * corrieron. Cada una por su lado: el script saltea la de una tabla que
+     * todavia no existe. Nunca lanza: si no se puede leer, ninguna.
+     *
+     * @return array ['pagada_sin_monto' => bool, 'pct_separados' => bool, 'conceptos_factura' => bool, 'todo' => bool]
+     */
+    public function ajustes() {
+        if ($this->ajustes === null) {
+            $this->ajustes = ['pagada_sin_monto' => false, 'pct_separados' => false, 'conceptos_factura' => false];
+
+            try {
+                $r = $this->fila("SELECT COLUMNPROPERTY(OBJECT_ID('dbo." . self::T_PAGADA . "'), 'MONTO', 'AllowsNull') AS M,
+                        CASE WHEN COL_LENGTH('dbo." . self::T_OPERADOR . "', 'PCT_COMISIONES') IS NOT NULL
+                              AND COL_LENGTH('dbo." . self::T_OPERADOR . "', 'PCT_FPC') IS NOT NULL THEN 1 ELSE 0 END AS P,
+                        (SELECT COUNT(*) FROM sys.check_constraints WHERE name = 'CK_RO_T_CF_LLFAC_CONCEPTO'
+                            AND definition LIKE '%COMISIONES%' AND definition LIKE '%FPC%') AS F", [],
+                    'Error al verificar el script de ajustes de Llaves');
+                $this->ajustes = ['pagada_sin_monto' => (int) ($r['M'] ?? 0) === 1, 'pct_separados' => (int) ($r['P'] ?? 0) === 1,
+                                  'conceptos_factura' => (int) ($r['F'] ?? 0) > 0];
+            } catch (Throwable $e) {
+                /* Sin poder leerlo, como si no se hubiera corrido: nada se pierde. */
+            }
+        }
+
+        return $this->ajustes + ['todo' => !in_array(false, $this->ajustes, true)];
+    }
+
     public function avisoSinTabla() {
         return 'Faltan las tablas de Parámetros › Llaves y Renovaciones: hay que correr ' . self::SCRIPT
             . ' contra la base central. Hasta entonces no se estima ninguna llave, obra ni apertura, y no se '
@@ -569,14 +611,21 @@ class LlavesParametros {
         return $out + ['_meta' => $meta];
     }
 
-    /** @return array COD_PROVEE => ['pct_llave', 'pct_otros', 'escribano', 'pct_impuestos', 'cuotas', 'corrimiento', 'usuario', 'fecha'] */
+    /**
+     * PCT_OTROS no se lee: lo reemplazan PCT_COMISIONES y PCT_FPC (script 73).
+     * Sin el 73 esas columnas no existen y quedan en null (sin dato).
+     *
+     * @return array COD_PROVEE => ['pct_llave', 'pct_comisiones', 'pct_fpc', 'escribano', 'pct_impuestos', 'cuotas',
+     *                              'corrimiento', 'usuario', 'fecha']
+     */
     public function operadores() {
         $out = [];
 
         foreach ($this->filas("SELECT * FROM dbo." . self::T_OPERADOR . " WHERE VIGENTE = 1", [],
                               'Error al leer los operadores de Llaves') as $r) {
             $out[Planilla::codigo($r['COD_PROVEE'])] = [
-                'pct_llave' => self::num($r['PCT_LLAVE']), 'pct_otros' => self::num($r['PCT_OTROS']),
+                'pct_llave' => self::num($r['PCT_LLAVE']),
+                'pct_comisiones' => self::num($r['PCT_COMISIONES'] ?? null), 'pct_fpc' => self::num($r['PCT_FPC'] ?? null),
                 'escribano' => self::num($r['ESCRIBANO']), 'pct_impuestos' => self::num($r['PCT_IMPUESTOS']),
                 'cuotas' => ($r['CUOTAS'] === null) ? null : (int) $r['CUOTAS'],
                 'corrimiento' => ($r['CORRIMIENTO'] === null) ? null : (int) $r['CORRIMIENTO'],
@@ -611,7 +660,7 @@ class LlavesParametros {
     public function pagadas() {
         return array_map(function ($r) {
             return ['id' => (int) $r['ID'], 'nro' => (int) $r['NRO_SUCURS'], 'id_contrato_ant' => (int) $r['ID_CONTRATO_ANT'],
-                    'concepto' => trim($r['CONCEPTO']), 'fecha' => self::dia($r['FECHA']), 'monto' => (float) $r['MONTO'],
+                    'concepto' => trim($r['CONCEPTO']), 'fecha' => self::dia($r['FECHA']), 'monto' => self::num($r['MONTO']),
                     'comprobante' => $r['COMPROBANTE'], 'observacion' => $r['OBSERVACION'],
                     'usuario' => $r['USUARIO_ALTA'], 'fecha_alta' => self::momento($r['FECHA_ALTA'])];
         }, $this->filas("SELECT * FROM dbo." . self::T_PAGADA . " WHERE VIGENTE = 1 ORDER BY NRO_SUCURS, FECHA", [],
@@ -646,7 +695,7 @@ class LlavesParametros {
         return array_map(function ($r) {
             return ['id' => (int) $r['ID'], 'tipo' => trim($r['TIPO_OPERADOR']), 'cod_provee' => Planilla::codigo($r['COD_PROVEE']),
                     'nro' => ($r['NRO_SUCURS'] === null) ? null : (int) $r['NRO_SUCURS'], 'concepto' => $r['CONCEPTO'],
-                    'fecha' => self::dia($r['FECHA']), 'monto' => (float) $r['MONTO'],
+                    'fecha' => self::dia($r['FECHA']), 'monto' => self::num($r['MONTO']),
                     'forma' => ($r['FORMA_PAGO'] === null) ? null : trim($r['FORMA_PAGO']),
                     'observacion' => $r['OBSERVACION'],
                     'id_serie' => ($r['ID_SERIE'] === null) ? null : (int) $r['ID_SERIE'],
@@ -669,7 +718,10 @@ class LlavesParametros {
                     'pagadas' => [], 'obras' => [], 'aperturas' => [], 'compromisos' => []];
         }
 
-        return ['tablas_ok' => true, 'generales' => $this->generales(), 'operadores' => $this->operadores(),
+        $aj = $this->ajustes();
+
+        return ['tablas_ok' => true, 'ajustes_ok' => $aj['pct_separados'], 'ajustes' => $aj,
+                'generales' => $this->generales(), 'operadores' => $this->operadores(),
                 'locales' => $this->locales(), 'pagadas' => $this->pagadas(), 'obras' => $this->obras(),
                 'aperturas' => $this->aperturas(), 'compromisos' => $this->compromisos()];
     }
@@ -719,14 +771,26 @@ class LlavesParametros {
         }
 
         $v = self::validarOperador($datos);
+        $separados = $this->ajustes()['pct_separados'];
 
-        $this->enTransaccion(function () use ($c, $v, $usuario) {
+        /* SIN EL SCRIPT 73 los dos % no tienen donde guardarse: se dice, en
+           vez de perderlos en silencio. Lo demas del operador se guarda igual. */
+        if (!$separados && ($v['pct_comisiones'] !== null || $v['pct_fpc'] !== null)) {
+            throw new InvalidArgumentException('Todavía no se pueden cargar el % de comisiones ni el de FPC: falta correr '
+                . self::SCRIPT_AJUSTES . ' contra la base central.');
+        }
+
+        $this->enTransaccion(function () use ($c, $v, $usuario, $separados) {
             $this->darDeBaja(self::T_OPERADOR, 'COD_PROVEE = ? AND VIGENTE = 1', [$c], $usuario);
+            /* PCT_OTROS no se escribe: la fila nueva lo deja en null y el valor
+               anterior queda en el historial (la fila dada de baja). */
             $this->ejecutar("INSERT INTO dbo." . self::T_OPERADOR . "
-                    (COD_PROVEE, PCT_LLAVE, PCT_OTROS, ESCRIBANO, PCT_IMPUESTOS, CUOTAS, CORRIMIENTO, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-                [$c, $v['pct_llave'], $v['pct_otros'], $v['escribano'], $v['pct_impuestos'], $v['cuotas'],
-                 $v['corrimiento'], $usuario, $usuario], 'Error al guardar el operador');
+                    (COD_PROVEE, PCT_LLAVE, " . ($separados ? "PCT_COMISIONES, PCT_FPC, " : "") . "ESCRIBANO, PCT_IMPUESTOS, CUOTAS,
+                     CORRIMIENTO, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
+                 VALUES (?, ?, " . ($separados ? "?, ?, " : "") . "?, ?, ?, ?, 1, ?, ?)",
+                array_merge([$c, $v['pct_llave']], $separados ? [$v['pct_comisiones'], $v['pct_fpc']] : [],
+                    [$v['escribano'], $v['pct_impuestos'], $v['cuotas'], $v['corrimiento'], $usuario, $usuario]),
+                'Error al guardar el operador');
         });
 
         return ['cod' => $c] + $v;
@@ -787,6 +851,14 @@ class LlavesParametros {
         }
 
         $v = self::validarPagadas($datos, $hoy);
+
+        /* SIN EL SCRIPT 73 MONTO NO ACEPTA VACIO: se dice, en vez del error de la base. */
+        if (in_array(null, array_column($v['conceptos'], 'monto'), true) && !$this->ajustes()['pagada_sin_monto']) {
+            throw new InvalidArgumentException('Todavía no se puede marcar «Ya pagada» sin monto: falta correr '
+                . self::SCRIPT_AJUSTES . ' contra la base central. Hasta entonces, cargá el monto en Parámetros › '
+                . 'Llaves y Renovaciones › Ya pagadas.');
+        }
+
         $ids = [];
         $marcados = [];
         $ya = [];

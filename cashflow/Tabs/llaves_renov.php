@@ -106,7 +106,7 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
                     <div>
                         <h5 class="mb-0">Proyección por operador</h5>
                         <small class="text-muted">
-                            Cada operador se abre en sus locales y cada local en llave, otros gastos y obra. Lo
+                            Cada operador se abre en sus locales y cada local en llave, comisiones, FPC, escribano y otros y obra. Lo
                             <em class="ll-estimado-muestra">estimado</em> va en itálica y atenuado. Pasá el mouse por
                             un importe para ver de dónde sale y la cuenta.
                         </small>
@@ -136,7 +136,10 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
             </div>
             <div class="card-body p-0">
                 <div class="cargando-slot" id="llSpinner" data-cargando="Proyectando llaves y renovaciones…"></div>
-                <div class="table-wrapper table-responsive" id="llWrapper" style="display: none;">
+                <!-- .tabla-temporal: el encabezado y el pie quedan fijos, y la columna
+                     «Operador · local · concepto» (col-fija-1, Js/columnas-fijas.js) queda
+                     fija al scrollear a lo ancho, como en Alquileres. -->
+                <div class="table-wrapper table-responsive tabla-temporal" id="llWrapper" style="display: none;">
                     <!-- data-orden="no": cada fila lleva sus hijas abajo, y ordenar las separaría. -->
                     <table id="tablaLlaves" class="table table-hover table-sm mb-0" data-orden="no">
                         <thead id="llThead"></thead>
@@ -225,18 +228,17 @@ $edita = AuthCashflow::puedeEditar('llaves_renov');
                             <select id="llPagRen" class="form-select form-select-sm"></select></div>
                         <!-- Los dos conceptos tildados por defecto: lo normal es marcar la
                              renovación entera, y marcar sólo la llave deja los otros
-                             gastos proyectados sin que nadie lo note. -->
+                             gastos proyectados sin que nadie lo note. SIN IMPORTES: el
+                             monto no suma ni resta nada (si se quiere, se carga en
+                             Parámetros › Ya pagadas). -->
                         <div class="col-12"><span class="form-label small mb-0 d-block">Qué se pagó</span>
-                            <div class="row g-2 align-items-center">
-                                <div class="col-5"><div class="form-check mb-0">
-                                    <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagLlave" value="LLAVE" checked>
-                                    <label class="form-check-label small" for="llPagLlave">Llave</label></div></div>
-                                <div class="col-7"><input type="text" id="llPagMontoLLAVE" class="form-control form-control-sm" inputmode="decimal" placeholder="Monto ($)"></div>
-                                <div class="col-5"><div class="form-check mb-0">
-                                    <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagOtros" value="OTROS" checked>
-                                    <label class="form-check-label small" for="llPagOtros">Otros gastos</label></div></div>
-                                <div class="col-7"><input type="text" id="llPagMontoOTROS" class="form-control form-control-sm" inputmode="decimal" placeholder="Monto ($)"></div>
-                            </div></div>
+                            <div class="form-check mb-0">
+                                <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagLlave" value="LLAVE" checked>
+                                <label class="form-check-label small" for="llPagLlave">Llave</label></div>
+                            <div class="form-check mb-0">
+                                <input class="form-check-input ll-pag-concepto" type="checkbox" id="llPagOtros" value="OTROS" checked>
+                                <label class="form-check-label small" for="llPagOtros">Otros gastos <span class="text-muted">(comisiones, FPC y escribano)</span></label></div>
+                            </div>
                         <div class="col-md-6"><label class="form-label small mb-0" for="llPagFecha">Fecha del pago</label>
                             <input type="date" id="llPagFecha" class="form-control form-control-sm"></div>
                         <div class="col-md-6"><label class="form-label small mb-0" for="llPagComp">Comprobante</label>
