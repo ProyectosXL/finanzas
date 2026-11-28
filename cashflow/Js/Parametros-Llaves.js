@@ -13,9 +13,15 @@
  * compromisos y ya pagadas son altas: se cargan con su formulario y se dan de
  * baja; no se editan.
  *
- * LO SUGERIDO VA COMO PLACEHOLDER, en gris, con el tooltip de donde sale. Un
- * placeholder no se guarda: lo confirma una persona escribiendolo (o con el
- * boton de los cortes).
+ * NINGUN NUMERO ADENTRO DE UN CAMPO VACIO. Un placeholder en gris parecia un
+ * dato cargado y no lo era (un operador quedo sin % de impuestos creyendo que
+ * lo tenia). Por eso un campo vacio dice, DEBAJO y en chico, que pasa:
+ *   - si hereda: que valor usa y de donde («usa 25 % (general)»);
+ *   - si es sin dato y frena o recorta la proyeccion: borde punteado y
+ *     «⚠ sin dato» en negrita.
+ * Lo SUGERIDO va al lado, en un chip «Sugerido: 31 %» con el tooltip de donde
+ * sale y el boton «Usar», que lo graba como cualquier cambio (con auditoria).
+ * Lo grabado se ve como dato normal. Ver campo().
  *
  * NADA DE alert(). Todo va a Notificacion, igual que el resto del modulo.
  */
@@ -113,9 +119,35 @@
               + numero(s.chico) + ' m², mediano hasta ' + numero(s.mediano) + ' m², grande más. Los confirma una persona.'
             : 'No hay m² suficientes para sugerir cortes.';
 
-        ['CORTE_CHICO', 'CORTE_MEDIANO'].forEach(function(c) {
-            var el = document.getElementById('pll' + c);
-            if (el && s) { el.placeholder = numero(c === 'CORTE_CHICO' ? s.chico : s.mediano); }
+        /* Debajo de cada general, lo que pasa si esta vacio: los cortes llevan su
+           sugerido con «Usar»; un costo en U$S vacio es «sin dato» (frena la obra
+           o la apertura de ese segmento). */
+        document.querySelectorAll('.pll-general').forEach(function(el) {
+            var clave = el.getAttribute('data-clave');
+            var vacio = g[clave] === undefined || g[clave] === null;
+            var opc = { titulo: el.title };
+
+            if (clave === 'CORTE_CHICO' || clave === 'CORTE_MEDIANO') {
+                opc.sinDato = true;
+                opc.sugerido = s ? { valor: clave === 'CORTE_CHICO' ? s.chico : s.mediano, unidad: ' m²',
+                                     tip: 'Los terciles de los m² de los ' + datos.m2_locales + ' locales habilitados que tienen m².' } : null;
+            } else if (clave.indexOf('USD_') === 0) {
+                opc.sinDato = true;
+            }
+
+            el.placeholder = '';
+            el.classList.toggle('pll-sin-dato', vacio && !!opc.sinDato);
+
+            var ayuda = el.parentNode.querySelector('.pll-ayuda[data-de="' + clave + '"]');
+
+            if (!ayuda) {
+                ayuda = document.createElement('div');
+                ayuda.className = 'pll-ayuda';
+                ayuda.setAttribute('data-de', clave);
+                el.parentNode.insertBefore(ayuda, el.nextSibling);
+            }
+
+            ayuda.innerHTML = ayudaCampo(vacio ? null : g[clave], opc, 'data-general="' + esc(clave) + '"');
         });
     }
 
@@ -149,7 +181,6 @@
             return;
         }
 
-        var g = datos.generales || {};
         /* Sin el script 73 el % de comisiones y el de FPC no tienen donde
            guardarse: se ven deshabilitados y nombran el script. */
         var separados = !!(datos.ajustes && datos.ajustes.pct_separados);
@@ -159,21 +190,29 @@
             var v = o.valores || {};
             var sug = o.sugerido || {};
             var imp = o.impuestos || {};
+            var usa = o.usa || {};
+            var pct = function(x) { return x === null || x === undefined ? null : { valor: x, unidad: ' %' }; };
 
             return '<tr data-cod="' + esc(o.cod) + '">'
                 + '<td><strong>' + esc(o.nombre) + '</strong> <small class="text-muted">' + esc(o.cod) + '</small></td>'
                 + '<td><small>' + esc(o.locales.join(', ') || '—') + '</small></td>'
-                + '<td>' + campo('pct_llave', v.pct_llave, sug.pct_llave !== undefined && sug.pct_llave !== null
-                    ? numero(sug.pct_llave) : numero(g.PCT_LLAVE), tipRenovaciones(sug, 'pct')) + '</td>'
-                + '<td>' + campo('pct_comisiones', v.pct_comisiones, sug.pct_comisiones !== undefined && sug.pct_comisiones !== null
-                    ? numero(sug.pct_comisiones) : 'sin dato', separados ? tipRenovaciones(sug, 'comisiones') : SIN_73, !separados) + '</td>'
-                + '<td>' + campo('pct_fpc', v.pct_fpc, sug.pct_fpc !== undefined && sug.pct_fpc !== null
-                    ? numero(sug.pct_fpc) : 'sin dato', separados ? tipRenovaciones(sug, 'fpc') : SIN_73, !separados) + '</td>'
-                + '<td>' + campo('escribano', v.escribano, 'sin dato', 'Vacío = sin dato (avisa). Cargá 0 si no hay.') + '</td>'
-                + '<td>' + campo('pct_impuestos', v.pct_impuestos, imp.pct !== undefined && imp.pct !== null ? numero(imp.pct) : 'sin dato',
-                    tipImpuestos(imp)) + '</td>'
-                + '<td>' + campo('cuotas', v.cuotas, numero(g.CUOTAS), 'Vacío = las generales') + '</td>'
-                + '<td>' + campo('corrimiento', v.corrimiento, '0', 'Vacío = 0. Negativo = la primera cuota antes del inicio') + '</td>'
+                + '<td>' + campo('pct_llave', v.pct_llave, { titulo: 'Vacío = el general', hereda: heredado(usa.pct_llave, ' %'),
+                    sugerido: sugerido(pct(sug.pct_llave), tipRenovaciones(sug, 'pct')) }) + '</td>'
+                + '<td>' + campo('pct_comisiones', v.pct_comisiones, separados
+                    ? { titulo: 'Vacío = sin dato: las comisiones estimadas no se proyectan', sinDato: true,
+                        sugerido: sugerido(pct(sug.pct_comisiones), tipRenovaciones(sug, 'comisiones')) }
+                    : { titulo: SIN_73, deshabilitado: true }) + '</td>'
+                + '<td>' + campo('pct_fpc', v.pct_fpc, separados
+                    ? { titulo: 'Vacío = sin dato: el FPC estimado no se proyecta', sinDato: true,
+                        sugerido: sugerido(pct(sug.pct_fpc), tipRenovaciones(sug, 'fpc')) }
+                    : { titulo: SIN_73, deshabilitado: true }) + '</td>'
+                + '<td>' + campo('escribano', v.escribano, { titulo: 'Vacío = sin dato (avisa). Cargá 0 si no hay.', sinDato: true }) + '</td>'
+                + '<td>' + campo('pct_impuestos', v.pct_impuestos, { sinDato: true,
+                    titulo: 'Vacío = sin dato: la llave, las comisiones y el FPC de este operador no se proyectan',
+                    sugerido: sugerido(pct(imp.pct), tipImpuestos(imp)) }) + '</td>'
+                + '<td>' + campo('cuotas', v.cuotas, { titulo: 'Vacío = las generales', hereda: heredado(usa.cuotas, '') }) + '</td>'
+                + '<td>' + campo('corrimiento', v.corrimiento, { titulo: 'Negativo = la primera cuota antes del inicio',
+                    hereda: heredado(usa.corrimiento, '') }) + '</td>'
                 + '<td><small class="text-muted">' + (v.usuario ? esc(Auditoria.linea('modif', v.usuario, v.fecha)) : '') + '</small></td>'
                 + '</tr>';
         }).join('');
@@ -210,11 +249,82 @@
             }).join('; ') + '.';
     }
 
-    function campo(nombre, valor, placeholder, titulo, deshabilitado) {
-        return '<input type="text" class="form-control form-control-sm" data-campo="' + nombre + '" inputmode="decimal" '
-            + 'value="' + (valor === null || valor === undefined ? '' : esc(numeroEditable(valor))) + '" '
-            + 'placeholder="' + esc(placeholder === undefined || placeholder === null ? '' : placeholder) + '" '
-            + 'title="' + esc(titulo || '') + '"' + (deshabilitado ? ' disabled' : '') + '>';
+    /**
+     * Un campo numerico de Parametros. NUNCA LLEVA UN NUMERO COMO PLACEHOLDER:
+     * lo que pasa con el campo vacio va debajo (ayudaCampo()).
+     *
+     * @param {string} nombre data-campo
+     * @param {*} valor Lo grabado (null = vacio)
+     * @param {Object} opc { titulo, deshabilitado,
+     *                      hereda: 'usa 25 % (general)' -> el valor que usa vacio y de donde,
+     *                      sinDato: true -> vacio frena o recorta la proyeccion,
+     *                      sugerido: { valor, unidad, tip } -> chip «Sugerido» con «Usar» }
+     */
+    function campo(nombre, valor, opc) {
+        opc = opc || {};
+        var vacio = valor === null || valor === undefined;
+
+        return '<div class="pll-campo"><input type="text" class="form-control form-control-sm'
+            + (vacio && opc.sinDato && !opc.deshabilitado ? ' pll-sin-dato' : '') + '" data-campo="' + nombre + '" inputmode="decimal" '
+            + 'value="' + (vacio ? '' : esc(numeroEditable(valor))) + '" placeholder="" '
+            + 'title="' + esc(opc.titulo || '') + '"' + (opc.deshabilitado ? ' disabled' : '') + '>'
+            + (opc.deshabilitado ? '' : ayudaCampo(vacio ? null : valor, opc, 'data-usar-campo="' + esc(nombre) + '"'))
+            + '</div>';
+    }
+
+    /**
+     * Lo que va al lado y debajo de un campo: el chip del sugerido con «Usar» (si
+     * hay sugerido y no es lo grabado) y, vacio, lo que hereda o «sin dato».
+     */
+    function ayudaCampo(valor, opc, destino) {
+        var vacio = valor === null || valor === undefined;
+        var s = opc.sugerido;
+        var html = '';
+
+        if (s && s.valor !== null && s.valor !== undefined && (vacio || Math.abs(Number(valor) - Number(s.valor)) >= 0.005)) {
+            html += '<span class="pll-sugerido" title="' + esc(s.tip || '') + '">Sugerido: ' + esc(numero(s.valor) + (s.unidad || ''))
+                + ' <button type="button" class="btn btn-link btn-sm p-0 pll-usar" ' + destino + ' data-valor="'
+                + esc(numeroEditable(s.valor)) + '" title="Grabar el sugerido">Usar</button></span>';
+        }
+
+        if (vacio && opc.hereda) {
+            html += '<small class="pll-hereda">' + esc(opc.hereda) + '</small>';
+        } else if (vacio && opc.sinDato) {
+            html += '<small class="pll-sin-dato-leyenda"><i class="fas fa-triangle-exclamation"></i> sin dato</small>';
+        }
+
+        return html;
+    }
+
+    /** «usa 25 % (general)» con lo de LlavesCalculo::queSeUsa(). */
+    function heredado(u, unidad) {
+        if (!u || u.valor === null || u.valor === undefined) { return null; }
+
+        return 'usa ' + numero(u.valor) + unidad + (u.de ? ' (' + u.de + ')' : '');
+    }
+
+    function sugerido(s, tip) {
+        return s ? { valor: s.valor, unidad: s.unidad, tip: tip } : null;
+    }
+
+    /**
+     * «Usar» graba el sugerido como cualquier cambio: en Generales, la clave; en
+     * una fila, la fila entera con ese valor (guardarFila(), con auditoria).
+     */
+    function usarSugerido(btn) {
+        var valor = btn.getAttribute('data-valor');
+        var clave = btn.getAttribute('data-general');
+
+        if (clave) {
+            escribir('guardarGeneral', { clave: clave, valor: valor });
+            return;
+        }
+
+        var fila = btn.closest('tr');
+        var el = fila.querySelector('[data-campo="' + btn.getAttribute('data-usar-campo') + '"]');
+
+        el.value = valor;
+        guardarFila('guardarOperador', fila, { cod_provee: fila.getAttribute('data-cod') });
     }
 
     /**
@@ -238,7 +348,6 @@
         /* Las estimadas y las CARGADAS: de una cargada siguen valiendo las cuotas
            y el mes de la 1.a cuota, asi que tienen que poder verse y cambiarse. */
         var rens = (datos.renovaciones || []).filter(function(r) { return r.tipo === 'ESTIMADA' || r.tipo === 'CARGADA'; });
-        var g = datos.generales || {};
 
         if (!rens.length) {
             cuerpo.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">Ningún local vence dentro del '
@@ -250,6 +359,7 @@
             var p = r.parametros || {};
             var v = r.vigente;
             var cargada = r.tipo === 'CARGADA';
+            var usa = r.usa || {};
             var dis = cargada ? ' disabled title="' + esc(MANDA_EL_CONTRATO) + '"' : '';
 
             return '<tr data-nro="' + r.nro + '" data-contrato="' + r.ant + '"' + (cargada ? ' class="pll-cargada"' : '') + '>'
@@ -261,12 +371,17 @@
                     + (p.no_renueva ? ' checked' : '') + dis + '>'
                     + '<input type="text" class="form-control form-control-sm" data-campo="motivo_no_renueva" maxlength="300" placeholder="motivo" value="'
                     + esc(p.motivo_no_renueva || '') + '"' + dis + '></div></td>'
-                + '<td>' + campo('llave_manual', p.llave_manual, 'calculada', cargada ? MANDA_EL_CONTRATO : 'Reemplaza el cálculo', cargada) + '</td>'
-                + '<td>' + campo('pct_llave', p.pct_llave, numero(g.PCT_LLAVE), cargada ? MANDA_EL_CONTRATO : 'Vacío = el del operador o el general', cargada) + '</td>'
-                + '<td>' + campo('meses', p.meses, r.meses_defecto, cargada ? MANDA_EL_CONTRATO : 'Vacío = los del último contrato con llave', cargada) + '</td>'
-                + '<td>' + campo('cuotas', p.cuotas, '', 'Vacío = las del operador o las generales') + '</td>'
-                + '<td><input type="month" class="form-control form-control-sm" data-campo="mes_primera_cuota" value="' + esc(p.mes_primera_cuota || '')
-                    + '" title="Vacío = ' + esc(r.mes1_defecto) + '"></td>'
+                + '<td>' + campo('llave_manual', p.llave_manual, cargada ? { titulo: MANDA_EL_CONTRATO, deshabilitado: true }
+                    : { titulo: 'Reemplaza el cálculo', hereda: 'se calcula' }) + '</td>'
+                + '<td>' + campo('pct_llave', p.pct_llave, cargada ? { titulo: MANDA_EL_CONTRATO, deshabilitado: true }
+                    : { titulo: 'Vacío = el del operador o el general', hereda: heredado(usa.pct_llave, ' %') }) + '</td>'
+                + '<td>' + campo('meses', p.meses, cargada ? { titulo: MANDA_EL_CONTRATO, deshabilitado: true }
+                    : { titulo: 'Vacío = los del último contrato con llave',
+                        hereda: heredado({ valor: r.meses_defecto, de: r.meses_de }, '') }) + '</td>'
+                + '<td>' + campo('cuotas', p.cuotas, { titulo: 'Vacío = las del operador o las generales', hereda: heredado(usa.cuotas, '') }) + '</td>'
+                + '<td><div class="pll-campo"><input type="month" class="form-control form-control-sm" data-campo="mes_primera_cuota" value="'
+                    + esc(p.mes_primera_cuota || '') + '" title="Vacío = el mes del inicio del contrato nuevo, más el corrimiento del operador">'
+                    + (p.mes_primera_cuota ? '' : '<small class="pll-hereda">usa ' + esc(mesTexto(r.mes1_defecto)) + '</small>') + '</div></td>'
                 + '<td><small class="text-muted">' + (p.usuario ? esc(Auditoria.linea('modif', p.usuario, p.fecha)) : '') + '</small></td>'
                 + '</tr>';
         }).join('');
@@ -296,6 +411,13 @@
 
         return '<small>#' + c.id + ' · ' + fecha(c.desde) + ' a ' + fecha(c.hasta) + '<br>llave ' + llaveTexto(c.llave)
             + (r.tipo === 'CARGADA' ? '<br><span class="text-muted">renueva al #' + r.vigente.id + '</span>' : '') + '</small>';
+    }
+
+    /** 'YYYY-MM' -> 'ene-2027' */
+    function mesTexto(m) {
+        var nombres = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+        return m ? nombres[Number(String(m).substr(5, 2)) - 1] + '-' + String(m).substr(0, 4) : '';
     }
 
     function llaveTexto(v) {
@@ -631,6 +753,17 @@
         document.querySelectorAll('.pll-general').forEach(function(el) {
             el.addEventListener('change', function() { guardarGeneral(el); });
         });
+
+        /* «Usar» un sugerido: el boton se dibuja en cada repintado, el clic se escucha una vez. */
+        var modulo = document.querySelector('.pll-modulo');
+
+        if (modulo) {
+            modulo.addEventListener('click', function(ev) {
+                var btn = ev.target.closest ? ev.target.closest('.pll-usar') : null;
+
+                if (btn) { usarSugerido(btn); }
+            });
+        }
 
         ParametrosCarga.registrar('LLAVES_RENOV', cargar);
     }

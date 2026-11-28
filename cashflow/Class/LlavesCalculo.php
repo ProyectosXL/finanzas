@@ -667,6 +667,41 @@ class LlavesCalculo {
     }
 
     /**
+     * QUE VALOR SE USA Y DE DONDE SALE, para lo que se hereda: el % de llave
+     * (local > operador > general), las cuotas (local > operador > generales)
+     * y el corrimiento (el del operador; vacio, 0). Es la regla de la
+     * estimacion y de las fechas (estimarLlave(), fechasCuotas()), y la que
+     * Parametros muestra debajo de un campo vacio («usa 25 % (general)»), asi
+     * las dos dicen lo mismo. Pura.
+     *
+     * @param array|null $locP Los parametros del local (null: lo que hereda el local)
+     * @param array|null $opP Los del operador (null: lo que hereda el operador)
+     * @param array $gen Los generales
+     * @return array 'pct_llave' | 'cuotas' | 'corrimiento' => ['valor' => float|int|null,
+     *               'de' => 'local' | 'operador' | 'general' | 'por defecto' | null]
+     */
+    public static function queSeUsa($locP, $opP, $gen) {
+        $elegir = function ($campo, $clave) use ($locP, $opP, $gen) {
+            if (($locP[$campo] ?? null) !== null) {
+                return ['valor' => $locP[$campo], 'de' => 'local'];
+            }
+
+            if (($opP[$campo] ?? null) !== null) {
+                return ['valor' => $opP[$campo], 'de' => 'operador'];
+            }
+
+            return (($gen[$clave] ?? null) !== null) ? ['valor' => $gen[$clave], 'de' => 'general'] : ['valor' => null, 'de' => null];
+        };
+
+        return [
+            'pct_llave' => $elegir('pct_llave', 'PCT_LLAVE'),
+            'cuotas' => $elegir('cuotas', 'CUOTAS'),
+            'corrimiento' => (($opP['corrimiento'] ?? null) !== null) ? ['valor' => (int) $opP['corrimiento'], 'de' => 'operador']
+                : ['valor' => 0, 'de' => 'por defecto']
+        ];
+    }
+
+    /**
      * CUANDO SE PAGA UNA RENOVACION: el inicio, el mes de la primera cuota, la
      * cantidad de cuotas y la fecha de cada una. Es la misma para la llave y
      * las comisiones, y la primera es la de la firma (FPC y escribano). Pura.
@@ -689,8 +724,9 @@ class LlavesCalculo {
         $estimada = ($r['tipo'] === self::ESTIMADA);
         $vig = $r['ant_contrato'];
         $vencido = $estimada && $vig['hasta'] < $hoy;
-        $corr = (int) ($opP['corrimiento'] ?? 0);
-        $n = (int) ($locP['cuotas'] ?? $opP['cuotas'] ?? $gen['CUOTAS'] ?? 0);
+        $usa = self::queSeUsa($locP, $opP, $gen);
+        $corr = (int) $usa['corrimiento']['valor'];
+        $n = (int) ($usa['cuotas']['valor'] ?? 0);
         $inicio = $estimada ? date('Y-m-d', strtotime($vig['hasta'] . ' +1 day')) : $r['contrato']['desde'];
         $dia = (int) substr($inicio, 8, 2);
 
@@ -1014,9 +1050,9 @@ class LlavesCalculo {
      * @return array ['llave' => float|null, 'cuenta' => string]
      */
     private static function estimarLlave($nro, $base, $mes1, $locP, $opP, $gen, $contratos, $e, $nombre, &$s, $propios = false) {
-        $pct = $locP['pct_llave'] ?? $opP['pct_llave'] ?? $gen['PCT_LLAVE'] ?? null;
-        $origenPct = (($locP['pct_llave'] ?? null) !== null) ? 'del local'
-            : ((($opP['pct_llave'] ?? null) !== null) ? 'del operador' : 'general');
+        $usaPct = self::queSeUsa($locP, $opP, $gen)['pct_llave'];
+        $pct = $usaPct['valor'];
+        $origenPct = ['local' => 'del local', 'operador' => 'del operador'][$usaPct['de']] ?? 'general';
 
         if (($locP['meses'] ?? null) !== null) {
             $meses = (int) $locP['meses'];

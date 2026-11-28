@@ -182,9 +182,11 @@ chequear('en una cargada, no renueva y su motivo deshabilitados con el tooltip',
     substr_count($pllJs, "+ dis + '"));
 foreach (['llave_manual', 'pct_llave', 'meses'] as $campoCuanto) {
     chequear($campoCuanto . ' deshabilitado en una cargada', true,
-        (bool) preg_match("/campo\('" . $campoCuanto . "',[^\n]*cargada \? MANDA_EL_CONTRATO[^\n]*, cargada\)/", $pllJs));
+        (bool) preg_match("/campo\('" . $campoCuanto . "', p\." . $campoCuanto
+            . ", cargada \? \{ titulo: MANDA_EL_CONTRATO, deshabilitado: true \}/", $pllJs));
 }
-chequear('cuotas sigue editable', true, strpos($pllJs, "campo('cuotas', p.cuotas, '', 'Vacío = las del operador o las generales')") !== false);
+chequear('cuotas sigue editable', true,
+    strpos($pllJs, "campo('cuotas', p.cuotas, { titulo: 'Vacío = las del operador o las generales', hereda: heredado(usa.cuotas, '') })") !== false);
 chequear('y la 1.a cuota tambien', false,
     (bool) preg_match('/data-campo="mes_primera_cuota"[^\n]*dis/', $pllJs));
 chequear('el tooltip dice que manda el contrato', true,
@@ -281,3 +283,58 @@ chequear('informa las marcas OTROS vigentes y los operadores con % de otros gast
     strpos($s73, "WHERE VIGENTE = 1 AND CONCEPTO = 'OTROS'") !== false && strpos($s73, 'WHERE VIGENTE = 1 AND PCT_OTROS IS NOT NULL') !== false);
 chequear('guardarOperador no escribe PCT_OTROS', false,
     strpos(file_get_contents(__DIR__ . '/../Class/LlavesParametros.php'), 'PCT_OTROS, ESCRIBANO') !== false);
+
+seccion('Parámetros: lo sugerido no se confunde con lo grabado');
+
+$p6Js = file_get_contents(__DIR__ . '/../Js/Parametros-Llaves.js');
+$p6Tab = file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php');
+/* Ningun placeholder numerico: ni literal en el HTML, ni armado con numero(), ni con un valor. */
+$p6Num = [];
+preg_match_all('/placeholder="([^"]*)"/', $p6Tab . $p6Js, $m);
+foreach ($m[1] as $ph) {
+    if (preg_match('/\d/', $ph)) { $p6Num[] = $ph; }
+}
+chequear('ningún input lleva un número como placeholder', [], $p6Num);
+chequear('ni se le asigna uno desde el JS', 0, preg_match('/\.placeholder\s*=\s*+(?!\'\')/', $p6Js));
+chequear('el campo vacío no lleva placeholder', true, strpos($p6Js, "'\" placeholder=\"\" '") !== false
+    || strpos($p6Js, '\'" placeholder="" \'') !== false);
+chequear('vacío que hereda: «usa X (de dónde)» debajo', true,
+    strpos($p6Js, "return 'usa ' + numero(u.valor) + unidad + (u.de ? ' (' + u.de + ')' : '');") !== false);
+chequear('vacío sin dato: borde punteado y «sin dato» en negrita', [true, true, true], [
+    strpos($p6Js, "' pll-sin-dato'") !== false,
+    strpos($p6Js, '<i class="fas fa-triangle-exclamation"></i> sin dato') !== false,
+    (bool) preg_match('/\.pll-sin-dato \{ border: 1px dashed #000; \}/', file_get_contents(__DIR__ . '/../Css/Parametros.css'))]);
+foreach (['pct_comisiones', 'pct_fpc', 'escribano', 'pct_impuestos'] as $p6c) {
+    chequear($p6c . ': sin dato', 1, preg_match("/campo\('" . $p6c . "'[^;]*sinDato: true/s", $p6Js));
+}
+foreach (['pct_llave', 'cuotas', 'corrimiento'] as $p6c) {
+    chequear($p6c . ' (operador): hereda', 1, preg_match("/campo\('" . $p6c . "', v\." . $p6c . ", \{[^}]*hereda: heredado\(usa\./", $p6Js));
+}
+chequear('el sugerido va en un chip con «Usar» y su tooltip', true,
+    strpos($p6Js, '<span class="pll-sugerido" title="') !== false && strpos($p6Js, 'pll-usar') !== false);
+chequear('«Usar» graba: la fila del operador o la clave de Generales, como cualquier cambio', [true, true], [
+    strpos($p6Js, "guardarFila('guardarOperador', fila, { cod_provee: fila.getAttribute('data-cod') });\n    }") !== false
+        || strpos(str_replace("\r\n", "\n", $p6Js), "el.value = valor;\n        guardarFila('guardarOperador', fila, { cod_provee: fila.getAttribute('data-cod') });") !== false,
+    strpos($p6Js, "escribir('guardarGeneral', { clave: clave, valor: valor });") !== false]);
+chequear('y guardarOperador pasa por usuarioDeEscritura (auditoría)', 1,
+    preg_match('/function guardarOperador\(\$cod, \$datos, \$razones, \$usuario\) \{\s+\$usuario = AuthCashflow::usuarioDeEscritura\(\$usuario\);/',
+        file_get_contents(__DIR__ . '/../Class/LlavesParametros.php')));
+
+seccion('LlavesCalculo::queSeUsa(): lo que se hereda, en un solo lugar');
+
+$gen6 = ['PCT_LLAVE' => 25.0, 'CUOTAS' => 4.0];
+chequear('el operador vacío usa el general', ['valor' => 25.0, 'de' => 'general'],
+    LlavesCalculo::queSeUsa(null, null, $gen6)['pct_llave']);
+chequear('el local vacío usa las cuotas del operador', ['valor' => 2, 'de' => 'operador'],
+    LlavesCalculo::queSeUsa(null, ['cuotas' => 2], $gen6)['cuotas']);
+chequear('el corrimiento vacío es 0 por defecto', ['valor' => 0, 'de' => 'por defecto'],
+    LlavesCalculo::queSeUsa(null, [], $gen6)['corrimiento']);
+chequear('lo del local manda', ['valor' => 30.0, 'de' => 'local'],
+    LlavesCalculo::queSeUsa(['pct_llave' => 30.0], ['pct_llave' => 28.0], $gen6)['pct_llave']);
+
+$plPar6 = ['generales' => ['CUOTAS' => 4.0, 'PCT_LLAVE' => 25.0], 'locales' => [],
+           'operadores' => ['SAIRSA' => ['cuotas' => 3, 'corrimiento' => -1]]];
+$plRen6 = array_values(array_filter($plDoble->enCurso($plBase, $plPar6), function ($r) { return $r['nro'] === 7; }))[0] ?? [];
+chequear('Por local dice lo que usa un campo vacío: cuotas del operador y % general', [['valor' => 3, 'de' => 'operador'],
+    ['valor' => 25.0, 'de' => 'general']], [$plRen6['usa']['cuotas'] ?? null, $plRen6['usa']['pct_llave'] ?? null]);
+chequear('y el mes de la 1.ª cuota con el corrimiento del operador (inicio oct-2026, -1)', '2026-09', $plRen6['mes1_defecto'] ?? null);

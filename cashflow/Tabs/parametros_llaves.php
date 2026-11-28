@@ -114,12 +114,14 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
         <div class="card-header">
             <h5 class="mb-0">Por operador</h5>
             <small class="text-muted">
-                Los operadores son las razones sociales dadas de alta en Parámetros › Alquileres. Vacío en el
-                <strong>% de llave</strong> o en las <strong>cuotas</strong> es el general; vacío en el
-                <strong>escribano</strong> o en el <strong>% de impuestos</strong> es «sin dato» y avisa (sin %
-                de impuestos la llave no se proyecta): sólo 0 cargado es 0. El <strong>corrimiento</strong> mueve
-                la primera cuota respecto del inicio del contrato nuevo (negativo = antes). En gris, lo sugerido
-                por la historia: el tooltip dice de dónde sale.
+                Los operadores son las razones sociales dadas de alta en Parámetros › Alquileres. Lo que está
+                escrito en un campo es lo grabado. Un campo vacío dice debajo qué pasa: <strong>«usa …»</strong>
+                si toma el valor de arriba (% de llave, cuotas, corrimiento), o <strong>«sin dato»</strong>, con
+                el borde punteado, si sin él algo no se proyecta (% de comisiones, % de FPC, escribano, % de
+                impuestos: sin este último no se proyectan la llave, las comisiones ni el FPC). Sólo 0 cargado es
+                0. El <strong>corrimiento</strong> mueve la primera cuota respecto del inicio del contrato nuevo
+                (negativo = antes). Al lado, el <strong>sugerido</strong> por la historia (el tooltip dice de
+                dónde sale): «Usar» lo graba.
             </small>
         </div>
         <div class="card-body p-0">
@@ -157,7 +159,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                 <strong>esa</strong> renovación. Cuando administración carga el contrato nuevo, lo que dice
                 <strong>cuánto</strong> (no renueva, llave a mano, % propio, meses) deja de aplicarse, porque manda
                 el importe del contrato, y esas columnas quedan deshabilitadas; lo que dice <strong>cómo se
-                paga</strong> (cuotas y 1.ª cuota) sigue valiendo y se puede cambiar. Vacío = el valor de arriba.
+                paga</strong> (cuotas y 1.ª cuota) sigue valiendo y se puede cambiar. Un campo vacío dice debajo
+                qué valor usa y de dónde.
             </small>
         </div>
         <div class="card-body p-0">

@@ -407,7 +407,9 @@ class Llaves {
                 'locales' => array_values(array_map(function ($l) { return $l['nombre']; },
                     array_filter($base['locales'], function ($l) use ($cod) { return $l['cod_provee'] === $cod; }))),
                 'sugerido' => $sugeridos[$cod] ?? null,
-                'impuestos' => $impuestos[$cod] ?? null
+                'impuestos' => $impuestos[$cod] ?? null,
+                /* Lo que se usa con el campo vacio: lo general (LlavesCalculo::queSeUsa()). */
+                'usa' => LlavesCalculo::queSeUsa(null, null, $gen)
             ];
         }
 
@@ -479,13 +481,14 @@ class Llaves {
 
                 if (in_array($estado, [LlavesCalculo::VENCE, LlavesCalculo::VENCIDO, LlavesCalculo::NO_RENUEVA], true)) {
                     $conLlave = LlavesCalculo::contratoDeLlave($ks, $vig);
-                    $sig = date('Y-m-d', strtotime($vig['hasta'] . ' +1 day'));
+                    $deMeses = LlavesCalculo::ultimoConLlave($ks, $conLlave ?? $vig) ?? ($conLlave ?? $vig);
+                    $r = ['tipo' => LlavesCalculo::ESTIMADA, 'contrato' => null, 'ant_contrato' => $vig];
                     $out[] = ['nro' => $nro, 'local' => $l['nombre'], 'operador' => $l['operador'], 'tipo' => LlavesCalculo::ESTIMADA,
                               'estado' => $estado, 'nombre_estado' => LlavesCalculo::NOMBRE_ESTADO[$estado],
                               'ant' => $vig['id'], 'contrato' => null, 'vigente' => $vig, 'tiene_llave' => $conLlave !== null,
-                              'meses_defecto' => LlavesCalculo::meses(($conLlave ?? $vig)['desde'], ($conLlave ?? $vig)['hasta']),
-                              'mes1_defecto' => ($vig['hasta'] < $this->hoy) ? substr($this->hoy, 0, 7) : substr($sig, 0, 7),
-                              'parametros' => $locP];
+                              'meses_defecto' => LlavesCalculo::meses($deMeses['desde'], $deMeses['hasta']),
+                              'meses_de' => 'contrato #' . $deMeses['id']]
+                        + $this->loQueSeUsa($r, $locP, $l, $par, $gen);
                 }
             }
 
@@ -506,8 +509,9 @@ class Llaves {
                     $out[] = ['nro' => $nro, 'local' => $l['nombre'], 'operador' => $l['operador'], 'tipo' => LlavesCalculo::CARGADA,
                               'estado' => null, 'nombre_estado' => 'Contrato #' . $c['id'] . ' cargado',
                               'ant' => $ant['id'], 'contrato' => $c, 'vigente' => $ant, 'tiene_llave' => LlavesCalculo::tieneLlave($c),
-                              'meses_defecto' => LlavesCalculo::meses($c['desde'], $c['hasta']), 'mes1_defecto' => substr($c['desde'], 0, 7),
-                              'parametros' => $par['locales'][$nro . '|' . $ant['id']] ?? null];
+                              'meses_defecto' => LlavesCalculo::meses($c['desde'], $c['hasta']), 'meses_de' => 'contrato #' . $c['id']]
+                        + $this->loQueSeUsa(['tipo' => LlavesCalculo::CARGADA, 'contrato' => $c, 'ant_contrato' => $ant],
+                            $locP, $l, $par, $gen);
                 }
             }
         }
@@ -515,6 +519,24 @@ class Llaves {
         usort($out, function ($a, $b) { return strcmp($a['local'], $b['local']) ?: strcmp($a['tipo'], $b['tipo']); });
 
         return $out;
+    }
+
+    /**
+     * Lo que usa una renovacion en cada campo del local que quede vacio, para
+     * que Parametros lo diga debajo del campo («usa 4 (operador)»): el % de
+     * llave y las cuotas del operador o las generales (LlavesCalculo::
+     * queSeUsa()) y el mes de la primera cuota que calcula
+     * LlavesCalculo::fechasCuotas() sin el del local. No hay reglas aca.
+     *
+     * @return array ['cod_provee', 'parametros', 'usa', 'mes1_defecto']
+     */
+    private function loQueSeUsa($r, $locP, $l, $par, $gen) {
+        $opP = ($l['cod_provee'] === null) ? [] : ($par['operadores'][$l['cod_provee']] ?? []);
+        $sinMes = $locP;
+        unset($sinMes['mes_primera_cuota']);
+
+        return ['cod_provee' => $l['cod_provee'], 'parametros' => $locP, 'usa' => LlavesCalculo::queSeUsa(null, $opP, $gen),
+                'mes1_defecto' => LlavesCalculo::fechasCuotas($r, $sinMes, $opP, $gen, $this->hoy, [])['mes1']];
     }
 
     /**
