@@ -6,6 +6,7 @@ require_once __DIR__ . '/AlquileresFacturas.php';
 require_once __DIR__ . '/LlavesParametros.php';
 require_once __DIR__ . '/LlavesCalculo.php';
 require_once __DIR__ . '/LlavesSugeridos.php';
+require_once __DIR__ . '/LlavesFacturas.php';
 require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Inflacion.php';
 require_once __DIR__ . '/Planilla.php';
@@ -819,7 +820,7 @@ class Llaves {
         return array_map(function ($f) use ($nombres) {
             return ['id' => $f['id'], 'comprobante' => $f['comprobante'], 'cod_provee' => $f['cod_provee'],
                     'nro' => $f['nro'], 'local' => $nombres[$f['nro']] ?? ('Local ' . $f['nro']), 'concepto' => $f['concepto'],
-                    'nombre_concepto' => LlavesCalculo::NOMBRE_CONCEPTO[$f['concepto']] ?? $f['concepto'], 'mes' => $f['mes'],
+                    'nombre_concepto' => LlavesFacturas::NOMBRES[$f['concepto']] ?? $f['concepto'], 'mes' => $f['mes'],
                     'ant' => $f['ant'], 'contrato' => $f['contrato'], 'pagada' => $f['pagada'], 'pagos' => $f['pagos'],
                     'total' => round(array_sum(array_column($f['pagos'], 'importe')), 2), 'texto' => $f['texto']];
         }, is_array($facturas) ? $facturas : []);
@@ -889,7 +890,9 @@ class Llaves {
             'imputables' => $e['pendientes'], 'imputadas' => $imputadas, 'excluidas' => $e['excluidas'],
             'llaves' => $ctx['facturas_llaves'] ?? [], 'locales' => $base['nombres'], 'contratos' => $base['contratos'],
             'hoy' => $h->hoy(), 'vtos' => (new AlquileresFacturaVto())->vigentes(), 'dias' => $e['dias'],
-            'cuotas' => $cuotas, 'cuotas_general' => (int) ($par['generales']['CUOTAS'] ?? 1), 'pagadas_12' => $pagadas12
+            'cuotas' => $cuotas, 'cuotas_general' => (int) ($par['generales']['CUOTAS'] ?? 1), 'pagadas_12' => $pagadas12,
+            /* Sin el script 73, Comisiones y FPC no se ofrecen ni se validan. */
+            'conceptos' => (new LlavesFacturas())->conceptosMarcables()
         ];
     }
 

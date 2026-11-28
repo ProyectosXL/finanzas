@@ -12,7 +12,7 @@ require_once __DIR__ . '/Aviso.php';
 /**
  * LlavesFacturas
  * Las facturas de alquiler marcadas como llave o renovacion en Alquileres ->
- * Facturas: con que local, que concepto (llave, otros gastos, obra) y que mes
+ * Facturas: con que local, que concepto (llave, comisiones, FPC, obra) y que mes
  * se imputan, y en cuantos pagos se pagan. Las tablas son las del script 68
  * (sql/cashflow_llaves_facturas.sql).
  *
@@ -43,7 +43,31 @@ class LlavesFacturas {
     const T_PAGO = 'RO_T_CASHFLOW_LLAVES_FACTURA_PAGO';
     const SCRIPT = 'sql/cashflow_llaves_facturas.sql';
 
-    const CONCEPTOS = [LlavesCalculo::LLAVE => 'Llave', LlavesCalculo::OTROS => 'Otros gastos', LlavesCalculo::OBRA => 'Obra'];
+    /**
+     * Los conceptos con los que se marca una factura. Comisiones y FPC
+     * reemplazan solo lo suyo (script 73). OTROS ya no se ofrece: las marcas
+     * viejas con ese concepto se siguen leyendo (cortan comisiones, FPC y
+     * escribano) y se avisa para que se rehagan.
+     */
+    const CONCEPTOS = [LlavesCalculo::LLAVE => 'Llave', LlavesCalculo::COMISIONES => 'Comisiones', LlavesCalculo::FPC => 'FPC',
+                       LlavesCalculo::OBRA => 'Obra'];
+
+    /** Los que necesitan el script 73 (el CHECK de CONCEPTO) */
+    const CONCEPTOS_73 = [LlavesCalculo::COMISIONES, LlavesCalculo::FPC];
+
+    /** El nombre de cada concepto de una marca, tambien el viejo */
+    const NOMBRES = self::CONCEPTOS + [LlavesCalculo::OTROS => 'Otros gastos (marca anterior)'];
+
+    /**
+     * Los conceptos que se pueden elegir hoy: sin el script 73, sin Comisiones
+     * ni FPC (la base los rechazaria). Pura.
+     *
+     * @param bool $ajustes Si ya se corrio el script 73 (su parte de facturas)
+     * @return array concepto => nombre
+     */
+    public static function conceptos($ajustes) {
+        return $ajustes ? self::CONCEPTOS : array_diff_key(self::CONCEPTOS, array_flip(self::CONCEPTOS_73));
+    }
 
     /** Tope de pagos por factura: una red contra un copiar y pegar, como Proveedores::MAX_PARTES */
     const MAX_PAGOS = 50;
@@ -152,7 +176,8 @@ class LlavesFacturas {
      *                  'pagos' => [['fecha', 'importe']], 'retencion', 'observacion']
      * @param array $e ['imputables' => claveCuota => fila (pendientes y pagadas), 'imputadas' => claveCuota => id
      *                  de imputacion de Alquileres, 'excluidas' => claveCuota => ..., 'llaves' => claveCuota => ...,
-     *                  'locales' => NRO => nombre, 'contratos' => NRO => [...], 'hoy' => 'Y-m-d']
+     *                  'locales' => NRO => nombre, 'contratos' => NRO => [...], 'hoy' => 'Y-m-d',
+     *                  'conceptos' => concepto => nombre (conceptos(); por defecto, todos)]
      * @return array ['ok', 'errores', 'cuotas' => [filas], 'nro', 'concepto', 'mes', 'ant', 'contrato',
      *                'renovacion', 'pagos', 'retencion', 'observacion', 'total']
      */
@@ -195,9 +220,13 @@ class LlavesFacturas {
         }
 
         $concepto = strtoupper(trim((string) ($d['concepto'] ?? '')));
+        $permitidos = $e['conceptos'] ?? self::CONCEPTOS;
 
-        if (!isset(self::CONCEPTOS[$concepto])) {
-            $errores[] = 'Elegí el concepto: llave, otros gastos u obra.';
+        if (isset(self::CONCEPTOS[$concepto]) && !isset($permitidos[$concepto])) {
+            $errores[] = 'Todavía no se puede marcar una factura como ' . mb_strtolower(self::CONCEPTOS[$concepto], 'UTF-8')
+                . ': falta correr ' . LlavesParametros::SCRIPT_AJUSTES . ' contra la base central.';
+        } elseif (!isset(self::CONCEPTOS[$concepto])) {
+            $errores[] = 'Elegí el concepto: llave, comisiones, FPC u obra.';
         }
 
         $mes = trim((string) ($d['mes'] ?? ''));
@@ -391,6 +420,30 @@ class LlavesFacturas {
         }
 
         return $this->tabla;
+    }
+
+    /** @var bool|null */
+    private $conceptos73 = null;
+
+    /**
+     * Los conceptos que se pueden elegir hoy (conceptos()), mirando si el
+     * script 73 ya rehizo el CHECK de CONCEPTO. Nunca lanza.
+     *
+     * @return array concepto => nombre
+     */
+    public function conceptosMarcables() {
+        if ($this->conceptos73 === null) {
+            try {
+                $r = $this->fila("SELECT COUNT(*) AS N FROM sys.check_constraints WHERE name = 'CK_RO_T_CF_LLFAC_CONCEPTO'
+                                    AND definition LIKE '%COMISIONES%' AND definition LIKE '%FPC%'", [],
+                    'Error al verificar los conceptos de las facturas de llave');
+                $this->conceptos73 = (int) ($r['N'] ?? 0) > 0;
+            } catch (Throwable $e) {
+                $this->conceptos73 = false;
+            }
+        }
+
+        return self::conceptos($this->conceptos73);
     }
 
     public function avisoSinTabla() {

@@ -453,8 +453,8 @@
                             <input type="month" class="form-control form-control-sm" id="alqLlaveMes">
                         </div>
                     </div>
-                    <div class="form-text">La llave y los otros gastos reemplazan lo proyectado de esa renovación del local (la que
-                        empieza más cerca del mes); la obra, la de ese local en ese mes.</div>
+                    <div class="form-text">La llave, las comisiones y el FPC reemplazan lo proyectado de ese concepto en esa
+                        renovación del local (la que empieza más cerca del mes); la obra, la de ese local en ese mes.</div>
                     <div id="alqLlavePagosCaja" class="mt-3">
                         <div class="d-flex justify-content-between align-items-center">
                             <h6 class="mb-0">Pagos</h6>

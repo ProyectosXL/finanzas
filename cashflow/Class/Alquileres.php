@@ -1326,7 +1326,10 @@ require_once __DIR__ . '/AlquileresFacturaExclusion.php';
             'script_exclusion' => AlquileresFacturaExclusion::SCRIPT,
             /* Marcar una factura como llave (script 68): el boton se dibuja con la tabla y el permiso. */
             'tabla_llaves' => !empty($c['tabla_llaves']),
-            'conceptos_llave' => LlavesFacturas::CONCEPTOS,
+            /* Los que se pueden elegir (sin el script 73, sin Comisiones ni FPC) y el nombre de cada marca, tambien la vieja. */
+            'conceptos_llave' => !empty($c['tabla_llaves']) ? (new LlavesFacturas())->conceptosMarcables()
+                : LlavesFacturas::conceptos(false),
+            'nombres_llave' => LlavesFacturas::NOMBRES,
             'locales_app' => array_map(function ($l) { return $l['nombre']; }, $c['locales']),
             'script' => AlquileresImputaciones::SCRIPT,
             'reemplazados' => count($c['reemplazados'])
