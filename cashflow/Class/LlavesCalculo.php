@@ -640,6 +640,68 @@ class LlavesCalculo {
     }
 
     /**
+     * CUANDO SE PAGA UNA RENOVACION: el inicio, el mes de la primera cuota, la
+     * cantidad de cuotas y la fecha de cada una. Es la misma para la llave y
+     * las comisiones, y la primera es la de la firma (FPC y escribano). Pura.
+     *
+     * El inicio es el del contrato nuevo o el dia siguiente al fin del
+     * vigente. La primera cuota va en su mes + el corrimiento del operador,
+     * salvo que el local diga otro mes; vencido sin renovar, al primer habil
+     * despues de hoy. Las cuotas: las del local, si no las del operador, si no
+     * las generales. Cada fecha, corrida al habil siguiente.
+     *
+     * @param array $r ['tipo', 'contrato', 'ant_contrato'] una renovacion
+     * @param array|null $locP Los parametros del local para esa renovacion
+     * @param array $opP Los del operador
+     * @param array $gen Los generales
+     * @param string $hoy 'Y-m-d'
+     * @param array $habiles 'Y-m-d' => bool. Vacio: de lunes a viernes (DiasHabiles::siguiente())
+     * @return array ['inicio', 'mes1', 'n', 'fechas' => [lo de DiasHabiles::siguiente() + 'pedido']]
+     */
+    public static function fechasCuotas($r, $locP, $opP, $gen, $hoy, $habiles) {
+        $estimada = ($r['tipo'] === self::ESTIMADA);
+        $vig = $r['ant_contrato'];
+        $vencido = $estimada && $vig['hasta'] < $hoy;
+        $corr = (int) ($opP['corrimiento'] ?? 0);
+        $n = (int) ($locP['cuotas'] ?? $opP['cuotas'] ?? $gen['CUOTAS'] ?? 0);
+        $inicio = $estimada ? date('Y-m-d', strtotime($vig['hasta'] . ' +1 day')) : $r['contrato']['desde'];
+        $dia = (int) substr($inicio, 8, 2);
+
+        if (!empty($locP['mes_primera_cuota'])) {
+            $mes1 = $locP['mes_primera_cuota'];
+        } elseif ($vencido) {
+            $mes1 = substr($hoy, 0, 7);
+        } else {
+            $mes1 = Inflacion::mesMas(substr($inicio, 0, 7), $corr);
+        }
+
+        $fechas = [];
+
+        for ($i = 0; $i < max(1, $n); $i++) {
+            if ($vencido && $i === 0 && empty($locP['mes_primera_cuota'])) {
+                $fechas[] = self::despuesDeHoy($hoy, $habiles) + ['pedido' => $hoy];
+            } else {
+                $fechas[] = self::diaDelMes(Inflacion::mesMas($mes1, $i), $dia, $habiles);
+            }
+        }
+
+        return ['inicio' => $inicio, 'mes1' => $mes1, 'n' => $n, 'fechas' => $fechas];
+    }
+
+    /**
+     * Si una renovacion es VIEJA: su ultima cuota es anterior al mes pasado.
+     * No proyecta, no entra en el aviso de cuotas pasadas y no se muestra en
+     * Parametros -> Por local. Pura.
+     *
+     * @param array $fechas Lo de fechasCuotas()['fechas']
+     * @param string $hoy 'Y-m-d'
+     * @return bool
+     */
+    public static function esVieja($fechas, $hoy) {
+        return max(array_column($fechas, 'fecha')) < Inflacion::mesMas(substr($hoy, 0, 7), -1) . '-01';
+    }
+
+    /**
      * Los pagos de llave y otros gastos de una renovacion.
      *
      * @return array Lo que se muestra de la renovacion: tipo, clave, primera cuota y el detalle
@@ -653,46 +715,21 @@ class LlavesCalculo {
         $locP = ($r['ant'] === null) ? null : ($par['locales'][$nro . '|' . $r['ant']] ?? null);
         $c = $r['contrato'];
         $vig = $r['ant_contrato'];
-        $corr = (int) ($opP['corrimiento'] ?? 0);
-        $n = (int) ($locP['cuotas'] ?? $opP['cuotas'] ?? $gen['CUOTAS'] ?? 0);
         $estimada = ($r['tipo'] === self::ESTIMADA);
-        $vencido = $estimada && $vig['hasta'] < $hoy;
-
-        /* EL INICIO: el del contrato nuevo, o el dia siguiente al fin del
-           vigente. La primera cuota va en su mes + el corrimiento del operador,
-           salvo que el local diga otro mes; vencido sin renovar, al mes en curso. */
-        $inicio = $estimada ? date('Y-m-d', strtotime($vig['hasta'] . ' +1 day')) : $c['desde'];
-        $dia = (int) substr($inicio, 8, 2);
-
-        if (!empty($locP['mes_primera_cuota'])) {
-            $mes1 = $locP['mes_primera_cuota'];
-        } elseif ($vencido) {
-            $mes1 = substr($hoy, 0, 7);
-        } else {
-            $mes1 = Inflacion::mesMas(substr($inicio, 0, 7), $corr);
-        }
+        $cal = self::fechasCuotas($r, $locP, $opP, $gen, $hoy, $habiles);
+        $inicio = $cal['inicio'];
+        $mes1 = $cal['mes1'];
+        $n = $cal['n'];
+        $fechas = $cal['fechas'];
 
         $clave = $nro . '|' . ($r['ant'] ?? ('C' . $c['id']));
         $out = ['tipo' => $r['tipo'], 'clave' => $clave, 'ant' => $r['ant'], 'contrato' => ($c === null) ? null : $c['id'],
                 'inicio' => $inicio, 'mes1' => $mes1, 'cuotas' => $n, 'llave' => null, 'otros' => null, 'notas' => []];
 
-        /* Las fechas de las N cuotas. */
-        $fechas = [];
-
-        for ($i = 0; $i < max(1, $n); $i++) {
-            if ($vencido && $i === 0 && empty($locP['mes_primera_cuota'])) {
-                $d = self::despuesDeHoy($hoy, $habiles) + ['pedido' => $hoy];
-            } else {
-                $d = self::diaDelMes(Inflacion::mesMas($mes1, $i), $dia, $habiles);
-            }
-
-            $fechas[] = $d;
-        }
-
         /* UN CONTRATO VIEJO NO DICE NADA: si su ultimo pago es anterior al mes
            pasado, no proyecta ni entra en el aviso de cuotas pasadas, y no tiene
            sentido pedirle impuestos ni operador. */
-        if (!$estimada && max(array_column($fechas, 'fecha')) < Inflacion::mesMas(substr($hoy, 0, 7), -1) . '-01') {
+        if (!$estimada && self::esVieja($fechas, $hoy)) {
             $out['notas'][] = 'Sus pagos son anteriores al mes pasado.';
             $out['vieja'] = true;
 

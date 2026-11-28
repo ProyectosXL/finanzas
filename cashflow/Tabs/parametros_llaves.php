@@ -165,7 +165,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'LLAVES_RENOV');
                     <thead>
                         <tr>
                             <th>Local</th>
-                            <th>Contrato vigente</th>
+                            <th title="El contrato que rige: el nuevo, si la renovación está cargada; si no, el vigente">Contrato</th>
                             <th>Estado</th>
                             <th style="min-width: 220px;">No renueva</th>
                             <th style="width: 140px;" title="Reemplaza el cálculo">Llave a mano ($)</th>

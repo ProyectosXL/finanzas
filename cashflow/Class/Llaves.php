@@ -436,16 +436,23 @@ class Llaves {
     /**
      * Las renovaciones de cada local que todavia pueden tener algo que
      * parametrizar o marcar como pagado: la del vigente que vence dentro del
-     * horizonte o ya vencio (sin renovacion cargada), y las de los contratos
-     * cargados que empezaron en el ultimo año o empiezan despues (sus cuotas
-     * pueden estar por delante).
+     * horizonte o ya vencio (sin renovacion cargada), y las cargadas que
+     * SIGUEN VIGENTES O SON FUTURAS y tienen alguna cuota desde el mes pasado
+     * (el criterio de "vieja" de LlavesCalculo::esVieja(), con las mismas
+     * fechas que proyecta: LlavesCalculo::fechasCuotas()). Una cargada
+     * terminada o con todos sus pagos atras no se muestra; sus parametros
+     * siguen en la base, con su historial.
+     *
+     * SIN EL CALENDARIO: Parametros no lo lee, asi que el corrimiento al habil
+     * es de lunes a viernes. Solo cambiaria algo si un feriado cae en el borde
+     * del mes de la ultima cuota.
      *
      * @return array
      */
     protected function renovacionesEnCurso($base, $par) {
         $out = [];
         $ultimoMes = Inflacion::mesMas(substr($this->hoy, 0, 7), 11);
-        $haceUnAnio = date('Y-m-d', strtotime($this->hoy . ' -12 month'));
+        $gen = $par['generales'] ?? [];
 
         foreach ($base['locales'] as $nro => $l) {
             if ($l['vigencia'] || empty($l['contratos'])) {
@@ -475,8 +482,17 @@ class Llaves {
             foreach ($ks as $c) {
                 $ant = LlavesCalculo::anteriorDe($ks, $c);
 
-                if ($ant !== null && $c['desde'] >= $haceUnAnio
-                    && (LlavesCalculo::tieneLlave($c) || ((float) $c['comisiones'] + (float) $c['fpc']) > 0)) {
+                if ($ant === null || $c['hasta'] < $this->hoy
+                    || !(LlavesCalculo::tieneLlave($c) || ((float) $c['comisiones'] + (float) $c['fpc']) > 0)) {
+                    continue;
+                }
+
+                $locP = $par['locales'][$nro . '|' . $ant['id']] ?? null;
+                $opP = ($l['cod_provee'] === null) ? [] : ($par['operadores'][$l['cod_provee']] ?? []);
+                $cal = LlavesCalculo::fechasCuotas(['tipo' => LlavesCalculo::CARGADA, 'contrato' => $c, 'ant_contrato' => $ant],
+                    $locP, $opP, $gen, $this->hoy, []);
+
+                if (!LlavesCalculo::esVieja($cal['fechas'], $this->hoy)) {
                     $out[] = ['nro' => $nro, 'local' => $l['nombre'], 'operador' => $l['operador'], 'tipo' => LlavesCalculo::CARGADA,
                               'estado' => null, 'nombre_estado' => 'Contrato #' . $c['id'] . ' cargado',
                               'ant' => $ant['id'], 'contrato' => $c, 'vigente' => $ant, 'tiene_llave' => LlavesCalculo::tieneLlave($c),

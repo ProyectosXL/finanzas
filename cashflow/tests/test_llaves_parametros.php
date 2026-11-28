@@ -169,6 +169,61 @@ chequear('y la 1.a cuota tambien', false,
 chequear('el tooltip dice que manda el contrato', true,
     strpos($pllJs, "var MANDA_EL_CONTRATO = 'El contrato nuevo ya está cargado en la app: manda el contrato.") !== false);
 
+seccion('Por local: sólo las renovaciones cargadas vigentes o futuras, con cuotas por delante');
+
+require_once __DIR__ . '/../Class/Llaves.php';
+
+/* Un doble de Llaves que expone renovacionesEnCurso() sin leer nada: la app,
+   los parametros y Alquileres no se construyen (van objetos vacios). */
+class LlavesPorLocalDoble extends Llaves {
+    public function enCurso($base, $par) { return $this->renovacionesEnCurso($base, $par); }
+}
+
+$plK = function ($id, $desde, $hasta, $llave) {
+    return ['id' => $id, 'desde' => $desde, 'hasta' => $hasta, 'llave' => $llave, 'comisiones' => 0.0, 'fpc' => 0.0];
+};
+$plBase = ['locales' => [
+    /* Alto Palermo: el #85 (renovó al #3) ya terminó; el #90 (renueva al #85) está vigente con cuotas por delante. */
+    7 => ['nro' => 7, 'nombre' => 'ALTO PALERMO', 'operador' => 'IRSA', 'cod_provee' => 'SAIRSA', 'vigencia' => false,
+          'contratos' => [$plK(3, '2022-04-16', '2026-04-15', 17578666.0), $plK(85, '2026-04-16', '2026-10-15', 9000000.0),
+                          $plK(90, '2026-10-16', '2027-12-31', 44500000.0)]],
+    /* Un vigente cargado hace dos años: sus cuotas son de 2024, ya no muestra nada. */
+    9 => ['nro' => 9, 'nombre' => 'CABALLITO', 'operador' => 'OTRO', 'cod_provee' => 'SAOTRO', 'vigencia' => false,
+          'contratos' => [$plK(10, '2020-01-01', '2023-12-31', 1000000.0), $plK(11, '2024-01-01', '2027-12-31', 2000000.0)]]
+]];
+$plPar = ['generales' => ['CUOTAS' => 4.0], 'operadores' => [], 'locales' => []];
+$plDoble = new LlavesPorLocalDoble('2026-11-23', new stdClass(), new stdClass(), new stdClass());
+$plRens = $plDoble->enCurso($plBase, $plPar);
+$plCargadas = array_map(function ($r) { return $r['nro'] . '|#' . $r['contrato']['id'] . '|renueva al #' . $r['ant']; },
+    array_values(array_filter($plRens, function ($r) { return $r['tipo'] === LlavesCalculo::CARGADA; })));
+
+chequear('el #85 de Alto Palermo (terminado) no aparece; el #90, vigente y con cuotas por delante, sí',
+    ['7|#90|renueva al #85'], $plCargadas);
+chequear('una cargada vigente con todas sus cuotas atrás tampoco (Caballito #11, cuotas de 2024)', 0,
+    count(array_filter($plRens, function ($r) { return $r['nro'] === 9; })));
+
+/* Con 36 cuotas desde enero de 2024, la última del #11 de Caballito es de diciembre de 2026: no es vieja. */
+$plPar36 = $plPar;
+$plPar36['locales']['9|10'] = ['cuotas' => 36];
+chequear('las cuotas del local cuentan: con 36 cuotas, Caballito #11 tiene pagos por delante y aparece', ['9|#11'],
+    array_map(function ($r) { return $r['nro'] . '|#' . $r['contrato']['id']; },
+        array_values(array_filter($plDoble->enCurso($plBase, $plPar36), function ($r) { return $r['nro'] === 9; }))));
+
+/* Una renovacion futura (cargada, empieza el año que viene) se muestra. */
+$plFut = $plBase;
+$plFut['locales'][7]['contratos'][] = $plK(95, '2028-01-01', '2030-12-31', 60000000.0);
+chequear('una cargada futura también aparece', true,
+    in_array('7|#95', array_map(function ($r) { return $r['nro'] . '|#' . ($r['contrato']['id'] ?? ''); },
+        $plDoble->enCurso($plFut, $plPar)), true));
+
+chequear('el criterio de «vieja» es el de la proyección (un solo lugar)', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/Llaves.php'), 'LlavesCalculo::esVieja(') !== false
+    && strpos(file_get_contents(__DIR__ . '/../Class/LlavesCalculo.php'), 'self::esVieja($fechas, $hoy)') !== false);
+chequear('la columna se llama «Contrato» y muestra el contrato nuevo de una cargada', true,
+    strpos(file_get_contents(__DIR__ . '/../Tabs/parametros_llaves.php'), '>Contrato</th>') !== false
+    && strpos($pllJs, "var c = r.tipo === 'CARGADA' ? r.contrato : r.vigente;") !== false
+    && strpos($pllJs, "renueva al #' + r.vigente.id") !== false);
+
 seccion('la pantalla nombra los conceptos del alquiler, no sus numeros');
 
 $sinNumeros = [];

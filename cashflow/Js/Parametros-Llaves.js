@@ -247,8 +247,7 @@
 
             return '<tr data-nro="' + r.nro + '" data-contrato="' + r.ant + '"' + (cargada ? ' class="pll-cargada"' : '') + '>'
                 + '<td><strong>' + esc(r.local) + '</strong><br><small class="text-muted">' + esc(r.operador || 'sin razón social') + '</small></td>'
-                + '<td><small>#' + v.id + ' · ' + fecha(v.desde) + ' a ' + fecha(v.hasta) + '<br>llave ' + llaveTexto(v.llave)
-                    + (cargada ? '<br>renueva con el #' + r.contrato.id + ' desde el ' + fecha(r.contrato.desde) : '') + '</small></td>'
+                + '<td>' + contratoTexto(r) + '</td>'
                 + '<td><span class="badge ' + (r.estado === 'VENCIDO' ? 'bg-warning text-dark' : 'bg-light text-dark border') + '">'
                     + esc(r.nombre_estado) + '</span>' + (r.tiene_llave || cargada ? '' : '<br><small class="text-muted" title="Criterio de Costo de Ocupación">sin llave: no se estima</small>') + '</td>'
                 + '<td><div class="d-flex gap-1 align-items-center"><input type="checkbox" class="form-check-input" data-campo="no_renueva"'
@@ -279,6 +278,17 @@
                 guardarFila('guardarLocal', fila, { nro: fila.getAttribute('data-nro'), id_contrato: fila.getAttribute('data-contrato') });
             });
         });
+    }
+
+    /**
+     * El contrato que rige la renovacion: en una cargada, el NUEVO (el que se
+     * paga) y debajo, en chico, a cual renueva; en una estimada, el vigente.
+     */
+    function contratoTexto(r) {
+        var c = r.tipo === 'CARGADA' ? r.contrato : r.vigente;
+
+        return '<small>#' + c.id + ' · ' + fecha(c.desde) + ' a ' + fecha(c.hasta) + '<br>llave ' + llaveTexto(c.llave)
+            + (r.tipo === 'CARGADA' ? '<br><span class="text-muted">renueva al #' + r.vigente.id + '</span>' : '') + '</small>';
     }
 
     function llaveTexto(v) {
